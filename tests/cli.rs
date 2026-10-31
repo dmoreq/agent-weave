@@ -308,3 +308,25 @@ fn g5_no_child_processes_survive() {
     let alive = String::from_utf8_lossy(&probe.stdout);
     assert!(alive.trim().is_empty(), "processes still alive: {alive}");
 }
+
+#[test]
+fn p15_stats_hotspots_report() {
+    let repo = fixture("p15");
+    build(&repo);
+    let out = kg(&repo).args(["stats"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("files=3") && stdout.contains("symbols=") && stdout.contains("edges="), "{stdout}");
+
+    let out = kg(&repo).args(["hotspots"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("loc=") && stdout.contains("cyc="), "{stdout}");
+
+    let out = kg(&repo).args(["report"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    for section in ["## 1. index overview", "## 2. architecture map", "## 3. hotspots", "## 4. most-called symbols"] {
+        assert!(stdout.contains(section), "missing {section}: {stdout}");
+    }
+}

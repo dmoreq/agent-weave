@@ -58,6 +58,16 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
+    /// Index totals: files, symbols, edges, parse errors, sizes
+    Stats {},
+    /// Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density
+    Hotspots {
+        /// How many files to show (default 10, max 100)
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Four-section architecture report (overview, map, hotspots, fan-in)
+    Report {},
     /// Inspect index health (integrity, versions, staleness, orphans)
     Doctor {
         /// Delete the index entirely (one-command exit to grep-only)

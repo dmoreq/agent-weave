@@ -9,6 +9,7 @@ mod doctor;
 mod error;
 mod extract;
 mod hash;
+mod insights;
 mod parse;
 mod query;
 mod walk;
@@ -61,6 +62,28 @@ fn run(cli: cli::Cli) -> Result<()> {
             let conn = db::open_for_query(&root)?;
             let out = query::impact(&conn, &root, &file, limit)?;
             query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Stats {} => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            println!("{}", insights::stats(&conn, &root)?);
+            Ok(())
+        }
+        cli::Cmd::Hotspots { limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in insights::hotspots(&conn, &root, limit)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Report {} => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in insights::report(&conn, &root)? {
+                println!("{line}");
+            }
             Ok(())
         }
         cli::Cmd::Doctor { invalidate } => {

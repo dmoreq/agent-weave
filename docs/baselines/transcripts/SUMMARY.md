@@ -76,3 +76,12 @@ during G6; the spec's response-contract section gains this flag at next edit.
 | G4 | PASS | staleness header + FNV re-hash path (tests/cli.rs g4_staleness) |
 | G5 | PASS | seatbelt network-deny build + Cargo.lock allowlist + write-path grep + tree-snapshot (content-hashed) + proc-hygiene (pgrep) tests |
 | G6 | PASS | 50% tool-call reduction, -67% bytes, no correctness loss |
+
+## P1.5 gate results (2026-10-31)
+
+| gate | verdict | evidence |
+|------|---------|----------|
+| G7 hotspots rank-overlap | MEASURED 4/10 — DEGRADED, not gating | pain-list.md is PROVISIONAL (agent-derived); owner confirmation required before G7 can stop the feature. kg hotspots top-10: street_parser(1↔1), street_validator(5↔4), gso_loader(8↔8), category(9↔9) match; scripts/* and admin_resolver/parity enter the list because LOC+cyc dominate the normalized sum. Command: `kg hotspots --limit 10 --root vihap` |
+| G8 report A/B | PASS | architecture questions T4+T5: baseline cold 6 calls (4+2), kg 2 calls (1+1) = -67% (target >= 30%). Command: transcripts/cold/T4,T5 vs kgarm/T4,T5 |
+
+P1.5 surface: `kg stats`, `kg hotspots [--limit N]`, `kg report` (4 sections).
