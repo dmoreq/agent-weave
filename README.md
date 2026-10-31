@@ -1,6 +1,7 @@
 # kg — local code knowledge index
 
-Status: ALL PHASES COMPLETE — P0/P1/P1.5/P2/P2.5 done, P3 skipped (trigger not met). Gates G1-G8 pass, G2 on Python + TS/TSX + Rust self-index. Spec: `agent-skills/docs/designs/2026-10-31_kg-rust-code-index.md` (v1.1 + Amendments 1-2).
+Status: ALL PHASES COMPLETE — P0/P1/P1.5/P2/P2.5 done, P3 skipped (trigger not met). Gates G1-G8 pass, G2 on Python + TS/TSX + Rust self-index.
+Spec (canonical, in-repo, v1.1 + Amendments 1-3): [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md).
 
 kg indexes a repository's symbols and call/inheritance edges into a local
 SQLite DB and answers three navigation questions:
@@ -72,6 +73,8 @@ harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).
 
 | doc | contents |
 |-----|----------|
+| [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md) | THE SPEC — normative v1.1 + Amendments 1-3 (gates, algorithm, schema, contract) |
+| [docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md](docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md) | concepts brief that preceded the spec |
 | [CHANGELOG.md](CHANGELOG.md) | phase-by-phase history (Keep a Changelog) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | spec-first rules, gate workflow, review protocol, honesty rule |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | contestable-findings standard |

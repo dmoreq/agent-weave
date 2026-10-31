@@ -59,6 +59,11 @@ changes bump the minor while 0.x is unstable.
   14/14. Python regression green throughout.
 - R2 independent review record (APPROVE after 2 fix cycles).
 
+### Added — docs
+
+- In-repo canonical spec + concepts brief under `docs/designs/` (cross-repo
+  references retired); GitHub community health files.
+
 ### Skipped
 
 - P3 stdio MCP server: trigger condition ("CLI discoverability measurably

@@ -11,7 +11,7 @@
 ## Spec conformance
 
 - [ ] No spec deviation, or an Amendment entry exists in
-      `docs/designs/2026-10-31_kg-rust-code-index.md`
+      `docs/designs/2026-10-31_kg-rust-code-index.md` (in-repo, canonical)
 - [ ] Response contract unchanged, or contract-bump note + wrapper update
       included
 - [ ] Safety invariants untouched (network / processes / read-only / no

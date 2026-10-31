@@ -6,7 +6,7 @@ rules any change (human or agent) must follow.
 ## Ground rules
 
 1. **Read the spec first.** `docs/designs/2026-10-31_kg-rust-code-index.md`
-   (v1.1 + Amendments 1-3) is normative: component layout, schema v1
+   (v1.1 + Amendments 1-3, canonical in this repo) is normative: component layout, schema v1
    (additive-only), resolution algorithm, response contract, exit codes,
    safety invariants. Code deviating from it needs an amendment entry first.
 2. **Safety invariants are non-negotiable** (CI-enforced): zero network, no
