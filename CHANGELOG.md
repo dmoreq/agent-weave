@@ -87,6 +87,20 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Added — J1 usage journal (Amendment 6)
+
+- Every journaled subcommand appends one JSONL line to `.kg/usage.log`:
+  ts, surface, tool, args summary (names/paths/scalars only — never file
+  contents), result/shown/total, ambiguous count, exit code, latency, stale
+  flag, kg version. Opt-out: `KG_NO_JOURNAL=1` or `--no-journal`. Rotation
+  at 5 MB (one prior generation). Best-effort writes — journal failures can
+  never alter output or exit codes.
+- `kg usage` — journal summary: calls per tool, error/empty/stale rates,
+  ambiguous pointer counts, p50/p95 latency. Read-only; no index required;
+  exit 1 on an empty journal.
+- QueryOutput carries `stale` (header fired on the displayed set) for
+  journaling; `unresolved`/`symbols` record their own result counts.
+
 ### Added — M1 query surface (Amendment 5)
 
 - `kg dead` — dead-code CANDIDATES (zero inbound call edges, AMBIGUOUS-name

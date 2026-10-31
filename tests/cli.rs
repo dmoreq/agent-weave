@@ -413,6 +413,43 @@ fn symbols_lists_file_symbols_and_unknown_exit1() {
 }
 
 #[test]
+fn journal_written_and_usage_summarizes() {
+    // Amendment 6: build + callers journal entries; kg usage aggregates them.
+    let repo = fixture("journal");
+    kg(&repo).env_remove("KG_NO_JOURNAL").args(["build"]).output().unwrap();
+    kg(&repo).env_remove("KG_NO_JOURNAL").args(["callers", "normalize"]).output().unwrap();
+    let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
+    assert_eq!(log.lines().count(), 2, "one entry per invocation: {log}");
+    assert!(log.contains("\"tool\":\"build\""), "{log}");
+    assert!(log.contains("\"tool\":\"callers\""), "{log}");
+    assert!(log.contains("\"surface\":\"cli\""), "{log}");
+
+    let out = kg(&repo).env_remove("KG_NO_JOURNAL").args(["usage"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("kg usage: 2 journaled calls"), "{stdout}");
+    assert!(stdout.contains("callers: 1 calls"), "{stdout}");
+    assert!(stdout.contains("build: 1 calls"), "{stdout}");
+}
+
+#[test]
+fn journal_opt_out_via_env_and_flag() {
+    let repo = fixture("journal-env");
+    kg(&repo).env("KG_NO_JOURNAL", "1").args(["build"]).output().unwrap();
+    assert!(!repo.join(".kg/usage.log").exists(), "env opt-out must suppress the journal");
+
+    let repo = fixture("journal-flag");
+    kg(&repo).args(["--no-journal", "build"]).output().unwrap();
+    assert!(!repo.join(".kg/usage.log").exists(), "--no-journal must suppress the journal");
+
+    // usage on an empty journal: exit 1 with a reason.
+    let out = kg(&repo).args(["usage"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no journal entries"), "{stderr}");
+}
+
+#[test]
 fn g5_no_child_processes_survive() {
     // Invariant 2: zero long-lived children after each subcommand. Run a build
     // tagged with a unique token, then assert nothing matching the token is

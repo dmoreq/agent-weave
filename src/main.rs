@@ -10,6 +10,7 @@ mod error;
 mod extract;
 mod hash;
 mod insights;
+mod journal;
 mod parse;
 mod query;
 mod walk;
@@ -23,17 +24,84 @@ use error::{KgError, Result};
 
 fn main() {
     let cli = cli::Cli::parse();
+    let root_arg = cli.root.clone();
+    let no_journal = cli.no_journal;
+    let journaled = !no_journal
+        && !matches!(cli.cmd, cli::Cmd::Doctor { .. } | cli::Cmd::Usage {});
+    if journaled {
+        journal::begin("cli", tool_name(&cli.cmd), &journal_args(&cli.cmd));
+    }
+    let started = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cli)));
+    let latency_us = started.elapsed().as_micros() as u64;
+    let root = walk::discover_root(root_arg.as_deref()).ok();
     match result {
-        Ok(Ok(())) => {}
+        Ok(Ok(())) => {
+            if journaled {
+                journal::finalize(root.as_deref(), 0, latency_us);
+            }
+        }
         Ok(Err(e)) => {
+            if journaled {
+                journal::finalize(root.as_deref(), e.exit_code(), latency_us);
+            }
             eprintln!("{e}");
             std::process::exit(e.exit_code());
         }
         Err(_panic) => {
+            if journaled {
+                journal::finalize(root.as_deref(), 6, latency_us);
+            }
             eprintln!("kg: internal: unexpected panic — no output written");
             std::process::exit(6);
         }
+    }
+}
+
+fn tool_name(cmd: &cli::Cmd) -> &'static str {
+    match cmd {
+        cli::Cmd::Build { .. } => "build",
+        cli::Cmd::Callers { .. } => "callers",
+        cli::Cmd::Callees { .. } => "callees",
+        cli::Cmd::Impact { .. } => "impact",
+        cli::Cmd::Dead { .. } => "dead",
+        cli::Cmd::Unresolved { .. } => "unresolved",
+        cli::Cmd::Symbols { .. } => "symbols",
+        cli::Cmd::Stats {} => "stats",
+        cli::Cmd::Hotspots { .. } => "hotspots",
+        cli::Cmd::Report {} => "report",
+        cli::Cmd::Doctor { .. } => "doctor",
+        cli::Cmd::Usage {} => "usage",
+    }
+}
+
+fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
+    match cmd {
+        cli::Cmd::Build { force, max_parse_error_rate } => vec![
+            ("force", force.to_string()),
+            ("threshold", max_parse_error_rate.to_string()),
+        ],
+        cli::Cmd::Callers { name, limit } => {
+            vec![("name", name.clone()), ("limit", limit.to_string())]
+        }
+        cli::Cmd::Callees { name, limit, depth } => vec![
+            ("name", name.clone()),
+            ("depth", depth.to_string()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Impact { file, limit } => {
+            vec![("file", file.clone()), ("limit", limit.to_string())]
+        }
+        cli::Cmd::Dead { limit } => vec![("limit", limit.to_string())],
+        cli::Cmd::Unresolved { limit } => vec![("limit", limit.to_string())],
+        cli::Cmd::Symbols { file, limit } => {
+            vec![("file", file.clone()), ("limit", limit.to_string())]
+        }
+        cli::Cmd::Stats {} => vec![],
+        cli::Cmd::Hotspots { limit } => vec![("limit", limit.to_string())],
+        cli::Cmd::Report {} => vec![],
+        cli::Cmd::Doctor { invalidate } => vec![("invalidate", invalidate.to_string())],
+        cli::Cmd::Usage {} => vec![],
     }
 }
 
@@ -47,6 +115,13 @@ fn run(cli: cli::Cli) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             let out = query::callers(&conn, &root, &name, limit)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
             query::print_output(&out);
             Ok(())
         }
@@ -54,6 +129,13 @@ fn run(cli: cli::Cli) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             let out = query::callees(&conn, &root, &name, limit, depth)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
             query::print_output(&out);
             Ok(())
         }
@@ -61,6 +143,13 @@ fn run(cli: cli::Cli) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             let out = query::impact(&conn, &root, &file, limit)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
             query::print_output(&out);
             Ok(())
         }
@@ -68,7 +157,21 @@ fn run(cli: cli::Cli) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             let out = query::dead(&conn, &root, limit)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
             query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Usage {} => {
+            let root = walk::discover_root(root_arg)?;
+            for line in journal::summary(&root)? {
+                println!("{line}");
+            }
             Ok(())
         }
         cli::Cmd::Unresolved { limit } => {
@@ -326,6 +429,7 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
     // missing (no delete step exists).
     std::fs::rename(db::db_new_path(&root), db::db_path(&root))?;
     let db_secs = t0.elapsed().as_secs_f64();
+    journal::record_result(total_files, total_files, total_files, false, 0);
 
     // CPU seconds are measured by the G1 harness (/usr/bin/time -l); the
     // binary reports wall + per-phase timings (std-only constraint).

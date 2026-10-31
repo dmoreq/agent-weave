@@ -6,6 +6,8 @@ pub mod doctor;
 pub mod error;
 pub mod extract;
 pub mod hash;
+pub mod insights;
+pub mod journal;
 pub mod parse;
 pub mod query;
 pub mod walk;

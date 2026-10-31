@@ -38,6 +38,8 @@ pub struct QueryOutput {
     pub pointers: Vec<Pointer>,
     pub shown: usize,
     pub total: usize,
+    /// True when the staleness header fired on the displayed set (journal).
+    pub stale: bool,
 }
 
 pub fn clamp_limit(limit: usize) -> Result<usize> {
@@ -292,6 +294,7 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
         out.push(format!("showing {} of {}", shown, n_files));
         eprintln!("[kg] capped at {} results ({} total)", shown, n_files);
     }
+    crate::journal::record_result(n_files, shown, n_files, false, 0);
     Ok(out)
 }
 
@@ -318,8 +321,10 @@ pub fn symbols(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
     if rows.is_empty() {
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
+    let stale = file_changed(conn, root, &rel);
+    crate::journal::record_result(rows.len(), rows.len(), rows.len(), stale, 0);
     let mut out = Vec::new();
-    if file_changed(conn, root, &rel) {
+    if stale {
         out.push("kg: 1 of 1 result files changed since build — run kg build".to_string());
     }
     let n_symbols = rows.len();
@@ -368,7 +373,7 @@ fn collect_output(
     } else {
         None
     };
-    Ok(QueryOutput { header, pointers: displayed, shown, total })
+    Ok(QueryOutput { header, pointers: displayed, shown, total, stale: changed > 0 })
 }
 
 pub fn print_output(out: &QueryOutput) {

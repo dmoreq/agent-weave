@@ -31,12 +31,15 @@ kg dead                       # dead-code candidates (caveat: not proof)
 kg unresolved                 # per-file unresolved-callee counts
 kg symbols app.py             # one file's symbols, ordered by line
 kg stats                      # index totals
+kg usage                      # usage-journal summary: calls, latency, rates
 kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
 kg report                     # 4-section architecture report
 kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 ```
 
 `--root <path>` overrides repo discovery (default: nearest git root ancestor).
+`--no-journal` (or env `KG_NO_JOURNAL=1`) disables the usage journal
+(`.kg/usage.log`, local-only JSONL — see spec Amendment 6).
 Exit codes: 0 ok; 1 no results / no index; 2 usage or ambiguous name (a
 candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 6 internal; 7 parse-quality abort.

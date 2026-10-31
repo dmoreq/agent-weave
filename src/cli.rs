@@ -16,6 +16,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub root: Option<std::path::PathBuf>,
 
+    /// Disable the usage journal for this invocation (Amendment 6).
+    #[arg(long, global = true)]
+    pub no_journal: bool,
+
     #[command(subcommand)]
     pub cmd: Cmd,
 }
@@ -95,4 +99,6 @@ pub enum Cmd {
         #[arg(long)]
         invalidate: bool,
     },
+    /// Summarize the usage journal: calls, errors, latency, empty/stale rates
+    Usage {},
 }
