@@ -69,36 +69,38 @@ fn decision_nodes(root: Node<'_>) -> usize {
 }
 
 fn git_counts(root: &Path) -> Result<(HashMap<String, f64>, HashMap<String, f64>)> {
-    let run = |args: &[&str]| -> Result<String> {
+    // Non-git repos (or git failures) degrade to zero churn/fix signal —
+    // hotspots stays useful, just LOC+cyc-driven.
+    let run = |args: &[&str]| -> Option<String> {
         let out = std::process::Command::new("git")
             .args(args)
             .current_dir(root)
             .output()
-            .map_err(|e| KgError::Internal(format!("git log failed: {e}")))?;
+            .ok()?;
         if !out.status.success() {
-            return Err(KgError::Internal("git log failed".to_string()));
+            return None;
         }
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        Some(String::from_utf8_lossy(&out.stdout).into_owned())
     };
-    let mut churn = HashMap::new();
-    for line in run(&["log", "--since=90.days", "--name-only", "--pretty=format:"])?
-        .lines()
-        .filter(|l| l.ends_with(".py"))
-    {
-        *churn.entry(line.to_string()).or_insert(0.0) += 1.0;
-    }
-    let mut fixes = HashMap::new();
-    for line in run(&[
+    let Some(log_all) = run(&["log", "--since=90.days", "--name-only", "--pretty=format:"]) else {
+        return Ok((HashMap::new(), HashMap::new()));
+    };
+    let Some(log_fix) = run(&[
         "log",
         "--since=180.days",
         "--grep=fix\\|bug\\|crash\\|wrong\\|incorrect\\|sai",
         "-i",
         "--name-only",
         "--pretty=format:",
-    ])?
-    .lines()
-    .filter(|l| l.ends_with(".py"))
-    {
+    ]) else {
+        return Ok((HashMap::new(), HashMap::new()));
+    };
+    let mut churn = HashMap::new();
+    for line in log_all.lines().filter(|l| l.ends_with(".py")) {
+        *churn.entry(line.to_string()).or_insert(0.0) += 1.0;
+    }
+    let mut fixes = HashMap::new();
+    for line in log_fix.lines().filter(|l| l.ends_with(".py")) {
         *fixes.entry(line.to_string()).or_insert(0.0) += 1.0;
     }
     Ok((churn, fixes))
