@@ -41,6 +41,9 @@ kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 `--root <path>` overrides repo discovery (default: nearest git root ancestor).
 `--no-journal` (or env `KG_NO_JOURNAL=1`) disables the usage journal
 (`.kg/usage.log`, local-only JSONL — see spec Amendment 6).
+The index file `.kg/index.db` is a portable artifact: cache it in CI and
+restore it into a fresh checkout — the dual-key fast path (Amendment 9)
+reuses it without re-parse when content hashes match.
 Exit codes: 0 ok; 1 no results / no index; 2 usage or ambiguous name (a
 candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 6 internal; 7 parse-quality abort.
