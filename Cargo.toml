@@ -15,6 +15,9 @@ tree-sitter-javascript = "0.25"
 tree-sitter-rust = "0.23"
 rusqlite = { version = "0.41", features = ["bundled"] }
 ignore = "0.4"
+# MCP stdio boundary parses UNTRUSTED client JSON (Amendment 8): one audited
+# parser instead of a hand-rolled one on a trust boundary; no async runtime.
+serde_json = "1"
 
 [profile.release]
 lto = "thin"

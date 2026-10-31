@@ -21,7 +21,7 @@ pub fn usage_log_path(root: &Path) -> PathBuf {
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
 struct Pending {
     surface: &'static str,
-    tool: &'static str,
+    tool: String,
     args: String, // pre-serialized JSON object body
     result_count: usize,
     shown: usize,
@@ -36,7 +36,7 @@ thread_local! {
 
 /// Arm the journal for this invocation. No-op when the env opt-out is set;
 /// the `--no-journal` flag is enforced by the caller skipping `begin`.
-pub fn begin(surface: &'static str, tool: &'static str, args: &[(&'static str, String)]) {
+pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)]) {
     if std::env::var("KG_NO_JOURNAL").as_deref() == Ok("1") {
         return;
     }
@@ -48,7 +48,7 @@ pub fn begin(surface: &'static str, tool: &'static str, args: &[(&'static str, S
     PENDING.with(|p| {
         *p.borrow_mut() = Some(Pending {
             surface,
-            tool,
+            tool: tool.to_string(),
             args: format!("{{{body}}}"),
             result_count: 0,
             shown: 0,

@@ -8,6 +8,13 @@ use std::fmt;
 pub enum KgError {
     NoResults(String),
     Usage(String),
+    /// Ambiguous bare name: candidates print on stdout (CUJ4), message on
+    /// stderr; exit 2. Carries the candidate list so non-CLI surfaces (MCP)
+    /// can render the same contract without touching stdout directly.
+    Ambiguous {
+        name: String,
+        candidates: Vec<(String, i64, String)>,
+    },
     CorruptIndex(String),
     Locked(u32),
     SchemaMismatch { have: i32, want: i32 },
@@ -20,6 +27,7 @@ impl KgError {
         match self {
             KgError::NoResults(_) => 1,
             KgError::Usage(_) => 2,
+            KgError::Ambiguous { .. } => 2,
             KgError::CorruptIndex(_) => 3,
             KgError::Locked(_) => 4,
             KgError::SchemaMismatch { .. } => 5,
@@ -32,6 +40,7 @@ impl KgError {
         match self {
             KgError::NoResults(_) => "no-results",
             KgError::Usage(_) => "usage",
+            KgError::Ambiguous { .. } => "usage",
             KgError::CorruptIndex(_) => "corrupt-index",
             KgError::Locked(_) => "locked",
             KgError::SchemaMismatch { .. } => "schema-mismatch",
@@ -46,6 +55,12 @@ impl fmt::Display for KgError {
         match self {
             KgError::NoResults(detail) => write!(f, "kg: {}: {}", self.class(), detail),
             KgError::Usage(detail) => write!(f, "kg: {}: {}", self.class(), detail),
+            KgError::Ambiguous { name, candidates } => write!(
+                f,
+                "kg: {}: ambiguous name '{name}' — {} candidates; use the Class.method qualname form",
+                self.class(),
+                candidates.len()
+            ),
             KgError::CorruptIndex(detail) => write!(f, "kg: {}: {}", self.class(), detail),
             KgError::Locked(pid) => {
                 write!(f, "kg: locked: build in progress (pid {pid}) — retry after it exits")

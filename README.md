@@ -1,6 +1,6 @@
 # kg — local code knowledge index
 
-Status: ALL PHASES COMPLETE — P0/P1/P1.5/P2/P2.5 done, P3 skipped (trigger not met). Gates G1-G8 pass, G2 on Python + TS/TSX + Rust self-index.
+Status: ALL PHASES COMPLETE — P0/P1/P1.5/P2/P2.5 done, P3 skipped (trigger not met), P3 ACTIVATED as M3 per owner decision (MCP stdio server). Gates G1-G8 pass, G2 on Python + TS/TSX + Rust self-index.
 Spec (canonical, in-repo, v1.1 + Amendments 1-3): [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md).
 
 kg indexes a repository's symbols and call/inheritance edges into a local
@@ -32,6 +32,7 @@ kg unresolved                 # per-file unresolved-callee counts
 kg symbols app.py             # one file's symbols, ordered by line
 kg stats                      # index totals
 kg usage                      # usage-journal summary: calls, latency, rates
+kg mcp                        # MCP stdio server (11 tools, JSON-RPC 2.0)
 kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
 kg report                     # 4-section architecture report
 kg doctor [--invalidate]      # integrity, versions, staleness, orphans

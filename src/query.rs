@@ -83,14 +83,12 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
-        // CUJ4: no merged-silent result; name the Class.method form.
-        for (path, line, qualname) in &cands {
-            println!("{path}:{line} {qualname}");
-        }
-        return Err(KgError::Usage(format!(
-            "ambiguous name '{name}' — {} candidates; use the Class.method qualname form",
-            cands.len()
-        )));
+        // CUJ4: no merged-silent result; name the Class.method form. The
+        // candidate list travels IN the error so non-CLI surfaces render it.
+        return Err(KgError::Ambiguous {
+            name: name.to_string(),
+            candidates: cands,
+        });
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!(
@@ -136,13 +134,10 @@ pub fn callees(
         return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
-        for (path, line, qualname) in &cands {
-            println!("{path}:{line} {qualname}");
-        }
-        return Err(KgError::Usage(format!(
-            "ambiguous name '{name}' — {} candidates; use the Class.method qualname form",
-            cands.len()
-        )));
+        return Err(KgError::Ambiguous {
+            name: name.to_string(),
+            candidates: cands,
+        });
     }
     // Callee pointer: the callee's definition line. AMBIGUOUS edges have no
     // dst symbol; they surface as the call site itself with the ambiguous tag.
@@ -376,15 +371,27 @@ fn collect_output(
     Ok(QueryOutput { header, pointers: displayed, shown, total, stale: changed > 0 })
 }
 
-pub fn print_output(out: &QueryOutput) {
+/// Render a QueryOutput exactly as the CLI prints it on stdout (header,
+/// pointers, cap line). The cap stderr note is NOT part of this string.
+pub fn render_output(out: &QueryOutput) -> String {
+    let mut text = String::new();
     if let Some(h) = &out.header {
-        println!("{h}");
+        text.push_str(h);
+        text.push('\n');
     }
     for p in &out.pointers {
-        println!("{}", p.render());
+        text.push_str(&p.render());
+        text.push('\n');
     }
     if out.total > out.shown {
-        println!("showing {} of {}", out.shown, out.total);
+        text.push_str(&format!("showing {} of {}\n", out.shown, out.total));
+    }
+    text
+}
+
+pub fn print_output(out: &QueryOutput) {
+    print!("{}", render_output(out));
+    if out.total > out.shown {
         eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
     }
 }

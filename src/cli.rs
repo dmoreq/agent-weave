@@ -101,4 +101,6 @@ pub enum Cmd {
     },
     /// Summarize the usage journal: calls, errors, latency, empty/stale rates
     Usage {},
+    /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0; Amendment 8)
+    Mcp {},
 }

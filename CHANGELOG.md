@@ -87,6 +87,30 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Added — M3 MCP stdio server (Amendment 8, P3 activated)
+
+- `kg mcp`: newline-delimited JSON-RPC 2.0 server on stdin/stdout; 11 tools
+  mapping 1:1 to CLI subcommands (doctor excluded — `--invalidate` stays a
+  human-CLI maintenance action). Spawned by the agent host; kg still spawns
+  no daemons. Zero network; writes confined to `.kg/`.
+- Tool results return the CLI's byte-identical stdout text (G10 parity
+  conformance is automated in tests/mcp.rs); ambiguous names carry the
+  candidate list in the result text with isError (exit-2 semantics
+  preserved); unknown tools rejected with -32602.
+- J2: every tool call journals with `surface:"mcp"` (same Amendment 6
+  schema); the server process itself is not journaled.
+- Dependency policy (additive, recorded in Amendment 8): `serde_json = "1"`
+  joins the pinned set — the MCP boundary parses untrusted client JSON;
+  `rmcp` rejected (tokio runtime tree contradicts minimal-dependency/no-daemon
+  build semantics).
+- Structural refactor: `run_build` moved to shared `src/build.rs` (CLI and
+  MCP share it); ambiguous-name candidates now travel in
+  `KgError::Ambiguous` instead of being printed mid-query (stdout stays a
+  pure protocol/data channel on every surface).
+- kg-self GT rows G02-G10 refreshed after the M3 line shifts (provenance in
+  the GT file); G2 vihap 29/29 + 493/495, finguard 20/20 + 57/57 unchanged.
+- Tests 76/76 (3 new MCP conformance tests); clippy -D warnings clean.
+
 ### Added — M2 resolution recall (Amendment 7)
 
 - `crate::a::b` calls now resolve when intermediate segments are plain
