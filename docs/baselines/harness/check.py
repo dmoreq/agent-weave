@@ -18,6 +18,9 @@ transcripts/<TASK>.answer.json for either arm):
                        excluded from the precision denominator (tasks.md rule)
   dynamic_excluded  optional [pointers]: dynamic dispatch (e.g. getattr) ->
                        excluded from the precision denominator per spec
+Precision convention: an answer with an EMPTY precision denominator (all
+candidate hits / all dynamic) reports precision 1.0 — recall still gates the
+answer, so a thin answer cannot hide behind this.
 
 Usage: check.py [TASK ...]   (default: all tasks with both files present)
 """
