@@ -98,3 +98,4 @@ P2 notes:
 - Relative TS imports resolve against the FILE'S DIRECTORY (stems may contain dots: command-bus.test.ts, runner.node.ts) — module-string derivation was wrong and was replaced (found by the finguard G2 run).
 - External imports (react, @finguard/*-alias) bind but resolve to unindexed modules: calls into them drop with the builtin counter, not unresolved.
 - unresolved=3403 in finguard is dominated by destructured hook results and untyped receivers (spec non-goal); the import-call backbone resolves.
+- R2 additions: `this.m()` resolves (TS parity with self.m()); pnpm workspace aliases (@finguard/*) documented as a limitation (value calls into workspace packages drop until alias resolution lands); JSX component usage (<Button />) is a spec non-goal — not indexed as calls.

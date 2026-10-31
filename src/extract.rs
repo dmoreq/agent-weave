@@ -274,7 +274,7 @@ fn text(node: Node<'_>, src: &[u8]) -> String {
 /// Unwraps `type` wrapper nodes (annotations).
 fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
     match node.kind() {
-        "identifier" => Some(vec![text(node, src)]),
+        "identifier" | "this" | "super" => Some(vec![text(node, src)]),
         "attribute" => {
             let obj = node.child_by_field_name("object")?;
             let attr = node.child_by_field_name("attribute")?;
@@ -1328,8 +1328,8 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 return Outcome::Unresolved;
             }
             let method = chain[1].clone();
-            // self.m() / cls.m() / self.field.m() inside a class body.
-            if chain[0] == "self" || chain[0] == "cls" {
+            // self/cls (Python) and this (TS) inside a class body.
+            if chain[0] == "self" || chain[0] == "cls" || chain[0] == "this" {
                 let Some(class_qn) = &site.scope_class else { return Outcome::Unresolved };
                 if chain.len() == 2 {
                     return mro_outcome(t, class_qn, &method);
@@ -1683,6 +1683,7 @@ mod alias_repro {
         assert_eq!(fx.calls.len(), 1, "calls: {}", fx.calls.len());
     }
 }
+
 
 
 

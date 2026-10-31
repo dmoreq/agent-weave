@@ -21,7 +21,7 @@ use crate::extract::{CarriedIndex, CarriedSymbol, NewSymbol, SCHEMA_VERSION};
 /// Compile-time grammar identity, derived from the Cargo.lock-pinned grammar
 /// crate version (tree-sitter versioning rule: runtime + grammars upgrade in
 /// one commit, golden fixture replay must stay identical).
-pub const GRAMMAR_VERSION: &str = "py-0.25.0";
+pub const GRAMMAR_VERSION: &str = "py-0.25.0+ts-0.23.2+js-0.25.0";
 
 pub fn kg_dir(root: &Path) -> PathBuf {
     root.join(".kg")

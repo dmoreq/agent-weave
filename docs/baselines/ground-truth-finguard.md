@@ -3,7 +3,12 @@
 - Filled: 2026-10-31, agent verification (owner delegated), working tree at finguard HEAD 2026-10-31.
 - Verification legend: `[x]` = verified by direct code read (import line + call line).
 - Known duplicate-name trap: `normalizeVndInput` is defined TWICE — apps/prototype/src/lib/format.ts:13 and packages/core-ledger/src/parser.ts:110 (module-local). Per-module import maps decide the target (G01 vs G02); kg must not merge them.
-- External packages (@finguard/core-ledger type-only, react) are outside the index — calls into them drop, excluded from GT.
+- External imports (react; @finguard/* workspace aliases) bind but resolve to
+  unindexed modules by design (pnpm workspace alias resolution is out of P2
+  scope) — calls into them drop with the builtin counter. NOTE (R2): these are
+  real intra-monorepo value calls (e.g. new DomainError in command-bus.ts:91);
+  they are excluded from GT because the alias targets are not indexed, not
+  because the calls are type-only. Module stems keep their dots (runner.node).
 
 | # | caller file:line | callee qualname | invocation kind | verified |
 |---|------------------|-----------------|-----------------|----------|

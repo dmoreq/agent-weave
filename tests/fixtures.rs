@@ -151,6 +151,7 @@ fn or_fallback_construction_types_receiver() {
 
 #[test]
 fn ts_class_method_and_this_call() {
+    // R2: this.m() must resolve like Python self.m() — assert the EDGE.
     let src = "export class Ledger {\n  balance = 0\n  add(n: number): number {\n    return this.normalize(n)\n  }\n  private normalize(n: number): number {\n    return Math.abs(n)\n  }\n}\n";
     let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
     let fx = kg::extract::extract_file(0, "apps/core/ledger.ts", src.as_bytes(), &parsed);
@@ -158,6 +159,11 @@ fn ts_class_method_and_this_call() {
     assert!(names.contains(&"apps.core.ledger.Ledger"), "{names:?}");
     assert!(names.contains(&"apps.core.ledger.Ledger.add"), "{names:?}");
     assert!(names.contains(&"apps.core.ledger.Ledger.normalize"), "{names:?}");
+    let resolution = kg::extract::resolve(vec![fx], Default::default());
+    let hit = resolution.edges.iter().any(|e| {
+        e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Ledger.normalize")
+    });
+    assert!(hit, "this.normalize(n) must resolve: {:?}", resolution.edges);
 }
 
 #[test]
