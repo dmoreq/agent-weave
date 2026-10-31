@@ -1,0 +1,5 @@
+{"task": "T1", "seq": 1, "tool": "rg", "cmd": "rg -n \"def normalize_ascii\" -g \"*.py\" .", "in_bytes": 39, "out_bytes": 545, "err_bytes": 0, "out_file": "out/T1-001.txt"}
+{"task": "T1", "seq": 2, "tool": "rg", "cmd": "rg -n \"(from|import).*normalize_ascii\" -g \"*.py\" -g \"!tests/**\" . | head -60", "in_bytes": 76, "out_bytes": 3940, "err_bytes": 0, "out_file": "out/T1-002.txt"}
+{"task": "T1", "seq": 3, "tool": "rg", "cmd": "rg -n \"normalize_ascii\" vihap/cleaners/__init__.py vihap/cleaners/text_utils.py vihap/cleaners/normalizer.py", "in_bytes": 108, "out_bytes": 740, "err_bytes": 0, "out_file": "out/T1-003.txt"}
+{"task": "T1", "seq": 4, "tool": "sed", "cmd": "sed -n \"178,190p\" vihap/cleaners/text_utils.py && echo --- && sed -n \"152,164p\" vihap/cleaners/__init__.py && echo --- && sed -n \"27,37p\" vihap/cleaners/normalizer.py", "in_bytes": 166, "out_bytes": 886, "err_bytes": 0, "out_file": "out/T1-004.txt"}
+{"task": "T1", "seq": 5, "tool": "rg", "cmd": "rg -n \"normalize_ascii\\(\" -g \"*.py\" -g \"!tests/**\" .", "in_bytes": 52, "out_bytes": 32261, "err_bytes": 0, "out_file": "out/T1-005.txt"}

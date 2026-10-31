@@ -1,0 +1,29 @@
+{
+ "task": "T2",
+ "symbol": "vihap.knowledge.registry.get_knowledge_base",
+ "provenance": "transcripts/out/T2-001.txt + T2-002.txt at vihap f7ca48c",
+ "pointers": [
+  "scripts/extract_poi_knowledge.py:287",
+  "vihap/knowledge/reform_utils.py:30",
+  "vihap/knowledge/reform_utils.py:127",
+  "vihap/knowledge/reform_utils.py:137",
+  "vihap/knowledge/reform_utils.py:144",
+  "vihap/knowledge/reform_utils.py:151",
+  "vihap/validators/gso_loader.py:613",
+  "vihap/validators/gso_loader.py:660",
+  "vihap/knowledge/access.py:18",
+  "vihap/validators/street_validator.py:295",
+  "vihap/reform/mapping.py:26",
+  "vihap/reform/kb_loader.py:38",
+  "vihap/reform/kb_loader.py:45"
+ ],
+ "ordering": [
+  "vihap/validators/gso_loader.py (admin-node resolution, GsoIndex build)",
+  "vihap/validators/street_validator.py (street validation, local import)",
+  "vihap/reform/mapping.py (reform mapping)",
+  "vihap/reform/kb_loader.py (deprecated wrapper, still live callers)",
+  "vihap/knowledge/reform_utils.py (reform utilities)",
+  "vihap/knowledge/access.py (lazy access wrapper)",
+  "scripts/extract_poi_knowledge.py (offline, outside parse request)"
+ ]
+}

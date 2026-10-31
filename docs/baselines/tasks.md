@@ -28,6 +28,7 @@
 - Question: "List the cross-module callees of `HierarchicalAddressParser.parse` (vihap/parsers/hierarchical_parser.py): which functions/classes in other package dirs does it invoke, directly or one hop deep?"
 - Expected essence: callees in grammar/, validators/, quality/, knowledge/ with defining files.
 - Ground-truth anchor: GT rows G21-G26.
+- Correction (2026-10-31, measured at f7ca48c): one-hop cross-module callees are parsers/macro_resolver (x3 methods), formatters/AddressFormatter.format, quality/QualityScorer.score (one hop via _assemble_parsed_address). grammar/, validators/, knowledge/ are >= 2 hops. Scoring uses expected/T5.json, not the prose above.
 
 ## Scoring notes
 - Tool calls + bytes counted per task by D0 harness (both directions).

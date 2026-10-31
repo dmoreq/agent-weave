@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# D0 baseline call logger (grep arm).
+# Executes ONE tool call of a task, captures stdout/stderr to files, appends a
+# JSONL record (tool, cmd, in/out bytes) to docs/baselines/transcripts/<TASK>.jsonl,
+# then prints the output. The recorded command string is the agent's own tool
+# input; the wrapper prefix is excluded from byte accounting.
+# usage: g <TASK> <TOOL> <CMD...>
+set -euo pipefail
+TASK="$1"; TOOL="$2"; shift 2
+CMD="$*"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+TR="$HERE/../transcripts"
+mkdir -p "$TR/out"
+SEQ=$(python3 -c '
+import json,os,sys
+p=sys.argv[1]; n=0
+if os.path.exists(p):
+    n=sum(1 for l in open(p) if l.strip())
+print(f"{n+1:03d}")' "$TR/$TASK.jsonl")
+OUT="$TR/out/$TASK-$SEQ.txt"
+ERR="$TR/out/$TASK-$SEQ.err"
+bash -c "$CMD" > "$OUT" 2> "$ERR" || true
+IN=$(printf '%s' "$CMD" | wc -c | tr -d ' ')
+OUTB=$(wc -c < "$OUT" | tr -d ' ')
+ERRB=$(wc -c < "$ERR" | tr -d ' ')
+python3 -c '
+import json,sys
+p,task,seq,tool,ib,ob,eb,cmd=sys.argv[1:9]
+rec={"task":task,"seq":int(seq),"tool":tool,"cmd":cmd,"in_bytes":int(ib),
+     "out_bytes":int(ob),"err_bytes":int(eb),"out_file":f"out/{task}-{seq}.txt"}
+open(p,"a").write(json.dumps(rec)+"\n")' "$TR/$TASK.jsonl" "$TASK" "$SEQ" "$TOOL" "$IN" "$OUTB" "$ERRB" "$CMD"
+cat "$OUT"
+if [ "$ERRB" != "0" ]; then cat "$ERR" >&2; fi
+echo "[g] $TASK#$SEQ $TOOL in=$IN out=$OUTB err=$ERRB" >&2

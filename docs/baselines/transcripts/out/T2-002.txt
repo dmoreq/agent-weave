@@ -1,0 +1,12 @@
+vihap/formatters/osm.py:10:    from ..validators.gso_index import GsoIndex
+vihap/formatters/osm.py:12:from ..quality.confidence import QualityScorer
+vihap/formatters/osm.py:193:_quality_scorer_singleton: QualityScorer | None = None
+vihap/formatters/osm.py:197:def _get_gso_index() -> GsoIndex:
+vihap/formatters/osm.py:203:def _get_quality_scorer() -> QualityScorer:
+vihap/formatters/osm.py:208:                _quality_scorer_singleton = QualityScorer()
+vihap/formatters/osm.py:235:    index: GsoIndex,
+vihap/formatters/osm.py:305:    index: GsoIndex,
+vihap/parsers/hierarchical_parser.py:39:    from ..quality.confidence import QualityScorer
+vihap/parsers/hierarchical_parser.py:57:        quality_scorer: QualityScorer | None = None,
+vihap/parsers/hierarchical_parser.py:77:            from ..quality.confidence import QualityScorer
+vihap/parsers/hierarchical_parser.py:79:            self.quality_scorer = QualityScorer()

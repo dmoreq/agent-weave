@@ -1,0 +1,11 @@
+vihap/cleaners/text_utils.py:186:    normalize_ascii,
+vihap/cleaners/text_utils.py:254:    ascii_name = normalize_ascii(name).strip()
+vihap/cleaners/text_utils.py:275:    norm = normalize_ascii(cleaned)
+vihap/cleaners/text_utils.py:422:    norm = normalize_ascii(stripped)
+vihap/cleaners/text_utils.py:444:    ascii_name = normalize_ascii(str(name)).strip()
+vihap/cleaners/text_utils.py:508:    return tuple(word_tokens(normalize_ascii(text).lower().replace("_", " ")))
+vihap/cleaners/text_utils.py:634:    "normalize_ascii",
+vihap/cleaners/__init__.py:160:    normalize_ascii,
+vihap/cleaners/__init__.py:238:    "normalize_ascii",
+vihap/cleaners/normalizer.py:33:    normalize_ascii,
+vihap/cleaners/normalizer.py:61:    "normalize_ascii",

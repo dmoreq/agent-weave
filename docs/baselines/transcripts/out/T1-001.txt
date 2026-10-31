@@ -1,0 +1,7 @@
+./scripts/build_industrial_zones.py:432:def normalize_ascii(text: str) -> str:
+./scripts/build_buildings_enriched.py:431:def normalize_ascii(text: str) -> str:
+./scripts/build_postal_codes.py:122:def normalize_ascii(text: str) -> str:
+./scripts/build_hamlets_enriched.py:82:def normalize_ascii(text: str) -> str:
+./scripts/build_knowledge_base.py:64:def normalize_ascii(text: str) -> str:
+./scripts/build_highway_junctions.py:69:def normalize_ascii(text: str) -> str:
+./vihap/cleaners/unicode.py:47:def normalize_ascii(text: str | None) -> str:

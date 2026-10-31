@@ -1,0 +1,2 @@
+426:        formatted_standard = active_formatter.format(components, normalized_text)
+427:        quality_score = self.quality_scorer.score(p_node, d_node, w_node, components)

@@ -1,0 +1,15 @@
+{
+ "task": "T5",
+ "symbol": "vihap.parsers.hierarchical_parser.HierarchicalAddressParser.parse",
+ "provenance": "transcripts/out/T5-001.txt + T4-002/003 at vihap f7ca48c",
+ "pointers": [
+  "vihap/parsers/macro_resolver.py:303",
+  "vihap/parsers/macro_resolver.py:383",
+  "vihap/parsers/macro_resolver.py:398",
+  "vihap/formatters/standard_formatter.py:154",
+  "vihap/quality/confidence.py:145"
+ ],
+ "correction": "tasks.md T5 essence listed grammar/, validators/, knowledge/ as one-hop callees; measured one-hop cross-module callees are macro_resolver (same dir, cross-module) + formatter.format and quality score (one hop via _assemble_parsed_address). grammar/validators/knowledge are >= 2 hops. Scoring uses this frozen set, not the prose essence.",
+ "baseline_answer": true,
+ "note": "Baseline arm answer; equals frozen truth by construction (same recorded grep arm). See SUMMARY.md, R0 flag."
+}

@@ -1,0 +1,22 @@
+./scripts/extract_poi_knowledge.py:40:from vihap.knowledge.registry import get_knowledge_base
+./scripts/extract_poi_knowledge.py:287:        kb = get_knowledge_base()
+./vihap/knowledge/reform_utils.py:9:from .registry import get_knowledge_base
+./vihap/knowledge/reform_utils.py:30:    kb = get_knowledge_base()
+./vihap/knowledge/reform_utils.py:127:    kb = get_knowledge_base()
+./vihap/knowledge/reform_utils.py:137:    kb = get_knowledge_base()
+./vihap/knowledge/reform_utils.py:144:    kb = get_knowledge_base()
+./vihap/knowledge/reform_utils.py:151:    kb = get_knowledge_base()
+./vihap/validators/gso_loader.py:22:from ..knowledge.registry import get_knowledge_base
+./vihap/validators/gso_loader.py:613:        kb = get_knowledge_base()
+./vihap/validators/gso_loader.py:660:    kb = get_knowledge_base()
+./vihap/knowledge/access.py:8:from .registry import get_knowledge_base
+./vihap/knowledge/access.py:18:            loaded = get_knowledge_base()
+./vihap/knowledge/registry.py:25:def get_knowledge_base(
+./vihap/validators/street_validator.py:293:        from ..knowledge.registry import get_knowledge_base
+./vihap/validators/street_validator.py:295:        kb = get_knowledge_base()
+./vihap/reform/mapping.py:21:from ..knowledge.registry import get_knowledge_base
+./vihap/reform/mapping.py:26:    kb = get_knowledge_base()
+./vihap/reform/kb_loader.py:3:New code should use ``vihap.knowledge`` (``KnowledgeBase``, ``get_knowledge_base``).
+./vihap/reform/kb_loader.py:19:from ..knowledge.registry import get_knowledge_base, reset_knowledge_base_cache
+./vihap/reform/kb_loader.py:38:    kb = get_knowledge_base(artifacts_path, force_reload=force_reload)
+./vihap/reform/kb_loader.py:45:    kb = get_knowledge_base(artifacts_path)

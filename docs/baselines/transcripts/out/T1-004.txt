@@ -1,0 +1,39 @@
+    NON_DIGIT_RE as _NON_DIGIT_RE,
+)
+from ..grammar.thoroughfare import (
+    STREET_PREFIX_RE as _STREET_PREFIX_RE,
+)
+from .contact_extractor import ContactExtractor
+from .number_utils import normalize_slash_numbers
+from .unicode import (
+    normalize_ascii,
+    normalize_unicode_nfkc,
+)
+
+
+---
+    strip_street_or_alley_prefix,
+    strip_street_prefix,
+    strip_trailing_punctuation,
+    tokenize_building_aware,
+    unspace_alphanumeric_route,
+    word_tokens,
+)
+from .unicode import (
+    normalize_ascii,
+    normalize_unicode_nfkc,
+)
+from .vocab_corrector import (
+    QueryCorrector,
+---
+    parse_door_alphanumeric_tokens,
+    parse_house_number_parity_and_root,
+    split_door_segments,
+)
+from .text_utils import (
+    collapse_whitespace,
+    normalize_ascii,
+    normalize_regional_street,
+    normalize_street_name,
+    normalize_unicode_nfkc,
+    protect_highway_dashes,

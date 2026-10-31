@@ -1,0 +1,3 @@
+vihap/__init__.py:47:def parse(
+vihap/pipeline.py:61:    def parse(
+vihap/parsers/hierarchical_parser.py:86:    def parse(
