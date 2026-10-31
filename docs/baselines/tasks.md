@@ -32,5 +32,5 @@
 
 ## Scoring notes
 - Tool calls + bytes counted per task by D0 harness (both directions).
-- Correctness: checker compares found pointers vs ground truth (GT file); precision/recall per task; AMBIGUOUS-candidate hits count only if the true callee appears in the candidate list.
+- Correctness: checker (harness/check.py) compares found pointers vs the frozen expected set (expected/<TASK>.json); precision/recall per task; AMBIGUOUS-candidate hits count as recall hits only when the true callee appears in the candidate list (answer key `candidate_hits`); dynamic-dispatch answers are excluded from the precision denominator (answer key `dynamic_excluded`); T1 grouping is scored per-dir; ordering keys are normalized to the token before " (" so prose annotations do not gate; T4/T5 expected sets are verified minimal cores scored `recall_only` (extras are not false positives).
 - Baseline expectation to beat (G6): treatment arm must cut total tool calls >= 30% without byte growth or correctness loss.

@@ -4,7 +4,7 @@
 - Provenance: every row's caller line was read in the vihap working tree at rev `f7ca48c` (2026-10-30T15:10:07+07:00).
 - Verification legend: `[x]` = verified by direct code read (import line + call line); re-confirm by owner optional, not blocking.
 - No star imports exist in vihap (verified `rg "from .* import \*"` = 0 hits) — the spec's star-import fixture case must be a synthetic fixture, not a vihap row.
-- Known duplicate-name trap: `normalize_ascii` is defined in BOTH `vihap/cleaners/unicode.py:47` and `vihap/cleaners/text_utils.py`; per-module import maps decide the target (G01 vs G02). kg must not merge them.
+- Re-export chains (R0-corrected): `cleaners/text_utils.py:184`, `cleaners/__init__.py:158`, and `cleaners/normalizer.py:32` all RE-EXPORT the single definition at `vihap/cleaners/unicode.py:47` (normalizer via text_utils). Every vihap-internal call resolves to the canonical def regardless of import path. The real trap is the 6 scripts that shadow it with local defs (G30 pattern).
 
 Instruction (original): pick 30 real call sites from the anchor functions below. For each row, record the exact
 call line and how the callee is invoked — this determines the EXTRACTED vs AMBIGUOUS expectation in kg: direct
@@ -22,7 +22,7 @@ Anchor functions (from vihap survey 2026-10-31):
 | # | caller file:line | callee qualname | invocation kind (import-call / self / instance / dynamic) | verified |
 |---|------------------|-----------------|-----------------------------------------------------------|----------|
 | G01 | vihap/grammar/hamlet.py:150 | vihap.cleaners.unicode.normalize_ascii | import-call (rel import hamlet.py:14) | [x] |
-| G02 | vihap/short_parser.py:34 | vihap.cleaners.text_utils.normalize_ascii | import-call (rel import short_parser.py:8 — text_utils, NOT unicode) | [x] |
+| G02 | vihap/short_parser.py:34 | vihap.cleaners.unicode.normalize_ascii | import-call via text_utils RE-EXPORT (rel import short_parser.py:8 -> text_utils:184 -> unicode:47) | [x] |
 | G03 | vihap/parsers/alley.py:497 | vihap.cleaners.unicode.normalize_ascii | import-call (rel import alley.py:11) | [x] |
 | G04 | vihap/validators/street_classifier.py:215 | vihap.cleaners.unicode.normalize_ascii | import-call (street_classifier.py:11) | [x] |
 | G05 | vihap/validators/category.py:174 | vihap.cleaners.unicode.normalize_ascii | import-call (category.py:19) | [x] |

@@ -9,6 +9,7 @@
   "vihap/parsers/hierarchical_parser.py:137",
   "vihap/parsers/hierarchical_parser.py:151",
   "vihap/parsers/hierarchical_parser.py:179",
+  "vihap/parsers/hierarchical_parser.py:192",
   "vihap/parsers/hierarchical_parser.py:197",
   "vihap/parsers/hierarchical_parser.py:426",
   "vihap/parsers/hierarchical_parser.py:427"
@@ -21,6 +22,8 @@
   "formatters (AddressFormatter)",
   "models.ParsedAddress"
  ],
+ "scoring": "recall_only",
+ "core_note": "Minimal verified core; extras accepted. resolve_legacy_districts (hierarchical_parser.py:192) added per R0 finding 2.",
  "baseline_answer": true,
  "note": "Baseline arm answer; equals frozen truth by construction (same recorded grep arm). See SUMMARY.md, R0 flag."
 }
