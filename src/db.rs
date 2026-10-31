@@ -179,15 +179,20 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
     Ok(Some(old))
 }
 
-/// (rel -> (mtime, size)) of the previous index's files.
-pub fn old_files(old: &Connection) -> Result<HashMap<String, (i64, i64)>> {
-    let mut stmt = old.prepare("SELECT path, mtime, size FROM files")?;
+/// (rel -> (mtime, size, content_hash)) of the previous index's files.
+pub fn old_files(old: &Connection) -> Result<HashMap<String, (i64, i64, i64)>> {
+    let mut stmt = old.prepare("SELECT path, mtime, size, content_hash FROM files")?;
     let rows = stmt
         .query_map(rusqlite::params![], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows.into_iter().map(|(p, m, s)| (p, (m, s))).collect())
+    Ok(rows.into_iter().map(|(p, m, s, h)| (p, (m, s, h))).collect())
 }
 
 /// Count parse-error files among the carried set (fast-path gate denominator).
@@ -297,13 +302,16 @@ pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedI
     Ok(CarriedIndex { symbols, inherits })
 }
 
-/// Copy rows for files whose (mtime, size) match the current walk. Attaches
-/// the old DB itself (SQLite ATTACH takes no bound parameters). Returns
-/// rel -> old file id for reuse.
+/// Copy rows for files matching the fast-path keys. `unchanged` rows carry
+/// (rel, old_mtime, size, current_mtime): the SELECT identifies the old row by
+/// (path, old_mtime, size); hash-carried rows (Amendment 9) then get their
+/// stored mtime refreshed to the fresh checkout's stat so the staleness
+/// contract stays truthful. Attaches the old DB itself (SQLite ATTACH takes no
+/// bound parameters). Returns rel -> old file id for reuse.
 pub fn carry_forward_unchanged(
     new: &Connection,
     root: &Path,
-    unchanged: &[(String, i64, i64)], // (rel, mtime, size)
+    unchanged: &[(String, i64, i64, i64)],
 ) -> Result<Vec<(String, i64)>> {
     let old_path = db_path(root);
     let quoted = old_path.to_string_lossy().replace('\'', "''");
@@ -316,9 +324,14 @@ pub fn carry_forward_unchanged(
              SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
-        for (rel, mtime, size) in unchanged {
+        let mut refresh_mtime =
+            new.prepare("UPDATE files SET mtime = ?1 WHERE path = ?2")?;
+        for (rel, mtime, size, current_mtime) in unchanged {
             let inserted = stmt.execute(rusqlite::params![rel, mtime, size])?;
             if inserted > 0 {
+                if current_mtime != mtime {
+                    refresh_mtime.execute(rusqlite::params![current_mtime, rel])?;
+                }
                 let id: i64 = new.query_row(
                     "SELECT id FROM files WHERE path = ?1",
                     rusqlite::params![rel],

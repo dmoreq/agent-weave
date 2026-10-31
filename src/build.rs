@@ -2,7 +2,7 @@
 //! dirty closure, parse-quality gate, and meta manifest. Shared by the CLI
 //! (prints the stats line) and the MCP server (returns it as tool text).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
@@ -30,12 +30,32 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
         None => Default::default(),
     };
     let mut carried: HashSet<String> = HashSet::new();
+    // Hash-carried rows (Amendment 9): carried on content match despite an
+    // mtime mismatch (restored index.db) — they need their stored mtime
+    // refreshed to the fresh checkout's stat.
+    let mut mtime_updates: HashMap<String, i64> = HashMap::new();
     let mut fresh: Vec<crate::walk::WalkedFile> = Vec::new();
     for f in &stats.files {
         let mtime = crate::db::stat_mtime(&f.abs).unwrap_or(0);
         match old_map.get(&f.rel) {
-            Some((om, osz)) if *om == mtime && *osz == f.size as i64 => {
+            Some((om, osz, _oh)) if *om == mtime && *osz == f.size as i64 => {
                 carried.insert(f.rel.clone());
+            }
+            // Dual-key (Amendment 9): (mtime, size) mismatch, but same size and
+            // same content hash -> carry (the CI cache-restore case). One
+            // read+hash instead of parse+extract.
+            Some((_om, osz, oh)) if *osz == f.size as i64 => {
+                match std::fs::read(&f.abs) {
+                    Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == *oh => {
+                        carried.insert(f.rel.clone());
+                        mtime_updates.insert(f.rel.clone(), mtime);
+                    }
+                    _ => fresh.push(crate::walk::WalkedFile {
+                        abs: f.abs.clone(),
+                        rel: f.rel.clone(),
+                        size: f.size,
+                    }),
+                }
             }
             _ => fresh.push(crate::walk::WalkedFile {
                 abs: f.abs.clone(),
@@ -135,9 +155,14 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     let t0 = Instant::now();
     let conn = crate::db::create_fresh(&root)?;
     if !carried.is_empty() {
-        let unchanged: Vec<(String, i64, i64)> = carried
+        let unchanged: Vec<(String, i64, i64, i64)> = carried
             .iter()
-            .filter_map(|rel| old_map.get(rel).map(|(m, s)| (rel.clone(), *m, *s)))
+            .filter_map(|rel| {
+                old_map.get(rel).map(|(m, s, _)| {
+                    let current = mtime_updates.get(rel).copied().unwrap_or(*m);
+                    (rel.clone(), *m, *s, current)
+                })
+            })
             .collect();
         crate::db::carry_forward_unchanged(&conn, &root, &unchanged)?;
     }

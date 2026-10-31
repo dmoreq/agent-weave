@@ -317,6 +317,52 @@ fn fast_path_preserves_callers_of_changed_file() {
 }
 
 #[test]
+fn prebuilt_index_restore_carries_on_hash_match() {
+    // Amendment 9: a restored index.db (CI cache) whose file mtimes differ
+    // from the fresh checkout is carried on content-hash match — no re-parse,
+    // correct queries, no stale flags.
+    let repo = fixture("m4-restore");
+    let (_, out1, _) = build(&repo);
+    assert!(out1.contains("carried=0"), "{out1}");
+
+    // Cache the index artifact.
+    let cache = temp_repo("m4-cache");
+    fs::create_dir_all(&cache).unwrap();
+    fs::copy(repo.join(".kg/index.db"), cache.join("index.db")).unwrap();
+
+    // Fresh checkout: same content, new mtimes; drop .kg; restore the artifact.
+    fs::write(repo.join("utils.py"), UTILS).unwrap();
+    fs::write(repo.join("widget.py"), WIDGET).unwrap();
+    fs::write(repo.join("app.py"), APP).unwrap();
+    fs::remove_dir_all(repo.join(".kg")).unwrap();
+    fs::create_dir_all(repo.join(".kg")).unwrap();
+    fs::copy(cache.join("index.db"), repo.join(".kg/index.db")).unwrap();
+
+    let (_, out2, _) = build(&repo);
+    assert!(
+        out2.contains("carried=3"),
+        "hash-carried despite mtime mismatch: {out2}"
+    );
+
+    // Queries correct after restore; no staleness flag (mtime refreshed).
+    let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("app.py:6"), "{stdout}");
+    assert!(
+        !stdout.starts_with("kg: 1 of "),
+        "carried rows must not read as stale: {stdout}"
+    );
+
+    // And a real edit still re-resolves correctly on top of the restore.
+    write(&repo, "utils.py", &format!("{UTILS}\n\ndef extra():\n    return 1\n"));
+    let (_, _, _) = build(&repo);
+    let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("app.py:6"), "dirty closure on restored index: {stdout}");
+}
+
+#[test]
 fn unresolved_count_stable_across_incremental_builds() {
     let repo = temp_repo("unres");
     write(&repo, "m.py", "def go():\n    return ghost()\n");

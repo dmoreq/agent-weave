@@ -87,6 +87,20 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Added — M4 prebuilt index artifacts (Amendment 9)
+
+- Dual-key fast path: (mtime, size) match carries as before; a (mtime,
+  size) mismatch with same size AND matching FNV-1a content hash also
+  carries — a restored `index.db` from a CI cache is reused without
+  re-parse. Hash-carried rows get their stored mtime refreshed to the fresh
+  checkout's stat (staleness contract stays truthful).
+- Cost model: extra reads only in the restore case (one read+hash per file,
+  parse+extract still skipped); the normal workflow pays zero extra reads.
+- Dirty closure, parse-quality gate, and version-gate semantics unchanged.
+- Restore-equivalence test: cache -> fresh checkout -> build carries all
+  files, queries byte-correct, no stale flags, and a subsequent real edit
+  still re-resolves via the dirty closure.
+
 ### Added — M3 MCP stdio server (Amendment 8, P3 activated)
 
 - `kg mcp`: newline-delimited JSON-RPC 2.0 server on stdin/stdout; 11 tools
@@ -166,7 +180,13 @@ changes bump the minor while 0.x is unstable.
 
 ### Skipped
 
-- P3 stdio MCP server: trigger condition ("CLI discoverability measurably
-  fails") not met. Re-evaluable on request.
+- P3 stdio MCP server (original trigger): "CLI discoverability measurably
+  fails" never occurred — the phase was skipped per its trigger rule, then
+  ACTIVATED as M3 by owner decision (MCP-native demand), recorded as
+  Amendment 8.
+- M5 additional languages (Go/Java/C#): trigger "real workload demand" not
+  met — no such workload identified. Re-evaluable on request; the P2
+  per-language template (grammar pin -> extraction -> fixtures -> GT -> G2)
+  remains the playbook.
 
 [Unreleased]: no tagged releases yet — history starts at f9d57b9 (repo init).
