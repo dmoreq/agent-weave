@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Build (locked)
+        run: cargo build --locked --release
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+      - name: Dependency allowlist (G5)
+        run: bash tests/scripts/allowlist_check.sh Cargo.lock
+
+  network-deny-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build binary
+        run: cargo build --locked --release
+      - name: Seatbelt network-deny build (G5)
+        run: |
+          mkdir -p /tmp/kg-fixture
+          printf 'def f():\n    return 1\n' > /tmp/kg-fixture/a.py
+          bash tests/scripts/seatbelt-build.sh target/release/kg /tmp/kg-fixture
+
+  network-deny-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install seccomp wrapper
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Build binary
+        run: cargo build --locked --release
+      - name: seccomp network-deny build (G5)
+        run: |
+          mkdir -p /tmp/kg-fixture
+          printf 'def f():\n    return 1\n' > /tmp/kg-fixture/a.py
+          bwrap --unshare-net --dev-bind / / --ro-bind / / \
+            target/release/kg build --root /tmp/kg-fixture

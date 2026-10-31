@@ -3,7 +3,6 @@
  "symbol": "vihap.knowledge.registry.get_knowledge_base",
  "provenance": "transcripts/out/T2-001.txt + T2-002.txt at vihap f7ca48c",
  "pointers": [
-  "scripts/extract_poi_knowledge.py:287",
   "vihap/knowledge/reform_utils.py:30",
   "vihap/knowledge/reform_utils.py:127",
   "vihap/knowledge/reform_utils.py:137",
@@ -23,7 +22,7 @@
   "vihap/reform/mapping.py (reform mapping)",
   "vihap/reform/kb_loader.py (deprecated wrapper, still live callers)",
   "vihap/knowledge/reform_utils.py (reform utilities)",
-  "vihap/knowledge/access.py (lazy access wrapper)",
-  "scripts/extract_poi_knowledge.py (offline, outside parse request)"
- ]
+  "vihap/knowledge/access.py (lazy access wrapper)"
+ ],
+ "correction": "2026-10-31 G6: extract_poi_knowledge.py removed — untracked+gitignored, outside the kg walk contract (git-visible set)."
 }

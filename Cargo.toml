@@ -1,0 +1,18 @@
+[package]
+name = "kg"
+version = "0.1.0"
+edition = "2021"
+description = "Local code knowledge index: who calls this, what does this call, what is impacted by this file."
+license = "LicenseRef-Private"
+publish = false
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tree-sitter = "0.25"
+tree-sitter-python = "0.25"
+rusqlite = { version = "0.41", features = ["bundled"] }
+ignore = "0.4"
+
+[profile.release]
+lto = "thin"
+strip = true

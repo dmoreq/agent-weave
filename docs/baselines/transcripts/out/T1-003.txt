@@ -1,11 +1,46 @@
-vihap/cleaners/text_utils.py:186:    normalize_ascii,
-vihap/cleaners/text_utils.py:254:    ascii_name = normalize_ascii(name).strip()
-vihap/cleaners/text_utils.py:275:    norm = normalize_ascii(cleaned)
-vihap/cleaners/text_utils.py:422:    norm = normalize_ascii(stripped)
-vihap/cleaners/text_utils.py:444:    ascii_name = normalize_ascii(str(name)).strip()
-vihap/cleaners/text_utils.py:508:    return tuple(word_tokens(normalize_ascii(text).lower().replace("_", " ")))
-vihap/cleaners/text_utils.py:634:    "normalize_ascii",
-vihap/cleaners/__init__.py:160:    normalize_ascii,
-vihap/cleaners/__init__.py:238:    "normalize_ascii",
-vihap/cleaners/normalizer.py:33:    normalize_ascii,
-vihap/cleaners/normalizer.py:61:    "normalize_ascii",
+./scripts/clean_building_dataset.py:11:from vihap.cleaners.normalizer import normalize_ascii
+./scripts/build_golden_fixtures.py:24:from vihap.cleaners.text_utils import normalize_ascii  # noqa: E402
+./scripts/import_poi_knowledge.py:100:    from vihap.cleaners import normalize_ascii
+./scripts/import_poi_knowledge.py:148:    from vihap.cleaners import normalize_ascii
+./scripts/import_poi_knowledge.py:205:    from vihap.cleaners import normalize_ascii
+./scripts/extract_poi_knowledge.py:38:from vihap.cleaners import normalize_ascii
+./vihap/validators/category.py:19:from ..cleaners.unicode import normalize_ascii
+./vihap/grammar/civic.py:14:from ..cleaners.unicode import normalize_ascii
+./vihap/grammar/hamlet.py:14:from ..cleaners.unicode import normalize_ascii
+./vihap/parsers/alley.py:11:from ..cleaners.unicode import normalize_ascii
+./vihap/validators/street_classifier.py:11:from ..cleaners.unicode import normalize_ascii
+./vihap/grammar/landmark.py:15:from ..cleaners.unicode import normalize_ascii
+./vihap/grammar/vocabulary.py:11:from ..cleaners.unicode import normalize_ascii
+./vihap/validators/gso_loader.py:14:from ..cleaners.unicode import normalize_ascii
+./vihap/matching/parity.py:12:from ..cleaners.unicode import normalize_ascii
+./vihap/parsers/street_parser.py:23:from ..cleaners.unicode import normalize_ascii
+./vihap/grammar/categories.py:8:from ..cleaners.unicode import normalize_ascii
+./vihap/matching/similarity.py:40:from ..cleaners.unicode import normalize_ascii
+./vihap/knowledge/base.py:9:from ..cleaners import normalize_ascii
+./vihap/validators/admin_validator.py:12:from ..cleaners.unicode import normalize_ascii
+./vihap/reform/street_district_lookup.py:9:from vihap.cleaners.unicode import normalize_ascii
+./vihap/validators/building_validator.py:14:from ..cleaners.unicode import normalize_ascii
+./vihap/grammar/fragments.py:8:from ..cleaners.unicode import normalize_ascii
+./vihap/parsers/hamlet_stage.py:8:from ..cleaners.text_utils import normalize_ascii
+./vihap/validators/gso_index.py:10:from ..cleaners.unicode import normalize_ascii
+./vihap/reform/street_kb_build.py:15:from vihap.cleaners import normalize_ascii
+./vihap/grammar/admin.py:11:from ..cleaners.unicode import normalize_ascii
+./vihap/parsers/building_stage.py:9:from ..cleaners.text_utils import normalize_ascii
+./vihap/validators/street_validator.py:13:from ..cleaners import AbbrCategory, AbbreviationEngine, collapse_whitespace, normalize_ascii
+./vihap/parsers/building_parser.py:6:from ..cleaners.unicode import normalize_ascii
+./vihap/validators/admin_resolver.py:13:from ..cleaners.unicode import normalize_ascii
+./vihap/short_parser.py:8:from .cleaners.text_utils import normalize_ascii
+./vihap/grammar/thoroughfare.py:15:from ..cleaners.unicode import normalize_ascii
+./vihap/parsers/slots.py:15:from ..cleaners.unicode import normalize_ascii
+./vihap/validators/address_splitter.py:11:from ..cleaners.unicode import normalize_ascii
+./vihap/cleaners/poi_cleaner.py:41:from .unicode import normalize_ascii
+./vihap/parsers/admin_tail.py:15:from ..cleaners.unicode import normalize_ascii
+./vihap/cleaners/query_cleaner.py:116:from .unicode import normalize_ascii
+./vihap/cleaners/vocab_corrector.py:28:from .unicode import normalize_ascii
+./vihap/cleaners/street_name_filter.py:97:from .text_utils import normalize_ascii
+./vihap/cleaners/abbreviation_engine.py:47:from .text_utils import build_term_automaton, normalize_ascii, replace_terms_automaton
+./vihap/cleaners/street_sanitizer.py:52:from .text_utils import normalize_ascii, protect_highway_dashes, restore_highway_dashes
+./vihap/cleaners/deduplicator.py:15:from .unicode import normalize_ascii
+./vihap/cleaners/route.py:10:from .text_utils import collapse_whitespace, normalize_ascii, normalize_unicode_nfkc
+./vihap/cleaners/lexicon_build.py:12:from .unicode import normalize_ascii
+./vihap/cleaners/admin.py:20:from .text_utils import collapse_whitespace, normalize_ascii

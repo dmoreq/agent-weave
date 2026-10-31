@@ -1,0 +1,11 @@
+from ..grammar.thoroughfare import (
+    STREET_PREFIX_RE as _STREET_PREFIX_RE,
+)
+from .contact_extractor import ContactExtractor
+from .number_utils import normalize_slash_numbers
+from .unicode import (
+    normalize_ascii,
+    normalize_unicode_nfkc,
+)
+
+

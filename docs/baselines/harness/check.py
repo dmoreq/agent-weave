@@ -48,9 +48,11 @@ def main():
         tasks = sorted(f[:2] for f in os.listdir(exp_dir) if f.endswith(".json"))
     print("| task | precision | recall | ordering | grouping |")
     print("|------|-----------|--------|----------|----------|")
-    for t in tasks:
+    for spec in tasks:
+        t, _, arm = spec.partition("@")
+        ans_name = f"{t}.answer.json" if not arm else f"{t}.answer.{arm}.json"
         exp = load(os.path.join(exp_dir, f"{t}.json"))
-        ans = load(os.path.join(tr_dir, f"{t}.answer.json"))
+        ans = load(os.path.join(tr_dir, ans_name))
         recall_only = exp.get("scoring") == "recall_only"
         a = {p.strip() for p in ans.get("pointers", [])}
         e = {p.strip() for p in exp.get("pointers", [])}
@@ -77,13 +79,14 @@ def main():
             eg = exp.get("grouping", {})
             ok = sum(1 for d in eg if ag.get(d) == eg[d])
             grp = f"{ok}/{len(eg)} dirs"
-        print(f"| {t} | {p_txt} | {recall:.2%} | {order:.0%} | {grp or '-'} |")
+        label = spec.replace("@", "/")
+        print(f"| {label} | {p_txt} | {recall:.2%} | {order:.0%} | {grp or '-'} |")
         if miss:
-            print(f"  {t} misses: {', '.join(miss)}")
+            print(f"  {label} misses: {', '.join(miss)}")
         if extra and not recall_only:
-            print(f"  {t} false positives: {', '.join(extra)}")
+            print(f"  {label} false positives: {', '.join(extra)}")
         elif extra:
-            print(f"  {t} extras (accepted, recall-only): {', '.join(extra[:8])}"
+            print(f"  {label} extras (accepted, recall-only): {', '.join(extra[:8])}"
                   + (" ..." if len(extra) > 8 else ""))
     return 0
 

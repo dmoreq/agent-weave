@@ -24,15 +24,12 @@ def load_task(path):
     return calls
 
 
-def main():
-    files = sorted(glob.glob(os.path.join(TR, "T*.jsonl")))
-    if not files:
-        print("no transcripts found", file=sys.stderr)
-        return 1
+def table(paths, label):
+    print(f"\n### {label}\n")
     print("| task | tool calls | in bytes | out bytes | total bytes |")
     print("|------|-----------|----------|-----------|-------------|")
     grand = [0, 0, 0, 0]
-    for path in files:
+    for path in paths:
         calls = load_task(path)
         task = os.path.basename(path)[:2]
         n = len(calls)
@@ -44,6 +41,19 @@ def main():
         grand[2] += ob
         grand[3] += ib + ob
     print(f"| TOTAL | {grand[0]} | {grand[1]} | {grand[2]} | {grand[3]} |")
+    return grand
+
+
+def main():
+    baseline = sorted(glob.glob(os.path.join(TR, "T[1-5].jsonl")))
+    kgarm = sorted(glob.glob(os.path.join(TR, "kgarm", "T[1-5].jsonl")))
+    if not baseline and not kgarm:
+        print("no transcripts found", file=sys.stderr)
+        return 1
+    if baseline:
+        table(baseline, "baseline arm (grep)")
+    if kgarm:
+        table(kgarm, "treatment arm (kg)")
     return 0
 
 

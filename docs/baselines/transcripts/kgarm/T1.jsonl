@@ -1,0 +1,1 @@
+{"task": "T1", "seq": 1, "tool": "kg", "cmd": "/Users/quy.doan/Workspace/kg/target/release/kg callers vihap.cleaners.unicode.normalize_ascii --limit 10000 --root .", "in_bytes": 116, "out_bytes": 9649, "err_bytes": 0, "out_file": "out/kgarm/T1-001-kg.txt"}

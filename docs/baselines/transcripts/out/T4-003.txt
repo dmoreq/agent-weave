@@ -1,2 +1,14 @@
+32:from .macro_resolver import (
+57:        quality_scorer: QualityScorer | None = None,
+59:        macro_resolver: MacroAdminResolver | None = None,
+68:        self.macro_resolver = macro_resolver or MacroAdminResolver(
+74:        if quality_scorer is not None:
+75:            self.quality_scorer = quality_scorer
+79:            self.quality_scorer = QualityScorer()
+179:        ) = self.macro_resolver.reconcile_admin_nodes(
+192:        legacy_district, legacy_districts = self.macro_resolver.resolve_legacy_districts(
+195:        lat, lon = self.macro_resolver.resolve_centroid_coordinates(w_node, gso_codes)
+251:        return self.macro_resolver.resolve_admin_nodes(normalized_text)
+308:            ) = self.macro_resolver.anchor_by_postal_code(
+323:        street_components = self.macro_resolver.reconcile_homonymous_street_or_building(
 426:        formatted_standard = active_formatter.format(components, normalized_text)
-427:        quality_score = self.quality_scorer.score(p_node, d_node, w_node, components)

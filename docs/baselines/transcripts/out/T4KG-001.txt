@@ -1,0 +1,7 @@
+vihap/parsers/hierarchical_parser.py:220
+vihap/parsers/hierarchical_parser.py:249
+vihap/parsers/hierarchical_parser.py:253
+vihap/parsers/hierarchical_parser.py:345
+vihap/parsers/macro_resolver.py:303
+vihap/parsers/macro_resolver.py:383
+vihap/parsers/macro_resolver.py:398

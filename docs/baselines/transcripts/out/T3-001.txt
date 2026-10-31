@@ -1,49 +1,45 @@
-./vihap/grammar/civic.py:15:from .fragments import _with_ascii_variants, make_alternation
-./vihap/grammar/civic.py:61:            rf"(?i)\b{make_alternation(*_with_ascii_variants(*_GOV_WORDS), flex_space=_FLEX_SPACE)}\b"
-./vihap/grammar/civic.py:67:            rf"(?i)\b{make_alternation(*_with_ascii_variants(*_TRANSIT_WORDS), flex_space=_FLEX_SPACE)}\b"
-./vihap/grammar/civic.py:73:            rf"(?i)\b{make_alternation(*_with_ascii_variants(*_HEALTH_WORDS), flex_space=_FLEX_SPACE)}\b"
-./vihap/grammar/civic.py:79:            rf"(?i)\b{make_alternation(*_with_ascii_variants(*_CULTURAL_WORDS), flex_space=_FLEX_SPACE)}\b"
-./vihap/grammar/admin.py:19:    make_alternation,
-./vihap/grammar/admin.py:69:    rf"(?:\b{make_alternation(*_with_ascii_variants(*_ADMIN_DISTRICT_BASE, 'thành phố'), 'tp', 'tx', 'quan', 'quận', 'huyen', 'huyện')}\b"
-./vihap/grammar/admin.py:70:    rf"|\b{make_alternation('tp.', 'tx.', 'q.', 'h.')})"
-./vihap/grammar/admin.py:77:    rf"(?:\b{make_alternation(*_with_ascii_variants(*_ADMIN_WARD_BASE, *_ADMIN_COMMUNE_BASE), 'phuong', 'phường', 'xa', 'xã', 'thi tran', 'thị trấn')}\b"
-./vihap/grammar/admin.py:78:    rf"|\b{make_alternation('tt.', 'p.', 'x.')})"
-./vihap/grammar/admin.py:96:_TRAILING_KW_ALT: Final[str] = make_alternation(
-./vihap/grammar/admin.py:160:_VN_CITY_CUE_ALT: Final[str] = make_alternation(*_VIETNAM_CITY_CUE_TERMS)
-./vihap/grammar/admin.py:161:_VN_CITY_CUE_FLEX_ALT: Final[str] = make_alternation(*_VIETNAM_CITY_CUE_TERMS, flex_space=r"\s*")
-./vihap/grammar/admin.py:676:    prov_alt = make_alternation(clean_prov, normalize_ascii(clean_prov))
-./vihap/grammar/fragments.py:31:    "make_alternation",
-./vihap/grammar/fragments.py:101:def make_alternation(
-./vihap/grammar/fragments.py:128:    alt = make_alternation(*terms, sort_len=sort_len, flex_space=flex_space)
-./vihap/grammar/fragments.py:146:    alt = make_alternation(*terms, sort_len=sort_len, flex_space=flex_space)
-./vihap/grammar/fragments.py:151:_FRAG_ALLEY_MAJOR: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:154:_FRAG_ALLEY_SUB: Final[str] = make_alternation(*_with_ascii_variants(*_THOROUGHFARE_ALLEY_SUB_BASE))
-./vihap/grammar/fragments.py:155:_FRAG_ALLEY_SHORT: Final[str] = make_alternation(*_THOROUGHFARE_ALLEY_SHORT)
-./vihap/grammar/fragments.py:156:_FRAG_ALLEY_ALL: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:162:_FRAG_ALLEY_INFRASTRUCTURE: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:167:_FRAG_STREET_BASE: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:171:_FRAG_STREET_ALL: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:179:_FRAG_ROUTE_PREFIX_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:183:_FRAG_ROUTE_ABBR: Final[str] = make_alternation(*_THOROUGHFARE_ROUTE_ABBR)
-./vihap/grammar/fragments.py:184:_FRAG_ROUTE_ALL: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:189:_FRAG_MAJOR_ROAD_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:198:_FRAG_PROVINCE_PREFIX_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:202:_FRAG_DISTRICT_PREFIX_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:206:_FRAG_DISTRICT_EXCLUSIVE_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:210:_FRAG_WARD_PREFIX_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:214:_FRAG_COMMUNE_PREFIX_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:218:_FRAG_ADMIN_ALL_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:227:_FRAG_ADMIN_ABBR_ALL: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:237:_FRAG_PROVINCE_CUE: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:242:_WARD_PREFIX_WORDS: Final[str] = make_alternation(
-./vihap/grammar/fragments.py:248:_FRAG_DISTRICT_ONLY: Final[str] = make_alternation(
-./vihap/grammar/thoroughfare.py:29:    make_alternation,
-./vihap/grammar/thoroughfare.py:519:_FRAG_NAMED_ALLEY: Final[str] = make_alternation(
-./vihap/grammar/categories.py:9:from .fragments import make_alternation, make_boundary_pattern
-./vihap/grammar/categories.py:139:    + make_alternation(
-./vihap/grammar/patterns.py:34:    make_alternation,
-./vihap/grammar/patterns.py:289:    + make_alternation(
-./vihap/grammar/landmark.py:17:from .fragments import make_alternation, make_boundary_pattern
-./vihap/grammar/landmark.py:69:# Snapshot locks the flat ``(?i)\b(a|b)\b`` shape, so drop make_alternation's
-./vihap/grammar/landmark.py:71:_ANCHOR_ALT: Final[str] = make_alternation(*_LANDMARK_ANCHOR_TERMS, flex_space=r"\s+")[3:-1]
-./vihap/grammar/landmark.py:375:            rf"\b{make_alternation(entry['canonical'].lower(), normalize_ascii(entry['canonical']))}\b",
+tests/test_grammar_fragments.py:36
+tests/test_grammar_fragments.py:37
+tests/test_grammar_fragments.py:41
+tests/test_grammar_fragments.py:54
+tests/test_grammar_fragments.py:66
+vihap/grammar/admin.py:69
+vihap/grammar/admin.py:70
+vihap/grammar/admin.py:77
+vihap/grammar/admin.py:78
+vihap/grammar/admin.py:96
+vihap/grammar/admin.py:160
+vihap/grammar/admin.py:161
+vihap/grammar/admin.py:676
+vihap/grammar/categories.py:139
+vihap/grammar/civic.py:61
+vihap/grammar/civic.py:67
+vihap/grammar/civic.py:73
+vihap/grammar/civic.py:79
+vihap/grammar/fragments.py:128
+vihap/grammar/fragments.py:146
+vihap/grammar/fragments.py:151
+vihap/grammar/fragments.py:154
+vihap/grammar/fragments.py:155
+vihap/grammar/fragments.py:156
+vihap/grammar/fragments.py:162
+vihap/grammar/fragments.py:167
+vihap/grammar/fragments.py:171
+vihap/grammar/fragments.py:179
+vihap/grammar/fragments.py:183
+vihap/grammar/fragments.py:184
+vihap/grammar/fragments.py:189
+vihap/grammar/fragments.py:198
+vihap/grammar/fragments.py:202
+vihap/grammar/fragments.py:206
+vihap/grammar/fragments.py:210
+vihap/grammar/fragments.py:214
+vihap/grammar/fragments.py:218
+vihap/grammar/fragments.py:227
+vihap/grammar/fragments.py:237
+vihap/grammar/fragments.py:242
+vihap/grammar/fragments.py:248
+vihap/grammar/landmark.py:71
+vihap/grammar/landmark.py:375
+vihap/grammar/patterns.py:289
+vihap/grammar/thoroughfare.py:519

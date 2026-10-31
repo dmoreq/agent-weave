@@ -1,0 +1,13 @@
+{
+ "pointers": [
+  "vihap/parsers/macro_resolver.py:303",
+  "vihap/parsers/macro_resolver.py:383",
+  "vihap/parsers/macro_resolver.py:398",
+  "vihap/formatters/standard_formatter.py:154",
+  "vihap/quality/confidence.py:145"
+ ],
+ "closure_size": 26,
+ "note": "cross-module filter per task definition",
+ "kg_answer": true,
+ "binary": "depth-N run B (kgarm/)"
+}

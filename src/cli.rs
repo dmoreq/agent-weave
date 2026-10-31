@@ -1,0 +1,67 @@
+//! clap definitions and help texts. Impact direction semantics are stated in
+//! the help: impact = "files that call into <file>" (spec response contract).
+
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(
+    name = "kg",
+    version,
+    about = "Local code knowledge index: who calls this, what does this call, what is impacted by this file.",
+    long_about = "kg indexes a repository's symbols and call/inheritance edges into a local\nSQLite index. It is consultative only: no hooks, no daemon, no network,\nno writes outside .kg/."
+)]
+pub struct Cli {
+    /// Repository root (default: nearest git root ancestor of cwd).
+    /// Global: valid before or after the subcommand.
+    #[arg(long, global = true)]
+    pub root: Option<std::path::PathBuf>,
+
+    #[command(subcommand)]
+    pub cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+pub enum Cmd {
+    /// Index the repository into .kg/index.db (full atomic replacement)
+    Build {
+        /// Re-extract everything (disable the unchanged-file fast path)
+        #[arg(long)]
+        force: bool,
+        /// Abort when this fraction of files fails to parse (default 5%)
+        #[arg(long, default_value_t = 0.05)]
+        max_parse_error_rate: f64,
+    },
+    /// Who calls this symbol
+    Callers {
+        /// Symbol name or dotted qualname (Class.method form disambiguates)
+        name: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// What does this symbol call
+    Callees {
+        /// Symbol name or dotted qualname (Class.method form disambiguates)
+        name: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+        /// Transitive depth for the call closure (default 1 = direct callees)
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
+    },
+    /// Files that call into <file> (impact direction: callers of the file)
+    Impact {
+        /// Repo-relative path of the indexed file
+        file: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Inspect index health (integrity, versions, staleness, orphans)
+    Doctor {
+        /// Delete the index entirely (one-command exit to grep-only)
+        #[arg(long)]
+        invalidate: bool,
+    },
+}

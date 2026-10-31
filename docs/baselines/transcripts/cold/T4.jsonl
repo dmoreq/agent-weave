@@ -1,0 +1,4 @@
+{"task": "T4", "seq": 1, "tool": "rg", "cmd": "rg -n \"def parse\\(\" vihap/pipeline.py vihap/__init__.py vihap/parsers/hierarchical_parser.py", "in_bytes": 92, "out_bytes": 123, "err_bytes": 0, "out_file": "out/T4-001.txt"}
+{"task": "T4", "seq": 2, "tool": "sed", "cmd": "sed -n \"96,145p\" vihap/parsers/hierarchical_parser.py", "in_bytes": 53, "out_bytes": 1794, "err_bytes": 0, "out_file": "out/T4-002.txt"}
+{"task": "T4", "seq": 3, "tool": "rg", "cmd": "rg -n \"macro_resolver|quality_scorer|active_formatter\\.format\" vihap/parsers/hierarchical_parser.py | head -14", "in_bytes": 110, "out_bytes": 930, "err_bytes": 0, "out_file": "out/T4-003.txt"}
+{"task": "T4", "seq": 4, "tool": "sed", "cmd": "sed -n \"60,80p\" vihap/parsers/hierarchical_parser.py", "in_bytes": 52, "out_bytes": 851, "err_bytes": 0, "out_file": "out/T4-004.txt"}

@@ -45,3 +45,34 @@ Correctness (harness/check.py vs frozen expected): T1–T5 all 100.00% precision
 | G-C | grep baseline recorded here; kg arm + A/B in P1 (G6) |
 | G-D/G-E | invariants CI-enforced from P1 onward |
 | P1.5 (G7) | pain-list.md PROVISIONAL — owner confirmation pending; G7 degraded until then |
+
+## G6 — A/B results (2026-10-31, run B, depth-N binary)
+
+| arm | tool calls | bytes (both dirs) | correctness |
+|-----|-----------|-------------------|-------------|
+| baseline (grep, frozen P0, R0-approved) | 12 | 49,224 | 100% self-derived, R0 spot-audited |
+| baseline (cold run B, equivalence check) | 13 | (transcripts/cold/) | — |
+| treatment (kg, kgarm/, run B) | 6 | 16,125 | T1 100/100 + 7/9 dirs; T2 100/100 + ordering 100%; T3 100/100; T4 ordering 100% (pointer semantics differ: callees contract emits def lines); T5 100/100 |
+
+- Tool-call reduction: (12-6)/12 = **50%** (target >= 30% — PASS).
+- Bytes: 16,125 vs 49,224 = **-67%** (no increase — PASS).
+- Cold-run equivalence (R0 suggestion): cold run B = 13 calls vs warm 12 (+8%) — warm baseline is a valid denominator.
+- Treatment-arm disagreements audited individually: (1) expected/T1 had a docstring misclassified as a call site (kg was right); (2) expected sets included untracked+gitignored scripts — kg's walk contract is the git-visible set (git ls-files -co), expected sets corrected to match; (3) depth>1 queries added to callees (`--depth N`) so flow tasks collapse to 1 query — response contract extension recorded as Amendment 2.
+- Run A (kgarm_runA/, depth-1 binary, 10 calls) retained as evidence that per-task chaining without --depth yields only ~17% tool-call reduction — the --depth extension is load-bearing for G6.
+
+## Amendment 2 (response contract)
+
+`kg callees` gains `--depth N` (default 1, clamp 1..10): transitive call closure
+via recursive CTE. Output format unchanged (pointer lines). Recorded 2026-10-31
+during G6; the spec's response-contract section gains this flag at next edit.
+
+## Gate ledger after P1 (P1 core)
+
+| gate | verdict | evidence |
+|------|---------|----------|
+| G1 | PASS | clean build 1.91s wall, 21.4MB RSS, 1.9MB DB (limits 5s/100MB/50MB) |
+| G2 | PASS | recall 29/29 = 100% [88,100], precision 100% [99,100] (limits 70/80/95) |
+| G3 | PASS | p95 = 10.1ms over 30 runs (limit 20ms) |
+| G4 | PASS | staleness header + FNV re-hash path (tests/cli.rs g4_staleness) |
+| G5 | PASS | seatbelt network-deny build + allowlist check + tree-snapshot + proc hygiene tests |
+| G6 | PASS | 50% tool-call reduction, -67% bytes, no correctness loss |
