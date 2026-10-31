@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
-use crate::parse::ParsedFile;
+use crate::parse::{Lang, ParsedFile};
 
 pub const SCHEMA_VERSION: i32 = 1;
 
@@ -166,7 +166,11 @@ struct ImportEdgeCandidate {
 pub struct FileExtraction {
     pub file_idx: usize,
     pub module: String,
+    /// Dot-joined DIRECTORY of the file (no file stem) — relative TS imports
+    /// resolve against this, because stems may contain dots (x.test.ts).
+    pub dir: String,
     pub is_package: bool,
+    pub lang: Lang,
     pub symbols: Vec<NewSymbol>,
     /// contains edges (indices local to this file's symbols; offset on merge).
     pub edges: Vec<NewEdge>,
@@ -183,20 +187,30 @@ pub struct FileExtraction {
 }
 
 /// Derive the dot-joined module path from the repo-relative file path.
-/// The package marker (`__init__.py`) collapses into the package path.
+/// Package markers (`__init__.py`, `index.ts(x)`, `index.js(x)`) collapse
+/// into the package path.
 pub fn module_path_for(rel: &str) -> (String, bool) {
-    if rel == "__init__.py" || rel.ends_with("/__init__.py") {
-        let pkg = rel
-            .strip_suffix("__init__.py")
+    let file_name = rel.rsplit('/').next().unwrap_or(rel);
+    let is_py_pkg = file_name == "__init__.py";
+    let is_ts_pkg = file_name == "index.ts" || file_name == "index.tsx"
+        || file_name == "index.js" || file_name == "index.jsx";
+    if is_py_pkg || is_ts_pkg {
+        let dir = rel
+            .strip_suffix(file_name)
             .unwrap_or(rel)
             .trim_end_matches('/')
             .replace('/', ".");
-        if pkg.is_empty() {
+        if dir.is_empty() {
             return ("root".to_string(), true);
         }
-        return (pkg, true);
+        return (dir, true);
     }
-    let stem = rel.strip_suffix(".py").unwrap_or(rel);
+    let stem = rel
+        .trim_end_matches(".tsx")
+        .trim_end_matches(".ts")
+        .trim_end_matches(".jsx")
+        .trim_end_matches(".js")
+        .trim_end_matches(".py");
     if stem.is_empty() {
         return ("root".to_string(), false);
     }
@@ -206,10 +220,16 @@ pub fn module_path_for(rel: &str) -> (String, bool) {
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {
     let (module, is_package) = module_path_for(rel);
     let mod_name = module.rsplit('.').next().unwrap_or(&module).to_string();
+    let dir = match rel.rfind('/') {
+        Some(i) => rel[..i].replace('/', "."),
+        None => String::new(),
+    };
     let mut fx = FileExtraction {
         file_idx,
         module: module.clone(),
+        dir,
         is_package,
+        lang: Lang::from_rel(rel),
         symbols: vec![NewSymbol {
             kind: "module",
             name: mod_name,
@@ -262,6 +282,14 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             chain.push(text(attr, src));
             Some(chain)
         }
+        // TypeScript member_expression: a.b.c (field `property`, not `attribute`).
+        "member_expression" => {
+            let obj = node.child_by_field_name("object")?;
+            let attr = node.child_by_field_name("property")?;
+            let mut chain = dotted_chain(obj, src)?;
+            chain.push(text(attr, src));
+            Some(chain)
+        }
         "type" => {
             let mut cursor = node.walk();
             let inner = node.named_children(&mut cursor).next();
@@ -280,6 +308,27 @@ fn walk_children(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut 
 
 fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
     match node.kind() {
+        // ---- TypeScript/TSX/JSX definitions (P2) ----
+        "function_declaration" | "generator_function_declaration" => {
+            define_function(node, src, fx, ctx, "function");
+        }
+        "class_declaration" | "abstract_class_declaration" => {
+            define_class_ts(node, src, fx, ctx);
+        }
+        "method_definition" => {
+            define_method_ts(node, src, fx, ctx);
+        }
+        "variable_declarator" => {
+            record_ts_arrow_function(node, src, fx, ctx);
+            walk_children(node, src, fx, ctx);
+        }
+        "new_expression" => {
+            record_call(node, src, fx, ctx);
+            walk_children(node, src, fx, ctx);
+        }
+        "import_statement" if fx.lang != Lang::Python => {
+            record_import_ts(node, src, fx);
+        }
         "decorated_definition" => {
             let mut cursor = node.walk();
             let mut decorators = Vec::new();
@@ -394,7 +443,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             record_assignment(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
         }
-        "call" => {
+        "call" | "call_expression" => {
             record_call(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
         }
@@ -419,6 +468,19 @@ fn parent_symbol_idx(fx: &FileExtraction, ctx: &WalkCtx) -> Option<usize> {
 fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
     let mut cursor = params.walk();
     for p in params.children(&mut cursor) {
+        // TS: required_parameter / optional_parameter carry pattern + type.
+        if matches!(p.kind(), "required_parameter" | "optional_parameter") {
+            let Some(ty) = p.child_by_field_name("type") else { continue };
+            let Some(ident) = p.child_by_field_name("pattern") else { continue };
+            if let Some(chain) = dotted_chain(ty, src) {
+                fx.params.push(ParamType {
+                    var: text(ident, src),
+                    ann_dotted: chain,
+                    scope_func: scope.to_string(),
+                });
+            }
+            continue;
+        }
         if matches!(p.kind(), "typed_parameter" | "typed_default_parameter") {
             // typed_parameter has NO 'name' field (positional identifier);
             // typed_default_parameter does. The annotation lives in the
@@ -451,10 +513,12 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
     let Some(left) = node.child_by_field_name("left") else { return };
     let Some(right) = node.child_by_field_name("right") else { return };
     let direct_call_chain = |call: Node<'_>| -> Option<Vec<String>> {
-        let f = call.child_by_field_name("function")?;
+        let f = call
+            .child_by_field_name("function")
+            .or_else(|| call.child_by_field_name("constructor"))?;
         dotted_chain(f, src)
     };
-    let target: Option<Vec<String>> = if right.kind() == "call" {
+    let target: Option<Vec<String>> = if matches!(right.kind(), "call" | "call_expression" | "new_expression") {
         direct_call_chain(right)
     } else if matches!(right.kind(), "boolean_operator" | "bool_op") {
         // `x = a or B(...)`: the last top-level operand that is a direct call.
@@ -463,7 +527,7 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
         operands
             .iter()
             .rev()
-            .find(|o| o.kind() == "call")
+            .find(|o| matches!(o.kind(), "call" | "call_expression"))
             .and_then(|o| direct_call_chain(*o))
     } else {
         None
@@ -496,7 +560,12 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
 }
 
 fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
-    let Some(f) = node.child_by_field_name("function") else { return };
+    // call_expression uses field "function"; TS new_expression uses "constructor".
+    let f = node
+        .child_by_field_name("function")
+        .or_else(|| node.child_by_field_name("constructor"));
+    let Some(f) = f else { return };
+    let _ = fx.lang;
     let callee = match dotted_chain(f, src) {
         Some(chain) if chain.len() == 1 => Callee::Name(chain.into_iter().next().unwrap()),
         Some(chain) => Callee::Attr(chain),
@@ -615,6 +684,294 @@ fn resolve_from_module(
         parts.join(".")
     } else {
         format!("{}.{}", parts.join("."), rest)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TypeScript/TSX/JSX definitions (P2)
+// ---------------------------------------------------------------------------
+
+fn define_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx, kind: &'static str) {
+    let Some(name_node) = node.child_by_field_name("name") else { return };
+    let name = text(name_node, src);
+    let parent_qn = ctx
+        .class_stack
+        .last()
+        .or_else(|| ctx.func_stack.last())
+        .cloned()
+        .unwrap_or_else(|| fx.module.clone());
+    let qualname = format!("{parent_qn}.{name}");
+    let start = node.start_position().row + 1;
+    let sym_idx = fx.symbols.len();
+    fx.symbols.push(NewSymbol {
+        kind,
+        name: name.clone(),
+        qualname: qualname.clone(),
+        file_idx: fx.file_idx,
+        line_start: start,
+        line_end: node.end_position().row + 1,
+    });
+    if let Some(params) = node.child_by_field_name("parameters") {
+        collect_param_types(params, src, fx, &qualname);
+    }
+    if let Some(pidx) = parent_symbol_idx(fx, ctx) {
+        fx.edges.push(NewEdge {
+            src_idx: pidx,
+            dst_idx: Some(sym_idx),
+            dst_name: qualname.clone(),
+            kind: "contains",
+            confidence: "EXTRACTED",
+            site_line: start,
+        });
+    }
+    ctx.func_stack.push(qualname);
+    if let Some(body) = node.child_by_field_name("body") {
+        walk_children(body, src, fx, ctx);
+    }
+    ctx.func_stack.pop();
+}
+
+fn define_class_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    let Some(name_node) = node.child_by_field_name("name") else { return };
+    let name = text(name_node, src);
+    let parent_qn = ctx
+        .class_stack
+        .last()
+        .or_else(|| ctx.func_stack.last())
+        .cloned()
+        .unwrap_or_else(|| fx.module.clone());
+    let qualname = format!("{parent_qn}.{name}");
+    let start = node.start_position().row + 1;
+    let sym_idx = fx.symbols.len();
+    fx.symbols.push(NewSymbol {
+        kind: "class",
+        name: name.clone(),
+        qualname: qualname.clone(),
+        file_idx: fx.file_idx,
+        line_start: start,
+        line_end: node.end_position().row + 1,
+    });
+    // Heritage: extends X / implements Y — inherit edges from extends targets.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "class_heritage" {
+            collect_heritage(child, src, fx, sym_idx);
+        }
+    }
+    if let Some(pidx) = parent_symbol_idx(fx, ctx) {
+        fx.edges.push(NewEdge {
+            src_idx: pidx,
+            dst_idx: Some(sym_idx),
+            dst_name: qualname.clone(),
+            kind: "contains",
+            confidence: "EXTRACTED",
+            site_line: start,
+        });
+    }
+    ctx.class_stack.push(qualname);
+    if let Some(body) = node.child_by_field_name("body") {
+        walk_children(body, src, fx, ctx);
+    }
+    ctx.class_stack.pop();
+}
+
+fn collect_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_idx: usize) {
+    // Collect identifier chains for extends/implements targets.
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "type_identifier" | "identifier" => {
+                if let Some(chain) = dotted_chain(n, src) {
+                    fx.inherits.push((class_idx, chain));
+                }
+            }
+            "nested_type_identifier" | "attribute" | "member_expression" => {
+                if let Some(chain) = dotted_chain(n, src) {
+                    fx.inherits.push((class_idx, chain));
+                }
+            }
+            _ => {
+                let mut c = n.walk();
+                for child in n.children(&mut c) {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+}
+
+fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    // method_definition: name field is a property_identifier inside a class body.
+    let Some(name_node) = node.child_by_field_name("name") else { return };
+    let Some(class_qn) = ctx.class_stack.last().cloned() else { return };
+    let name = text(name_node, src);
+    let qualname = format!("{class_qn}.{name}");
+    let start = node.start_position().row + 1;
+    let sym_idx = fx.symbols.len();
+    fx.symbols.push(NewSymbol {
+        kind: "method",
+        name: name.clone(),
+        qualname: qualname.clone(),
+        file_idx: fx.file_idx,
+        line_start: start,
+        line_end: node.end_position().row + 1,
+    });
+    if let Some(params) = node.child_by_field_name("parameters") {
+        collect_param_types(params, src, fx, &qualname);
+    }
+    if let Some(pidx) = parent_symbol_idx(fx, ctx) {
+        fx.edges.push(NewEdge {
+            src_idx: pidx,
+            dst_idx: Some(sym_idx),
+            dst_name: qualname.clone(),
+            kind: "contains",
+            confidence: "EXTRACTED",
+            site_line: start,
+        });
+    }
+    ctx.func_stack.push(qualname);
+    if let Some(body) = node.child_by_field_name("body") {
+        walk_children(body, src, fx, ctx);
+    }
+    ctx.func_stack.pop();
+}
+
+/// Module-level `const X = () => {...}` / `= function() {...}` -> function
+/// symbol (React components and hooks live here).
+fn record_ts_arrow_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    if !ctx.class_stack.is_empty() || !ctx.func_stack.is_empty() {
+        return; // nested functions are not indexed symbols
+    }
+    let Some(name_node) = node.child_by_field_name("name") else { return };
+    let Some(value) = node.child_by_field_name("value") else { return };
+    if !matches!(value.kind(), "arrow_function" | "function" | "function_expression") {
+        return;
+    }
+    let name = text(name_node, src);
+    let qualname = format!("{}.{}", fx.module, name);
+    let start = node.start_position().row + 1;
+    let sym_idx = fx.symbols.len();
+    fx.symbols.push(NewSymbol {
+        kind: "function",
+        name: name.clone(),
+        qualname: qualname.clone(),
+        file_idx: fx.file_idx,
+        line_start: start,
+        line_end: node.end_position().row + 1,
+    });
+    // Module symbol contains it.
+    fx.edges.push(NewEdge {
+        src_idx: 0,
+        dst_idx: Some(sym_idx),
+        dst_name: qualname.clone(),
+        kind: "contains",
+        confidence: "EXTRACTED",
+        site_line: start,
+    });
+    ctx.func_stack.push(qualname);
+    walk_children(value, src, fx, ctx);
+    ctx.func_stack.pop();
+}
+
+/// TS/TSX/JSX static ESM imports. Relative sources resolve by module path;
+/// bare/aliased sources bind as EXTERNAL (calls into them drop with the
+/// builtin counter, not the unresolved counter).
+fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
+    let line = node.start_position().row + 1;
+    let Some(source_node) = node.child_by_field_name("source") else { return };
+    let raw = text(source_node, src);
+    let source = raw.trim_matches(|c| c == '\'' || c == '"');
+    let module = resolve_ts_module(source, &fx.dir);
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        let mut c2 = child.walk();
+        for part in child.children(&mut c2) {
+            match part.kind() {
+                "identifier" => {
+                    // default import: import X from "..."
+                    let name = text(part, src);
+                    fx.aliases.push((
+                        name.clone(),
+                        ImportTarget::Symbol { module: module.clone(), name: "default".to_string() },
+                    ));
+                    fx.import_edges.push(ImportEdgeCandidate {
+                        line,
+                        target: ImportTarget::Symbol { module: module.clone(), name },
+                    });
+                }
+                "namespace_import" => {
+                    // * as ns — bind ns to the module itself
+                    let mut c3 = part.walk();
+                    for p2 in part.children(&mut c3) {
+                        if p2.kind() == "identifier" {
+                            fx.aliases
+                                .push((text(p2, src), ImportTarget::ModuleRoot { path: module.clone() }));
+                        }
+                    }
+                }
+                "named_imports" => {
+                    let mut c3 = part.walk();
+                    for spec in part.children(&mut c3) {
+                        if spec.kind() != "import_specifier" {
+                            continue;
+                        }
+                        let Some(name_node) = spec.child_by_field_name("name") else { continue };
+                        let name = text(name_node, src);
+                        let bound = spec
+                            .child_by_field_name("alias")
+                            .map(|a| text(a, src))
+                            .unwrap_or_else(|| name.clone());
+                        fx.aliases.push((
+                            bound,
+                            ImportTarget::Symbol { module: module.clone(), name: name.clone() },
+                        ));
+                        fx.import_edges.push(ImportEdgeCandidate {
+                            line,
+                            target: ImportTarget::Symbol { module: module.clone(), name },
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Resolve a TS import source to a module path, relative to the FILE'S
+/// DIRECTORY (stems may contain dots, so the directory — not the module
+/// string — is the only trustworthy base). Bare sources map to dotted
+/// external names; the resolver treats non-indexed modules as external.
+fn resolve_ts_module(source: &str, dir: &str) -> String {
+    let stripped = source
+        .trim_end_matches(".tsx")
+        .trim_end_matches(".ts")
+        .trim_end_matches(".jsx")
+        .trim_end_matches(".js");
+    if stripped.starts_with("./") || stripped.starts_with("../") {
+        let mut parts: Vec<&str> = if dir.is_empty() {
+            Vec::new()
+        } else {
+            dir.split('.').collect()
+        };
+        let mut segs: Vec<&str> = stripped.split('/').collect();
+        while segs.first() == Some(&"..") {
+            segs.remove(0);
+            parts.pop();
+        }
+        if segs.first() == Some(&".") {
+            segs.remove(0);
+        }
+        for seg in segs {
+            if !seg.is_empty() {
+                parts.push(seg);
+            }
+        }
+        parts.join(".")
+    } else {
+        stripped.replace('/', ".")
     }
 }
 
@@ -915,14 +1272,14 @@ fn redirect_ctor(t: &Tables, outcome: Outcome) -> Outcome {
         return Outcome::Extracted(idx);
     }
     let class_qn = t.symbols[idx].qualname.clone();
-    match t
-        .class_methods
-        .get(&class_qn)
-        .and_then(|m| m.get("__init__"))
-    {
-        Some(inits) if inits.len() == 1 => Outcome::Extracted(inits[0]),
-        _ => Outcome::Extracted(idx), // no (or ambiguous) __init__: keep the class
+    for ctor in ["__init__", "constructor"] {
+        match t.class_methods.get(&class_qn).and_then(|m| m.get(ctor)) {
+            Some(inits) if inits.len() == 1 => return Outcome::Extracted(inits[0]),
+            Some(_) => return Outcome::Extracted(idx), // ambiguous ctor: keep class
+            None => continue,
+        }
     }
+    Outcome::Extracted(idx)
 }
 
 fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
@@ -942,6 +1299,11 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                     let mut seen: HashSet<(String, String)> = HashSet::new();
                     if let Some(out) = follow_binding(t, module, n, 0, &mut seen, name) {
                         return out;
+                    }
+                    // Binding to a module that is not indexed at all = an
+                    // external library (react, pydantic, os.path, ...): drop.
+                    if !t.module_paths.contains(module) {
+                        return Outcome::Dropped;
                     }
                 }
                 Some(ImportTarget::ModuleRoot { .. }) => {
@@ -1321,5 +1683,8 @@ mod alias_repro {
         assert_eq!(fx.calls.len(), 1, "calls: {}", fx.calls.len());
     }
 }
+
+
+
 
 

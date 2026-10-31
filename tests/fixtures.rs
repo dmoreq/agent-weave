@@ -148,3 +148,61 @@ fn or_fallback_construction_types_receiver() {
         "or-idiom receiver typing -> B.m: {e:?}"
     );
 }
+
+#[test]
+fn ts_class_method_and_this_call() {
+    let src = "export class Ledger {\n  balance = 0\n  add(n: number): number {\n    return this.normalize(n)\n  }\n  private normalize(n: number): number {\n    return Math.abs(n)\n  }\n}\n";
+    let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
+    let fx = kg::extract::extract_file(0, "apps/core/ledger.ts", src.as_bytes(), &parsed);
+    let names: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
+    assert!(names.contains(&"apps.core.ledger.Ledger"), "{names:?}");
+    assert!(names.contains(&"apps.core.ledger.Ledger.add"), "{names:?}");
+    assert!(names.contains(&"apps.core.ledger.Ledger.normalize"), "{names:?}");
+}
+
+#[test]
+fn ts_new_expression_resolves_to_constructor() {
+    let src1 = "export class Widget {}\n";
+    let src2 = "import { Widget } from './widget'\n\nexport function make(): Widget {\n  const w = new Widget()\n  return w\n}\n";
+    let p1 = kg::parse::parse_source(src1.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
+    let p2 = kg::parse::parse_source(src2.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
+    let fx1 = kg::extract::extract_file(0, "apps/core/widget.ts", src1.as_bytes(), &p1);
+    let fx2 = kg::extract::extract_file(1, "apps/core/factory.ts", src2.as_bytes(), &p2);
+    let resolution = kg::extract::resolve(vec![fx1, fx2], Default::default());
+    let hit = resolution.edges.iter().any(|e| {
+        e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Widget")
+    });
+    assert!(hit, "new Widget() must resolve: {:?}", resolution.edges);
+}
+
+#[test]
+fn ts_relative_import_resolves_by_path() {
+    let src1 = "export function format(n: number): string {\n  return String(n)\n}\n";
+    let src2 = "import { format } from '../lib/format'\n\nexport function run(n: number): string {\n  return format(n)\n}\n";
+    let p1 = kg::parse::parse_source(src1.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
+    let p2 = kg::parse::parse_source(src2.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
+    let fx1 = kg::extract::extract_file(0, "apps/web/src/lib/format.ts", src1.as_bytes(), &p1);
+    let fx2 = kg::extract::extract_file(1, "apps/web/src/features/run.ts", src2.as_bytes(), &p2);
+    let resolution = kg::extract::resolve(vec![fx1, fx2], Default::default());
+    let hit = resolution.edges.iter().any(|e| {
+        e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("format")
+    });
+    assert!(hit, "../lib/format import must resolve: {:?}", resolution.edges);
+}
+
+#[test]
+fn ts_external_import_calls_drop() {
+    let src = "import { useState } from 'react'\n\nexport function useCount() {\n  const [n] = useState(0)\n  return n\n}\n";
+    let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
+    let fx = kg::extract::extract_file(0, "apps/web/src/useCount.ts", src.as_bytes(), &parsed);
+    let resolution = kg::extract::resolve(vec![fx], Default::default());
+    assert!(
+        !resolution.edges.iter().any(|e| e.kind == "calls" && e.dst_name.contains("useState")),
+        "no useState edge"
+    );
+    assert!(
+        resolution.stats.builtin_dropped >= 1,
+        "external call counted as dropped: {:?}",
+        resolution.stats
+    );
+}

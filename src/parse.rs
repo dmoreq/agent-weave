@@ -2,9 +2,45 @@
 //! parse_status: ok (0 error nodes) | partial (some error nodes) | failed
 //! (reserved for catastrophic parse failures; tree-sitter always yields a tree).
 
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::{Language, Node, Parser, Tree};
 
 use crate::error::{KgError, Result};
+
+/// Source language, derived from the file extension (P2: TS/TSX/JSX added).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lang {
+    Python,
+    TypeScript,
+    Tsx,
+    JavaScript,
+}
+
+impl Lang {
+    pub fn from_rel(rel: &str) -> Lang {
+        let name = rel.rsplit('/').next().unwrap_or(rel);
+        if name.ends_with(".tsx") {
+            Lang::Tsx
+        } else if name.ends_with(".ts") {
+            Lang::TypeScript
+        } else if name.ends_with(".jsx") {
+            Lang::JavaScript
+        } else if name.ends_with(".py") {
+            Lang::Python
+        } else {
+            Lang::JavaScript
+        }
+    }
+
+    pub fn grammar(self) -> Result<Language> {
+        let lang: Language = match self {
+            Lang::Python => tree_sitter_python::LANGUAGE.into(),
+            Lang::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Lang::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+            Lang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        };
+        Ok(lang)
+    }
+}
 
 pub struct ParsedFile {
     pub tree: Tree,
@@ -12,10 +48,10 @@ pub struct ParsedFile {
     pub status: &'static str,
 }
 
-pub fn parse_python(src: &[u8]) -> Result<ParsedFile> {
+pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
     let mut parser = Parser::new();
     parser
-        .set_language(&tree_sitter_python::LANGUAGE.into())
+        .set_language(&lang.grammar()?)
         .map_err(|e| KgError::Internal(format!("grammar load failed: {e}")))?;
     let tree = parser
         .parse(src, None)
@@ -23,6 +59,11 @@ pub fn parse_python(src: &[u8]) -> Result<ParsedFile> {
     let error_nodes = count_error_nodes(tree.root_node());
     let status = if error_nodes == 0 { "ok" } else { "partial" };
     Ok(ParsedFile { tree, error_nodes, status })
+}
+
+/// Backwards-compatible alias for the Python path.
+pub fn parse_python(src: &[u8]) -> Result<ParsedFile> {
+    parse_source(src, Lang::Python)
 }
 
 fn count_error_nodes(root: Node<'_>) -> usize {

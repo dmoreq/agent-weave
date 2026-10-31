@@ -85,3 +85,16 @@ during G6; the spec's response-contract section gains this flag at next edit.
 | G8 P1.5 extensions on architecture questions | PASS -67% calls — attribution corrected per R1.5 | The reduction is carried by `kg callees --depth` (Amendment 2), NOT `kg report`: baseline cold T4+T5 = 6 calls vs kg 2 calls (kgarm transcripts). `kg report` was never invoked in an A/B transcript; its differential utility on architecture questions is not demonstrated (callees --depth answers them in 1 call already). report is retained as a convenience summary; the G8 claim is scoped to the extension set, not to report alone |
 
 P1.5 surface: `kg stats`, `kg hotspots [--limit N]`, `kg report` (4 sections).
+
+## P2 gate results (2026-10-31, TS/TSX/JSX)
+
+| gate | verdict | evidence |
+|------|---------|----------|
+| G2 rerun on finguard (20 TS/TSX GT sites) | PASS | recall 20/20 = 100% [84,100], precision 57/57 = 100% [94,100] — command: `python3 tests/scripts/precision_recall.py <finguard> <kg> docs/baselines/ground-truth-finguard.md` |
+| Python regression | PASS | vihap recall 29/29, precision 493/495 on the rebuilt index; 54 tests green |
+
+P2 notes:
+- Grammars added in one commit (tree-sitter-typescript 0.23 + tree-sitter-javascript 0.25 + runtime 0.25); golden Python fixtures replay unchanged.
+- Relative TS imports resolve against the FILE'S DIRECTORY (stems may contain dots: command-bus.test.ts, runner.node.ts) — module-string derivation was wrong and was replaced (found by the finguard G2 run).
+- External imports (react, @finguard/*-alias) bind but resolve to unindexed modules: calls into them drop with the builtin counter, not unresolved.
+- unresolved=3403 in finguard is dominated by destructured hook results and untyped receivers (spec non-goal); the import-call backbone resolves.

@@ -104,7 +104,7 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
 
     // Walk.
     let t0 = Instant::now();
-    let stats = walk::walk(&root, &["py"])?;
+    let stats = walk::walk(&root, walk::SOURCE_EXTS)?;
     let walk_secs = t0.elapsed().as_secs_f64();
 
     // Fast path: files unchanged since a compatible previous index.
@@ -136,7 +136,7 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
     let mut fresh_error_files = 0usize;
     for (idx, f) in fresh.iter().enumerate() {
         let bytes = std::fs::read(&f.abs)?;
-        let parsed = parse::parse_python(&bytes)?;
+        let parsed = parse::parse_source(&bytes, parse::Lang::from_rel(&f.rel))?;
         if parsed.error_nodes > 0 {
             fresh_error_files += 1;
         }

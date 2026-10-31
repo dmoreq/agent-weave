@@ -11,6 +11,9 @@ use crate::error::{KgError, Result};
 
 pub const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
+/// P2 extension allowlist: Python + TypeScript/TSX + JavaScript/JSX.
+pub const SOURCE_EXTS: &[&str] = &["py", "ts", "tsx", "js", "jsx"];
+
 pub struct WalkedFile {
     /// Absolute path on disk (for reading and stat'ing).
     pub abs: PathBuf,

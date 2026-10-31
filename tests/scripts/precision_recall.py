@@ -120,7 +120,7 @@ def main():
         if pointers is None:
             continue
         short = callee.rsplit(".", 1)[-1]
-        if short == "__init__":
+        if short in ("__init__", "constructor"):
             short = callee.rsplit(".", 2)[-2]
         for ptr in sorted(pointers):
             total_checked += 1
