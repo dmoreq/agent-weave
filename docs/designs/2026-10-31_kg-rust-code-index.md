@@ -29,7 +29,7 @@ Agent sessions navigate code by grep/read loops. On large repos this costs many 
 | Gate | Goal | What | Pass command | Kill action |
 |------|------|------|--------------|-------------|
 | G1 | G-B | build performance on vihap | `hyperfine 'kg build'` (prereq: `brew install hyperfine`; fallback `tests/scripts/timing.sh` using `/usr/bin/time -l`) | retune or stop |
-| G2 | G-A | precision + recall on 30 ground-truth sites | `tests/scripts/precision_recall.sh` | retune resolution algorithm or stop |
+| G2 | G-A | precision + recall on 30 ground-truth sites | `python3 tests/scripts/precision_recall.py <repo> <kg-binary> docs/baselines/ground-truth{,-finguard,-kg-self}.md` | retune resolution algorithm or stop |
 | G3 | G-B | query latency p95, hot + cold page cache | `hyperfine --warmup 3 'kg callers <hot_fn>'` x 30 runs | retune or stop |
 | G4 | — | staleness detection + false-stale rate | edit-after-build integration test | fix |
 | G5 | G-D/G-E | safety invariants 1-3 (CI) | seatbelt + seccomp + proc-table + tree-snapshot tests | fix before any ship |
