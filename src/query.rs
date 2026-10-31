@@ -59,13 +59,13 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>
     let mut cands = Vec::new();
     for row in rows {
         let (id, qualname, sname, path, line) = row?;
-        // Qualname match is authoritative; a bare-name match that IS the same
-        // symbol is deduped by id.
+        // Dedupe by id: a symbol whose bare name equals its qualname matches
+        // both WHERE branches and must not create a false ambiguity.
         if !ids.contains(&id) {
             ids.push(id);
+            cands.push((path, line, qualname));
         }
         let _ = sname;
-        cands.push((path, line, qualname));
     }
     Ok((ids, cands))
 }

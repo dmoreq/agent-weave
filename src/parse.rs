@@ -65,11 +65,6 @@ pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
     Ok(ParsedFile { tree, error_nodes, status })
 }
 
-/// Backwards-compatible alias for the Python path.
-pub fn parse_python(src: &[u8]) -> Result<ParsedFile> {
-    parse_source(src, Lang::Python)
-}
-
 fn count_error_nodes(root: Node<'_>) -> usize {
     fn rec(node: Node<'_>) -> usize {
         let mut n = usize::from(node.is_error() || node.is_missing());
@@ -88,7 +83,7 @@ mod tests {
 
     #[test]
     fn clean_source_is_ok() {
-        let p = parse_python(b"def f():\n    return 1\n").unwrap();
+        let p = parse_source(b"def f():\n    return 1\n", Lang::Python).unwrap();
         assert_eq!(p.status, "ok");
         assert_eq!(p.error_nodes, 0);
     }
@@ -96,7 +91,7 @@ mod tests {
     #[test]
     fn broken_source_counts_error_nodes() {
         let src = b"def f(:\n    pass\n";
-        let p = parse_python(src).unwrap();
+        let p = parse_source(src, Lang::Python).unwrap();
         assert_eq!(p.status, "partial");
         assert!(p.error_nodes >= 1);
     }
@@ -104,7 +99,7 @@ mod tests {
     #[test]
     fn line_numbers_are_one_based_on_emission_boundary() {
         // Extraction offsets rows at emission; parse layer only exposes the tree.
-        let p = parse_python(b"a = 1\nb = 2\n").unwrap();
+        let p = parse_source(b"a = 1\nb = 2\n", Lang::Python).unwrap();
         assert_eq!(p.tree.root_node().child(0).unwrap().start_position().row, 0);
     }
 }

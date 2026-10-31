@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -89,7 +89,14 @@ pub struct Resolution {
     /// previous index (already stored; not re-inserted), None for fresh rows.
     pub existing_ids: Vec<Option<i64>>,
     pub edges: Vec<NewEdge>,
+    /// Kept for the lib surface (integration tests assert builtin_dropped);
+    /// the binary's meta total is the per-file SQL sum instead.
+    #[allow(dead_code)]
     pub stats: ExtractStats,
+    /// Parallel to the input `files` (fresh files only): unresolved-callee count
+    /// per file, so the meta total is an authoritative SQL sum and stays stable
+    /// across incremental builds.
+    pub unresolved_per_file: Vec<usize>,
 }
 
 /// Symbols loaded from the previous index's fast-path files. They join the
@@ -1297,6 +1304,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
     }
 
     let mut stats = ExtractStats::default();
+    let mut unresolved_per_file = vec![0usize; t.file_ctx.len()];
 
     // Import edges.
     for fctx in &t.file_ctx {
@@ -1370,12 +1378,21 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                     site_line: site.line,
                 }),
                 Outcome::Dropped => stats.builtin_dropped += 1,
-                Outcome::Unresolved => stats.unresolved_callees += 1,
+                Outcome::Unresolved => {
+                    stats.unresolved_callees += 1;
+                    unresolved_per_file[fi] += 1;
+                }
             }
         }
     }
 
-    Resolution { symbols: t.symbols, existing_ids: t.existing_ids, edges: t.edges, stats }
+    Resolution {
+        symbols: t.symbols,
+        existing_ids: t.existing_ids,
+        edges: t.edges,
+        stats,
+        unresolved_per_file,
+    }
 }
 
 fn resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
@@ -1594,7 +1611,10 @@ fn mro_outcome(t: &Tables, class_qn: &str, method: &str) -> Outcome {
         match found.len() {
             1 => return Outcome::Extracted(found[0]),
             0 if next.is_empty() => return Outcome::Unresolved,
-            _ => level = next,
+            0 => level = next,
+            // Two or more same-level definitions (e.g. diamond): AMBIGUOUS, as
+            // documented — never silently drop the call site.
+            _ => return Outcome::Ambiguous(format!("{class_qn}.{method}")),
         }
     }
     Outcome::Unresolved
@@ -1775,10 +1795,11 @@ fn chain_from_module(t: &Tables, module: String, rest: &[String]) -> Outcome {
 #[cfg(test)]
 mod gt_repro_tests {
     use super::*;
-    use crate::parse::parse_python;
+    use crate::parse::Lang;
+    use crate::parse::parse_source;
 
     fn extract_src(src: &str) -> FileExtraction {
-        let parsed = parse_python(src.as_bytes()).unwrap();
+        let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
         extract_file(0, "m.py", src.as_bytes(), &parsed)
     }
 
@@ -1813,12 +1834,12 @@ mod gt_repro_tests {
 #[cfg(test)]
 mod alias_repro {
     use super::*;
-    use crate::parse::parse_python;
+    use crate::parse::{Lang, parse_source};
 
     #[test]
     fn aliased_from_import_binds_and_emits_edge_candidate() {
         let src = "from ..knowledge.marshal_io import default_artifacts_dir as knowledge_artifacts_dir\n\ndef g():\n    return knowledge_artifacts_dir()\n";
-        let parsed = parse_python(src.as_bytes()).unwrap();
+        let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
         let fx = extract_file(0, "vihap/validators/gso_loader.py", src.as_bytes(), &parsed);
         assert!(
             fx.aliases.iter().any(|(a, _)| a == "knowledge_artifacts_dir"),

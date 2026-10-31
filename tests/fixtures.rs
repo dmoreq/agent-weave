@@ -5,11 +5,11 @@
 
 use kg::extract::extract_file;
 use kg::extract::resolve;
-use kg::parse::parse_python;
+use kg::parse::{Lang, parse_source};
 
 fn edges_for(src: &str) -> Vec<(String, String, String)> {
     // (kind, confidence, dst_name) of all calls edges, single-file project.
-    let parsed = parse_python(src.as_bytes()).unwrap();
+    let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
     let fx = extract_file(0, "pkg/mod.py", src.as_bytes(), &parsed);
     let resolution = resolve(vec![fx], Default::default());
     resolution
@@ -31,8 +31,8 @@ fn star_import_defers_to_star_module() {
     // module; the bare call defers to the star module's top-level names.
     let src1 = "def helper():\n    return 1\n";
     let src2 = "from .utils import *\n\ndef go():\n    return helper()\n";
-    let parsed1 = parse_python(src1.as_bytes()).unwrap();
-    let parsed2 = parse_python(src2.as_bytes()).unwrap();
+    let parsed1 = parse_source(src1.as_bytes(), Lang::Python).unwrap();
+    let parsed2 = parse_source(src2.as_bytes(), Lang::Python).unwrap();
     let fx1 = extract_file(0, "pkg/utils.py", src1.as_bytes(), &parsed1);
     let fx2 = extract_file(1, "pkg/mod.py", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
@@ -122,8 +122,8 @@ fn module_qualified_constructor_resolves() {
     // R1: from pkg2 import mod; mod.K() must resolve via the module path.
     let src1 = "class K:\n    def m(self):\n        return 1\n";
     let src2 = "from pkg.pkg2 import mod\n\ndef go():\n    return mod.K()\n";
-    let parsed1 = parse_python(src1.as_bytes()).unwrap();
-    let parsed2 = parse_python(src2.as_bytes()).unwrap();
+    let parsed1 = parse_source(src1.as_bytes(), Lang::Python).unwrap();
+    let parsed2 = parse_source(src2.as_bytes(), Lang::Python).unwrap();
     let fx1 = extract_file(0, "pkg/pkg2/mod.py", src1.as_bytes(), &parsed1);
     let fx2 = extract_file(1, "pkg/other.py", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
@@ -146,6 +146,19 @@ fn or_fallback_construction_types_receiver() {
         e.iter()
             .any(|(k, c, n)| k == "calls" && c == "EXTRACTED" && n.contains("B.m")),
         "or-idiom receiver typing -> B.m: {e:?}"
+    );
+}
+
+#[test]
+fn diamond_mro_multi_match_is_ambiguous() {
+    // Post-R2 review: two same-level MRO matches (diamond) must emit an
+    // AMBIGUOUS calls edge, never silently drop the call site.
+    let src = "class A:\n    def m(self):\n        return 1\n\nclass B(A):\n    def m(self):\n        return 2\n\nclass C(A):\n    def m(self):\n        return 3\n\nclass D(B, C):\n    pass\n\ndef go():\n    d = D()\n    return d.m()\n";
+    let e = edges_for(src);
+    assert!(
+        e.iter()
+            .any(|(k, c, n)| k == "calls" && c == "AMBIGUOUS" && n.contains("D.m")),
+        "diamond multi-match must be AMBIGUOUS: {e:?}"
     );
 }
 

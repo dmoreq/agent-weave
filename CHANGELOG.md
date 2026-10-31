@@ -64,6 +64,29 @@ changes bump the minor while 0.x is unstable.
 - In-repo canonical spec + concepts brief under `docs/designs/` (cross-repo
   references retired); GitHub community health files.
 
+### Fixed — post-R2 review (Amendment 4)
+
+- Fast path: files with any call/import/inherits edge into a changed file are
+  re-extracted (transitive dirty closure). Previously their copied edges died
+  with the old destination ids and `kg callers`/`kg impact` silently lost
+  results after any incremental build.
+- Schema v2 (additive): per-file `files.unresolved` column;
+  `unresolved_callee_count` is now an authoritative SQL total and no longer
+  inflates monotonically on incremental builds.
+- mtime keys use nanosecond precision; same-second, same-size edits no longer
+  defeat the fast path or the staleness check.
+- Build lock: orphan sidecar cleanup happens after the flock is held, so a
+  second concurrent build can no longer delete the in-progress
+  `index.db.new` of the build holding the lock.
+- MRO resolution: multiple same-level matches (diamond) now emit an AMBIGUOUS
+  edge as documented, instead of silently dropping the call site.
+- hotspots: language-aware cyclomatic proxy (Python/TS/JS/Rust) and churn/fix
+  filters over all source extensions, not `.py` only.
+- `callers`/`callees`: no false ambiguous match when a symbol's bare name
+  equals its qualname; `--max-parse-error-rate` is validated to [0, 1].
+- README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
+  commit history).
+
 ### Skipped
 
 - P3 stdio MCP server: trigger condition ("CLI discoverability measurably

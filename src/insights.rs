@@ -52,20 +52,54 @@ struct FileScore {
     score: f64,
 }
 
-fn decision_nodes(root: Node<'_>) -> usize {
-    fn rec(node: Node<'_>) -> usize {
-        let mut n = usize::from(matches!(
-            node.kind(),
-            "if_statement" | "for_statement" | "while_statement" | "boolean_operator"
-                | "except_clause" | "match_statement" | "conditional_expression"
-        ));
+fn decision_kinds(lang: parse::Lang) -> &'static [&'static str] {
+    match lang {
+        parse::Lang::Python => &[
+            "if_statement",
+            "for_statement",
+            "while_statement",
+            "boolean_operator",
+            "except_clause",
+            "match_statement",
+            "conditional_expression",
+        ],
+        parse::Lang::TypeScript | parse::Lang::Tsx | parse::Lang::JavaScript => &[
+            "if_statement",
+            "for_statement",
+            "for_in_statement",
+            "while_statement",
+            "do_statement",
+            "switch_case",
+            "conditional_expression",
+        ],
+        parse::Lang::Rust => &[
+            "if_expression",
+            "if_let_expression",
+            "for_expression",
+            "while_expression",
+            "while_let_expression",
+            "loop_expression",
+            "match_arm",
+        ],
+    }
+}
+
+fn decision_nodes(root: Node<'_>, kinds: &[&str]) -> usize {
+    fn rec(node: Node<'_>, kinds: &[&str]) -> usize {
+        let mut n = usize::from(kinds.contains(&node.kind()));
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            n += rec(child);
+            n += rec(child, kinds);
         }
         n
     }
-    rec(root)
+    rec(root, kinds)
+}
+
+fn is_source_path(line: &str) -> bool {
+    line.rsplit('.')
+        .next()
+        .is_some_and(|ext| crate::walk::SOURCE_EXTS.contains(&ext))
 }
 
 fn git_counts(root: &Path) -> Result<(HashMap<String, f64>, HashMap<String, f64>)> {
@@ -96,11 +130,11 @@ fn git_counts(root: &Path) -> Result<(HashMap<String, f64>, HashMap<String, f64>
         return Ok((HashMap::new(), HashMap::new()));
     };
     let mut churn = HashMap::new();
-    for line in log_all.lines().filter(|l| l.ends_with(".py")) {
+    for line in log_all.lines().filter(|l| is_source_path(l)) {
         *churn.entry(line.to_string()).or_insert(0.0) += 1.0;
     }
     let mut fixes = HashMap::new();
-    for line in log_fix.lines().filter(|l| l.ends_with(".py")) {
+    for line in log_fix.lines().filter(|l| is_source_path(l)) {
         *fixes.entry(line.to_string()).or_insert(0.0) += 1.0;
     }
     Ok((churn, fixes))
@@ -129,8 +163,11 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
         let abs = root.join(rel);
         let Ok(bytes) = std::fs::read(&abs) else { continue };
         let loc = bytes.split(|b: &u8| *b == b'\n').count() as f64;
-        let cyc = match parse::parse_python(&bytes) {
-            Ok(p) => decision_nodes(p.tree.root_node()) as f64,
+        // Language-aware cyclomatic proxy: the Python-only re-parse scored
+        // garbage zeros on TS/JS/Rust files in multi-language repos.
+        let lang = parse::Lang::from_rel(rel);
+        let cyc = match parse::parse_source(&bytes, lang) {
+            Ok(p) => decision_nodes(p.tree.root_node(), decision_kinds(lang)) as f64,
             Err(_) => 0.0,
         };
         scores.push(FileScore {

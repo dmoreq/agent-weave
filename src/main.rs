@@ -98,6 +98,11 @@ fn run(cli: cli::Cli) -> Result<()> {
 }
 
 fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) -> Result<()> {
+    if !max_parse_error_rate.is_finite() || !(0.0..=1.0).contains(&max_parse_error_rate) {
+        return Err(KgError::Usage(format!(
+            "--max-parse-error-rate must be a finite value in [0, 1], got {max_parse_error_rate}"
+        )));
+    }
     let started = Instant::now();
     let root = walk::discover_root(root_arg)?;
     let _lock = db::BuildLock::acquire(&root)?;
@@ -129,6 +134,28 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
         }
     }
 
+    // Dirty closure (fast-path correctness): a carried file with any edge into
+    // a changed file must be re-extracted, or its copied edge dies with the old
+    // destination id (transitive: callers of re-extracted files too).
+    if let Some(c) = &old {
+        let changed: Vec<String> = fresh.iter().map(|f| f.rel.clone()).collect();
+        if !changed.is_empty() {
+            let dirty = db::dirty_closure(c, &changed)?;
+            for rel in dirty {
+                if carried.remove(&rel) {
+                    if let Some(f) = stats.files.iter().find(|f| f.rel == rel) {
+                        fresh.push(walk::WalkedFile {
+                            abs: f.abs.clone(),
+                            rel: f.rel.clone(),
+                            size: f.size,
+                        });
+                    }
+                }
+            }
+            fresh.sort_by(|a, b| a.rel.cmp(&b.rel));
+        }
+    }
+
     // Parse + extract fresh files only (streamed; no corpus accumulation).
     let t0 = Instant::now();
     let mut fresh_rows: Vec<db::FilesRow> = Vec::with_capacity(fresh.len());
@@ -148,6 +175,7 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
             content_hash: hash::fnv1a64(&bytes) as i64,
             parse_status: parsed.status,
             error_nodes: parsed.error_nodes,
+            unresolved: 0,
         });
     }
     let parse_secs = t0.elapsed().as_secs_f64();
@@ -174,8 +202,9 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
         }
     }
 
-    // Resolve over fresh extractions + carried symbols (fast path keeps
-    // fresh->carried resolution intact).
+    // Resolve over fresh extractions + carried symbols. The dirty closure above
+    // re-extracts every carried file whose edges touched a changed file, so
+    // both fresh->carried and carried->fresh resolution stay intact.
     let t0 = Instant::now();
     let carried_index = match &old {
         Some(c) => db::load_carried(c, &carried)?,
@@ -183,6 +212,13 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
     };
     let resolution = extract::resolve(extractions, carried_index);
     let extract_secs = t0.elapsed().as_secs_f64();
+    // Per-file unresolved counts: parallel to the fresh-file order.
+    for (row, unresolved) in fresh_rows
+        .iter_mut()
+        .zip(&resolution.unresolved_per_file)
+    {
+        row.unresolved = *unresolved;
+    }
 
     // DB: fresh schema at index.db.new -> carry forward -> insert -> swap.
     let t0 = Instant::now();
@@ -257,22 +293,10 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
     db::set_meta(&conn, "symbol_count", &sym_total.to_string())?;
     db::set_meta(&conn, "edge_count", &edge_total.to_string())?;
     db::set_meta(&conn, "parse_error_count", &perr_total.to_string())?;
-    // Unresolved total accumulates across fast-path builds: carried files keep
-    // the previous build's unresolved count (their rows were not re-resolved).
-    let carried_unresolved = match &old {
-        Some(c) => c
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'unresolved_callee_count'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(0),
-        None => 0,
-    };
-    let total_unresolved = resolution.stats.unresolved_callees + carried_unresolved;
-    db::set_meta(&conn, "unresolved_callee_count", &total_unresolved.to_string())?;
+    // Unresolved total is the authoritative SQL sum of per-file counts, stable
+    // across fast-path builds (carried rows keep their stored count).
+    let unres_total = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
+    db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     drop(conn);
 
     // Atomic swap: rename(2) onto index.db — readers see old or new, never
@@ -288,7 +312,7 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
         symbols = sym_total,
         edges = edge_total,
         perr = perr_total,
-        unres = total_unresolved,
+        unres = unres_total,
         carried = carried.len(),
         wall = started.elapsed().as_secs_f64(),
         w = walk_secs,

@@ -82,4 +82,4 @@ harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).
 | [SUPPORT.md](SUPPORT.md) | troubleshooting table, scope boundaries |
 | [LICENSE](LICENSE) | private / all rights reserved (OQ1: swap before any publish) |
 | `.github/` | PR template, bug/feature issue templates, ci.yml |
-| `docs/baselines/reviews/` | R0/R1/R1.5/R2 independent review records |
+| `docs/baselines/reviews/` | R0/R1 independent review records (R1.5/R2 fix cycles: see CHANGELOG and commit history) |

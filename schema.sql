@@ -1,4 +1,4 @@
--- kg schema v1 — additive-only evolution policy.
+-- kg schema v2 — additive-only evolution policy (v1 -> v2 adds files.unresolved).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -8,10 +8,14 @@ CREATE TABLE files(
     id INTEGER PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
     size INTEGER NOT NULL,
+    -- Nanosecond-precision stat mtime (fast-path and staleness key).
     mtime INTEGER NOT NULL,
     content_hash INTEGER NOT NULL,
     parse_status TEXT NOT NULL,
-    error_nodes INTEGER NOT NULL
+    error_nodes INTEGER NOT NULL,
+    -- Unresolved-callee count for this file (authoritative per-file split of
+    -- the meta unresolved_callee_count total; stable across incremental builds).
+    unresolved INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE symbols(
     id INTEGER PRIMARY KEY,

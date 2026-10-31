@@ -195,7 +195,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v1 — run kg build"),
+        stderr.contains("schema v99, binary expects v2 — run kg build"),
         "{stderr}"
     );
 }
@@ -264,12 +264,14 @@ fn g4_staleness_header_after_edit() {
     );
     assert!(stdout.contains("result files changed since build — run kg build"));
     // FNV-1a re-hash path: same size, different content -> still stale.
+    // Nanosecond mtimes make the mtime mismatch (and thus the re-hash)
+    // deterministic; both result files now report changed.
     let original = fs::read_to_string(repo.join("utils.py")).unwrap();
     let swapped: String = original.chars().rev().collect();
     fs::write(repo.join("utils.py"), &swapped).unwrap();
     let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("kg: 1 of "), "re-hash staleness: {stdout}");
+    assert!(stdout.starts_with("kg: 2 of "), "re-hash staleness: {stdout}");
 }
 
 #[test]
@@ -289,6 +291,67 @@ fn fast_path_second_build_carries_everything() {
     let (_, out2, _) = build(&repo);
     assert!(out1.contains("carried=0"), "{out1}");
     assert!(out2.contains("carried=3"), "{out2}");
+}
+
+#[test]
+fn fast_path_preserves_callers_of_changed_file() {
+    // Dirty-closure regression: a carried file with edges into a changed file
+    // must be re-extracted, or `callers`/`impact` silently lose results.
+    let repo = fixture("closure");
+    build(&repo);
+    let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("app.py:6"), "baseline caller present: {stdout}");
+    // Change utils.py (fresh); app.py/widget.py are carried.
+    write(&repo, "utils.py", &format!("{UTILS}\n\ndef extra():\n    return 1\n"));
+    build(&repo);
+    let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "caller edges must survive: {stdout}");
+    assert!(stdout.contains("app.py:6"), "app.py caller survived: {stdout}");
+    assert!(stdout.contains("utils.py:5"), "utils.py caller survived: {stdout}");
+    let out = kg(&repo).args(["impact", "utils.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "impact must survive: {stdout}");
+    assert!(stdout.contains("app.py:6"), "impact edge survived: {stdout}");
+}
+
+#[test]
+fn unresolved_count_stable_across_incremental_builds() {
+    let repo = temp_repo("unres");
+    write(&repo, "m.py", "def go():\n    return ghost()\n");
+    let (_, out1, _) = build(&repo);
+    assert!(out1.contains("unresolved=1"), "{out1}");
+    // Re-resolve the same file: the total must not inflate.
+    write(&repo, "m.py", "def go():\n    return ghost()\n# c\n");
+    let (_, out2, _) = build(&repo);
+    assert!(out2.contains("unresolved=1"), "{out2}");
+}
+
+#[test]
+fn callees_depth_two_is_transitive() {
+    let repo = temp_repo("depth");
+    write(
+        &repo,
+        "a.py",
+        "def leaf():\n    return 1\n\ndef mid():\n    return leaf()\n\ndef top():\n    return mid()\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["callees", "top", "--depth", "2"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("a.py:4"), "direct callee mid: {stdout}");
+    assert!(stdout.contains("a.py:1"), "transitive callee leaf: {stdout}");
+}
+
+#[test]
+fn impact_unknown_path_exit1() {
+    let repo = fixture("impact-neg");
+    build(&repo);
+    let out = kg(&repo).args(["impact", "nope.py"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not indexed"), "{stderr}");
 }
 
 #[test]

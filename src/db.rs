@@ -57,11 +57,6 @@ impl BuildLock {
     pub fn acquire(root: &Path) -> Result<BuildLock> {
         let dir = kg_dir(root);
         fs::create_dir_all(&dir)?;
-        // Orphan sidecar cleanup at build start (spec build semantics).
-        let new = db_new_path(root);
-        if new.exists() {
-            let _ = fs::remove_file(&new);
-        }
         let lock_path = dir.join("build.lock");
         let file = fs::OpenOptions::new()
             .create(true)
@@ -83,6 +78,12 @@ impl BuildLock {
                 return Err(KgError::Locked(pid));
             }
             Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+        }
+        // Orphan sidecar cleanup AFTER the lock is held: deleting index.db.new
+        // while another build is writing it would destroy its in-progress work.
+        let new = db_new_path(root);
+        if new.exists() {
+            let _ = fs::remove_file(&new);
         }
         let mut file = file;
         file.seek(SeekFrom::Start(0))?;
@@ -190,16 +191,57 @@ pub fn old_files(old: &Connection) -> Result<HashMap<String, (i64, i64)>> {
 }
 
 /// Count parse-error files among the carried set (fast-path gate denominator).
+/// One chunked IN query instead of one query per file.
 pub fn old_error_count(old: &Connection, rels: &[String]) -> Result<usize> {
     let mut n = 0usize;
-    let mut stmt = old.prepare(
-        "SELECT COUNT(*) FROM files WHERE path = ?1 AND parse_status != 'ok'",
-    )?;
-    for rel in rels {
-        let c: i64 = stmt.query_row([rel], |r| r.get(0))?;
+    for chunk in rels.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT COUNT(*) FROM files WHERE parse_status != 'ok' AND path IN ({placeholders})"
+        );
+        let c: i64 =
+            old.query_row(&sql, rusqlite::params_from_iter(chunk.iter()), |r| r.get(0))?;
         n += c as usize;
     }
     Ok(n)
+}
+
+/// Transitive dirty closure over the previous index (fast-path correctness):
+/// every file with an edge (any kind, resolved destination) into a changed
+/// file must be re-extracted, or its copied edge dies with the old destination
+/// id — and any file calling into a re-extracted file needs the same treatment.
+/// Returns changed + closure; the caller moves the carried members to `fresh`.
+pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<String>> {
+    let mut dirty: HashSet<String> = changed.iter().cloned().collect();
+    loop {
+        let mut frontier: Vec<String> = dirty.iter().cloned().collect();
+        frontier.sort();
+        let mut new_paths: HashSet<String> = HashSet::new();
+        for chunk in frontier.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT DISTINCT f.path
+                 FROM edges e
+                 JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+                 JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+                 WHERE df.path IN ({placeholders})"
+            );
+            let mut stmt = old.prepare(&sql)?;
+            let rows =
+                stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| r.get::<_, String>(0))?;
+            for r in rows {
+                let p = r?;
+                if !dirty.contains(&p) {
+                    new_paths.insert(p);
+                }
+            }
+        }
+        if new_paths.is_empty() {
+            break;
+        }
+        dirty.extend(new_paths);
+    }
+    Ok(dirty)
 }
 
 /// Symbols + inherits pairs of the carried set, for resolution tables.
@@ -270,8 +312,8 @@ pub fn carry_forward_unchanged(
     let mut reused = Vec::new();
     {
         let mut stmt = new.prepare(
-            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes)
-             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes
+            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
+             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
         for (rel, mtime, size) in unchanged {
@@ -308,6 +350,8 @@ pub struct FilesRow {
     pub content_hash: i64,
     pub parse_status: &'static str,
     pub error_nodes: usize,
+    /// Per-file unresolved-callee count (filled after resolve()).
+    pub unresolved: usize,
 }
 
 pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
@@ -316,8 +360,8 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
         conn.execute_batch("BEGIN")?;
         {
             let mut stmt = conn.prepare(
-                "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
             for r in chunk {
                 stmt.execute(rusqlite::params![
@@ -326,7 +370,8 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
                     r.mtime,
                     r.content_hash,
                     r.parse_status,
-                    r.error_nodes as i64
+                    r.error_nodes as i64,
+                    r.unresolved as i64
                 ])?;
                 ids.push(conn.last_insert_rowid());
             }
@@ -430,9 +475,11 @@ pub fn source_rev(root: &Path) -> String {
     rev
 }
 
-/// stat mtime as i64 seconds (staleness short-circuit key).
+/// Nanosecond-precision stat mtime as i64 (fast-path and staleness key).
+/// Nanoseconds close the same-second, same-size edit hole that silently kept
+/// a stale index; both sides of every comparison use this function.
 pub fn stat_mtime(path: &Path) -> Option<i64> {
-    fs::metadata(path).ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs() as i64)
+    fs::metadata(path).ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_nanos() as i64)
 }
 
 /// stat size as i64.
@@ -445,7 +492,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fresh_db_has_schema_v1() {
+    fn fresh_db_has_schema_v2() {
         let dir = std::env::temp_dir().join(format!("kg-db-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
