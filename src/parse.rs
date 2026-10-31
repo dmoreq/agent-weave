@@ -20,9 +20,9 @@ impl Lang {
         let name = rel.rsplit('/').next().unwrap_or(rel);
         if name.ends_with(".tsx") {
             Lang::Tsx
-        } else if name.ends_with(".ts") {
+        } else if name.ends_with(".ts") || name.ends_with(".mts") || name.ends_with(".cts") {
             Lang::TypeScript
-        } else if name.ends_with(".jsx") {
+        } else if name.ends_with(".jsx") || name.ends_with(".mjs") || name.ends_with(".cjs") {
             Lang::JavaScript
         } else if name.ends_with(".py") {
             Lang::Python

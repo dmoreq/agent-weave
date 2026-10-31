@@ -1345,6 +1345,19 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 }
                 return Outcome::Unresolved;
             }
+            // super.m(): skip the own class, resolve against its bases.
+            if chain[0] == "super" && chain.len() == 2 {
+                let Some(class_qn) = &site.scope_class else { return Outcome::Unresolved };
+                if let Some(bases) = t.class_bases.get(class_qn) {
+                    for base in bases {
+                        let out = mro_outcome(t, base, &method);
+                        if !matches!(out, Outcome::Unresolved) {
+                            return out;
+                        }
+                    }
+                }
+                return Outcome::Unresolved;
+            }
             // Class-attribute call: Class.m(...) or pkg.Class.m(...).
             // R1 fix: a module-bound first segment (import x as y / from pkg
             // import mod) must NOT enter the class branch — `mod.K()` is a
