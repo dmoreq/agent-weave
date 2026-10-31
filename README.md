@@ -66,7 +66,7 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 | gate | measured | target |
 |------|----------|--------|
 | G1 build | 0.47s wall, 22.8MB RSS, 1.98MB DB | < 5s / < 100MB / < 50MB |
-| G2 precision/recall | vihap 100%/100% (493/495); finguard 100%/100%; self 90%/100% | >= 80% / >= 70% |
+| G2 precision/recall | vihap 100%/100% (493/495); finguard 100%/100%; self 100%/100% | >= 80% / >= 70% |
 | G3 query p95 | 9.8ms | < 20ms |
 | G6 utility A/B | -50% tool calls, -67% bytes vs grep (P1 measurement; M0 re-run pending) | >= 30% calls, no byte growth |
 | G7 hotspots | 8/10 rank-overlap (provisional pain list) | >= 7/10 |

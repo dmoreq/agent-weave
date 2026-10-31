@@ -279,10 +279,11 @@ fn text(node: Node<'_>, src: &[u8]) -> String {
 }
 
 /// Dotted identifier chain for identifier/attribute nodes: `a.b.c` -> [a, b, c].
-/// Unwraps `type` wrapper nodes (annotations).
+/// Unwraps `type` wrapper nodes (annotations). Rust path keywords (`crate`,
+/// `self`, `super`) join the chain as plain segments.
 fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
     match node.kind() {
-        "identifier" | "this" | "super" => Some(vec![text(node, src)]),
+        "identifier" | "this" | "super" | "crate" => Some(vec![text(node, src)]),
         "attribute" => {
             let obj = node.child_by_field_name("object")?;
             let attr = node.child_by_field_name("attribute")?;
@@ -1499,6 +1500,16 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 }
                 return Outcome::Unresolved;
             }
+            // Receiver typing takes precedence over module interpretation
+            // (Amendment 7b): a local binding shadows a same-named module.
+            if chain.len() == 2 {
+                if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
+                    let out = mro_outcome(t, &var_class, &method);
+                    if !matches!(out, Outcome::Unresolved) {
+                        return out;
+                    }
+                }
+            }
             // Class-attribute call: Class.m(...) or pkg.Class.m(...).
             // R1 fix: a module-bound first segment (import x as y / from pkg
             // import mod) must NOT enter the class branch — `mod.K()` is a
@@ -1523,7 +1534,21 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             // Rust crate::path::call — map crate:: to the crate root dir.
             if chain[0] == "crate" {
                 if let Some(root) = &fctx.crate_root {
-                    return module_chain_outcome(t, fi, &root_chain(root, chain));
+                    let out = module_chain_outcome(t, fi, &root_chain(root, chain));
+                    if !matches!(out, Outcome::Unresolved) {
+                        return out;
+                    }
+                    // Intermediate segments may be plain namespaces (a src/
+                    // tree with no mod.rs): look the whole path up as a
+                    // qualname under the crate root (Amendment 7a).
+                    let full = format!("{}.{}", root, chain[1..].join("."));
+                    if let Some(cands) = t.by_qualname.get(&full) {
+                        return match cands.len() {
+                            1 => Outcome::Extracted(cands[0]),
+                            0 => Outcome::Unresolved,
+                            _ => Outcome::Ambiguous(full),
+                        };
+                    }
                 }
                 return Outcome::Unresolved;
             }

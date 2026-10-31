@@ -256,3 +256,42 @@ fn ts_external_import_calls_drop() {
         resolution.stats
     );
 }
+
+#[test]
+fn rust_crate_three_segment_call_resolves() {
+    // M2/Amendment 7a: crate::a::b must fall back to a direct qualname lookup
+    // under the crate root when the intermediate segments are not indexed
+    // modules (src/ layout without mod.rs) — the G2-self G01 gap.
+    let src1 = "pub fn file_changed() -> bool {\n    true\n}\n";
+    let src2 = "pub fn check() -> bool {\n    crate::query::file_changed()\n}\n";
+    let parsed1 = kg::parse::parse_source(src1.as_bytes(), kg::parse::Lang::Rust).unwrap();
+    let parsed2 = kg::parse::parse_source(src2.as_bytes(), kg::parse::Lang::Rust).unwrap();
+    let fx1 = kg::extract::extract_file(0, "src/query.rs", src1.as_bytes(), &parsed1);
+    let fx2 = kg::extract::extract_file(1, "src/doctor.rs", src2.as_bytes(), &parsed2);
+    let resolution = resolve(vec![fx1, fx2], Default::default());
+    assert!(
+        resolution.edges.iter().any(|e| {
+            e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "src.query.file_changed"
+        }),
+        "crate::query::file_changed must resolve: {:?}",
+        resolution.edges
+    );
+}
+
+#[test]
+fn local_variable_shadows_same_named_module() {
+    // M2/Amendment 7b: in d.py (module "d"), a local `d = D()` types the
+    // receiver — the same-named module interpretation must not eat the call.
+    let src = "class D:\n    def m(self):\n        return 1\n\ndef go():\n    d = D()\n    return d.m()\n";
+    let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
+    let fx = extract_file(0, "d.py", src.as_bytes(), &parsed);
+    let resolution = resolve(vec![fx], Default::default());
+    assert!(
+        resolution
+            .edges
+            .iter()
+            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("D.m")),
+        "local-var receiver typing must shadow the module name: {:?}",
+        resolution.edges
+    );
+}

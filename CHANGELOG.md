@@ -87,6 +87,19 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Added — M2 resolution recall (Amendment 7)
+
+- `crate::a::b` calls now resolve when intermediate segments are plain
+  namespaces (src/ layout without mod.rs): module-chain attempt first, then a
+  direct qualname lookup under the crate root. Root cause of the G2-self G01
+  gap was deeper: `dotted_chain` did not recognize the Rust `crate` keyword
+  node, so whole `crate::` call chains were never recorded — fixed.
+- Receiver typing (typed params, constructor assignments) now takes
+  precedence over module interpretation for 2-segment calls: a local binding
+  shadows a same-named module, matching Python scoping.
+- kg-self GT rows G02-G10 refreshed after M1's line shifts (provenance noted
+  in the GT file); G01 unchanged.
+
 ### Added — J1 usage journal (Amendment 6)
 
 - Every journaled subcommand appends one JSONL line to `.kg/usage.log`:
