@@ -1,6 +1,6 @@
 # kg — local code knowledge index
 
-Status: P1 core complete — all gates G1-G6 PASS. Spec: `agent-skills/docs/designs/2026-10-31_kg-rust-code-index.md` (v1.1 + Amendments 1-2).
+Status: P1 + P1.5 complete — gates G1-G6 PASS, G7 8/10 (provisional pain list), G8 -67% calls. Spec: `agent-skills/docs/designs/2026-10-31_kg-rust-code-index.md` (v1.1 + Amendments 1-2).
 
 kg indexes a repository's symbols and call/inheritance edges into a local
 SQLite DB and answers three navigation questions:
@@ -26,6 +26,9 @@ kg build --force              # re-extract everything (skip the fast path)
 kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg impact app.py              # files that call into app.py
+kg stats                      # index totals
+kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
+kg report                     # 4-section architecture report
 kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 ```
 
@@ -59,6 +62,8 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 | G2 precision/recall | 100% / 100% on 29 scored GT sites | >= 80% / >= 70% |
 | G3 query p95 | 10.1ms | < 20ms |
 | G6 utility A/B | -50% tool calls, -67% bytes vs grep | >= 30% calls, no byte growth |
+| G7 hotspots | 8/10 rank-overlap (provisional pain list) | >= 7/10 |
+| G8 extensions A/B | -67% calls on architecture questions (via callees --depth) | >= 30% |
 
 Baseline evidence: `docs/baselines/` (tasks, ground truth, transcripts, D0
 harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).

@@ -24,3 +24,8 @@ Your list is the ground truth for whether the score mirrors reality; no other us
 (*fix-180d = 0 means no fix-keyword commits touched the file in the window, not "no bugs".)
 
 msb2c/ files (e.g. msb2c/reranker/candidate_scorer.py, 28 churn) excluded: pain-list scope is the vihap package.
+
+Divergence note (R1.5): this list's fix-180d counts use the narrower keyword set from the
+original derivation; kg hotspots uses fix|bug|crash|wrong|incorrect|sai (-i), so its fix
+counts for category.py (5) and text_utils.py (7) are higher than the 0* recorded here.
+Churn-90d matches exactly.

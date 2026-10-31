@@ -115,6 +115,9 @@ fn normalize(v: f64, lo: f64, hi: f64) -> f64 {
 }
 
 pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<String>> {
+    if limit == 0 {
+        return Err(KgError::Usage("--limit must be >= 1".to_string()));
+    }
     let mut stmt = conn.prepare("SELECT path FROM files")?;
     let paths: Vec<String> = stmt
         .query_map([], |r| r.get(0))?
@@ -142,23 +145,33 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
     if scores.is_empty() {
         return Err(KgError::NoResults("no indexed files".to_string()));
     }
-    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
-    for s in &scores {
-        for v in [s.loc, s.cyclomatic, s.churn, s.fixes] {
+    // Per-metric min-max bounds (R1.5 fix): pooling one (lo, hi) across all
+    // four metrics let LOC swamp churn/fix and the score stopped meaning
+    // what the output claims.
+    fn bounds(scores: &[FileScore], get: impl Fn(&FileScore) -> f64) -> (f64, f64) {
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
+        for s in scores {
+            let v = get(s);
             lo = lo.min(v);
             hi = hi.max(v);
         }
+        (lo, hi)
     }
+    let (loc_lo, loc_hi) = bounds(&scores, |s| s.loc);
+    let (cyc_lo, cyc_hi) = bounds(&scores, |s| s.cyclomatic);
+    let (ch_lo, ch_hi) = bounds(&scores, |s| s.churn);
+    let (fx_lo, fx_hi) = bounds(&scores, |s| s.fixes);
     for s in &mut scores {
-        s.score = normalize(s.loc, lo, hi)
-            + normalize(s.cyclomatic, lo, hi)
-            + normalize(s.churn, lo, hi)
-            + normalize(s.fixes, lo, hi);
+        s.score = normalize(s.loc, loc_lo, loc_hi)
+            + normalize(s.cyclomatic, cyc_lo, cyc_hi)
+            + normalize(s.churn, ch_lo, ch_hi)
+            + normalize(s.fixes, fx_lo, fx_hi);
     }
     scores.sort_by(|a, b| b.score.total_cmp(&a.score));
     Ok(scores
         .into_iter()
-        .take(limit.clamp(1, 100))
+        .take(limit.min(100))
         .map(|s| {
             format!(
                 "{:.3} {} (loc={} cyc={} churn90={} fix180={})",

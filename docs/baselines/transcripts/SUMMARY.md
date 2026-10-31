@@ -81,7 +81,7 @@ during G6; the spec's response-contract section gains this flag at next edit.
 
 | gate | verdict | evidence |
 |------|---------|----------|
-| G7 hotspots rank-overlap | MEASURED 4/10 — DEGRADED, not gating | pain-list.md is PROVISIONAL (agent-derived); owner confirmation required before G7 can stop the feature. kg hotspots top-10: street_parser(1↔1), street_validator(5↔4), gso_loader(8↔8), category(9↔9) match; scripts/* and admin_resolver/parity enter the list because LOC+cyc dominate the normalized sum. Command: `kg hotspots --limit 10 --root vihap` |
-| G8 report A/B | PASS | architecture questions T4+T5: baseline cold 6 calls (4+2), kg 2 calls (1+1) = -67% (target >= 30%). Command: transcripts/cold/T4,T5 vs kgarm/T4,T5 |
+| G7 hotspots rank-overlap | PASS 8/10 (target >= 7/10) — still DEGRADED pending owner pain-list confirmation | R1.5 Critical fix: per-metric min-max normalization (pooled bounds let LOC swamp churn/fix; measured 4/10). Post-fix top-10 matches pain ranks 1,2,3,4,5,7,8,10. Command: `kg hotspots --limit 10 --root vihap` |
+| G8 P1.5 extensions on architecture questions | PASS -67% calls — attribution corrected per R1.5 | The reduction is carried by `kg callees --depth` (Amendment 2), NOT `kg report`: baseline cold T4+T5 = 6 calls vs kg 2 calls (kgarm transcripts). `kg report` was never invoked in an A/B transcript; its differential utility on architecture questions is not demonstrated (callees --depth answers them in 1 call already). report is retained as a convenience summary; the G8 claim is scoped to the extension set, not to report alone |
 
 P1.5 surface: `kg stats`, `kg hotspots [--limit N]`, `kg report` (4 sections).
