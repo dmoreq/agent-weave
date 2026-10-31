@@ -2,7 +2,10 @@
 
 - Filled: 2026-10-31, agent verification (owner delegated), working tree at finguard HEAD 2026-10-31.
 - Verification legend: `[x]` = verified by direct code read (import line + call line).
-- Known duplicate-name trap: `normalizeVndInput` is defined TWICE — apps/prototype/src/lib/format.ts:13 and packages/core-ledger/src/parser.ts:110 (module-local). Per-module import maps decide the target (G01 vs G02); kg must not merge them.
+- Known duplicate-name trap: `normalizeVndInput` is defined TWICE — apps/prototype/src/lib/format.ts:13 and packages/core-ledger/src/parser.ts:117 (module-local). Per-module import maps decide the target (G01 vs G02); kg must not merge them.
+- M0 re-baseline (2026-10-31, post-fix cycle): G02 re-verified against the
+  current working tree (parser.ts carries uncommitted edits, def moved
+  110 -> 117, call site 107 -> 114); row updated after direct code read.
 - External imports (react; @finguard/* workspace aliases) bind but resolve to
   unindexed modules by design (pnpm workspace alias resolution is out of P2
   scope) — calls into them drop with the builtin counter. NOTE (R2): these are
@@ -13,7 +16,7 @@
 | # | caller file:line | callee qualname | invocation kind | verified |
 |---|------------------|-----------------|-----------------|----------|
 | G01 | apps/prototype/src/lib/demo-parser.ts:10 | apps.prototype.src.lib.format.normalizeVndInput | import-call (rel import demo-parser.ts:2 './format') | [x] |
-| G02 | packages/core-ledger/src/parser.ts:107 | packages.core-ledger.src.parser.normalizeVndInput | same-file local def (parser.ts:110) — must NOT resolve to the prototype copy | [x] |
+| G02 | packages/core-ledger/src/parser.ts:114 | packages.core-ledger.src.parser.normalizeVndInput | same-file local def (parser.ts:117) — must NOT resolve to the prototype copy | [x] |
 | G03 | apps/prototype/src/features/overview/OverviewPage.tsx:26 | apps.prototype.src.lib.format.formatMoney | import-call (OverviewPage.tsx:2 '../../lib/format') | [x] |
 | G04 | apps/prototype/src/features/overview/OverviewPage.tsx:42 | apps.prototype.src.lib.format.formatMoney | import-call | [x] |
 | G05 | apps/prototype/src/features/chat/ProposalCard.tsx:33 | apps.prototype.src.lib.format.formatMoney | import-call | [x] |

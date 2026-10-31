@@ -87,6 +87,16 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Changed — M0 re-baseline (Elephant/Goldfish cycle)
+
+- All measurable gates re-run on the post-fix binary (`docs/baselines/
+  rebaseline-m0.md`): G1 0.47s/22.8MB/1.98MB, G2 vihap 29/29 + 493/495,
+  finguard 20/20 + 57/57, self 9/10 + 14/14 (all matching pre-fix numbers —
+  zero regression), G3 p95 9.8ms, G7 8/10.
+- G2-finguard G02 row refreshed (finguard working tree moved; GT staleness,
+  not a regression). G6/G8 A/B re-runs marked pending with rationale.
+- README gates table updated to the re-baselined numbers.
+
 ### Skipped
 
 - P3 stdio MCP server: trigger condition ("CLI discoverability measurably

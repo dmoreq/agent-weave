@@ -55,16 +55,16 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 3. Read-only over source; writes confined to `.kg/` (tree-snapshot test).
 4. No behavior hijack: no hooks, settings, or agent-config writes.
 
-## Gates (measured, vihap ~102k LOC)
+## Gates (measured, vihap ~102k LOC — re-baselined M0 2026-10-31, see docs/baselines/rebaseline-m0.md)
 
 | gate | measured | target |
 |------|----------|--------|
-| G1 build | 1.91s wall, 21.4MB RSS, 1.9MB DB | < 5s / < 100MB / < 50MB |
-| G2 precision/recall | 100% / 100% on 29 scored GT sites | >= 80% / >= 70% |
-| G3 query p95 | 10.1ms | < 20ms |
-| G6 utility A/B | -50% tool calls, -67% bytes vs grep | >= 30% calls, no byte growth |
+| G1 build | 0.47s wall, 22.8MB RSS, 1.98MB DB | < 5s / < 100MB / < 50MB |
+| G2 precision/recall | vihap 100%/100% (493/495); finguard 100%/100%; self 90%/100% | >= 80% / >= 70% |
+| G3 query p95 | 9.8ms | < 20ms |
+| G6 utility A/B | -50% tool calls, -67% bytes vs grep (P1 measurement; M0 re-run pending) | >= 30% calls, no byte growth |
 | G7 hotspots | 8/10 rank-overlap (provisional pain list) | >= 7/10 |
-| G8 extensions A/B | -67% calls on architecture questions (via callees --depth) | >= 30% |
+| G8 extensions A/B | -67% calls on architecture questions (P1.5 measurement; M0 re-run pending) | >= 30% |
 
 Baseline evidence: `docs/baselines/` (tasks, ground truth, transcripts, D0
 harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).
