@@ -1,0 +1,67 @@
+# Changelog
+
+All notable changes to kg are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
+[Calm SemVer](https://github.com/calver?ad=calver) 0.x — breaking contract
+changes bump the minor while 0.x is unstable.
+
+## [Unreleased]
+
+### Added — P0 baseline (f9d57b9..1ca1d0e)
+
+- Frozen A/B baselines: 5 navigation task definitions (T1-T5), 30 verified
+  ground-truth call sites on vihap, provisional top-10 pain list.
+- D0 harness: `g` call logger (byte/call accounting both directions),
+  `count.py`, `check.py` (precision/recall with AMBIGUOUS-candidate and
+  dynamic-dispatch rules), derivation scripts, cold-run equivalence check.
+- Grep-arm baseline: 12 tool calls / 49,224 bytes; P0 exit criterion passed
+  (premise not weak).
+- R0 independent review record (APPROVE after 1 fix cycle).
+
+### Added — P1 core (9f75656..e72b9b0)
+
+- `kg` Rust CLI (single binary, 5 pinned deps, `#![forbid(unsafe_code)]`):
+  `build`, `callers`, `callees [--depth N]`, `impact`, `doctor`, `stats`,
+  `hotspots`, `report`.
+- Resolution algorithm: local module -> import alias map (with re-export
+  following) -> receiver-class (self/this, constructor assignment, typed
+  params, single-constructor fields, MRO over known bases) -> builtin table.
+- Full-atomic-replacement builds with per-file fast path, flock build lock,
+  FNV-1a staleness on the post-cap displayed set.
+- Exit-code contract 0-7; response contract with caps and tier tags.
+- Safety: zero network (Seatbelt/seccomp CI), Cargo.lock allowlist,
+  write-path grep, tree-snapshot (content-hashed), proc-hygiene test.
+- 54 tests; clippy `-D warnings` clean.
+- Gate results on vihap (~102k LOC): G1 1.91s/21.4MB/1.9MB; G2 recall 29/29,
+  precision 493/495; G3 p95 10.1ms; G6 -50% tool calls, -67% bytes.
+- R1 independent review record (APPROVE after 2 fix cycles).
+
+### Added — P1.5 extensions (d9951ce..5034939)
+
+- `kg stats`, `kg hotspots` (per-metric min-max normalization of
+  cyclomatic + LOC + churn-90d + fix-density), `kg report` (4 sections).
+- G7 rank-overlap 8/10 vs pain list (degraded: pain list provisional).
+- G8 -67% tool calls on architecture questions (via `callees --depth`).
+- `code-index` skill wrapper in the agent-skills repo (OQ2).
+- R1.5 independent review record (APPROVE after 1 fix cycle).
+
+### Added — P2 multi-language (2aeeb9d..7a99343)
+
+- TypeScript/TSX and JavaScript/JSX grammars (one-commit upgrade rule);
+  Rust grammar (P2.5, rs-0.24.2).
+- TS/TSX extraction: classes, methods, arrow-const components/hooks,
+  `new` -> constructor redirect, `this`/`super` MRO calls, ESM imports
+  (default/named/namespace/type), directory-based relative resolution
+  (dot-stem safe), external-module drop rule.
+- Rust extraction: functions, structs/enums/impls, `use` and `mod`
+  declarations, `crate::` call paths, scoped identifiers.
+- G2-finguard: 20/20 recall, 57/57 precision. G2-self (dogfooding): 9/10,
+  14/14. Python regression green throughout.
+- R2 independent review record (APPROVE after 2 fix cycles).
+
+### Skipped
+
+- P3 stdio MCP server: trigger condition ("CLI discoverability measurably
+  fails") not met. Re-evaluable on request.
+
+[Unreleased]: no tagged releases yet — history starts at f9d57b9 (repo init).

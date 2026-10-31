@@ -67,3 +67,16 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 Baseline evidence: `docs/baselines/` (tasks, ground truth, transcripts, D0
 harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).
+
+## Project docs
+
+| doc | contents |
+|-----|----------|
+| [CHANGELOG.md](CHANGELOG.md) | phase-by-phase history (Keep a Changelog) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | spec-first rules, gate workflow, review protocol, honesty rule |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | contestable-findings standard |
+| [SECURITY.md](SECURITY.md) | invariants, index safety, reporting |
+| [SUPPORT.md](SUPPORT.md) | troubleshooting table, scope boundaries |
+| [LICENSE](LICENSE) | private / all rights reserved (OQ1: swap before any publish) |
+| `.github/` | PR template, bug/feature issue templates, ci.yml |
+| `docs/baselines/reviews/` | R0/R1/R1.5/R2 independent review records |
