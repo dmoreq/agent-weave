@@ -107,7 +107,13 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
         })
     })?;
-    collect_output(conn, root, rows, limit)
+    collect_output(
+        conn,
+        root,
+        rows,
+        limit,
+        "0 callers found (dynamic dispatch possible — grep fallback recommended)",
+    )
 }
 
 pub fn callees(
@@ -189,7 +195,7 @@ pub fn callees(
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
         })
     })?;
-    collect_output(conn, root, rows, limit)
+    collect_output(conn, root, rows, limit, "0 callees found")
 }
 
 pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
@@ -219,7 +225,7 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
         })
     })?;
-    collect_output(conn, root, rows, limit)
+    collect_output(conn, root, rows, limit, "0 impacting files found")
 }
 
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by
@@ -229,6 +235,7 @@ fn collect_output(
     root: &Path,
     rows: impl Iterator<Item = std::result::Result<Pointer, rusqlite::Error>>,
     limit: usize,
+    empty_reason: &str,
 ) -> Result<QueryOutput> {
     let mut all: Vec<Pointer> = Vec::new();
     for r in rows {
@@ -236,9 +243,7 @@ fn collect_output(
     }
     let total = all.len();
     if total == 0 {
-        return Err(KgError::NoResults(
-            "0 results found (dynamic dispatch possible — grep fallback recommended)".to_string(),
-        ));
+        return Err(KgError::NoResults(empty_reason.to_string()));
     }
     let shown = all.len().min(limit);
     let displayed: Vec<Pointer> = all.into_iter().take(shown).collect();

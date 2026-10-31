@@ -24,6 +24,8 @@ jobs:
         run: cargo test --locked
       - name: Dependency allowlist (G5)
         run: bash tests/scripts/allowlist_check.sh Cargo.lock
+      - name: Write-path check (G5 invariant 4)
+        run: bash tests/scripts/write_path_check.sh
 
   network-deny-macos:
     runs-on: macos-latest

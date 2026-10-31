@@ -1,3 +1,2 @@
 {"task": "T2", "seq": 1, "tool": "rg", "cmd": "rg -n \"get_knowledge_base\" -g \"*.py\" -g \"!tests/**\" .", "in_bytes": 53, "out_bytes": 1733, "err_bytes": 0, "out_file": "out/T2-001.txt"}
 {"task": "T2", "seq": 2, "tool": "rg", "cmd": "rg -n \"GsoIndex|QualityScorer\" vihap/parsers/hierarchical_parser.py vihap/formatters/osm.py | head -20", "in_bytes": 102, "out_bytes": 925, "err_bytes": 0, "out_file": "out/T2-002.txt"}
-{"task": "T2", "seq": 3, "tool": "kg", "cmd": "seed", "in_bytes": 4, "out_bytes": 0, "err_bytes": 30, "out_file": "out/T2-003.txt"}

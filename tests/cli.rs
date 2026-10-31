@@ -68,9 +68,10 @@ fn fixture(name: &str) -> PathBuf {
 
 /// Walk the tree collecting (path, len) for files outside .kg/ — the read-only
 /// invariant probe.
-fn snapshot(repo: &Path) -> Vec<(String, u64)> {
+fn snapshot(repo: &Path) -> Vec<(String, u64, u64)> {
+    // (path, len, content hash) — hashes catch same-size edits (invariant 3).
     let mut out = Vec::new();
-    fn rec(dir: &Path, acc: &mut Vec<(String, u64)>) {
+    fn rec(dir: &Path, acc: &mut Vec<(String, u64, u64)>) {
         for e in fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
             if p.file_name().is_some_and(|n| n == ".kg") {
@@ -80,7 +81,15 @@ fn snapshot(repo: &Path) -> Vec<(String, u64)> {
                 rec(&p, acc);
             } else {
                 let len = e.metadata().map(|m| m.len()).unwrap_or(0);
-                acc.push((p.to_string_lossy().into_owned(), len));
+                let hash = fs::read(&p)
+                    .map(|b| {
+                        use std::hash::{Hash, Hasher};
+                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                        b.hash(&mut h);
+                        h.finish()
+                    })
+                    .unwrap_or(0);
+                acc.push((p.to_string_lossy().into_owned(), len, hash));
             }
         }
     }
@@ -280,4 +289,22 @@ fn fast_path_second_build_carries_everything() {
     let (_, out2, _) = build(&repo);
     assert!(out1.contains("carried=0"), "{out1}");
     assert!(out2.contains("carried=3"), "{out2}");
+}
+
+#[test]
+fn g5_no_child_processes_survive() {
+    // Invariant 2: zero long-lived children after each subcommand. Run a build
+    // tagged with a unique token, then assert nothing matching the token is
+    // alive (the kg process itself has exited).
+    let repo = fixture("proc");
+    let marker = format!("kg-proc-{}", std::process::id());
+    write(&repo, &format!("{marker}.py"), "def f():\n    pass\n");
+    let out = kg(&repo).args(["build"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let probe = Command::new("pgrep")
+        .args(["-f", &marker])
+        .output()
+        .unwrap();
+    let alive = String::from_utf8_lossy(&probe.stdout);
+    assert!(alive.trim().is_empty(), "processes still alive: {alive}");
 }

@@ -1,6 +1,7 @@
 //! Entry point: subcommand dispatch, build orchestration (full atomic
 //! replacement with the per-file fast path), and exit-code mapping.
 //! Panic-free boundary: a panic aborts with exit 6, never partial stdout.
+#![forbid(unsafe_code)]
 
 mod cli;
 mod db;
@@ -163,31 +164,14 @@ fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) ->
     // DB: fresh schema at index.db.new -> carry forward -> insert -> swap.
     let t0 = Instant::now();
     let conn = db::create_fresh(&root)?;
-    let mut file_ids: Vec<i64> = vec![0; total_files];
-    let mut reused_ids: std::collections::HashMap<String, i64> = Default::default();
     if !carried.is_empty() {
         let unchanged: Vec<(String, i64, i64)> = carried
             .iter()
-            .filter_map(|rel| {
-                old_map.get(rel).map(|(m, s)| (rel.clone(), *m, *s))
-            })
+            .filter_map(|rel| old_map.get(rel).map(|(m, s)| (rel.clone(), *m, *s)))
             .collect();
-        for (rel, id) in db::carry_forward_unchanged(&conn, &root, &unchanged)? {
-            reused_ids.insert(rel.clone(), id);
-        }
-        for rel in &carried {
-            if let Some(id) = reused_ids.get(rel) {
-                if let Some(pos) = stats.files.iter().position(|f| &f.rel == rel) {
-                    file_ids[pos] = *id;
-                }
-            }
-        }
+        db::carry_forward_unchanged(&conn, &root, &unchanged)?;
     }
     let fresh_file_ids = db::insert_files(&conn, &fresh_rows)?;
-    for (i, f) in fresh.iter().enumerate() {
-        let pos = stats.files.iter().position(|x| x.rel == f.rel).unwrap_or(i);
-        file_ids[pos] = fresh_file_ids[i];
-    }
 
     // Symbols: fresh rows insert; carried rows keep their previous ids.
     let fresh_sym_count = resolution.existing_ids.iter().filter(|e| e.is_none()).count();

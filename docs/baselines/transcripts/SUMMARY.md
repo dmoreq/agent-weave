@@ -71,8 +71,8 @@ during G6; the spec's response-contract section gains this flag at next edit.
 | gate | verdict | evidence |
 |------|---------|----------|
 | G1 | PASS | clean build 1.91s wall, 21.4MB RSS, 1.9MB DB (limits 5s/100MB/50MB) |
-| G2 | PASS | recall 29/29 = 100% [88,100], precision 100% [99,100] (limits 70/80/95) |
+| G2 | PASS | recall 29/29 = 100% [88,100], precision 493/495 = 99.6% [99,100] (limits 70/80/95) |
 | G3 | PASS | p95 = 10.1ms over 30 runs (limit 20ms) |
 | G4 | PASS | staleness header + FNV re-hash path (tests/cli.rs g4_staleness) |
-| G5 | PASS | seatbelt network-deny build + allowlist check + tree-snapshot + proc hygiene tests |
+| G5 | PASS | seatbelt network-deny build + Cargo.lock allowlist + write-path grep + tree-snapshot (content-hashed) + proc-hygiene (pgrep) tests |
 | G6 | PASS | 50% tool-call reduction, -67% bytes, no correctness loss |

@@ -441,27 +441,33 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
     }
 }
 
-/// Constructor-target scan for receiver typing: direct call, or the LAST
-/// resolvable call in the RHS subtree (`a or B(...)` idiom). Handles both
-/// `var = Ctor(...)` (function-local) and `self.field = Ctor(...)` (class-wide).
+/// Constructor-target scan for receiver typing. CONSERVATIVE (R1 fix): only a
+/// DIRECT call RHS types the receiver — `var = Ctor(...)`. For `a or B(...)`
+/// the last top-level OR operand is accepted (the fallback-construction idiom);
+/// nested calls like `obj = factory(A())` type NOTHING (the outer call's
+/// return type is unknowable). Handles `var = ...` (function-local) and
+/// `self.field = ...` (class-wide).
 fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
     let Some(left) = node.child_by_field_name("left") else { return };
     let Some(right) = node.child_by_field_name("right") else { return };
-    let mut target: Option<Vec<String>> = None;
-    let mut stack = vec![right];
-    while let Some(n) = stack.pop() {
-        if n.kind() == "call" {
-            if let Some(f) = n.child_by_field_name("function") {
-                if let Some(chain) = dotted_chain(f, src) {
-                    target = Some(chain);
-                }
-            }
-        }
-        let mut cursor = n.walk();
-        for child in n.children(&mut cursor) {
-            stack.push(child);
-        }
-    }
+    let direct_call_chain = |call: Node<'_>| -> Option<Vec<String>> {
+        let f = call.child_by_field_name("function")?;
+        dotted_chain(f, src)
+    };
+    let target: Option<Vec<String>> = if right.kind() == "call" {
+        direct_call_chain(right)
+    } else if right.kind() == "bool_op" {
+        // `x = a or B(...)`: the last top-level operand that is a direct call.
+        let mut cursor = right.walk();
+        let operands: Vec<Node<'_>> = right.named_children(&mut cursor).collect();
+        operands
+            .iter()
+            .rev()
+            .find(|o| o.kind() == "call")
+            .and_then(|o| direct_call_chain(*o))
+    } else {
+        None
+    };
     let Some(target_dotted) = target else { return };
     match left.kind() {
         "identifier" => fx.assignments.push(Assignment {
@@ -517,7 +523,9 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                         fx.aliases
                             .push((root.clone(), ImportTarget::ModuleRoot { path: root }));
                     }
-                    "alias" => {
+                    // `import a.b as c` wraps in aliased_import; a bare
+                    // "alias" node appears in some grammar versions.
+                    "aliased_import" | "alias" => {
                         let Some(target) = child.child_by_field_name("name") else { continue };
                         let Some(alias) = child.child_by_field_name("alias") else { continue };
                         fx.aliases.push((
@@ -976,20 +984,41 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 return Outcome::Unresolved;
             }
             // Class-attribute call: Class.m(...) or pkg.Class.m(...).
-            if let Some(class_qn) = resolve_class_of_chain(t, fi, chain) {
-                if chain.len() == 2 {
-                    return mro_outcome(t, &class_qn, &method);
+            // R1 fix: a module-bound first segment (import x as y / from pkg
+            // import mod) must NOT enter the class branch — `mod.K()` is a
+            // constructor through the module path, not a method lookup. And a
+            // class-path miss falls through to the module path.
+            if !chain_is_module_start(t, fi, &chain[0]) {
+                if let Some(class_qn) = resolve_class_of_chain(t, fi, chain) {
+                    if chain.len() == 2 {
+                        let out = mro_outcome(t, &class_qn, &method);
+                        if !matches!(out, Outcome::Unresolved) {
+                            return out;
+                        }
+                    }
                 }
-            }
-            // Receiver typed by constructor assignment or annotation.
-            if chain.len() == 2 {
-                if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
-                    return mro_outcome(t, &var_class, &method);
+                // Receiver typed by constructor assignment or annotation.
+                if chain.len() == 2 {
+                    if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
+                        return mro_outcome(t, &var_class, &method);
+                    }
                 }
             }
             // Module-qualified call through the alias map / module tree.
             module_chain_outcome(t, fi, chain)
         }
+    }
+}
+
+/// Does the first chain segment bind to a module (alias or bare indexed name)?
+fn chain_is_module_start(t: &Tables, fi: usize, first: &str) -> bool {
+    let fctx = &t.file_ctx[fi];
+    match fctx.aliases.get(first) {
+        Some(ImportTarget::ModuleRoot { .. }) => true,
+        Some(ImportTarget::Symbol { module, name }) => {
+            t.module_paths.contains(&format!("{module}.{name}"))
+        }
+        None => t.module_paths.contains(first),
     }
 }
 
@@ -1292,3 +1321,5 @@ mod alias_repro {
         assert_eq!(fx.calls.len(), 1, "calls: {}", fx.calls.len());
     }
 }
+
+
