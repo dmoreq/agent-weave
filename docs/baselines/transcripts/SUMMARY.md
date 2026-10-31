@@ -99,3 +99,12 @@ P2 notes:
 - External imports (react, @finguard/*-alias) bind but resolve to unindexed modules: calls into them drop with the builtin counter, not unresolved.
 - unresolved=3403 in finguard is dominated by destructured hook results and untyped receivers (spec non-goal); the import-call backbone resolves.
 - R2 additions: `this.m()` resolves (TS parity with self.m()); pnpm workspace aliases (@finguard/*) documented as a limitation (value calls into workspace packages drop until alias resolution lands); JSX component usage (<Button />) is a spec non-goal — not indexed as calls.
+
+## P2.5 + P3 (2026-10-31)
+
+| item | verdict | evidence |
+|------|---------|----------|
+| P2.5 Rust self-index (optional, implemented) | PASS | kg indexes its own repo: 20 files, 218 symbols, 476 edges; G2-self recall 9/10 = 90% [60,98], precision 14/14 = 100% [78,100] — command: `python3 tests/scripts/precision_recall.py ~/Workspace/kg target/release/kg docs/baselines/ground-truth-kg-self.md`. crate:: paths + mod declarations mapped to the crate root dir; GRAMMAR_VERSION gains rs-0.24.2 |
+| P3 stdio MCP server (optional) | SKIPPED — trigger condition not met | Spec P3 trigger: "only if CLI discoverability measurably fails". No such measurement exists; the CLI answers all three questions with documented exit codes + the code-index skill wrapper ships install instructions. Condition re-evaluable at owner request |
+
+Final state: all mandatory phases (P0, P1, P1.5, P2) complete and independently reviewed (R0/R1/R1.5/R2 APPROVE); optional P2.5 implemented and gated; optional P3 skipped with documented trigger analysis.

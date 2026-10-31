@@ -210,6 +210,7 @@ pub fn module_path_for(rel: &str) -> (String, bool) {
         .trim_end_matches(".ts")
         .trim_end_matches(".jsx")
         .trim_end_matches(".js")
+        .trim_end_matches(".rs")
         .trim_end_matches(".py");
     if stem.is_empty() {
         return ("root".to_string(), false);
@@ -282,6 +283,23 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             chain.push(text(attr, src));
             Some(chain)
         }
+        // Rust scoped_identifier: a::b::c (fields path + name).
+        "scoped_identifier" => {
+            let mut chain = Vec::new();
+            if let Some(path) = node.child_by_field_name("path") {
+                if let Some(mut sub) = dotted_chain(path, src) {
+                    chain.append(&mut sub);
+                }
+            }
+            if let Some(name) = node.child_by_field_name("name") {
+                chain.push(text(name, src));
+            }
+            if chain.is_empty() {
+                None
+            } else {
+                Some(chain)
+            }
+        }
         // TypeScript member_expression: a.b.c (field `property`, not `attribute`).
         "member_expression" => {
             let obj = node.child_by_field_name("object")?;
@@ -308,6 +326,25 @@ fn walk_children(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut 
 
 fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
     match node.kind() {
+        // ---- Rust definitions (P2.5) ----
+        "function_item" => {
+            define_function(node, src, fx, ctx, if ctx.class_stack.is_empty() { "function" } else { "method" });
+        }
+        "struct_item" | "enum_item" => {
+            define_class_ts(node, src, fx, ctx);
+        }
+        "impl_item" => {
+            // impl Type { ... } — scope methods under the type name.
+            let type_name = impl_type_name(node, src);
+            let qualname = if ctx.class_stack.is_empty() {
+                format!("{}.{}", fx.module, type_name)
+            } else {
+                format!("{}.{}", ctx.class_stack.last().unwrap(), type_name)
+            };
+            ctx.class_stack.push(qualname);
+            walk_children(node, src, fx, ctx);
+            ctx.class_stack.pop();
+        }
         // ---- TypeScript/TSX/JSX definitions (P2) ----
         "function_declaration" | "generator_function_declaration" => {
             define_function(node, src, fx, ctx, "function");
@@ -328,6 +365,23 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
         }
         "import_statement" if fx.lang != Lang::Python => {
             record_import_ts(node, src, fx);
+        }
+        "mod_item" if fx.lang == Lang::Rust => {
+            // `mod db;` declares a module sibling: bind db -> crate_root.db.
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let name = text(name_node, src);
+                if node.child_by_field_name("body").is_none() {
+                    if let Some(root) = fx.dir.split('.').next().map(|p| p.to_string()) {
+                        let path = format!("{root}.{name}");
+                        fx.aliases.push((name, ImportTarget::ModuleRoot { path }));
+                    }
+                }
+            }
+            walk_children(node, src, fx, ctx);
+        }
+        "use_declaration" if fx.lang == Lang::Rust => {
+            record_use_decl(node, src, fx);
+            walk_children(node, src, fx, ctx);
         }
         "decorated_definition" => {
             let mut cursor = node.walk();
@@ -975,12 +1029,75 @@ fn resolve_ts_module(source: &str, dir: &str) -> String {
     }
 }
 
+fn impl_type_name(node: Node<'_>, src: &[u8]) -> String {
+    // impl [<generics>] Type [for Trait] — take the first type_identifier.
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "type_identifier" {
+            return text(n, src);
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+    "UnknownImpl".to_string()
+}
+
+/// Rust use declarations: `use crate::error::Result;` binds the last segment.
+/// crate:: maps to the file's top-level directory (the crate root dir);
+/// external crates (std, clap, ...) bind as external and drop at call time.
+fn record_use_decl(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
+    let line = node.start_position().row + 1;
+    let mut stack = vec![node];
+    let mut crate_root: Option<String> = None;
+    if let Some(first_seg) = fx.module.split('.').next() {
+        crate_root = Some(first_seg.to_string());
+    }
+    while let Some(n) = stack.pop() {
+        if n.kind() == "scoped_identifier" {
+            let full = text(n, src);
+            let parts: Vec<&str> = full.split("::").collect();
+            if parts.len() >= 2 {
+                let name = parts.last().unwrap().to_string();
+                let mut path_parts: Vec<String> = parts[..parts.len() - 1]
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect();
+                if path_parts.first().map(|p| p.as_str()) == Some("crate") {
+                    if let Some(root) = &crate_root {
+                        path_parts[0] = root.clone();
+                    } else {
+                        path_parts.remove(0);
+                    }
+                }
+                let module = path_parts.join(".");
+                fx.aliases.push((
+                    name.clone(),
+                    ImportTarget::Symbol { module: module.clone(), name: name.clone() },
+                ));
+                fx.import_edges.push(ImportEdgeCandidate {
+                    line,
+                    target: ImportTarget::Symbol { module, name },
+                });
+            }
+            continue;
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Phase B: global resolution
 // ---------------------------------------------------------------------------
 
 struct FileCtx {
     module: String,
+    /// Crate-root dir segment for Rust files (e.g. "src") — maps crate:: paths.
+    crate_root: Option<String>,
     module_sym_idx: usize,
     aliases: HashMap<String, ImportTarget>,
     stars: Vec<String>,
@@ -1093,8 +1210,10 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
         for sf in fx.self_fields {
             self_fields.insert((sf.class_qn, sf.field), sf.target_dotted);
         }
+        let crate_root = fx.dir.split('.').next().map(|p| p.to_string());
         t.file_ctx.push(FileCtx {
             module,
+            crate_root,
             module_sym_idx: base,
             aliases,
             stars: fx.stars,
@@ -1379,10 +1498,24 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                     }
                 }
             }
+            // Rust crate::path::call — map crate:: to the crate root dir.
+            if chain[0] == "crate" {
+                if let Some(root) = &fctx.crate_root {
+                    return module_chain_outcome(t, fi, &root_chain(root, chain));
+                }
+                return Outcome::Unresolved;
+            }
             // Module-qualified call through the alias map / module tree.
             module_chain_outcome(t, fi, chain)
         }
     }
+}
+
+/// Replace a leading `crate` segment with the crate root dir segment.
+fn root_chain(root: &str, chain: &[String]) -> Vec<String> {
+    let mut out = vec![root.to_string()];
+    out.extend_from_slice(&chain[1..]);
+    out
 }
 
 /// Does the first chain segment bind to a module (alias or bare indexed name)?

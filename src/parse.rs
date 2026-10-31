@@ -13,6 +13,7 @@ pub enum Lang {
     TypeScript,
     Tsx,
     JavaScript,
+    Rust,
 }
 
 impl Lang {
@@ -26,6 +27,8 @@ impl Lang {
             Lang::JavaScript
         } else if name.ends_with(".py") {
             Lang::Python
+        } else if name.ends_with(".rs") {
+            Lang::Rust
         } else {
             Lang::JavaScript
         }
@@ -37,6 +40,7 @@ impl Lang {
             Lang::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
             Lang::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
             Lang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
         };
         Ok(lang)
     }

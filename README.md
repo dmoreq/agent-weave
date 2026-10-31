@@ -1,6 +1,6 @@
 # kg — local code knowledge index
 
-Status: P1 + P1.5 complete — gates G1-G6 PASS, G7 8/10 (provisional pain list), G8 -67% calls. Spec: `agent-skills/docs/designs/2026-10-31_kg-rust-code-index.md` (v1.1 + Amendments 1-2).
+Status: ALL PHASES COMPLETE — P0/P1/P1.5/P2/P2.5 done, P3 skipped (trigger not met). Gates G1-G8 pass, G2 on Python + TS/TSX + Rust self-index. Spec: `agent-skills/docs/designs/2026-10-31_kg-rust-code-index.md` (v1.1 + Amendments 1-2).
 
 kg indexes a repository's symbols and call/inheritance edges into a local
 SQLite DB and answers three navigation questions:
