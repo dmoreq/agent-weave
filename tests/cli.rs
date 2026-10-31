@@ -33,29 +33,29 @@ fn build(repo: &Path) -> (i32, String, String) {
     )
 }
 
-const WIDGET: &str = "\
-class Widget:\n\
-    def render(self):\n\
-        return normalize('x')\n\
-\n\
-    def render2(self):\n\
-        return self.render()\n\
-";
-const UTILS: &str = "\
-def normalize(text):\n\
-    return text.strip()\n\
-\n\
-def caller():\n\
-    return normalize('a')\n\
-";
-const APP: &str = "\
-from utils import normalize\n\
-from .widget import Widget as W\n\
-\n\
-def run():\n\
-    w = W()\n\
-    return normalize(w.render())\n\
-";
+// Raw strings: the previous `\`-continuation form stripped the leading
+// indentation of every line, so class bodies collapsed to top-level defs and
+// the fixtures never exercised method resolution at all.
+const WIDGET: &str = r#"class Widget:
+    def render(self):
+        return normalize('x')
+
+    def render2(self):
+        return self.render()
+"#;
+const UTILS: &str = r#"def normalize(text):
+    return text.strip()
+
+def caller():
+    return normalize('a')
+"#;
+const APP: &str = r#"from utils import normalize
+from .widget import Widget as W
+
+def run():
+    w = W()
+    return normalize(w.render())
+"#;
 const BROKEN: &str = "def broken(:\n    pass\n";
 
 fn fixture(name: &str) -> PathBuf {
@@ -349,6 +349,64 @@ fn impact_unknown_path_exit1() {
     let repo = fixture("impact-neg");
     build(&repo);
     let out = kg(&repo).args(["impact", "nope.py"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not indexed"), "{stderr}");
+}
+
+#[test]
+fn dead_lists_uncalled_and_excludes_called() {
+    // fixture: normalize is called; Widget.render is called (self.render and
+    // app.run's w.render()); run, caller, and render2 have zero inbound edges.
+    let repo = fixture("dead");
+    build(&repo);
+    let out = kg(&repo).args(["dead"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.starts_with("kg: dead-code candidates —"),
+        "caveat header first: {stdout}"
+    );
+    assert!(stdout.contains("app.py:4"), "run is dead: {stdout}");
+    assert!(stdout.contains("utils.py:4"), "caller is dead: {stdout}");
+    assert!(stdout.contains("widget.py:5"), "render2 is dead: {stdout}");
+    assert!(!stdout.contains("utils.py:1"), "normalize is called: {stdout}");
+    assert!(!stdout.contains("widget.py:1"), "Widget is constructed: {stdout}");
+    assert!(!stdout.contains("widget.py:2"), "render is called: {stdout}");
+}
+
+#[test]
+fn unresolved_reports_counts_and_zero_is_exit1() {
+    let repo = temp_repo("unresolved");
+    write(&repo, "m.py", "def go():\n    return ghost()\n");
+    build(&repo);
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("kg: unresolved=1 callees in 1 files"), "{stdout}");
+    assert!(stdout.contains("m.py unresolved=1"), "{stdout}");
+
+    let clean = temp_repo("unresolved-clean");
+    write(&clean, "a.py", "def g():\n    return 1\n\ndef go():\n    return g()\n");
+    build(&clean);
+    let out = kg(&clean).args(["unresolved"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("0 unresolved callees"), "{stderr}");
+}
+
+#[test]
+fn symbols_lists_file_symbols_and_unknown_exit1() {
+    let repo = fixture("symbols");
+    build(&repo);
+    let out = kg(&repo).args(["symbols", "utils.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("utils.py:1 module utils"), "{stdout}");
+    assert!(stdout.contains("utils.py:1 function utils.normalize"), "{stdout}");
+    assert!(stdout.contains("utils.py:4 function utils.caller"), "{stdout}");
+
+    let out = kg(&repo).args(["symbols", "nope.py"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not indexed"), "{stderr}");

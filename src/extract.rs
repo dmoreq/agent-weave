@@ -741,8 +741,13 @@ fn resolve_from_module(
     for _ in 1..level {
         parts.pop();
     }
+    // Root-level plain module: the containing package is the empty string, and
+    // joining it must not leave a stray leading dot (".widget" never matches
+    // the indexed module "widget" and misclassifies project calls as dropped).
     if rest.is_empty() {
         parts.join(".")
+    } else if parts.is_empty() {
+        rest.to_string()
     } else {
         format!("{}.{}", parts.join("."), rest)
     }

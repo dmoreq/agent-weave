@@ -64,6 +64,29 @@ fn run(cli: cli::Cli) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
+        cli::Cmd::Dead { limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            let out = query::dead(&conn, &root, limit)?;
+            query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Unresolved { limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::unresolved(&conn, limit)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Symbols { file, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::symbols(&conn, &root, &file, limit)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
         cli::Cmd::Stats {} => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;

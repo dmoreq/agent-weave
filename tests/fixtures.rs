@@ -163,6 +163,37 @@ fn diamond_mro_multi_match_is_ambiguous() {
 }
 
 #[test]
+fn root_level_relative_import_resolves_without_stray_dot() {
+    // M1 finding: `from .widget import Widget as W` inside a repo-root plain
+    // module resolved to ".widget" (stray leading dot) and the W() call was
+    // misclassified as dropped-external instead of resolving to the class.
+    let src1 = "class Widget:\n    def render(self):\n        return 1\n";
+    let src2 = "from .widget import Widget as W\n\ndef run():\n    w = W()\n    return w.render()\n";
+    let parsed1 = parse_source(src1.as_bytes(), Lang::Python).unwrap();
+    let parsed2 = parse_source(src2.as_bytes(), Lang::Python).unwrap();
+    let fx1 = extract_file(0, "widget.py", src1.as_bytes(), &parsed1);
+    let fx2 = extract_file(1, "app.py", src2.as_bytes(), &parsed2);
+    let resolution = resolve(vec![fx1, fx2], Default::default());
+    assert!(
+        resolution
+            .edges
+            .iter()
+            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "widget.Widget"),
+        "W() must resolve to widget.Widget: {:?}",
+        resolution.edges
+    );
+    assert!(
+        resolution
+            .edges
+            .iter()
+            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "widget.Widget.render"),
+        "w.render() must resolve: {:?}",
+        resolution.edges
+    );
+    assert_eq!(resolution.stats.unresolved_callees, 0, "no unresolved left: {:?}", resolution.stats);
+}
+
+#[test]
 fn ts_class_method_and_this_call() {
     // R2: this.m() must resolve like Python self.m() — assert the EDGE.
     let src = "export class Ledger {\n  balance = 0\n  add(n: number): number {\n    return this.normalize(n)\n  }\n  private normalize(n: number): number {\n    return Math.abs(n)\n  }\n}\n";

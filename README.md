@@ -27,6 +27,9 @@ kg build --force              # re-extract everything (skip the fast path)
 kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg impact app.py              # files that call into app.py
+kg dead                       # dead-code candidates (caveat: not proof)
+kg unresolved                 # per-file unresolved-callee counts
+kg symbols app.py             # one file's symbols, ordered by line
 kg stats                      # index totals
 kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
 kg report                     # 4-section architecture report

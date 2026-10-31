@@ -87,6 +87,22 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Added — M1 query surface (Amendment 5)
+
+- `kg dead` — dead-code CANDIDATES (zero inbound call edges, AMBIGUOUS-name
+  aware) with a permanent first-line caveat: candidates, never proof.
+- `kg unresolved` — per-file unresolved-callee counts, descending; exit 1 on
+  full coverage.
+- `kg symbols <file>` — one file's symbols as `path:line kind qualname`.
+- Resolution fix: `from .x import y` inside a repo-root plain module resolved
+  to ".x" (stray leading dot) and the call was misclassified as dropped
+  external; root-level relative imports now resolve to the sibling module
+  (fixture regression test added).
+- Test-fixture fix: the shared fixture constants lost their indentation to
+  Rust `\`-line continuations, so class bodies collapsed to top-level defs
+  and method resolution was never exercised; fixtures are now raw strings
+  (all 63 tests pass against the semantic fixtures).
+
 ### Changed — M0 re-baseline (Elephant/Goldfish cycle)
 
 - All measurable gates re-run on the post-fix binary (`docs/baselines/

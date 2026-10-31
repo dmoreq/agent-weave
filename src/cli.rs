@@ -58,6 +58,27 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
+    /// Dead-code candidates: indexed symbols with zero inbound call edges.
+    /// Candidates only — dynamic dispatch and entry points are not proven absent.
+    Dead {
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Per-file unresolved-callee counts (where kg could not resolve calls)
+    Unresolved {
+        /// How many files to show (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Symbols of one indexed file, ordered by line
+    Symbols {
+        /// Repo-relative path of the indexed file
+        file: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
     /// Index totals: files, symbols, edges, parse errors, sizes
     Stats {},
     /// Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density

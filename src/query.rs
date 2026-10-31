@@ -14,6 +14,10 @@ use crate::hash::fnv1a64;
 pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
 
+/// Permanent honesty caveat for `kg dead` (Amendment 5): candidates, not proof.
+const DEAD_CAVEAT: &str =
+    "kg: dead-code candidates — dynamic dispatch, entry points, and external callers are not proven absent";
+
 /// One resolved candidate: (path, line, qualname).
 pub type Candidate = (String, i64, String);
 
@@ -226,6 +230,108 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
         })
     })?;
     collect_output(conn, root, rows, limit, "0 impacting files found")
+}
+
+/// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
+/// AMBIGUOUS edge naming the symbol (qualname or bare name). Pointer contract;
+/// the caveat header is unconditional.
+pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput> {
+    let limit = clamp_limit(limit)?;
+    let sql = "SELECT s.qualname, f.path, s.line_start
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE s.kind IN ('function', 'method', 'class')
+           AND s.id NOT IN (
+               SELECT dst_id FROM edges WHERE kind = 'calls' AND dst_id IS NOT NULL)
+           AND s.qualname NOT IN (
+               SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')
+           AND s.name NOT IN (
+               SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')
+         ORDER BY f.path, s.line_start";
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([], |r| {
+        let path: String = r.get(1)?;
+        let line: i64 = r.get(2)?;
+        Ok(Pointer { file: path, line, tag: "" })
+    })?;
+    let mut out = collect_output(conn, root, rows, limit, "0 dead-code candidates found")?;
+    out.header = Some(match out.header.take() {
+        Some(stale) => format!("{DEAD_CAVEAT}\n{stale}"),
+        None => DEAD_CAVEAT.to_string(),
+    });
+    Ok(out)
+}
+
+/// Unresolved-callee report (Amendment 5): files with counts, descending.
+/// Report shape — cap, no staleness; header carries the index total.
+pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    let total: i64 = conn.query_row("SELECT COALESCE(SUM(unresolved), 0) FROM files", [], |r| r.get(0))?;
+    if total == 0 {
+        return Err(KgError::NoResults(
+            "0 unresolved callees (full call-site coverage)".to_string(),
+        ));
+    }
+    let mut stmt = conn.prepare(
+        "SELECT path, unresolved FROM files WHERE unresolved > 0
+         ORDER BY unresolved DESC, path",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let n_files = rows.len();
+    let shown = n_files.min(limit);
+    let mut out = vec![format!("kg: unresolved={total} callees in {n_files} files")];
+    out.extend(
+        rows.into_iter()
+            .take(shown)
+            .map(|(path, n)| format!("{path} unresolved={n}")),
+    );
+    if n_files > shown {
+        out.push(format!("showing {} of {}", shown, n_files));
+        eprintln!("[kg] capped at {} results ({} total)", shown, n_files);
+    }
+    Ok(out)
+}
+
+/// Symbols of one indexed file (Amendment 5): `path:line kind qualname` by
+/// line; single-file staleness header.
+pub fn symbols(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    let rel = file.trim_start_matches("./").to_string();
+    let mut stmt = conn.prepare(
+        "SELECT s.kind, s.qualname, s.line_start
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE f.path = ?1
+         ORDER BY s.line_start",
+    )?;
+    let rows = stmt
+        .query_map([&rel], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if rows.is_empty() {
+        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+    }
+    let mut out = Vec::new();
+    if file_changed(conn, root, &rel) {
+        out.push("kg: 1 of 1 result files changed since build — run kg build".to_string());
+    }
+    let n_symbols = rows.len();
+    let shown = n_symbols.min(limit);
+    out.extend(rows.into_iter().take(shown).map(|(kind, qualname, line)| {
+        format!("{rel}:{line} {kind} {qualname}")
+    }));
+    if n_symbols > shown {
+        out.push(format!("showing {} of {}", shown, n_symbols));
+        eprintln!("[kg] capped at {} results ({} total)", shown, n_symbols);
+    }
+    Ok(out)
 }
 
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by
