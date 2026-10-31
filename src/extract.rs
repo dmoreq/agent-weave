@@ -456,7 +456,7 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
     };
     let target: Option<Vec<String>> = if right.kind() == "call" {
         direct_call_chain(right)
-    } else if right.kind() == "bool_op" {
+    } else if matches!(right.kind(), "boolean_operator" | "bool_op") {
         // `x = a or B(...)`: the last top-level operand that is a direct call.
         let mut cursor = right.walk();
         let operands: Vec<Node<'_>> = right.named_children(&mut cursor).collect();

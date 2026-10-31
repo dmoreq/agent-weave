@@ -135,3 +135,16 @@ fn module_qualified_constructor_resolves() {
     assert!(hit, "mod.K() must resolve: {:?}", resolution.edges);
 }
 
+
+#[test]
+fn or_fallback_construction_types_receiver() {
+    // R1 cycle 2: `x = a or B()` (the fallback-construction idiom) must type
+    // x as B at the RECEIVER level — the B.m edge, not just the ctor edge.
+    let src = "class B:\n    def m(self):\n        return 1\n\ndef go(a):\n    x = a or B()\n    return x.m()\n";
+    let e = edges_for(src);
+    assert!(
+        e.iter()
+            .any(|(k, c, n)| k == "calls" && c == "EXTRACTED" && n.contains("B.m")),
+        "or-idiom receiver typing -> B.m: {e:?}"
+    );
+}
