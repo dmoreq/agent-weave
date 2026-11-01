@@ -113,8 +113,7 @@ rules:
 - Gate G14 (kill-able): recall >= 70% on a frozen 20-query NL-navigation list
   (`docs/baselines/search-gt.jsonl`, frozen BEFORE implementation), FPR
   surfaced alongside with Wilson 95% interval (G-A conventions). Pass
-  command: `python3 tests/scripts/search_recall.py --queries
-  docs/baselines/search-gt.jsonl <kg-binary>`. Fail -> F2 dropped before
+  command: `python3 tests/scripts/search_recall.py --queries docs/baselines/search-gt.jsonl <kg-binary> --kg-root <kg-repo> --vihap-root <vihap-worktree>`. Fail -> F2 dropped before
   release (schema v4 ships without `symbols_fts`).
 
 ### F3 — Skill wrapper hardening (OQ2; CI conformance check, not a kill-able gate) — APPROVED
@@ -167,8 +166,9 @@ rules:
   the proposed 15% by owner decision 2026-11-01: the measured cost is
   clone-row INSERT I/O — attribution in `docs/baselines/g16-clones-2026-11-01.md`).
   Pass command:
-  `cargo test clones_seed` + `hyperfine 'kg build'` before/after
-  comparison. Fail -> F4 dropped before release (schema v4 ships without
+  `cargo test clones_seed` + interleaved before/after build timing (A/B rounds
+  on identical corpora; hyperfine if installed — the executed measurement used
+  a 30-round interleaved python timing loop, see the G16 report). Fail -> F4 dropped before release (schema v4 ships without
   `clone_groups`).
 - Priority: explicitly last; only after G13 and G14 pass.
 

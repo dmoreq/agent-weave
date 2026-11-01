@@ -595,11 +595,24 @@ fn clones_seed_gate() {
     let out = kg(&repo).args(["clones", "--min-lines", "100"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
 
-    // Carry-forward: no-change rebuild keeps the candidates.
+    // Carry-forward: no-change rebuild keeps the candidates (re-count from
+    // the second run's own stdout — detection must hold independently).
     build(&repo);
     let out = kg(&repo).args(["clones", "--limit", "10000"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
-    assert!(detected >= 8, "post-rebuild detection held");
+    let stdout2 = String::from_utf8_lossy(&out.stdout);
+    let pair_lines2: Vec<&str> = stdout2
+        .lines()
+        .filter(|l| l.contains(":") && !l.starts_with("kg:") && !l.starts_with("showing "))
+        .collect();
+    let detected2 = expected_pairs
+        .iter()
+        .filter(|(a, b)| pair_lines2.iter().any(|l| l.contains(a.as_str()) && l.contains(b.as_str())))
+        .count();
+    assert!(
+        detected2 >= 8,
+        "post-rebuild detection {detected2}/10: {stdout2}"
+    );
 }
 
 #[test]

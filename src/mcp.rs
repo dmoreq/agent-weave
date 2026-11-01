@@ -311,7 +311,13 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             out.push(("depth", arg_usize(args, "depth", 1).to_string()));
             out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
         }
-        "impact" | "symbols" => {
+        "impact" => {
+            if let Some(file) = arg_str(args, "file") {
+                out.push(("file", file));
+            }
+            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+        }
+        "symbols" => {
             if let Some(file) = arg_str(args, "file") {
                 out.push(("file", file));
             }

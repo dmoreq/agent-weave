@@ -136,8 +136,8 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
     let _ = fs::remove_file(&path);
     let conn = Connection::open(&path)?;
     conn.execute_batch(include_str!("../schema.sql"))?;
-    // Belt and braces: the schema batch declares user_version = 1; enforce it
-    // via the pragma API so the contract never depends on batch semantics.
+    // The version contract lives here alone: schema.sql declares no PRAGMA,
+    // and this pragma_update stamps the compiled SCHEMA_VERSION.
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(conn)
 }

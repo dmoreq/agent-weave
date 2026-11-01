@@ -64,8 +64,9 @@ fn fixture(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("kg-mcp-{}-{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("utils.py"), "def normalize(text):\n    return text.strip()\n\ndef caller():\n    return normalize('a')\n").unwrap();
-    fs::write(dir.join("app.py"), "from utils import normalize\n\ndef run():\n    return normalize('x')\n").unwrap();
+    let tail = "def tail_block(v):\n    a = v + 1\n    b = v + 2\n    c = v + 3\n    return a + b + c\n";
+    fs::write(dir.join("utils.py"), format!("def normalize(text):\n    return text.strip()\n\ndef caller():\n    return normalize('a')\n{}", tail)).unwrap();
+    fs::write(dir.join("app.py"), format!("from utils import normalize\n\ndef run():\n    return normalize('x')\n{}", tail)).unwrap();
     dir
 }
 
@@ -125,6 +126,33 @@ fn g10_initialize_tools_list_and_parity() {
     let search = rpc(&mut srv, 9, "tools/call", json!({"name": "search", "arguments": {"terms": "normalize"}}));
     assert_eq!(result_text(&search), String::from_utf8_lossy(&cli_search.stdout).into_owned());
 
+    // G10 parity extends to clones (Amendment 12d): the fixture's tail block
+    // is duplicated across both files, so the pair line must be byte-equal.
+    let cli_clones = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root").arg(&repo).args(["clones"])
+        .output().unwrap();
+    assert_eq!(cli_clones.status.code(), Some(0));
+    let clones = rpc(&mut srv, 10, "tools/call", json!({"name": "clones", "arguments": {}}));
+    assert_eq!(result_text(&clones), String::from_utf8_lossy(&cli_clones.stdout).into_owned());
+    assert!(
+        result_text(&clones).contains("app.py:5-9 utils.py:6-10"),
+        "seeded clone pair line present: {}",
+        result_text(&clones)
+    );
+
+    // min_lines above every span: both surfaces fail with the same stderr
+    // text and isError semantics (Amendment 8 error contract).
+    let cli_clones_hi = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root").arg(&repo).args(["clones", "--min-lines", "100"])
+        .output().unwrap();
+    assert_eq!(cli_clones_hi.status.code(), Some(1));
+    let clones_hi = rpc(&mut srv, 11, "tools/call", json!({"name": "clones", "arguments": {"min_lines": 100}}));
+    assert_eq!(clones_hi["result"]["isError"], true);
+    assert_eq!(
+        result_text(&clones_hi).trim_end(),
+        String::from_utf8_lossy(&cli_clones_hi.stderr).trim_end()
+    );
+
     let dead = rpc(&mut srv, 5, "tools/call", json!({"name": "dead", "arguments": {}}));
     assert_eq!(result_text(&dead), String::from_utf8_lossy(&cli_dead.stdout).into_owned());
     assert!(result_text(&dead).starts_with("kg: dead-code candidates —"), "caveat preserved: {}", result_text(&dead));
@@ -136,12 +164,13 @@ fn g10_initialize_tools_list_and_parity() {
     assert_eq!(unknown["error"]["code"], -32602, "unregistered tool rejected");
 
     // Every dispatched tool call journaled with the mcp surface: callers,
-    // symbols (plain), symbols (outline), dead, stats. The unknown tool is
-    // rejected before dispatch and journals nothing; the CLI reference
-    // commands above added their own surface=cli entries.
+    // symbols (plain), symbols (outline), search, clones, clones (min_lines
+    // failure), dead, stats. The unknown tool is rejected before dispatch and
+    // journals nothing; the CLI reference commands above added their own
+    // surface=cli entries.
     let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
     let mcp_lines = log.lines().filter(|l| l.contains("\"surface\":\"mcp\"")).count();
-    assert_eq!(mcp_lines, 6, "{log}");
+    assert_eq!(mcp_lines, 8, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the

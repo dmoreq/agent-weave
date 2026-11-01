@@ -302,7 +302,9 @@ fn signature_of(node: Node<'_>, src: &[u8]) -> String {
 /// Lowercased token split of an identifier path for symbol search
 /// (Amendment 12b): camelCase humps, snake_case underscores, dots and other
 /// separators all become single spaces. `HierarchicalAddressParser.parse`
-/// -> "hierarchical address parser parse".
+/// -> "hierarchical address parser parse". Known limitation (pinned by test):
+/// consecutive-capital runs are not split — `HTTPServer` stays one token —
+/// so acronym-led identifiers match by full prefix only.
 pub fn split_ident(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     let mut prev_lower = false;
