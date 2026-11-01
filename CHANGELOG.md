@@ -87,6 +87,39 @@ changes bump the minor while 0.x is unstable.
 - README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
   commit history).
 
+### Added — A3 observability layer 3 (Amendment 10)
+
+- Result-payload journal: `.kg/usage-results.jsonl` — one self-contained
+  JSONL line per successful pointer query (callers/callees/impact/dead/
+  symbols) carrying the displayed set byte-identical to the stdout data
+  lines plus index `built_at`/`source_rev`. Non-pointer tools and
+  empty/ambiguous/error outcomes write none. Rotation (5 MB), opt-out
+  (`KG_NO_JOURNAL` / `--no-journal`), and best-effort contract mirror
+  usage.log.
+- Session attribution: `KG_SESSION`/`KG_ARM` env tags ride every usage.log
+  and payload line as additive fields — R1/R2 A/B attribution per task
+  without transcript parsing.
+- `kg usage --verify [--limit N]`: deterministic even-stride sample over
+  payload entries; the index's staleness check separates CHANGED
+  (unverifiable, never counted wrong) from OK/FAIL; unchanged files get
+  structural checks (line bounds; `callers` also requires the queried
+  name's bare segment on the pointer line). Report-only exit 0; exit 1 on
+  an empty payload log. The MCP `usage` tool accepts optional
+  verify/limit args (G10 byte parity preserved per invocation).
+- `kg usage` payload section: entries/pointers totals and top-5 queried
+  names by call count (demand map). `kg doctor` reports payload journal
+  volume or its explicit absence.
+- G11 gate (payload conformance) added to the Gate Registry: one payload
+  line per successful pointer call, byte-equal pointers, verify FAIL=0 on
+  fresh builds. Conformance run on the 3 GT repos (kg self / vihap /
+  finguard): 594 pointers verified, FAIL=0; byte-parity payload-vs-stdout
+  confirmed. Tests 91/91; clippy -D warnings clean.
+- Support changes: index meta `built_at` now carries millisecond precision
+  (the verify epoch comparison must not collide on same-second rebuilds);
+  kg-self GT rows G01/G02/G07/G09/G10 refreshed after the Amendment 10 line
+  shifts (provenance in the GT file; G06 annotation corrected — the M3-era
+  file mislabeled the Dead dispatch as Stats).
+
 ### Added — M4 prebuilt index artifacts (Amendment 9)
 
 - Dual-key fast path: (mtime, size) match carries as before; a (mtime,

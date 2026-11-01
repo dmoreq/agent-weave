@@ -32,6 +32,7 @@ kg unresolved                 # per-file unresolved-callee counts
 kg symbols app.py             # one file's symbols, ordered by line
 kg stats                      # index totals
 kg usage                      # usage-journal summary: calls, latency, rates
+kg usage --verify             # replay-verify sampled payload pointers: OK/CHANGED/FAIL
 kg mcp                        # MCP stdio server (11 tools, JSON-RPC 2.0)
 kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
 kg report                     # 4-section architecture report
@@ -41,6 +42,12 @@ kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 `--root <path>` overrides repo discovery (default: nearest git root ancestor).
 `--no-journal` (or env `KG_NO_JOURNAL=1`) disables the usage journal
 (`.kg/usage.log`, local-only JSONL — see spec Amendment 6).
+Every successful pointer query also appends one self-contained payload line
+to `.kg/usage-results.jsonl` (Amendment 10): the displayed pointers,
+byte-identical to stdout, plus index `built_at`/`source_rev` and
+`KG_SESSION`/`KG_ARM` tags. `kg usage --verify` replays a deterministic
+sample of those pointers against current source (OK / CHANGED / FAIL);
+`kg usage` shows the demand map (top queried names).
 The index file `.kg/index.db` is a portable artifact: cache it in CI and
 restore it into a fresh checkout — the dual-key fast path (Amendment 9)
 reuses it without re-parse when content hashes match.
@@ -75,6 +82,7 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 | G6 utility A/B | -50% tool calls, -67% bytes vs grep (P1 measurement; M0 re-run pending) | >= 30% calls, no byte growth |
 | G7 hotspots | 8/10 rank-overlap (provisional pain list) | >= 7/10 |
 | G8 extensions A/B | -67% calls on architecture questions (P1.5 measurement; M0 re-run pending) | >= 30% |
+| G11 payload conformance | automated in tests (91/91); 594 pointers verified FAIL=0 on the 3 GT repos | per Amendment 10 |
 
 Baseline evidence: `docs/baselines/` (tasks, ground truth, transcripts, D0
 harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).

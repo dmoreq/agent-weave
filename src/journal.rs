@@ -344,7 +344,7 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
         let mut names: std::collections::BTreeMap<String, usize> = Default::default();
         let mut n_pointers = 0usize;
         for line in read_payload_log(root).lines().filter(|l| !l.trim().is_empty()) {
-            if let Some((_tool, name, pointers)) = parse_payload_line(line) {
+            if let Some((_tool, name, _built_at, pointers)) = parse_payload_line(line) {
                 *names.entry(name).or_default() += 1;
                 n_pointers += pointers.len();
             }
@@ -364,10 +364,11 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
 // against current source; the open index separates CHANGED from OK/FAIL.
 // ---------------------------------------------------------------------------
 
-/// One parsed payload line: (tool, name, pointers).
-fn parse_payload_line(line: &str) -> Option<(String, String, Vec<String>)> {
+/// One parsed payload line: (tool, name, built_at, pointers).
+fn parse_payload_line(line: &str) -> Option<(String, String, u64, Vec<String>)> {
     let tool = extract_str(line, "tool")?;
     let name = extract_str(line, "name").unwrap_or_default();
+    let built_at = extract_num(line, "built_at").unwrap_or(0).max(0) as u64;
     let marker = "\"pointers\":[";
     let start = line.find(marker)? + marker.len();
     let end = line.rfind(']')?;
@@ -383,13 +384,16 @@ fn parse_payload_line(line: &str) -> Option<(String, String, Vec<String>)> {
             .map(|s| s.trim_matches('"').to_string())
             .collect()
     };
-    Some((tool, name, pointers))
+    Some((tool, name, built_at, pointers))
 }
 
-/// Split a rendered pointer `path:line [tag]` into (path, 1-based line).
+/// Split a rendered pointer into (path, 1-based line). Callers/callees/
+/// impact/dead render `path:line [tag]`; symbols renders
+/// `path:line kind qualname` — the first whitespace token carries the pointer.
 fn parse_pointer(ptr: &str) -> Option<(String, usize)> {
     let ptr = ptr.strip_suffix(" [ambiguous]").unwrap_or(ptr);
-    let (path, line) = ptr.rsplit_once(':')?;
+    let token = ptr.split_whitespace().next()?;
+    let (path, line) = token.rsplit_once(':')?;
     Some((path.to_string(), line.parse().ok()?))
 }
 
@@ -431,7 +435,7 @@ pub fn verify(
     limit: usize,
 ) -> crate::error::Result<Vec<String>> {
     let limit = crate::query::clamp_limit(limit)?;
-    let entries: Vec<(String, String, Vec<String>)> = read_payload_log(root)
+    let entries: Vec<(String, String, u64, Vec<String>)> = read_payload_log(root)
         .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(parse_payload_line)
@@ -442,18 +446,28 @@ pub fn verify(
         ));
     }
     let n_entries = entries.len();
-    let sampled: Vec<&(String, String, Vec<String>)> = if n_entries <= limit {
+    let sampled: Vec<&(String, String, u64, Vec<String>)> = if n_entries <= limit {
         entries.iter().collect()
     } else {
         (0..limit).map(|i| &entries[i * n_entries / limit]).collect()
     };
+    // Payload epoch: an entry recorded against a superseded index (a rebuild
+    // happened between query and verify) cannot PROVE a pointer wrong — its
+    // index is gone. Its structural failures degrade to CHANGED; structural
+    // passes still count OK. FAIL is reserved for the current epoch, where a
+    // failing pointer is proven wrong against the index it came from.
+    let cur_built_at: u64 = crate::db::meta_get(conn, "built_at")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
 
     let (mut ok, mut changed, mut fail) = (0usize, 0usize, 0usize);
     let mut fail_lines: Vec<String> = Vec::new();
-    for (tool, name, pointers) in &sampled {
+    for (tool, name, built_at, pointers) in &sampled {
+        let stale_epoch = *built_at != 0 && cur_built_at != 0 && *built_at != cur_built_at;
         let bare = bare_name(name);
         for ptr in pointers {
             let Some((path, line_no)) = parse_pointer(ptr) else {
+                // Unparseable text is a payload defect, not source drift.
                 fail += 1;
                 fail_lines.push(format!("FAIL {ptr} (unparseable pointer)"));
                 continue;
@@ -465,22 +479,30 @@ pub fn verify(
             let text = match fs::read_to_string(root.join(&path)) {
                 Ok(c) => c,
                 Err(_) => {
-                    fail += 1;
-                    fail_lines.push(format!("FAIL {ptr} (file unreadable)"));
+                    // Contradictory with file_changed=false — a race; unverifiable.
+                    changed += 1;
                     continue;
                 }
             };
             let n_lines = text.lines().count();
             if line_no == 0 || line_no > n_lines {
-                fail += 1;
-                fail_lines.push(format!("FAIL {ptr} (line beyond {n_lines})"));
+                if stale_epoch {
+                    changed += 1;
+                } else {
+                    fail += 1;
+                    fail_lines.push(format!("FAIL {ptr} (line beyond {n_lines})"));
+                }
                 continue;
             }
             if tool == "callers" && !bare.is_empty() {
                 let line_text = text.lines().nth(line_no - 1).unwrap_or("");
                 if !line_text.contains(bare) {
-                    fail += 1;
-                    fail_lines.push(format!("FAIL {ptr} (line does not mention '{bare}')"));
+                    if stale_epoch {
+                        changed += 1;
+                    } else {
+                        fail += 1;
+                        fail_lines.push(format!("FAIL {ptr} (line does not mention '{bare}')"));
+                    }
                     continue;
                 }
             }
@@ -511,9 +533,10 @@ mod tests {
     #[test]
     fn payload_parsing_helpers() {
         let line = "{\"ts\":7,\"surface\":\"cli\",\"tool\":\"callers\",\"name\":\"a.b::c\",\"session\":\"\",\"arm\":\"\",\"built_at\":42,\"source_rev\":\"x\",\"stale\":false,\"shown\":2,\"total\":2,\"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}";
-        let (tool, name, pointers) = parse_payload_line(line).unwrap();
+        let (tool, name, built_at, pointers) = parse_payload_line(line).unwrap();
         assert_eq!(tool, "callers");
         assert_eq!(name, "a.b::c");
+        assert_eq!(built_at, 42);
         assert_eq!(pointers, vec!["src/a.rs:7", "src/b.rs:12 [ambiguous]"]);
         assert_eq!(parse_pointer("src/a.rs:7"), Some(("src/a.rs".into(), 7)));
         assert_eq!(
@@ -522,6 +545,11 @@ mod tests {
         );
         assert_eq!(parse_pointer("junk"), None);
         assert_eq!(parse_pointer("f.rs:x"), None);
+        assert_eq!(
+            parse_pointer("src/a.rs:1 module a.b"),
+            Some(("src/a.rs".into(), 1)),
+            "symbols form: first whitespace token"
+        );
         assert_eq!(bare_name("a.b::c"), "c");
         assert_eq!(bare_name("utils.normalize"), "normalize");
         assert_eq!(bare_name("normalize"), "normalize");

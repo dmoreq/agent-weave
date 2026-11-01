@@ -710,6 +710,28 @@ fn usage_verify_stride_sample_and_empty_payload() {
 }
 
 #[test]
+fn usage_verify_epoch_rebuild_is_changed_not_fail() {
+    // A payload entry recorded against a superseded index (edit + rebuild
+    // between query and verify) cannot prove a pointer wrong: the untouched
+    // file's pointer still verifies OK, the edited file's is CHANGED, and no
+    // pointer becomes FAIL.
+    let repo = fixture("verify-epoch");
+    build(&repo);
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    write(&repo, "app.py", "from utils import normalize\n\ndef run():\n    return normalize('z')\n");
+    build(&repo);
+    let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("ok=1 changed=1 fail=0"), "old-epoch pointers: {stdout}");
+    assert!(!stdout.contains("FAIL"), "no structural failures across epochs: {stdout}");
+}
+
+#[test]
 fn usage_summary_payload_section_and_doctor_health() {
     // Amendment 10: usage summary carries the demand map over the payload log;
     // doctor reports payload-journal volume (or its absence).

@@ -212,9 +212,12 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     crate::db::set_meta(
         &conn,
         "built_at",
+        // Millisecond precision: the payload journal (Amendment 10c) compares
+        // built_at epochs to tell superseded payload entries apart — sub-second
+        // builds must not collide on the same epoch value.
         &std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().to_string())
+            .map(|d| d.as_millis().to_string())
             .unwrap_or_else(|_| "0".into()),
     )?;
     crate::db::set_meta(&conn, "source_rev", &crate::db::source_rev(&root))?;
