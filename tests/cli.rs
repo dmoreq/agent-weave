@@ -710,6 +710,42 @@ fn usage_verify_stride_sample_and_empty_payload() {
 }
 
 #[test]
+fn usage_summary_payload_section_and_doctor_health() {
+    // Amendment 10: usage summary carries the demand map over the payload log;
+    // doctor reports payload-journal volume (or its absence).
+    let repo = fixture("usage-payload");
+    build(&repo);
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    let out = kg(&repo).args(["usage"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("payload: 1 entries, 2 pointers"), "{stdout}");
+    assert!(stdout.contains("normalize: 1 calls"), "{stdout}");
+
+    let out = kg(&repo).args(["doctor"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("payload journal: 1 lines, "), "{stdout}");
+
+    // No pointer queries yet -> absent line, and no payload section in usage.
+    let repo = fixture("usage-payload-absent");
+    build(&repo);
+    let out = kg(&repo).args(["usage"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("payload:"), "no section without payload: {stdout}");
+    let out = kg(&repo).args(["doctor"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("payload journal: absent"),
+        "doctor states absence: {stdout}"
+    );
+}
+
+#[test]
 fn g5_no_child_processes_survive() {
     // Invariant 2: zero long-lived children after each subcommand. Run a build
     // tagged with a unique token, then assert nothing matching the token is

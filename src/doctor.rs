@@ -60,6 +60,15 @@ pub fn report(root: &Path) -> Result<()> {
 
     let size = std::fs::metadata(db::db_path(root)).map(|m| m.len()).unwrap_or(0);
     println!("  db size: {size} bytes (target < 52428800)");
+
+    // Payload journal health (Amendment 10): volume only — contents are
+    // usage data, not index integrity.
+    let (plines, pbytes) = crate::journal::payload_stats(root);
+    if plines > 0 {
+        println!("  payload journal: {plines} lines, {pbytes} bytes");
+    } else {
+        println!("  payload journal: absent (no pointer queries journaled yet)");
+    }
     Ok(())
 }
 

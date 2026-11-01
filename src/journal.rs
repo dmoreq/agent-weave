@@ -337,6 +337,25 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
             p(0.95),
         ));
     }
+    // Amendment 10 payload section: demand map over the result-payload journal
+    // (absent log just omits the section — usage stays valid on usage.log alone).
+    let (plines, _bytes) = payload_stats(root);
+    if plines > 0 {
+        let mut names: std::collections::BTreeMap<String, usize> = Default::default();
+        let mut n_pointers = 0usize;
+        for line in read_payload_log(root).lines().filter(|l| !l.trim().is_empty()) {
+            if let Some((_tool, name, pointers)) = parse_payload_line(line) {
+                *names.entry(name).or_default() += 1;
+                n_pointers += pointers.len();
+            }
+        }
+        out.push(format!("  payload: {plines} entries, {n_pointers} pointers"));
+        let mut top: Vec<(&String, &usize)> = names.iter().collect();
+        top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        for (name, calls) in top.into_iter().take(5) {
+            out.push(format!("    {name}: {calls} calls"));
+        }
+    }
     Ok(out)
 }
 
@@ -379,6 +398,28 @@ fn bare_name(name: &str) -> &str {
     name.rsplit(['.', ':']).next().unwrap_or(name)
 }
 
+/// Both payload generations concatenated (rotation-aware readers).
+fn read_payload_log(root: &Path) -> String {
+    let mut content = String::new();
+    for gen in [".1", ""] {
+        let mut path = payload_log_path(root).into_os_string();
+        if !gen.is_empty() {
+            path.push(gen);
+        }
+        if let Ok(c) = fs::read_to_string(PathBuf::from(path)) {
+            content.push_str(&c);
+        }
+    }
+    content
+}
+
+/// Payload log health (doctor): (lines, bytes) across both generations.
+pub fn payload_stats(root: &Path) -> (usize, u64) {
+    let content = read_payload_log(root);
+    let lines = content.lines().filter(|l| !l.trim().is_empty()).count();
+    (lines, content.len() as u64)
+}
+
 /// Verify sampled payload pointers (Amendment 10c). Deterministic even-stride
 /// sample over payload entries; a file whose content differs from the index
 /// (`query::file_changed`) is CHANGED — unverifiable, never counted wrong.
@@ -390,17 +431,7 @@ pub fn verify(
     limit: usize,
 ) -> crate::error::Result<Vec<String>> {
     let limit = crate::query::clamp_limit(limit)?;
-    let mut content = String::new();
-    for gen in [".1", ""] {
-        let mut path = payload_log_path(root).into_os_string();
-        if !gen.is_empty() {
-            path.push(gen);
-        }
-        if let Ok(c) = fs::read_to_string(PathBuf::from(path)) {
-            content.push_str(&c);
-        }
-    }
-    let entries: Vec<(String, String, Vec<String>)> = content
+    let entries: Vec<(String, String, Vec<String>)> = read_payload_log(root)
         .lines()
         .filter(|l| !l.trim().is_empty())
         .filter_map(parse_payload_line)
