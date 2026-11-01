@@ -99,6 +99,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     let mut extractions: Vec<crate::extract::FileExtraction> = Vec::with_capacity(fresh.len());
     let mut fresh_error_files = 0usize;
     let mut extract_secs_sum = 0f64;
+    let mut fresh_shingles: Vec<Vec<crate::clones::Shingle>> = Vec::with_capacity(fresh.len());
     let workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
@@ -108,7 +109,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
         let mut handles = Vec::new();
         for (base, chunk) in fresh.chunks(chunk_len).enumerate() {
             let chunk = chunk.to_vec();
-            handles.push(scope.spawn(move || -> Result<(Vec<(crate::db::FilesRow, crate::extract::FileExtraction)>, f64)> {
+            handles.push(scope.spawn(move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
                 let mut units = Vec::with_capacity(chunk.len());
                 let mut secs = 0f64;
                 for (local, f) in chunk.into_iter().enumerate() {
@@ -125,6 +126,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
                     let cyclomatic =
                         crate::parse::decision_nodes(parsed.tree.root_node(), crate::parse::decision_kinds(lang))
                             as i64;
+                    let shingles = crate::clones::shingles(&bytes);
                     units.push((
                         crate::db::FilesRow {
                             rel: f.rel,
@@ -138,6 +140,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
                             cyclomatic,
                         },
                         fx,
+                        shingles,
                     ));
                 }
                 Ok((units, secs))
@@ -148,12 +151,13 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
                 .join()
                 .map_err(|_| KgError::Internal("parse worker panicked".to_string()))??;
             extract_secs_sum += secs;
-            for (row, fx) in units {
+            for (row, fx, shingles) in units {
                 if row.error_nodes > 0 {
                     fresh_error_files += 1;
                 }
                 fresh_rows.push(row);
                 extractions.push(fx);
+                fresh_shingles.push(shingles);
             }
         }
         Ok(())
@@ -260,6 +264,16 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     }
     crate::db::insert_edge_rows(&conn, &edge_rows)?;
     crate::db::populate_symbols_fts(&conn)?;
+    // Clone-candidate shingles (Amendment 12d): fresh-file windows keyed by
+    // the just-inserted file ids; carried files' rows were copied above.
+    if !fresh_shingles.is_empty() {
+        let pairs: Vec<crate::clones::FileShingles> = fresh_file_ids
+            .iter()
+            .zip(&fresh_shingles)
+            .map(|(id, sh)| (*id, sh.clone()))
+            .collect();
+        crate::db::insert_clone_groups(&conn, &pairs)?;
+    }
 
     // Meta manifest; counts are authoritative SQL totals over the whole index.
     crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;

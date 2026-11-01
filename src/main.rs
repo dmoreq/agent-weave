@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod build;
+mod clones;
 mod cli;
 mod db;
 mod doctor;
@@ -75,6 +76,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Unresolved { .. } => "unresolved",
         cli::Cmd::Symbols { .. } => "symbols",
         cli::Cmd::Search { .. } => "search",
+        cli::Cmd::Clones { .. } => "clones",
         cli::Cmd::Stats {} => "stats",
         cli::Cmd::Hotspots { .. } => "hotspots",
         cli::Cmd::Report {} => "report",
@@ -113,6 +115,12 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         cli::Cmd::Search { terms, limit } => {
             vec![
                 ("terms", terms.clone()),
+                ("limit", limit.to_string()),
+            ]
+        }
+        cli::Cmd::Clones { min_lines, limit } => {
+            vec![
+                ("min_lines", min_lines.to_string()),
                 ("limit", limit.to_string()),
             ]
         }
@@ -224,6 +232,14 @@ fn run(cli: cli::Cli) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             for line in query::search(&conn, &root, &terms, limit)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Clones { min_lines, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::clones(&conn, &root, min_lines, limit)? {
                 println!("{line}");
             }
             Ok(())

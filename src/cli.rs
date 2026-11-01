@@ -94,6 +94,15 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
+    /// Duplicate-block candidates: normalized 5-line-window shingle matches
+    Clones {
+        /// Minimum duplicated-block lines per side (floor: the 5-line build window)
+        #[arg(long, default_value_t = 5)]
+        min_lines: usize,
+        /// Maximum pair lines shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
     /// Index totals: files, symbols, edges, parse errors, sizes
     Stats {},
     /// Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density

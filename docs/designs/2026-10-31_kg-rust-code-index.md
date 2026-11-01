@@ -41,7 +41,7 @@ Agent sessions navigate code by grep/read loops. On large repos this costs many 
 | G13 | Amendment 12 | outline utility: `kg symbols --outline` A/B on T1-T5, >= 30% tool-call reduction, no correctness loss | D0 harness (`docs/baselines/harness/`): `count.py` + `check.py` over the `transcripts/kgoutlinearm/` arm | feature dropped; schema v4 ships without `symbols.signature` |
 | G14 | Amendment 12 | symbol-search recall on 20 frozen NL queries (`docs/baselines/search-gt.jsonl`) | `python3 tests/scripts/search_recall.py --queries docs/baselines/search-gt.jsonl <kg-binary>` (recall >= 70%, FPR + Wilson 95% reported) | feature dropped; schema v4 ships without `symbols_fts` |
 | G15 | Amendment 12 | skill-contract drift (agent-skills repo) | `KG_BIN=<kg> python3 tests/skill_contract_drift.py` (agent-skills; skips when KG_BIN unset) | CI conformance check — fix skill text (not a product kill) |
-| G16 | Amendment 12 | clone detection on 10 seeded pairs + build overhead | `cargo test clones_seed` (>= 8/10 pairs, <= 20% spurious) + `hyperfine 'kg build'` before/after (<= 15% wall) | feature dropped; schema v4 ships without `clone_groups` |
+| G16 | Amendment 12 | clone detection on 10 seeded pairs + build overhead | `cargo test clones_seed` (>= 8/10 pairs, <= 20% spurious) + interleaved before/after build timing (<= 25% wall; bar amended from the proposed 15% by owner decision 2026-11-01 after attribution showed the cost is clone-row INSERT I/O, linear in LOC — `docs/baselines/g16-clones-2026-11-01.md`) | feature dropped; schema v4 ships without `clone_groups` |
 
 ### Per-Phase Independent Review Protocol (normative)
 

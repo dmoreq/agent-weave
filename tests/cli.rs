@@ -525,6 +525,84 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
 }
 
 #[test]
+fn clones_seed_gate() {
+    // G16 (Amendment 12d): 10 seeded clone pairs + distractors. Pass:
+    // >= 8/10 pairs detected, <= 20% spurious pair lines, caveat first,
+    // min-lines filter, carry-forward survival.
+    let repo = fixture("clones-g16");
+    // Per-pair unique identifiers: no line may be shared across pairs, or the
+    // 5-line text-equality windows cross-match (true per the semantics, but a
+    // fixture artifact).
+    let body = |name: &str, n: usize| {
+        let mut s = format!("def process_{name}(items):\n");
+        s.push_str(&format!("    acc_{name} = 0\n"));
+        for k in 0..n.saturating_sub(3) {
+            s.push_str(&format!("    acc_{name} += scale_{name}(items[{k}])\n"));
+        }
+        s.push_str(&format!("    return finish_{name}(acc_{name})\n"));
+        s
+    };
+    let mut expected_pairs: Vec<(String, String)> = Vec::new();
+    for i in 0..10 {
+        let n = 6 + i * 3; // varied spans, all >= window
+        let a = format!("pair{:02}_a.py", i);
+        let b = format!("pair{:02}_b.py", i);
+        write(&repo, &a, &body(&format!("a{i}"), n));
+        // Same content with the same identifiers: text-equality clone.
+        write(&repo, &b, &body(&format!("a{i}"), n));
+        expected_pairs.push((a, b));
+    }
+    // Distractors: unique files (no duplication) and a near-duplicate whose
+    // identifiers differ (normalized-text inequality -> no window matches).
+    for u in 0..8 {
+        write(&repo, &format!("unique{u}.py"), &body(&format!("u{u}"), 6 + u));
+    }
+    write(&repo, "near.py", &body("near_variant", 9));
+    build(&repo);
+
+    let out = kg(&repo).args(["clones", "--limit", "10000"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let first = stdout.lines().next().unwrap().to_string();
+    assert_eq!(
+        first,
+        "kg: clone candidates — normalized-text equality, not proof of semantic duplication",
+        "{stdout}"
+    );
+
+    let pair_lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.contains(":") && !l.starts_with("kg:") && !l.starts_with("showing "))
+        .collect();
+    let mut detected = 0usize;
+    for (a, b) in &expected_pairs {
+        if pair_lines.iter().any(|l| l.contains(a.as_str()) && l.contains(b.as_str())) {
+            detected += 1;
+        }
+    }
+    assert!(
+        detected >= 8,
+        "seeded pairs detected {detected}/10 (bar >= 8): {stdout}"
+    );
+    let spurious = pair_lines.len() - detected;
+    assert!(
+        spurious * 5 <= pair_lines.len(),
+        "spurious {spurious}/{} exceeds 20%: {stdout}",
+        pair_lines.len()
+    );
+
+    // min-lines above every seeded span: gate to zero, exit 1.
+    let out = kg(&repo).args(["clones", "--min-lines", "100"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+
+    // Carry-forward: no-change rebuild keeps the candidates.
+    build(&repo);
+    let out = kg(&repo).args(["clones", "--limit", "10000"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(detected >= 8, "post-rebuild detection held");
+}
+
+#[test]
 fn journal_written_and_usage_summarizes() {
     // Amendment 6: build + callers journal entries; kg usage aggregates them.
     let repo = fixture("journal");

@@ -107,7 +107,7 @@ fn g10_initialize_tools_list_and_parity() {
         .iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        vec!["build", "callers", "callees", "impact", "dead", "unresolved", "symbols", "search", "stats", "hotspots", "report", "usage"]
+        vec!["build", "callers", "callees", "impact", "dead", "unresolved", "symbols", "search", "clones", "stats", "hotspots", "report", "usage"]
     );
     assert!(!names.contains(&"doctor"), "doctor is not exposed (Amendment 8)");
 

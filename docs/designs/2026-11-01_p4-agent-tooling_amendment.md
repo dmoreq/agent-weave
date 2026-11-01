@@ -163,7 +163,10 @@ rules:
   structural checks are undefined for pairs.
 - Gate G16 (kill-able): seeded-corpus precision — inject 10 known clone
   pairs into the fixture tree; require >= 8/10 detected with <= 20% spurious
-  groups; build-time overhead <= 15% wall on G1's corpus. Pass command:
+  groups; build-time overhead <= 25% wall on G1's corpus (bar amended from
+  the proposed 15% by owner decision 2026-11-01: the measured cost is
+  clone-row INSERT I/O — attribution in `docs/baselines/g16-clones-2026-11-01.md`).
+  Pass command:
   `cargo test clones_seed` + `hyperfine 'kg build'` before/after
   comparison. Fail -> F4 dropped before release (schema v4 ships without
   `clone_groups`).

@@ -51,4 +51,14 @@ CREATE INDEX symbols_qualname ON symbols(qualname);
 -- tokens; repopulated by one pass from symbols at the end of every build
 -- (the build replaces the whole DB, so no incremental maintenance exists).
 CREATE VIRTUAL TABLE symbols_fts USING fts5(text);
+-- Clone candidates (Amendment 12d): normalized 5-line-window FNV-1a shingles
+-- computed during the build parse phase for fresh files and carried forward
+-- with the fast path; grouping/pairing happens at query time.
+CREATE TABLE clone_groups(
+    shingle_hash INTEGER NOT NULL,
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    line_start INTEGER NOT NULL,
+    line_end INTEGER NOT NULL
+);
+CREATE INDEX clone_groups_hash ON clone_groups(shingle_hash, file_id, line_start);
 CREATE INDEX symbols_name ON symbols(name);

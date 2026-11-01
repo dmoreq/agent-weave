@@ -344,7 +344,10 @@ pub fn carry_forward_unchanged(
          SELECT id, src_id, dst_id, dst_name, kind, confidence, site_line
          FROM olddb.edges
          WHERE src_id IN (SELECT id FROM symbols)
-           AND (dst_id IS NULL OR dst_id IN (SELECT id FROM symbols));",
+           AND (dst_id IS NULL OR dst_id IN (SELECT id FROM symbols));
+         INSERT INTO clone_groups(shingle_hash, file_id, line_start, line_end)
+         SELECT shingle_hash, file_id, line_start, line_end
+         FROM olddb.clone_groups WHERE file_id IN (SELECT id FROM files);",
     )?;
     Ok(reused)
 }
@@ -424,6 +427,29 @@ pub struct EdgeRow {
     pub kind: &'static str,
     pub confidence: &'static str,
     pub site_line: usize,
+}
+
+pub fn insert_clone_groups(
+    conn: &Connection,
+    per_file: &[crate::clones::FileShingles],
+) -> Result<()> {
+    // Raw bind/execute loop (no per-row params! allocation): this is the
+    // highest-row insert in the build and the per-row overhead showed up as
+    // build-wall overhead in the G16 gate measurement (Amendment 12d).
+    let mut stmt = conn.prepare(
+        "INSERT INTO clone_groups(shingle_hash, file_id, line_start, line_end)
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for (file_id, shingles) in per_file {
+        for (line_start, line_end, hash) in shingles {
+            stmt.raw_bind_parameter(1, hash)?;
+            stmt.raw_bind_parameter(2, file_id)?;
+            stmt.raw_bind_parameter(3, line_start)?;
+            stmt.raw_bind_parameter(4, line_end)?;
+            stmt.raw_execute()?;
+        }
+    }
+    Ok(())
 }
 
 pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {

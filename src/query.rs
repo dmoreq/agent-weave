@@ -18,6 +18,10 @@ pub const MAX_LIMIT: usize = 10_000;
 const DEAD_CAVEAT: &str =
     "kg: dead-code candidates — dynamic dispatch, entry points, and external callers are not proven absent";
 
+/// Permanent honesty caveat for `kg clones` (Amendment 12d): candidates, not proof.
+const CLONES_CAVEAT: &str =
+    "kg: clone candidates — normalized-text equality, not proof of semantic duplication";
+
 /// One resolved candidate: (path, line, qualname).
 pub type Candidate = (String, i64, String);
 
@@ -438,6 +442,122 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
         eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
     }
     Ok(lines)
+}
+
+/// Clone candidates (Amendment 12d): merge adjacent matching shingle windows
+/// per file, pair the merged regions, filter by `min_lines`, emit
+/// `pathA:startA-endA pathB:startB-endB` under the standard cap contract.
+/// Caveat line always first — candidates, never proof. NOT payload-journaled
+/// (Amendment 12 deviation: pair lines are not single pointers, so the
+/// `usage --verify` structural checks do not apply).
+pub fn clones(conn: &Connection, root: &Path, min_lines: usize, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    let min_lines = min_lines.max(crate::clones::WINDOW);
+    let mut stmt = conn.prepare(
+        "SELECT cg.shingle_hash, f.path, cg.line_start, cg.line_end
+         FROM clone_groups cg JOIN files f ON f.id = cg.file_id
+         ORDER BY cg.shingle_hash, f.path, cg.line_start",
+    )?;
+    let mut groups: std::collections::BTreeMap<i64, Vec<(String, i64, i64)>> = Default::default();
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })?;
+    for r in rows {
+        let (h, path, s, e) = r?;
+        groups.entry(h).or_default().push((path, s, e));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
+    for regions in groups.values() {
+        // Merge overlapping / near-adjacent windows (gap < window) per file:
+        // one long clone produces many overlapping windows, one region.
+        let mut merged: Vec<(String, i64, i64)> = Vec::new();
+        for (path, s, e) in regions {
+            if let Some(last) = merged.last_mut() {
+                if last.0 == *path && *s <= last.2 + 4 {
+                    last.2 = (*e).max(last.2);
+                    continue;
+                }
+            }
+            merged.push((path.clone(), *s, *e));
+        }
+        if merged.len() < 2 {
+            continue;
+        }
+        for i in 0..merged.len() {
+            for j in (i + 1)..merged.len() {
+                let (pa, sa, ea) = &merged[i];
+                let (pb, sb, eb) = &merged[j];
+                if (*ea - *sa + 1) < min_lines as i64 || (*eb - *sb + 1) < min_lines as i64 {
+                    continue;
+                }
+                let (fa, sta, ena, fb, stb, enb) = if (pa.as_str(), *sa, *ea)
+                    <= (pb.as_str(), *sb, *eb)
+                {
+                    (pa, *sa, *ea, pb, *sb, *eb)
+                } else {
+                    (pb, *sb, *eb, pa, *sa, *ea)
+                };
+                let key = (fa.clone(), sta, ena, fb.clone(), stb, enb);
+                if seen.insert(key) {
+                    pairs.push((fa.clone(), sta, ena, fb.clone(), stb, enb));
+                }
+            }
+        }
+    }
+    // Post-merge: windows of one long clone live in different hash groups,
+    // so the same file pair re-emits per window. Merge same-file-pair rows
+    // whose spans overlap on BOTH sides into one region pair.
+    pairs.sort();
+    let mut merged_pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
+    for (fa, sa, ea, fb, sb, eb) in pairs {
+        if let Some(last) = merged_pairs.last_mut() {
+            if last.0 == fa && last.3 == fb && sa <= last.2 && sb <= last.5 {
+                last.2 = last.2.max(ea);
+                last.5 = last.5.max(eb);
+                continue;
+            }
+        }
+        merged_pairs.push((fa, sa, ea, fb, sb, eb));
+    }
+    let pairs = merged_pairs;
+    if pairs.is_empty() {
+        return Err(KgError::NoResults("0 clone candidates found".to_string()));
+    }
+    let shown = pairs.len().min(limit);
+    let displayed = &pairs[..shown];
+    let files: std::collections::BTreeSet<&String> = displayed
+        .iter()
+        .flat_map(|(a, _, _, b, _, _)| [a, b])
+        .collect();
+    let n_files = files.len();
+    let mut changed = 0usize;
+    for f in &files {
+        if file_changed(conn, root, f) {
+            changed += 1;
+        }
+    }
+    let stale = changed > 0;
+    crate::journal::record_result(shown, shown, pairs.len(), stale, 0);
+    let mut out = vec![CLONES_CAVEAT.to_string()];
+    if stale {
+        out.push(format!(
+            "kg: {changed} of {n_files} result files changed since build — run kg build"
+        ));
+    }
+    for (pa, sa, ea, pb, sb, eb) in displayed {
+        out.push(format!("{pa}:{sa}-{ea} {pb}:{sb}-{eb}"));
+    }
+    if pairs.len() > shown {
+        out.push(format!("showing {} of {}", shown, pairs.len()));
+        eprintln!("[kg] capped at {} results ({} total)", shown, pairs.len());
+    }
+    Ok(out)
 }
 
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by

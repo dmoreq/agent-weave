@@ -45,6 +45,9 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "outline": {"type": "boolean"}, "limit": limit}), &["file"])},
         {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms",
          "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "limit": limit}), &["terms"])},
+        {"name": "clones", "description": "Duplicate-block candidates: merged 5-line shingle windows, paired",
+         "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "limit": limit}), &[])},
+
         {"name": "stats", "description": "Index totals: files, symbols, edges, parse errors, sizes",
          "inputSchema": schema_obj(json!({}), &[])},
         {"name": "hotspots", "description": "Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density",
@@ -240,6 +243,20 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
+        "clones" => {
+            let conn = crate::db::open_for_query(root)?;
+            let min_lines = args
+                .get("min_lines")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(5);
+            Ok(join_lines(&crate::query::clones(
+                &conn,
+                root,
+                min_lines,
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
+        }
         "stats" => Ok(crate::insights::stats(&crate::db::open_for_query(root)?, root)?),
         "hotspots" => Ok(join_lines(&crate::insights::hotspots(&crate::db::open_for_query(root)?, root, arg_usize(args, "limit", 10))?)),
         "report" => Ok(join_lines(&crate::insights::report(&crate::db::open_for_query(root)?, root)?)),
@@ -309,6 +326,17 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(terms) = arg_str(args, "terms") {
                 out.push(("terms", terms));
             }
+            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+        }
+        "clones" => {
+            out.push((
+                "min_lines",
+                args.get("min_lines")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(5)
+                    .to_string(),
+            ));
             out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
         }
         "usage" => {

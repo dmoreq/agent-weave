@@ -53,6 +53,23 @@ changes bump the minor while 0.x is unstable.
   (pooled 24/28, Wilson 95% [0.685, 0.943]) —
   `docs/baselines/g14-search-2026-11-01.md`.
 
+### Added — `kg clones` (Amendment 12d, F4)
+
+- New `kg clones [--min-lines N]` (default 5): duplicate-block candidates —
+  normalized 5-line-window FNV-1a shingles computed during the build parse
+  phase (workers already hold the bytes — no extra reads), carried forward
+  with the fast path; adjacent matching windows merged per file at query
+  time; pair lines `pathA:startA-endA pathB:startB-endB` under the standard
+  cap/staleness contract. Mandatory caveat first line: candidates, never
+  proof. NOT payload-journaled (Amendment 12 deviation: pair lines are not
+  single pointers, `usage --verify` structural checks do not apply).
+- Schema v4 (same bump as F1/F2): `clone_groups` + `clone_groups_hash`
+  index. No new dependencies.
+- G16 PASS: 10/10 seeded pairs, 0 spurious (bar >= 8/10, <= 20%); build
+  overhead +23.2% interleaved-measured — owner amended the proposed 15% bar
+  to 25% with INSERT-I/O attribution on record
+  (`docs/baselines/g16-clones-2026-11-01.md`).
+
 ### Changed — performance ceiling pass (Amendment 11, G12)
 
 Four changes, all measured on a 2,025-file / 7.9 MB synthetic Python corpus
