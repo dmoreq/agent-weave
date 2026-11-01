@@ -1,17 +1,28 @@
 # kg — local code knowledge index
 
-Status: ALL PHASES COMPLETE — P0/P1/P1.5/P2/P2.5 done, P3 skipped (trigger not met), P3 ACTIVATED as M3 per owner decision (MCP stdio server). Gates G1-G8 pass, G2 on Python + TS/TSX + Rust self-index.
-Spec (canonical, in-repo, v1.1 + Amendments 1-3): [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md).
+[![CI](https://github.com/quy-doan/kg/actions/workflows/ci.yml/badge.svg)](https://github.com/quy-doan/kg/actions/workflows/ci.yml)
 
 kg indexes a repository's symbols and call/inheritance edges into a local
-SQLite DB and answers three navigation questions:
+SQLite DB and answers navigation questions a code agent asks dozens of times
+per session:
 
 - **who calls this** — `kg callers <symbol>`
-- **what does this call** — `kg callees <symbol>` (`--depth N` for the transitive closure)
-- **what is impacted by this file** — `kg impact <file>` (files that call into `<file>`)
+- **what does this call** — `kg callees <symbol>` (`--depth N` transitive closure)
+- **what is impacted by this file** — `kg impact <file>`
+- **find a symbol by name** — `kg search <terms>` (BM25 over identifier tokens)
+- **file structure** — `kg symbols <file> --outline` (one-line signatures)
 
-Consultative only: no hooks, no prompts, no daemon, no network, no writes
-outside `.kg/`. One static binary, five pinned dependencies, zero unsafe Rust.
+Consultative only: no hooks, no daemon, no network, no writes outside `.kg/`.
+One static binary, five pinned dependencies, zero unsafe Rust.
+
+Measured results (see [docs/EVALUATION.md](docs/EVALUATION.md) for methodology,
+reproduction commands, and threats to validity):
+
+| question | measured |
+|----------|----------|
+| Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall + precision 100% on 3 frozen GT sets |
+| Is it fast enough for an agent loop? | queries 5-10 ms end-to-end at any index size; builds 0.1-0.5 s on 25-600-file repos |
+| Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (30 instrumented agent runs) |
 
 ## Install
 
@@ -27,13 +38,15 @@ kg build --force              # re-extract everything (skip the fast path)
 kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg impact app.py              # files that call into app.py
+kg search parser fragment     # BM25 symbol search over split identifier tokens
 kg dead                       # dead-code candidates (caveat: not proof)
 kg unresolved                 # per-file unresolved-callee counts
 kg symbols app.py             # one file's symbols, ordered by line
+kg symbols app.py --outline   # + one-line signatures (no bodies)
 kg stats                      # index totals
 kg usage                      # usage-journal summary: calls, latency, rates
 kg usage --verify             # replay-verify sampled payload pointers: OK/CHANGED/FAIL
-kg mcp                        # MCP stdio server (11 tools, JSON-RPC 2.0)
+kg mcp                        # MCP stdio server, JSON-RPC 2.0
 kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
 kg report                     # 4-section architecture report
 kg doctor [--invalidate]      # integrity, versions, staleness, orphans
@@ -41,19 +54,27 @@ kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 
 `--root <path>` overrides repo discovery (default: nearest git root ancestor).
 `--no-journal` (or env `KG_NO_JOURNAL=1`) disables the usage journal
-(`.kg/usage.log`, local-only JSONL — see spec Amendment 6).
-Every successful pointer query also appends one self-contained payload line
-to `.kg/usage-results.jsonl` (Amendment 10): the displayed pointers,
-byte-identical to stdout, plus index `built_at`/`source_rev` and
-`KG_SESSION`/`KG_ARM` tags. `kg usage --verify` replays a deterministic
-sample of those pointers against current source (OK / CHANGED / FAIL);
-`kg usage` shows the demand map (top queried names).
-The index file `.kg/index.db` is a portable artifact: cache it in CI and
-restore it into a fresh checkout — the dual-key fast path (Amendment 9)
-reuses it without re-parse when content hashes match.
+(`.kg/usage.log`, local-only JSONL). Every successful pointer query also
+appends one self-contained payload line to `.kg/usage-results.jsonl`:
+displayed pointers byte-identical to stdout, plus index `built_at`/`source_rev`
+and `KG_SESSION`/`KG_ARM` attribution. `kg usage --verify` replays a
+deterministic sample of those pointers against current source.
+The index `.kg/index.db` is a portable artifact: cache it in CI and restore it
+into a fresh checkout — the dual-key fast path reuses it without re-parse when
+content hashes match.
+
 Exit codes: 0 ok; 1 no results / no index; 2 usage or ambiguous name (a
 candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 6 internal; 7 parse-quality abort.
+
+## Agent integration
+
+- **MCP**: `kg mcp` serves every subcommand as a JSON-RPC tool over stdio;
+  tool results are byte-identical to CLI stdout (conformance-tested).
+- **Skill**: [`skills/kg-first/SKILL.md`](skills/kg-first/SKILL.md) is the
+  measured routing policy for code agents — when to query kg first, how to
+  handle ambiguous names and result caps, and when to fall back to grep.
+  Stored here; installation into a host is the owner's call.
 
 ## Response contract
 
@@ -72,32 +93,28 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 3. Read-only over source; writes confined to `.kg/` (tree-snapshot test).
 4. No behavior hijack: no hooks, settings, or agent-config writes.
 
-## Gates (measured, vihap ~102k LOC — re-baselined M0 2026-10-31, see docs/baselines/rebaseline-m0.md)
+## Limitations
 
-| gate | measured | target |
-|------|----------|--------|
-| G1 build | 0.47s wall, 22.8MB RSS, 1.98MB DB | < 5s / < 100MB / < 50MB |
-| G2 precision/recall | vihap 100%/100% (493/495); finguard 100%/100%; self 100%/100% | >= 80% / >= 70% |
-| G3 query p95 | 9.8ms | < 20ms |
-| G6 utility A/B | -50% tool calls, -67% bytes vs grep (P1 measurement; M0 re-run pending) | >= 30% calls, no byte growth |
-| G7 hotspots | 8/10 rank-overlap (provisional pain list) | >= 7/10 |
-| G8 extensions A/B | -67% calls on architecture questions (P1.5 measurement; M0 re-run pending) | >= 30% |
-| G11 payload conformance | automated in tests (91/91); 594 pointers verified FAIL=0 on the 3 GT repos | per Amendment 10 |
-
-Baseline evidence: `docs/baselines/` (tasks, ground truth, transcripts, D0
-harness). Rollback: `rm -rf .kg/` (or `kg doctor --invalidate`).
+- Resolution is static: dynamic dispatch and untyped attribute calls are
+  unresolved by design (10-48% of raw call sites in the evaluation corpora,
+  depending on language and style); the tool says so and recommends grep.
+- The index is per-repo and local; cross-repo questions are out of scope.
+- Staleness is detected, never auto-repaired: run `kg build` after edits
+  (0.1-0.5 s typical).
 
 ## Project docs
 
 | doc | contents |
 |-----|----------|
-| [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md) | THE SPEC — normative v1.1 + Amendments 1-3 (gates, algorithm, schema, contract) |
+| [docs/EVALUATION.md](docs/EVALUATION.md) | **measured results** — perf, multi-repo verification, correctness gates, agent A/B, limitations |
+| [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md) | THE SPEC — normative v1.1 + Amendments (gates, algorithm, schema, contract) |
 | [docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md](docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md) | concepts brief that preceded the spec |
 | [CHANGELOG.md](CHANGELOG.md) | phase-by-phase history (Keep a Changelog) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | spec-first rules, gate workflow, review protocol, honesty rule |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | contestable-findings standard |
 | [SECURITY.md](SECURITY.md) | invariants, index safety, reporting |
 | [SUPPORT.md](SUPPORT.md) | troubleshooting table, scope boundaries |
-| [LICENSE](LICENSE) | private / all rights reserved (OQ1: swap before any publish) |
+| [skills/](skills/README.md) | kg-first agent skill (in-repo; host installation is owner-decided) |
+| [LICENSE](LICENSE) | private / all rights reserved (swap before any publish) |
 | `.github/` | PR template, bug/feature issue templates, ci.yml |
-| `docs/baselines/reviews/` | R0/R1 independent review records (R1.5/R2 fix cycles: see CHANGELOG and commit history) |
+| `docs/baselines/` | evidence layer: frozen tasks, ground truth, transcripts, harness, review records (internal; uses real corpus-repo names) |
