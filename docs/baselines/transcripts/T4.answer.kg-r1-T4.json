@@ -1,0 +1,32 @@
+{
+  "pointers": [
+    "vihap/cleaners/contact_extractor.py:76",
+    "vihap/cleaners/chat_cleaner.py:88",
+    "vihap/cleaners/spelling_corrector.py:26",
+    "vihap/parsers/hierarchical_parser.py:48",
+    "vihap/validators/gso_index.py:182",
+    "vihap/validators/street_validator.py:213",
+    "vihap/quality/confidence.py:142",
+    "vihap/formatters/standard_formatter.py:70",
+    "vihap/models.py:419",
+    "vihap/pipeline.py:40",
+    "vihap/parsers/hierarchical_parser.py:86",
+    "vihap/parsers/hierarchical_parser.py:102",
+    "vihap/parsers/hierarchical_parser.py:121",
+    "vihap/parsers/hierarchical_parser.py:137",
+    "vihap/parsers/hierarchical_parser.py:151",
+    "vihap/parsers/hierarchical_parser.py:179",
+    "vihap/parsers/hierarchical_parser.py:192",
+    "vihap/parsers/hierarchical_parser.py:197",
+    "vihap/parsers/hierarchical_parser.py:426",
+    "vihap/parsers/hierarchical_parser.py:427"
+  ],
+  "ordering": [
+    "cleaners (ContactExtractor)",
+    "parsers (HierarchicalAddressParser + grammar)",
+    "validators (GsoIndex)",
+    "quality (QualityScorer)",
+    "formatters (AddressFormatter)",
+    "models.ParsedAddress"
+  ]
+}

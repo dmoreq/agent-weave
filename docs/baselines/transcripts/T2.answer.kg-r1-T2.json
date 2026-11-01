@@ -1,0 +1,35 @@
+{
+  "pointers": [
+    "scripts/extract_poi_knowledge.py:287",
+    "tests/test_knowledge_base.py:27",
+    "tests/test_knowledge_base.py:38",
+    "tests/test_knowledge_base.py:53",
+    "tests/test_knowledge_base.py:56",
+    "tests/test_knowledge_base.py:62",
+    "tests/test_knowledge_base.py:63",
+    "tests/test_knowledge_base.py:70",
+    "vihap/knowledge/access.py:18",
+    "vihap/knowledge/reform_utils.py:30",
+    "vihap/knowledge/reform_utils.py:127",
+    "vihap/knowledge/reform_utils.py:137",
+    "vihap/knowledge/reform_utils.py:144",
+    "vihap/knowledge/reform_utils.py:151",
+    "vihap/reform/kb_loader.py:38",
+    "vihap/reform/kb_loader.py:45",
+    "vihap/reform/mapping.py:26",
+    "vihap/validators/gso_loader.py:613",
+    "vihap/validators/gso_loader.py:660",
+    "vihap/validators/street_validator.py:295"
+  ],
+  "ordering": [
+    "vihap/knowledge/access.py:MasterAdminKnowledge.__init__",
+    "vihap/reform/mapping.py:_load_trees_from_knowledge_base",
+    "vihap/validators/gso_loader.py:GsoDataLoader._load_relational_mappings",
+    "vihap/reform/kb_loader.py:get_district_to_province",
+    "vihap/validators/gso_loader.py:_lines_from_kb_query",
+    "vihap/reform/kb_loader.py:get_district_streets_mapping",
+    "vihap/reform/kb_loader.py:get_district_to_province",
+    "vihap/validators/street_validator.py:StreetValidator._load_current_ward_streets",
+    "vihap/reform/kb_loader.py:get_building_names"
+  ]
+}
