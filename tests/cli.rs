@@ -195,7 +195,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v2 — run kg build"),
+        stderr.contains("schema v99, binary expects v3 — run kg build"),
         "{stderr}"
     );
 }

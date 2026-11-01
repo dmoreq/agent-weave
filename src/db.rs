@@ -315,8 +315,8 @@ pub fn carry_forward_unchanged(
     let mut reused = Vec::new();
     {
         let mut stmt = new.prepare(
-            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
-             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved
+            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic)
+             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
         let mut refresh_mtime =
@@ -359,6 +359,9 @@ pub struct FilesRow {
     pub error_nodes: usize,
     /// Per-file unresolved-callee count (filled after resolve()).
     pub unresolved: usize,
+    /// Hotspots metrics (Amendment 11d), computed on the build's parse tree.
+    pub loc: i64,
+    pub cyclomatic: i64,
 }
 
 /// Amendment 11b: caller holds the build transaction; 500-row prepared
@@ -367,8 +370,8 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(rows.len());
     for chunk in rows.chunks(500) {
         let mut stmt = conn.prepare(
-            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
         for r in chunk {
             stmt.execute(rusqlite::params![
@@ -378,7 +381,9 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
                 r.content_hash,
                 r.parse_status,
                 r.error_nodes as i64,
-                r.unresolved as i64
+                r.unresolved as i64,
+                r.loc,
+                r.cyclomatic
             ])?;
             ids.push(conn.last_insert_rowid());
         }

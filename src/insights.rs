@@ -2,18 +2,18 @@
 //!
 //! hotspots score (spec G7): cyclomatic-proxy + LOC + churn-90d + fix-density,
 //! each min-max normalized across the indexed set, summed. Cyclomatic proxy =
-//! decision-node count (if/for/while/boolean_operator/except/match) from a
-//! quick re-parse. Churn/fix counts come from `git log` on the repo (read-only).
+//! decision-node count (if/for/while/boolean_operator/except/match), computed
+//! once per file at build time (Amendment 11d: files.loc / files.cyclomatic) —
+//! no per-invocation re-parse. Churn/fix counts come from `git log` on the
+//! repo (read-only).
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use rusqlite::Connection;
-use tree_sitter::Node;
 
 use crate::db;
 use crate::error::{KgError, Result};
-use crate::parse;
 
 pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
     let q = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
@@ -50,50 +50,6 @@ struct FileScore {
     churn: f64,
     fixes: f64,
     score: f64,
-}
-
-fn decision_kinds(lang: parse::Lang) -> &'static [&'static str] {
-    match lang {
-        parse::Lang::Python => &[
-            "if_statement",
-            "for_statement",
-            "while_statement",
-            "boolean_operator",
-            "except_clause",
-            "match_statement",
-            "conditional_expression",
-        ],
-        parse::Lang::TypeScript | parse::Lang::Tsx | parse::Lang::JavaScript => &[
-            "if_statement",
-            "for_statement",
-            "for_in_statement",
-            "while_statement",
-            "do_statement",
-            "switch_case",
-            "conditional_expression",
-        ],
-        parse::Lang::Rust => &[
-            "if_expression",
-            "if_let_expression",
-            "for_expression",
-            "while_expression",
-            "while_let_expression",
-            "loop_expression",
-            "match_arm",
-        ],
-    }
-}
-
-fn decision_nodes(root: Node<'_>, kinds: &[&str]) -> usize {
-    fn rec(node: Node<'_>, kinds: &[&str]) -> usize {
-        let mut n = usize::from(kinds.contains(&node.kind()));
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            n += rec(child, kinds);
-        }
-        n
-    }
-    rec(root, kinds)
 }
 
 fn is_source_path(line: &str) -> bool {
@@ -152,35 +108,31 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
     if limit == 0 {
         return Err(KgError::Usage("--limit must be >= 1".to_string()));
     }
-    let mut stmt = conn.prepare("SELECT path FROM files")?;
-    let paths: Vec<String> = stmt
-        .query_map([], |r| r.get(0))?
+    // Amendment 11d: loc/cyclomatic are stored per file at build time —
+    // hotspots is a single scan + git log, not a whole-repo re-parse.
+    let mut stmt = conn.prepare("SELECT path, loc, cyclomatic FROM files")?;
+    let rows: Vec<(String, i64, i64)> = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
+    if rows.is_empty() {
+        return Err(KgError::NoResults("no indexed files".to_string()));
+    }
     let (churn, fixes) = git_counts(root)?;
 
-    let mut scores: Vec<FileScore> = Vec::new();
-    for rel in &paths {
-        let abs = root.join(rel);
-        let Ok(bytes) = std::fs::read(&abs) else { continue };
-        let loc = bytes.split(|b: &u8| *b == b'\n').count() as f64;
-        // Language-aware cyclomatic proxy: the Python-only re-parse scored
-        // garbage zeros on TS/JS/Rust files in multi-language repos.
-        let lang = parse::Lang::from_rel(rel);
-        let cyc = match parse::parse_source(&bytes, lang) {
-            Ok(p) => decision_nodes(p.tree.root_node(), decision_kinds(lang)) as f64,
-            Err(_) => 0.0,
-        };
+    let mut scores: Vec<FileScore> = Vec::with_capacity(rows.len());
+    for (rel, loc, cyc) in rows {
+        let churn_n = churn.get(&rel).copied().unwrap_or(0.0);
+        let fixes_n = fixes.get(&rel).copied().unwrap_or(0.0);
         scores.push(FileScore {
-            rel: rel.clone(),
-            loc,
-            cyclomatic: cyc,
-            churn: churn.get(rel).copied().unwrap_or(0.0),
-            fixes: fixes.get(rel).copied().unwrap_or(0.0),
+            rel,
+            loc: loc as f64,
+            cyclomatic: cyc as f64,
+            churn: churn_n,
+            fixes: fixes_n,
             score: 0.0,
         });
-    }
-    if scores.is_empty() {
-        return Err(KgError::NoResults("no indexed files".to_string()));
     }
     // Per-metric min-max bounds (R1.5 fix): pooling one (lo, hi) across all
     // four metrics let LOC swamp churn/fix and the score stopped meaning

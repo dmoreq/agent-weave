@@ -77,6 +77,54 @@ fn count_error_nodes(root: Node<'_>) -> usize {
     rec(root)
 }
 
+/// Language-aware cyclomatic-proxy decision kinds (hotspots metric, G7).
+/// Lives beside the parser so the build's parse phase (Amendment 11d) can
+/// count decision nodes on the tree it already has.
+pub fn decision_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Python => &[
+            "if_statement",
+            "for_statement",
+            "while_statement",
+            "boolean_operator",
+            "except_clause",
+            "match_statement",
+            "conditional_expression",
+        ],
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &[
+            "if_statement",
+            "for_statement",
+            "for_in_statement",
+            "while_statement",
+            "do_statement",
+            "switch_case",
+            "conditional_expression",
+        ],
+        Lang::Rust => &[
+            "if_expression",
+            "if_let_expression",
+            "for_expression",
+            "while_expression",
+            "while_let_expression",
+            "loop_expression",
+            "match_arm",
+        ],
+    }
+}
+
+/// Count decision nodes of the given kinds in the subtree.
+pub fn decision_nodes(root: Node<'_>, kinds: &[&str]) -> usize {
+    fn rec(node: Node<'_>, kinds: &[&str]) -> usize {
+        let mut n = usize::from(kinds.contains(&node.kind()));
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            n += rec(child, kinds);
+        }
+        n
+    }
+    rec(root, kinds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

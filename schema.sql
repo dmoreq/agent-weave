@@ -1,4 +1,6 @@
--- kg schema v2 — additive-only evolution policy (v1 -> v2 adds files.unresolved).
+-- kg schema v3 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
+-- v2 -> v3 adds files.loc/files.cyclomatic, Amendment 11d: hotspots metrics
+-- computed once at build, not re-parsed per query).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -15,7 +17,11 @@ CREATE TABLE files(
     error_nodes INTEGER NOT NULL,
     -- Unresolved-callee count for this file (authoritative per-file split of
     -- the meta unresolved_callee_count total; stable across incremental builds).
-    unresolved INTEGER NOT NULL DEFAULT 0
+    unresolved INTEGER NOT NULL DEFAULT 0,
+    -- Hotspots metrics (Amendment 11d), frozen at this file's last fresh
+    -- extraction: line count and language-aware decision-node count.
+    loc INTEGER NOT NULL DEFAULT 0,
+    cyclomatic INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE symbols(
     id INTEGER PRIMARY KEY,

@@ -114,11 +114,17 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
                 for (local, f) in chunk.into_iter().enumerate() {
                     let idx = base * chunk_len + local;
                     let bytes = std::fs::read(&f.abs)?;
-                    let parsed =
-                        crate::parse::parse_source(&bytes, crate::parse::Lang::from_rel(&f.rel))?;
+                    let lang = crate::parse::Lang::from_rel(&f.rel);
+                    let parsed = crate::parse::parse_source(&bytes, lang)?;
                     let e0 = Instant::now();
                     let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
                     secs += e0.elapsed().as_secs_f64();
+                    // Hotspots metrics on the tree we already hold (Amendment
+                    // 11d): line count + decision-node count, same formulas
+                    // hotspots previously computed per query.
+                    let cyclomatic =
+                        crate::parse::decision_nodes(parsed.tree.root_node(), crate::parse::decision_kinds(lang))
+                            as i64;
                     units.push((
                         crate::db::FilesRow {
                             rel: f.rel,
@@ -128,6 +134,8 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
                             parse_status: parsed.status,
                             error_nodes: parsed.error_nodes,
                             unresolved: 0,
+                            loc: bytes.split(|b: &u8| *b == b'\n').count() as i64,
+                            cyclomatic,
                         },
                         fx,
                     ));
