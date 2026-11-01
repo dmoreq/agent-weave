@@ -152,8 +152,13 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     }
 
     // DB: fresh schema at index.db.new -> carry forward -> insert -> swap.
+    // Amendment 11b: one transaction for the whole write (carry-forward +
+    // files + symbols + edges + meta) — the per-500-row commits were pure
+    // fsync cost on a throwaway file; a crash before rename(2) leaves only an
+    // orphan .new, which the next build's lock holder removes.
     let t0 = Instant::now();
     let conn = crate::db::create_fresh(&root)?;
+    conn.execute_batch("BEGIN")?;
     if !carried.is_empty() {
         let unchanged: Vec<(String, i64, i64, i64)> = carried
             .iter()
@@ -236,6 +241,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     // across fast-path builds (carried rows keep their stored count).
     let unres_total = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
+    conn.execute_batch("COMMIT")?;
     drop(conn);
 
     // Atomic swap: rename(2) onto index.db — readers see old or new, never

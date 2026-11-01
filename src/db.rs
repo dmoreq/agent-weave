@@ -1,5 +1,6 @@
 //! rusqlite layer: schema lifecycle, meta manifest, build lock (flock),
-//! streamed chunked inserts, and the full-atomic-replacement build policy.
+//! build inserts under one caller-owned transaction (Amendment 11b; 500-row
+//! prepared batches), and the full-atomic-replacement build policy.
 //!
 //! Build semantics (spec, single rule): `kg build` always produces a full
 //! atomic replacement — extract into `.kg/index.db.new` (fresh schema), close,
@@ -302,6 +303,7 @@ pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedI
 /// stored mtime refreshed to the fresh checkout's stat so the staleness
 /// contract stays truthful. Attaches the old DB itself (SQLite ATTACH takes no
 /// bound parameters). Returns rel -> old file id for reuse.
+/// Amendment 11b: the caller owns the build transaction — no BEGIN/COMMIT here.
 pub fn carry_forward_unchanged(
     new: &Connection,
     root: &Path,
@@ -310,7 +312,6 @@ pub fn carry_forward_unchanged(
     let old_path = db_path(root);
     let quoted = old_path.to_string_lossy().replace('\'', "''");
     new.execute_batch(&format!("ATTACH DATABASE '{quoted}' AS olddb"))?;
-    new.execute_batch("BEGIN")?;
     let mut reused = Vec::new();
     {
         let mut stmt = new.prepare(
@@ -345,7 +346,6 @@ pub fn carry_forward_unchanged(
          WHERE src_id IN (SELECT id FROM symbols)
            AND (dst_id IS NULL OR dst_id IN (SELECT id FROM symbols));",
     )?;
-    new.execute_batch("COMMIT")?;
     Ok(reused)
 }
 
@@ -361,29 +361,27 @@ pub struct FilesRow {
     pub unresolved: usize,
 }
 
+/// Amendment 11b: caller holds the build transaction; 500-row prepared
+/// batches remain (statement reuse), the per-chunk BEGIN/COMMIT fsyncs do not.
 pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(rows.len());
     for chunk in rows.chunks(500) {
-        conn.execute_batch("BEGIN")?;
-        {
-            let mut stmt = conn.prepare(
-                "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?;
-            for r in chunk {
-                stmt.execute(rusqlite::params![
-                    r.rel,
-                    r.size,
-                    r.mtime,
-                    r.content_hash,
-                    r.parse_status,
-                    r.error_nodes as i64,
-                    r.unresolved as i64
-                ])?;
-                ids.push(conn.last_insert_rowid());
-            }
+        let mut stmt = conn.prepare(
+            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?;
+        for r in chunk {
+            stmt.execute(rusqlite::params![
+                r.rel,
+                r.size,
+                r.mtime,
+                r.content_hash,
+                r.parse_status,
+                r.error_nodes as i64,
+                r.unresolved as i64
+            ])?;
+            ids.push(conn.last_insert_rowid());
         }
-        conn.execute_batch("COMMIT")?;
     }
     Ok(ids)
 }
@@ -391,25 +389,21 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
 pub fn insert_symbols(conn: &Connection, symbols: &[NewSymbol], file_ids: &[i64]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
     for chunk in symbols.chunks(500) {
-        conn.execute_batch("BEGIN")?;
-        {
-            let mut stmt = conn.prepare(
-                "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )?;
-            for s in chunk {
-                stmt.execute(rusqlite::params![
-                    s.kind,
-                    s.name,
-                    s.qualname,
-                    file_ids[s.file_idx],
-                    s.line_start as i64,
-                    s.line_end as i64
-                ])?;
-                ids.push(conn.last_insert_rowid());
-            }
+        let mut stmt = conn.prepare(
+            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for s in chunk {
+            stmt.execute(rusqlite::params![
+                s.kind,
+                s.name,
+                s.qualname,
+                file_ids[s.file_idx],
+                s.line_start as i64,
+                s.line_end as i64
+            ])?;
+            ids.push(conn.last_insert_rowid());
         }
-        conn.execute_batch("COMMIT")?;
     }
     Ok(ids)
 }
@@ -428,24 +422,20 @@ pub struct EdgeRow {
 
 pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
     for chunk in rows.chunks(500) {
-        conn.execute_batch("BEGIN")?;
-        {
-            let mut stmt = conn.prepare(
-                "INSERT INTO edges(src_id, dst_id, dst_name, kind, confidence, site_line)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )?;
-            for e in chunk {
-                stmt.execute(rusqlite::params![
-                    e.src_id,
-                    e.dst_id,
-                    e.dst_name,
-                    e.kind,
-                    e.confidence,
-                    e.site_line as i64
-                ])?;
-            }
+        let mut stmt = conn.prepare(
+            "INSERT INTO edges(src_id, dst_id, dst_name, kind, confidence, site_line)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for e in chunk {
+            stmt.execute(rusqlite::params![
+                e.src_id,
+                e.dst_id,
+                e.dst_name,
+                e.kind,
+                e.confidence,
+                e.site_line as i64
+            ])?;
         }
-        conn.execute_batch("COMMIT")?;
     }
     Ok(())
 }
