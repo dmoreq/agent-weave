@@ -9,7 +9,7 @@ set -euo pipefail
 TASK="$1"; TOOL="$2"; shift 2
 CMD="$*"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-TR="$HERE/../transcripts"
+TR="${KG_TR:-$HERE/../transcripts}"
 mkdir -p "$TR/out"
 SEQ=$(python3 -c '
 import json,os,sys

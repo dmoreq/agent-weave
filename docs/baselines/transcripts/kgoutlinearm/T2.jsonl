@@ -1,0 +1,2 @@
+{"task": "T2", "seq": 1, "tool": "kg", "cmd": "/Users/quy.doan/Workspace/kg/target/release/kg callers vihap.knowledge.registry.get_knowledge_base --limit 10000 --root /tmp/vihap-g13", "in_bytes": 134, "out_bytes": 628, "err_bytes": 0, "out_file": "out/T2-001.txt"}
+{"task": "T2", "seq": 2, "tool": "kg", "cmd": "/Users/quy.doan/Workspace/kg/target/release/kg callees vihap.parsers.hierarchical_parser.HierarchicalAddressParser.parse --depth 2 --limit 10000 --root /tmp/vihap-g13", "in_bytes": 166, "out_bytes": 919, "err_bytes": 0, "out_file": "out/T2-002.txt"}

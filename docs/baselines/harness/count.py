@@ -47,13 +47,19 @@ def table(paths, label):
 def main():
     baseline = sorted(glob.glob(os.path.join(TR, "T[1-5].jsonl")))
     kgarm = sorted(glob.glob(os.path.join(TR, "kgarm", "T[1-5].jsonl")))
-    if not baseline and not kgarm:
+    # Optional positional arm dir (relative to transcripts/), e.g. kgoutlinearm
+    # for the G13 outline-first gate (Amendment 12).
+    arm_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    extra = sorted(glob.glob(os.path.join(TR, arm_arg, "T[1-5].jsonl"))) if arm_arg else []
+    if not baseline and not kgarm and not extra:
         print("no transcripts found", file=sys.stderr)
         return 1
     if baseline:
         table(baseline, "baseline arm (grep)")
     if kgarm:
         table(kgarm, "treatment arm (kg)")
+    if extra:
+        table(extra, f"arm ({arm_arg})")
     return 0
 
 

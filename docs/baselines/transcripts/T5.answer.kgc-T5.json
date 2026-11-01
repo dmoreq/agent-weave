@@ -1,0 +1,17 @@
+{
+  "pointers": [
+    "vihap/formatters/standard_formatter.py:154",
+    "vihap/parsers/macro_resolver.py:76",
+    "vihap/parsers/macro_resolver.py:108",
+    "vihap/parsers/macro_resolver.py:272",
+    "vihap/parsers/macro_resolver.py:303",
+    "vihap/parsers/macro_resolver.py:366",
+    "vihap/parsers/macro_resolver.py:383",
+    "vihap/parsers/macro_resolver.py:398",
+    "vihap/quality/confidence.py:145"
+  ],
+  "closure_size": 26,
+  "note": "cross-module filter per task definition",
+  "kg_answer": true,
+  "binary": "kg control, current binary (kgarm-r2/) @ f7ca48c"
+}
