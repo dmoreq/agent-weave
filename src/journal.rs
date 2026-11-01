@@ -340,6 +340,130 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------------------
+// `kg usage --verify` (Amendment 10c): replay sampled payload pointers
+// against current source; the open index separates CHANGED from OK/FAIL.
+// ---------------------------------------------------------------------------
+
+/// One parsed payload line: (tool, name, pointers).
+fn parse_payload_line(line: &str) -> Option<(String, String, Vec<String>)> {
+    let tool = extract_str(line, "tool")?;
+    let name = extract_str(line, "name").unwrap_or_default();
+    let marker = "\"pointers\":[";
+    let start = line.find(marker)? + marker.len();
+    let end = line.rfind(']')?;
+    if end < start {
+        return None;
+    }
+    let inner = &line[start..end];
+    let pointers = if inner.is_empty() {
+        Vec::new()
+    } else {
+        inner
+            .split("\",\"")
+            .map(|s| s.trim_matches('"').to_string())
+            .collect()
+    };
+    Some((tool, name, pointers))
+}
+
+/// Split a rendered pointer `path:line [tag]` into (path, 1-based line).
+fn parse_pointer(ptr: &str) -> Option<(String, usize)> {
+    let ptr = ptr.strip_suffix(" [ambiguous]").unwrap_or(ptr);
+    let (path, line) = ptr.rsplit_once(':')?;
+    Some((path.to_string(), line.parse().ok()?))
+}
+
+/// The bare segment of a queried name (`a.b`, `a::b`, `b` -> `b`).
+fn bare_name(name: &str) -> &str {
+    name.rsplit(['.', ':']).next().unwrap_or(name)
+}
+
+/// Verify sampled payload pointers (Amendment 10c). Deterministic even-stride
+/// sample over payload entries; a file whose content differs from the index
+/// (`query::file_changed`) is CHANGED — unverifiable, never counted wrong.
+/// Unchanged files get structural checks: line in bounds, and for `callers`
+/// the line must mention the queried name's bare segment. Report-only.
+pub fn verify(
+    root: &Path,
+    conn: &rusqlite::Connection,
+    limit: usize,
+) -> crate::error::Result<Vec<String>> {
+    let limit = crate::query::clamp_limit(limit)?;
+    let mut content = String::new();
+    for gen in [".1", ""] {
+        let mut path = payload_log_path(root).into_os_string();
+        if !gen.is_empty() {
+            path.push(gen);
+        }
+        if let Ok(c) = fs::read_to_string(PathBuf::from(path)) {
+            content.push_str(&c);
+        }
+    }
+    let entries: Vec<(String, String, Vec<String>)> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(parse_payload_line)
+        .collect();
+    if entries.is_empty() {
+        return Err(crate::error::KgError::NoResults(
+            "no payload entries — usage-results.jsonl is empty or absent".to_string(),
+        ));
+    }
+    let n_entries = entries.len();
+    let sampled: Vec<&(String, String, Vec<String>)> = if n_entries <= limit {
+        entries.iter().collect()
+    } else {
+        (0..limit).map(|i| &entries[i * n_entries / limit]).collect()
+    };
+
+    let (mut ok, mut changed, mut fail) = (0usize, 0usize, 0usize);
+    let mut fail_lines: Vec<String> = Vec::new();
+    for (tool, name, pointers) in &sampled {
+        let bare = bare_name(name);
+        for ptr in pointers {
+            let Some((path, line_no)) = parse_pointer(ptr) else {
+                fail += 1;
+                fail_lines.push(format!("FAIL {ptr} (unparseable pointer)"));
+                continue;
+            };
+            if crate::query::file_changed(conn, root, &path) {
+                changed += 1;
+                continue;
+            }
+            let text = match fs::read_to_string(root.join(&path)) {
+                Ok(c) => c,
+                Err(_) => {
+                    fail += 1;
+                    fail_lines.push(format!("FAIL {ptr} (file unreadable)"));
+                    continue;
+                }
+            };
+            let n_lines = text.lines().count();
+            if line_no == 0 || line_no > n_lines {
+                fail += 1;
+                fail_lines.push(format!("FAIL {ptr} (line beyond {n_lines})"));
+                continue;
+            }
+            if tool == "callers" && !bare.is_empty() {
+                let line_text = text.lines().nth(line_no - 1).unwrap_or("");
+                if !line_text.contains(bare) {
+                    fail += 1;
+                    fail_lines.push(format!("FAIL {ptr} (line does not mention '{bare}')"));
+                    continue;
+                }
+            }
+            ok += 1;
+        }
+    }
+    let mut out = vec![format!(
+        "kg usage --verify: {} pointers sampled from {n_entries} entries: ok={ok} changed={changed} fail={fail}",
+        ok + changed + fail
+    )];
+    out.extend(fail_lines);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,6 +475,25 @@ mod tests {
         assert_eq!(json_escape("a\nb"), "a\\nb");
         assert_eq!(json_escape("a\u{1}b"), "a\\u0001b");
         assert_eq!(json_escape("normal.text"), "normal.text");
+    }
+
+    #[test]
+    fn payload_parsing_helpers() {
+        let line = "{\"ts\":7,\"surface\":\"cli\",\"tool\":\"callers\",\"name\":\"a.b::c\",\"session\":\"\",\"arm\":\"\",\"built_at\":42,\"source_rev\":\"x\",\"stale\":false,\"shown\":2,\"total\":2,\"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}";
+        let (tool, name, pointers) = parse_payload_line(line).unwrap();
+        assert_eq!(tool, "callers");
+        assert_eq!(name, "a.b::c");
+        assert_eq!(pointers, vec!["src/a.rs:7", "src/b.rs:12 [ambiguous]"]);
+        assert_eq!(parse_pointer("src/a.rs:7"), Some(("src/a.rs".into(), 7)));
+        assert_eq!(
+            parse_pointer("src/a.rs:12 [ambiguous]"),
+            Some(("src/a.rs".into(), 12))
+        );
+        assert_eq!(parse_pointer("junk"), None);
+        assert_eq!(parse_pointer("f.rs:x"), None);
+        assert_eq!(bare_name("a.b::c"), "c");
+        assert_eq!(bare_name("utils.normalize"), "normalize");
+        assert_eq!(bare_name("normalize"), "normalize");
     }
 
     #[test]

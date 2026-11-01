@@ -49,8 +49,8 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}}), &[])},
         {"name": "report", "description": "Four-section architecture report",
          "inputSchema": schema_obj(json!({}), &[])},
-        {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates",
-         "inputSchema": schema_obj(json!({}), &[])},
+        {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates; verify=true replays sampled payload pointers (Amendment 10)",
+         "inputSchema": schema_obj(json!({"verify": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10000}}), &[])},
     ])
 }
 
@@ -225,7 +225,18 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
         "stats" => Ok(crate::insights::stats(&crate::db::open_for_query(root)?, root)?),
         "hotspots" => Ok(join_lines(&crate::insights::hotspots(&crate::db::open_for_query(root)?, root, arg_usize(args, "limit", 10))?)),
         "report" => Ok(join_lines(&crate::insights::report(&crate::db::open_for_query(root)?, root)?)),
-        "usage" => Ok(join_lines(&crate::journal::summary(root)?)),
+        "usage" => {
+            if args.get("verify").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let conn = crate::db::open_for_query(root)?;
+                Ok(join_lines(&crate::journal::verify(
+                    root,
+                    &conn,
+                    arg_usize(args, "limit", 50),
+                )?))
+            } else {
+                Ok(join_lines(&crate::journal::summary(root)?))
+            }
+        }
         _ => Err(KgError::Usage(format!("unknown tool '{tool}'"))),
     }
 }
@@ -273,6 +284,12 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "dead" | "unresolved" | "hotspots" => {
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "usage" => {
+            if args.get("verify").and_then(|v| v.as_bool()).unwrap_or(false) {
+                out.push(("verify", "true".to_string()));
+                out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+            }
         }
         _ => {}
     }

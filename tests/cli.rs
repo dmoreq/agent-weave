@@ -632,6 +632,84 @@ fn payload_opt_out_and_empty_or_ambiguous_writes_none() {
 }
 
 #[test]
+fn usage_verify_reports_ok_changed_fail() {
+    // Amendment 10c: fresh queries verify OK; an edit-after-build turns that
+    // file's pointers CHANGED (unverifiable, not wrong); a corrupt pointer
+    // (line beyond bounds) FAILs; the report is informational (exit 0).
+    let repo = fixture("verify");
+    build(&repo);
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    kg(&repo).env_remove("KG_NO_JOURNAL").args(["dead"]).output().unwrap();
+
+    let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("kg usage --verify: 5 pointers sampled from 2 entries"), "{stdout}");
+    assert!(stdout.contains("changed=0 fail=0"), "all OK on a fresh build: {stdout}");
+
+    // Edit app.py (dead pointers include app.py:4; callers include app.py:6):
+    // the index still holds the old hash -> those pointers are CHANGED.
+    write(&repo, "app.py", "from utils import normalize\n\ndef run():\n    return normalize('z')\n");
+    let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(stdout.contains("changed=2"), "app.py pointers unverifiable: {stdout}");
+    assert!(stdout.contains("fail=0"), "changed is not fail: {stdout}");
+
+    // Corrupt one pointer beyond bounds -> FAIL, still exit 0.
+    let ppath = repo.join(".kg/usage-results.jsonl");
+    let payload = fs::read_to_string(&ppath).unwrap().replace("utils.py:5", "utils.py:9999");
+    fs::write(&ppath, payload).unwrap();
+    let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "report-only");
+    assert!(stdout.contains("fail=1"), "{stdout}");
+    assert!(stdout.contains("FAIL utils.py:9999 (line beyond"), "{stdout}");
+}
+
+#[test]
+fn usage_verify_stride_sample_and_empty_payload() {
+    // >limit entries sample exactly `limit` entries, deterministically.
+    let repo = fixture("verify-stride");
+    build(&repo);
+    for _ in 0..60 {
+        kg(&repo)
+            .env_remove("KG_NO_JOURNAL")
+            .args(["callers", "normalize"])
+            .output()
+            .unwrap();
+    }
+    let out = kg(&repo).args(["usage", "--verify", "--limit", "10"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0));
+    // 10 entries x 2 pointers each.
+    assert!(stdout.contains("20 pointers sampled from 60 entries"), "{stdout}");
+
+    // No payload at all: exit 1 with a reason.
+    let repo = fixture("verify-empty");
+    build(&repo);
+    let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no payload entries"), "{stderr}");
+
+    // --limit 0 is a usage error (exit 2).
+    let repo = fixture("verify-limit0");
+    build(&repo);
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    let out = kg(&repo).args(["usage", "--verify", "--limit", "0"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn g5_no_child_processes_survive() {
     // Invariant 2: zero long-lived children after each subcommand. Run a build
     // tagged with a unique token, then assert nothing matching the token is

@@ -160,6 +160,27 @@ fn g10_initialize_tools_list_and_parity() {
 }
 
 #[test]
+fn g10_usage_verify_via_mcp() {
+    // Amendment 10c on the MCP surface: usage with verify=true shares the CLI
+    // code path and reports the same three-state outcome.
+    let repo = fixture("mcp-verify");
+    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root").arg(&repo).arg("build")
+        .output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let callers = rpc(&mut srv, 1, "tools/call", json!({"name": "callers", "arguments": {"name": "normalize"}}));
+    assert_eq!(callers["result"]["isError"], false);
+    let verify = rpc(&mut srv, 2, "tools/call", json!({"name": "usage", "arguments": {"verify": true, "limit": 10}}));
+    assert_eq!(verify["result"]["isError"], false);
+    let text = result_text(&verify);
+    assert!(text.starts_with("kg usage --verify: 2 pointers sampled from 1 entries"), "{text}");
+    assert!(text.contains("changed=0 fail=0"), "{text}");
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn g10_ambiguous_carries_candidates_and_iserror() {
     let repo = fixture("ambiguous");
     fs::write(repo.join("a.py"), "class A:\n    def process(self):\n        return 1\n").unwrap();

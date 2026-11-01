@@ -99,8 +99,16 @@ pub enum Cmd {
         #[arg(long)]
         invalidate: bool,
     },
-    /// Summarize the usage journal: calls, errors, latency, empty/stale rates
-    Usage {},
+    /// Summarize the usage journal: calls, errors, latency, empty/stale rates.
+    /// --verify replays sampled payload pointers against current source.
+    Usage {
+        /// Replay-verify sampled payload pointers (Amendment 10c)
+        #[arg(long)]
+        verify: bool,
+        /// Verify sample size (deterministic even stride over payload entries)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
     /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0; Amendment 8)
     Mcp {},
 }

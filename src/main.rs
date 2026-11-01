@@ -28,7 +28,7 @@ fn main() {
     let root_arg = cli.root.clone();
     let no_journal = cli.no_journal;
     let journaled = !no_journal
-        && !matches!(cli.cmd, cli::Cmd::Doctor { .. } | cli::Cmd::Usage {} | cli::Cmd::Mcp {});
+        && !matches!(cli.cmd, cli::Cmd::Doctor { .. } | cli::Cmd::Usage { .. } | cli::Cmd::Mcp {});
     if journaled {
         journal::begin("cli", tool_name(&cli.cmd), &journal_args(&cli.cmd));
     }
@@ -78,7 +78,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Hotspots { .. } => "hotspots",
         cli::Cmd::Report {} => "report",
         cli::Cmd::Doctor { .. } => "doctor",
-        cli::Cmd::Usage {} => "usage",
+        cli::Cmd::Usage { .. } => "usage",
         cli::Cmd::Mcp {} => "mcp",
     }
 }
@@ -109,7 +109,7 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         cli::Cmd::Hotspots { limit } => vec![("limit", limit.to_string())],
         cli::Cmd::Report {} => vec![],
         cli::Cmd::Doctor { invalidate } => vec![("invalidate", invalidate.to_string())],
-        cli::Cmd::Usage {} => vec![],
+        cli::Cmd::Usage { .. } => vec![],
         cli::Cmd::Mcp {} => vec![],
     }
 }
@@ -178,10 +178,17 @@ fn run(cli: cli::Cli) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
-        cli::Cmd::Usage {} => {
+        cli::Cmd::Usage { verify, limit } => {
             let root = walk::discover_root(root_arg)?;
-            for line in journal::summary(&root)? {
-                println!("{line}");
+            if verify {
+                let conn = db::open_for_query(&root)?;
+                for line in journal::verify(&root, &conn, limit)? {
+                    println!("{line}");
+                }
+            } else {
+                for line in journal::summary(&root)? {
+                    println!("{line}");
+                }
             }
             Ok(())
         }
