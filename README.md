@@ -22,7 +22,8 @@ reproduction commands, and threats to validity):
 |----------|----------|
 | Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall + precision 100% on 3 frozen GT sets |
 | Is it fast enough for an agent loop? | queries 5-10 ms end-to-end at any index size; builds 0.1-0.5 s on 25-600-file repos |
-| Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (30 instrumented agent runs) |
+| Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (42 instrumented agent runs) |
+| Structure and duplication lookups? | `kg search` recall 0.850 on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7%; `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
 
 ## Install
 

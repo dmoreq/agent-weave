@@ -91,8 +91,9 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 | G3 query latency | p95 over repeated pointer queries | 9.8-10.1 ms (limit 20 ms) |
 | G11 payload conformance | 1 payload line per successful pointer call, byte-equal pointers, verify FAIL=0 | 594 pointers verified, FAIL=0 |
 | G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, parallel == serial | PASS (91/91 tests) |
-| G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction vs no-outline control, zero correctness delta |
+| G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction, -64.8% bytes, zero correctness delta — PASS |
 | G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.850 recall — PASS |
+| G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
 
 ## 5. Agent A/B — the measured case for kg
 
@@ -180,6 +181,8 @@ raise model capability.
 | G2/G11/G12 gates | `baselines/ground-truth*.md`, gate rows in the spec |
 | G13 outline | `baselines/g13-outline-2026-11-01.md` |
 | G14 search | `baselines/g14-search-2026-11-01.md` |
+| G16 clones | `baselines/g16-clones-2026-11-01.md` |
+| P4 spec + implementation reviews | `baselines/reviews/R4-P4.md`, `baselines/reviews/` (R4b record) |
 | agent A/B + routing + replication | `baselines/grok-a-b-2026-11-01.md` (+ `baselines/grok-a-b-2026-11-01/` manifests and audits) |
 | tasks, ground truth, harness | `baselines/tasks.md`, `baselines/ground-truth*.md`, `baselines/harness/` |
 

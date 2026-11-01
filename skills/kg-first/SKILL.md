@@ -20,6 +20,7 @@ source:
 | which files call into a file | `kg impact <file>` |
 | find a symbol by (partial) name | `kg search <terms>` |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |
+| is this logic duplicated elsewhere | `kg clones [--min-lines N]` — candidates only, never proof of semantic duplication |
 | what is risky / dead / unresolved | `kg hotspots`, `kg dead`, `kg unresolved` |
 
 Use grep/rg **only** for what kg cannot answer or to verify one specific line.
