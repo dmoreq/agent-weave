@@ -131,6 +131,31 @@ fn g10_initialize_tools_list_and_parity() {
     let mcp_lines = log.lines().filter(|l| l.contains("\"surface\":\"mcp\"")).count();
     assert_eq!(mcp_lines, 4, "{log}");
 
+    // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
+    // stats writes none. The callers payload pointers are byte-equal to the
+    // CLI reference stdout's data lines (G10 parity extends to the payload).
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    let mcp_payload = payload
+        .lines()
+        .filter(|l| l.contains("\"surface\":\"mcp\""))
+        .count();
+    assert_eq!(mcp_payload, 3, "callers+symbols+dead, not stats: {payload}");
+    let callers_line = payload
+        .lines()
+        .find(|l| l.contains("\"tool\":\"callers\"") && l.contains("\"surface\":\"mcp\""))
+        .unwrap();
+    assert!(callers_line.contains("\"name\":\"normalize\""), "{callers_line}");
+    let marker = "\"pointers\":[";
+    let s = callers_line.find(marker).unwrap() + marker.len();
+    let e = s + callers_line[s..].find("]}").unwrap();
+    let expected: String = String::from_utf8_lossy(&cli_callers.stdout)
+        .lines()
+        .filter(|l| !l.starts_with("kg: "))
+        .map(|p| format!("\"{p}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    assert_eq!(&callers_line[s..e], &expected, "payload byte-parity");
+
     let _ = fs::remove_dir_all(&repo);
 }
 

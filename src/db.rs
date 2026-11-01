@@ -465,6 +465,12 @@ pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Read one meta-manifest value (payload journal records built_at/source_rev).
+pub fn meta_get(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+        .ok()
+}
+
 /// Probe the source repo's git revision with a `-dirty` suffix on a dirty tree.
 pub fn source_rev(root: &Path) -> String {
     let head = std::process::Command::new("git")

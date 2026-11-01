@@ -495,6 +495,142 @@ fn journal_opt_out_via_env_and_flag() {
     assert!(stderr.contains("no journal entries"), "{stderr}");
 }
 
+/// Parse the `pointers` array of one hand-serialized payload line (Amendment 10).
+fn payload_pointers(line: &str) -> Vec<String> {
+    let marker = "\"pointers\":[";
+    let start = line.find(marker).expect("payload line carries pointers") + marker.len();
+    let end = start + line[start..].find("]}").expect("pointers array terminator");
+    let inner = &line[start..end];
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    inner
+        .split("\",\"")
+        .map(|s| s.trim_matches('"').to_string())
+        .collect()
+}
+
+#[test]
+fn payload_log_written_for_pointer_tools_only() {
+    // Amendment 10a: callers/dead/symbols append self-contained payload lines;
+    // build/stats write none; pointers are byte-identical to stdout data lines.
+    let repo = fixture("payload");
+    build(&repo);
+    assert!(
+        !repo.join(".kg/usage-results.jsonl").exists(),
+        "build writes no payload line"
+    );
+
+    let out = kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    let data_lines: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.starts_with("kg: "))
+        .map(String::from)
+        .collect();
+    assert!(!data_lines.is_empty());
+
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    let mut lines = payload.lines();
+    let line = lines.next().unwrap();
+    assert!(line.contains("\"tool\":\"callers\""), "{line}");
+    assert!(line.contains("\"name\":\"normalize\""), "{line}");
+    assert!(line.contains("\"surface\":\"cli\""), "{line}");
+    assert!(line.contains("\"stale\":false"), "{line}");
+    assert!(line.contains("\"built_at\":"), "{line}");
+    assert!(line.contains("\"source_rev\":\""), "{line}");
+    assert_eq!(payload_pointers(line), data_lines, "byte-equal pointers");
+
+    kg(&repo).env_remove("KG_NO_JOURNAL").args(["dead"]).output().unwrap();
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["symbols", "utils.py"])
+        .output()
+        .unwrap();
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    assert_eq!(payload.lines().count(), 3, "one payload line per pointer call");
+    assert!(payload.contains("\"tool\":\"dead\""), "{payload}");
+    assert!(payload.contains("\"tool\":\"symbols\""), "{payload}");
+    assert!(
+        payload.contains("\"pointers\":[\"utils.py:1 module utils"),
+        "symbols data lines, no header/cap: {payload}"
+    );
+
+    // Non-pointer tools journal to usage.log but add no payload line.
+    let before = payload.lines().count();
+    kg(&repo).env_remove("KG_NO_JOURNAL").args(["stats"]).output().unwrap();
+    let after = fs::read_to_string(repo.join(".kg/usage-results.jsonl"))
+        .unwrap()
+        .lines()
+        .count();
+    assert_eq!(before, after, "stats writes no payload line");
+}
+
+#[test]
+fn session_and_arm_tags_recorded_in_both_logs() {
+    // Amendment 10b: KG_SESSION/KG_ARM land in usage.log AND payload lines.
+    let repo = fixture("payload-tags");
+    build(&repo);
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .env("KG_SESSION", "  r1-task-1  ")
+        .env("KG_ARM", "kg")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    let usage = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
+    assert!(usage.contains("\"session\":\"r1-task-1\""), "{usage}");
+    assert!(usage.contains("\"arm\":\"kg\""), "{usage}");
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    assert!(payload.contains("\"session\":\"r1-task-1\""), "{payload}");
+    assert!(payload.contains("\"arm\":\"kg\""), "{payload}");
+}
+
+#[test]
+fn payload_opt_out_and_empty_or_ambiguous_writes_none() {
+    // Opt-out suppresses both journal files.
+    let repo = fixture("payload-optout");
+    kg(&repo).env("KG_NO_JOURNAL", "1").args(["build"]).output().unwrap();
+    kg(&repo)
+        .env("KG_NO_JOURNAL", "1")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    assert!(!repo.join(".kg/usage.log").exists());
+    assert!(!repo.join(".kg/usage-results.jsonl").exists());
+
+    // Empty result: journaled with exit 1, no payload line.
+    let repo = fixture("payload-empty");
+    build(&repo);
+    let out = kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "ghost"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        !repo.join(".kg/usage-results.jsonl").exists(),
+        "empty result writes no payload"
+    );
+
+    // Ambiguous name: exit 2 with candidates on stdout, no payload line.
+    let repo = temp_repo("payload-ambig");
+    write(&repo, "a.py", "def dup():\n    return 1\n");
+    write(&repo, "b.py", "def dup():\n    return 2\n");
+    build(&repo);
+    let out = kg(&repo).args(["callers", "dup"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        !repo.join(".kg/usage-results.jsonl").exists(),
+        "ambiguous result writes no payload"
+    );
+}
+
 #[test]
 fn g5_no_child_processes_survive() {
     // Invariant 2: zero long-lived children after each subcommand. Run a build

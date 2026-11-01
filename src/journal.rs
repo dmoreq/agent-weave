@@ -1,8 +1,10 @@
-//! Usage journal (Amendment 6): one JSONL line per journaled invocation,
-//! appended to `.kg/usage.log` after the process outcome is known. Best-effort
-//! by contract: a failed journal write is silently ignored and can never alter
-//! a command's output or exit code. Zero dependencies — the JSON line is
-//! hand-serialized; the summary reader extracts only the fixed keys we write.
+//! Usage journal (Amendment 6) and result-payload journal (Amendment 10):
+//! one JSONL line per journaled invocation appended to `.kg/usage.log`, plus
+//! one self-contained pointer-payload line per successful pointer query
+//! appended to `.kg/usage-results.jsonl`. Best-effort by contract: a failed
+//! journal write is silently ignored and can never alter a command's output
+//! or exit code. Zero dependencies — the JSON line is hand-serialized; the
+//! summary reader extracts only the fixed keys we write.
 
 use std::cell::RefCell;
 use std::fs::{self, OpenOptions};
@@ -17,6 +19,19 @@ pub fn usage_log_path(root: &Path) -> PathBuf {
     crate::db::kg_dir(root).join("usage.log")
 }
 
+/// Result-payload journal (Amendment 10): rendered pointers of the displayed
+/// set, one line per successful pointer query.
+pub fn payload_log_path(root: &Path) -> PathBuf {
+    crate::db::kg_dir(root).join("usage-results.jsonl")
+}
+
+/// Session/arm attribution (Amendment 10b): R1/R2 A/B tags, sanitized.
+fn env_tag(key: &str) -> String {
+    std::env::var(key)
+        .map(|v| v.trim().chars().take(64).collect())
+        .unwrap_or_default()
+}
+
 /// Journal opt-out contract: env `KG_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
 struct Pending {
@@ -28,6 +43,14 @@ struct Pending {
     total: usize,
     ambiguous: usize,
     stale: bool,
+    session: String,
+    arm: String,
+    // Payload fields (Amendment 10): set by record_payload on the success path
+    // of a pointer-returning query; empty pointers -> no payload line.
+    name: String,
+    pointers: Vec<String>,
+    built_at: u64,
+    source_rev: String,
 }
 
 thread_local! {
@@ -55,6 +78,12 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
             total: 0,
             ambiguous: 0,
             stale: false,
+            session: env_tag("KG_SESSION"),
+            arm: env_tag("KG_ARM"),
+            name: String::new(),
+            pointers: Vec::new(),
+            built_at: 0,
+            source_rev: String::new(),
         });
     });
 }
@@ -73,9 +102,37 @@ pub fn record_result(result_count: usize, shown: usize, total: usize, stale: boo
     });
 }
 
-/// Serialize and append the line. Called exactly once per process, after the
-/// outcome is known. All I/O failures are swallowed by contract. A `None`
-/// root (repo discovery failed) skips the write — there is no `.kg/` location.
+/// Capture the payload of a successful pointer query (Amendment 10a):
+/// the rendered pointer text of the displayed set — byte-identical to the
+/// query's stdout data lines — plus the index meta the pointers came from.
+/// Called from the query layer (`query::collect_output`, `query::symbols`);
+/// empty `pointers` writes no payload line at finalize time.
+pub fn record_payload(
+    name: &str,
+    pointers: &[String],
+    stale: bool,
+    shown: usize,
+    total: usize,
+    built_at: u64,
+    source_rev: &str,
+) {
+    PENDING.with(|p| {
+        if let Some(pending) = p.borrow_mut().as_mut() {
+            pending.name = name.to_string();
+            pending.pointers = pointers.to_vec();
+            pending.stale = stale;
+            pending.shown = shown;
+            pending.total = total;
+            pending.built_at = built_at;
+            pending.source_rev = source_rev.to_string();
+        }
+    });
+}
+
+/// Serialize and append the usage line, then the payload line when pointers
+/// were captured. Called exactly once per process, after the outcome is known.
+/// All I/O failures are swallowed by contract. A `None` root (repo discovery
+/// failed) skips the write — there is no `.kg/` location.
 pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
@@ -88,7 +145,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let line = format!(
-        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"args\":{},\"result_count\":{},\"shown\":{},\"total\":{},\"ambiguous\":{},\"exit_code\":{exit_code},\"latency_us\":{latency_us},\"stale\":{},\"kg_version\":\"{}\"}}\n",
+        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"args\":{},\"result_count\":{},\"shown\":{},\"total\":{},\"ambiguous\":{},\"exit_code\":{exit_code},\"latency_us\":{latency_us},\"stale\":{},\"kg_version\":\"{}\",\"session\":\"{}\",\"arm\":\"{}\"}}\n",
         pending.surface,
         pending.tool,
         pending.args,
@@ -98,15 +155,47 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         pending.ambiguous,
         pending.stale,
         env!("CARGO_PKG_VERSION"),
+        json_escape(&pending.session),
+        json_escape(&pending.arm),
     );
-    let path = usage_log_path(root);
-    rotate_if_needed(&path, ROTATE_BYTES);
+    append_line(&usage_log_path(root), &line);
+    if !pending.pointers.is_empty() {
+        append_line(&payload_log_path(root), &payload_line(&pending, ts));
+    }
+}
+
+fn append_line(path: &Path, line: &str) {
+    rotate_if_needed(path, ROTATE_BYTES);
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());
     }
+}
+
+/// Payload journal line (Amendment 10a): self-contained — replay verification
+/// needs no join with usage.log. Same `ts` as the usage line of the invocation.
+fn payload_line(p: &Pending, ts: u64) -> String {
+    let pointers = p
+        .pointers
+        .iter()
+        .map(|ptr| format!("\"{}\"", json_escape(ptr)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"name\":\"{}\",\"session\":\"{}\",\"arm\":\"{}\",\"built_at\":{},\"source_rev\":\"{}\",\"stale\":{},\"shown\":{},\"total\":{},\"pointers\":[{pointers}]}}\n",
+        p.surface,
+        p.tool,
+        json_escape(&p.name),
+        json_escape(&p.session),
+        json_escape(&p.arm),
+        p.built_at,
+        json_escape(&p.source_rev),
+        p.stale,
+        p.shown,
+        p.total,
+    )
 }
 
 fn rotate_if_needed(path: &Path, max: u64) {
@@ -286,5 +375,53 @@ mod tests {
         assert_eq!(extract_num(line, "ambiguous"), Some(1));
         assert_eq!(extract_num(line, "latency_us"), Some(9800));
         assert_eq!(extract_num(line, "stale"), Some(0));
+        // Amendment 10 additive keys stay extractable.
+        assert_eq!(
+            extract_str(line, "session"),
+            None,
+            "pre-Amendment-10 lines have no session key"
+        );
+    }
+
+    #[test]
+    fn payload_line_is_self_contained_and_escaped() {
+        let p = Pending {
+            surface: "mcp",
+            tool: "callers".into(),
+            args: "{}".into(),
+            result_count: 2,
+            shown: 2,
+            total: 2,
+            ambiguous: 0,
+            stale: true,
+            session: "r1-t1".into(),
+            arm: "kg".into(),
+            name: "a.b".into(),
+            pointers: vec!["src/a.rs:7".into(), "src/b.rs:12 [ambiguous]".into()],
+            built_at: 42,
+            source_rev: "abc".into(),
+        };
+        let line = payload_line(&p, 7);
+        assert_eq!(
+            line,
+            "{\"ts\":7,\"surface\":\"mcp\",\"tool\":\"callers\",\"name\":\"a.b\",\
+             \"session\":\"r1-t1\",\"arm\":\"kg\",\"built_at\":42,\
+             \"source_rev\":\"abc\",\"stale\":true,\"shown\":2,\"total\":2,\
+             \"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}\n"
+        );
+        assert_eq!(extract_str(&line, "session").as_deref(), Some("r1-t1"));
+        assert_eq!(extract_num(&line, "built_at"), Some(42));
+        assert_eq!(extract_num(&line, "stale"), Some(1));
+    }
+
+    #[test]
+    fn env_tag_trims_and_caps_at_64() {
+        // Safety: test-only env mutation, single-threaded test binary section.
+        std::env::set_var("KG_TEST_TAG", "  r1-task-1  ");
+        assert_eq!(env_tag("KG_TEST_TAG"), "r1-task-1");
+        std::env::set_var("KG_TEST_TAG", "x".repeat(100));
+        assert_eq!(env_tag("KG_TEST_TAG").len(), 64);
+        std::env::remove_var("KG_TEST_TAG");
+        assert_eq!(env_tag("KG_TEST_TAG"), "");
     }
 }

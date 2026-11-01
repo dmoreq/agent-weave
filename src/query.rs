@@ -114,6 +114,7 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     collect_output(
         conn,
         root,
+        name,
         rows,
         limit,
         "0 callers found (dynamic dispatch possible — grep fallback recommended)",
@@ -196,7 +197,7 @@ pub fn callees(
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
         })
     })?;
-    collect_output(conn, root, rows, limit, "0 callees found")
+    collect_output(conn, root, name, rows, limit, "0 callees found")
 }
 
 pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
@@ -226,7 +227,7 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
         })
     })?;
-    collect_output(conn, root, rows, limit, "0 impacting files found")
+    collect_output(conn, root, &rel, rows, limit, "0 impacting files found")
 }
 
 /// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
@@ -250,7 +251,7 @@ pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput>
         let line: i64 = r.get(2)?;
         Ok(Pointer { file: path, line, tag: "" })
     })?;
-    let mut out = collect_output(conn, root, rows, limit, "0 dead-code candidates found")?;
+    let mut out = collect_output(conn, root, "", rows, limit, "0 dead-code candidates found")?;
     out.header = Some(match out.header.take() {
         Some(stale) => format!("{DEAD_CAVEAT}\n{stale}"),
         None => DEAD_CAVEAT.to_string(),
@@ -317,16 +318,34 @@ pub fn symbols(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
     let stale = file_changed(conn, root, &rel);
-    crate::journal::record_result(rows.len(), rows.len(), rows.len(), stale, 0);
+    let n_symbols = rows.len();
+    let shown = n_symbols.min(limit);
+    let data_lines: Vec<String> = rows
+        .into_iter()
+        .take(shown)
+        .map(|(kind, qualname, line)| format!("{rel}:{line} {kind} {qualname}"))
+        .collect();
+    // Payload capture (Amendment 10a): the `path:line kind qualname` data
+    // lines only — never the staleness header or the cap footer.
+    let built_at = db::meta_get(conn, "built_at")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
+    crate::journal::record_payload(
+        &rel,
+        &data_lines,
+        stale,
+        shown,
+        n_symbols,
+        built_at,
+        &source_rev,
+    );
+    crate::journal::record_result(n_symbols, shown, n_symbols, stale, 0);
     let mut out = Vec::new();
     if stale {
         out.push("kg: 1 of 1 result files changed since build — run kg build".to_string());
     }
-    let n_symbols = rows.len();
-    let shown = n_symbols.min(limit);
-    out.extend(rows.into_iter().take(shown).map(|(kind, qualname, line)| {
-        format!("{rel}:{line} {kind} {qualname}")
-    }));
+    out.extend(data_lines);
     if n_symbols > shown {
         out.push(format!("showing {} of {}", shown, n_symbols));
         eprintln!("[kg] capped at {} results ({} total)", shown, n_symbols);
@@ -336,9 +355,11 @@ pub fn symbols(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
 
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by
 /// the displayed count): stat short-circuits, FNV-1a re-hash on mismatch.
+/// `name` is the query target recorded in the payload journal (Amendment 10).
 fn collect_output(
     conn: &Connection,
     root: &Path,
+    name: &str,
     rows: impl Iterator<Item = std::result::Result<Pointer, rusqlite::Error>>,
     limit: usize,
     empty_reason: &str,
@@ -368,7 +389,39 @@ fn collect_output(
     } else {
         None
     };
-    Ok(QueryOutput { header, pointers: displayed, shown, total, stale: changed > 0 })
+    let out = QueryOutput {
+        header,
+        pointers: displayed,
+        shown,
+        total,
+        stale: changed > 0,
+    };
+    record_payload_capture(conn, name, &out);
+    Ok(out)
+}
+
+/// Payload journal capture (Amendment 10a): the rendered displayed set,
+/// byte-identical to stdout data lines, plus the index meta it came from.
+/// Best-effort like every journal write; runs before the dispatch site's
+/// `record_result`, which fills the same Pending fields consistently.
+fn record_payload_capture(conn: &Connection, name: &str, out: &QueryOutput) {
+    if out.pointers.is_empty() {
+        return;
+    }
+    let built_at = db::meta_get(conn, "built_at")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
+    let rendered: Vec<String> = out.pointers.iter().map(|p| p.render()).collect();
+    crate::journal::record_payload(
+        name,
+        &rendered,
+        out.stale,
+        out.shown,
+        out.total,
+        built_at,
+        &source_rev,
+    );
 }
 
 /// Render a QueryOutput exactly as the CLI prints it on stdout (header,
