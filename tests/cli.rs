@@ -963,3 +963,22 @@ fn p15_stats_hotspots_report() {
         assert!(stdout.contains(section), "missing {section}: {stdout}");
     }
 }
+
+#[test]
+fn partial_v4_index_rebuilds_fresh() {
+    // Amendment 12 regression: a v4-stamped index from the first landing
+    // wave (symbols_fts present, clone_groups absent) must disable the fast
+    // path and rebuild fully, not fail carry-forward on the missing table.
+    let repo = fixture("partial-v4");
+    build(&repo);
+    // Demote the index to a first-wave v4: drop clone_groups in place.
+    let idx = repo.join(".kg/index.db");
+    let status = std::process::Command::new("sqlite3")
+        .args([idx.to_string_lossy().as_ref(), "DROP TABLE clone_groups;"])
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "sqlite3 demotion failed (fixture-only tool)");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "rebuild over partial v4 index failed: {stdout}{stderr}");
+    assert!(!stderr.contains("clone_groups"), "{stdout}{stderr}");
+}

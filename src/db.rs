@@ -160,6 +160,22 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
     if version != SCHEMA_VERSION {
         return Ok(None);
     }
+    // Amendment 12 landed schema v4 in two waves (symbols_fts first,
+    // clone_groups later) behind ONE version stamp, so a v4-stamped index
+    // from the first wave lacks clone_groups and the carry-forward INSERT
+    // would fail. Require the complete v4 table set before enabling the
+    // fast path; a partial index falls back to a full fresh build.
+    let has_clone_groups: i64 = match old.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'clone_groups'",
+        [],
+        |r| r.get(0),
+    ) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    if has_clone_groups == 0 {
+        return Ok(None);
+    }
     let grammar: String = match old.query_row(
         "SELECT value FROM meta WHERE key = 'grammar_version'",
         [],
