@@ -39,6 +39,7 @@ kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg impact app.py              # files that call into app.py
 kg search parser fragment     # BM25 symbol search over split identifier tokens
+kg clones                     # duplicate-block candidates (caveat: not proof)
 kg dead                       # dead-code candidates (caveat: not proof)
 kg unresolved                 # per-file unresolved-callee counts
 kg symbols app.py             # one file's symbols, ordered by line
