@@ -1,6 +1,6 @@
 ---
 name: kg-first
-description: Routing policy for code agents with the kg code index available. Use when locating callers, callees, impact of a change, symbol definitions, or file structure — query kg first and fall back to grep only for what it cannot answer. Encodes the measured economics (-27% input tokens at equal recall) and the failure modes (ambiguous bare names, result caps, staleness) from 42 instrumented agent runs.
+description: Routing policy for code agents with the kg code index available. Use when locating callers, callees, impact of a change, symbol definitions, file structure, or the call route between two symbols — query kg first and fall back to grep only for what it cannot answer. Encodes the measured economics (-27% input tokens at equal recall) and the failure modes (ambiguous bare names, result caps, staleness) from 42 instrumented agent runs.
 ---
 
 # kg-first navigation
@@ -17,6 +17,7 @@ source:
 |----------|---------|
 | who calls this symbol | `kg callers <name>` |
 | what does this call (transitive) | `kg callees <name> --depth N` |
+| does A reach B, via which call sites | `kg path <from> <to>` — one shortest route; reverse question = swap the arguments |
 | which files call into a file | `kg impact <file>` |
 | find a symbol by (partial) name | `kg search <terms>` |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |
@@ -27,7 +28,7 @@ Use grep/rg **only** for what kg cannot answer or to verify one specific line.
 Do not re-derive with grep what kg has already answered — that doubles the
 context you carry for zero information gain.
 
-## Handling the two contract behaviors
+## Handling the contract behaviors
 
 1. **Exit 2 (ambiguous name)**: a bare name matched several symbols. kg prints
    `path:line qualname` candidates. Re-query with the fully qualified name
@@ -36,6 +37,18 @@ context you carry for zero information gain.
 2. **`showing N of M` on the last line**: the result was capped (default 50).
    Hub symbols have hundreds of call sites. Re-run with `--limit <M>` (max
    10000) when you need the full set; paginate otherwise.
+3. **`kg path` outcomes**: endpoints accept the exact bare name or the full
+   qualname only — `symbol '<name>' not in index` means the input form was
+   wrong or the symbol is absent; recover with `kg search` or
+   `kg symbols <file>`. Exit 2 names the failing endpoint (`as the from|to
+   endpoint`) — resolve it the same way, then re-query.
+   `'q1' and 'q2' resolve to the same symbol` means both arguments landed on
+   one symbol. `no call path ... at any depth` is a definitive negative
+   within resolved edges; `within depth D; a longer path may exist` means
+   the cap stopped the search (max 10 hops). A K-hop route fails if ANY hop
+   edge is unresolved, so repeated no-path results likely reflect the
+   10-48% unresolved call-site rate, not a missing connection — fall back to
+   composing `callees`/`callers` or grep instead of re-querying `path`.
 
 ## Staleness discipline
 

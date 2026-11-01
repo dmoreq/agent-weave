@@ -108,7 +108,7 @@ fn g10_initialize_tools_list_and_parity() {
         .iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        vec!["build", "callers", "callees", "impact", "dead", "unresolved", "symbols", "search", "clones", "stats", "hotspots", "report", "usage"]
+        vec!["build", "callers", "callees", "path", "impact", "dead", "unresolved", "symbols", "search", "clones", "stats", "hotspots", "report", "usage"]
     );
     assert!(!names.contains(&"doctor"), "doctor is not exposed (Amendment 8)");
 
@@ -153,6 +153,16 @@ fn g10_initialize_tools_list_and_parity() {
         String::from_utf8_lossy(&cli_clones_hi.stderr).trim_end()
     );
 
+    // G10 parity extends to path (Amendment 13): hop pointers + chain line
+    // byte-equal between the surfaces.
+    let cli_path = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root").arg(&repo).args(["path", "caller", "normalize"])
+        .output().unwrap();
+    assert_eq!(cli_path.status.code(), Some(0));
+    let path_call = rpc(&mut srv, 12, "tools/call", json!({"name": "path", "arguments": {"from": "caller", "to": "normalize"}}));
+    assert_eq!(result_text(&path_call), String::from_utf8_lossy(&cli_path.stdout).into_owned());
+    assert!(result_text(&path_call).starts_with("kg: path — resolved static edges only;"), "path caveat first: {}", result_text(&path_call));
+
     let dead = rpc(&mut srv, 5, "tools/call", json!({"name": "dead", "arguments": {}}));
     assert_eq!(result_text(&dead), String::from_utf8_lossy(&cli_dead.stdout).into_owned());
     assert!(result_text(&dead).starts_with("kg: dead-code candidates —"), "caveat preserved: {}", result_text(&dead));
@@ -165,12 +175,12 @@ fn g10_initialize_tools_list_and_parity() {
 
     // Every dispatched tool call journaled with the mcp surface: callers,
     // symbols (plain), symbols (outline), search, clones, clones (min_lines
-    // failure), dead, stats. The unknown tool is rejected before dispatch and
-    // journals nothing; the CLI reference commands above added their own
-    // surface=cli entries.
+    // failure), dead, stats, path. The unknown tool is rejected before
+    // dispatch and journals nothing; the CLI reference commands above added
+    // their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
     let mcp_lines = log.lines().filter(|l| l.contains("\"surface\":\"mcp\"")).count();
-    assert_eq!(mcp_lines, 8, "{log}");
+    assert_eq!(mcp_lines, 9, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -182,8 +192,8 @@ fn g10_initialize_tools_list_and_parity() {
         .count();
     assert_eq!(
         mcp_payload,
-        5,
-        "callers+symbols(plain)+symbols(outline)+search+dead, not stats: {payload}"
+        6,
+        "callers+symbols(plain)+symbols(outline)+search+dead+path, not stats: {payload}"
     );
     let callers_line = payload
         .lines()

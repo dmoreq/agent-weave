@@ -22,8 +22,18 @@ const DEAD_CAVEAT: &str =
 const CLONES_CAVEAT: &str =
     "kg: clone candidates — normalized-text equality, not proof of semantic duplication";
 
+/// Permanent honesty caveat for `kg path` (Amendment 13): resolved static
+/// edges only; dynamic dispatch may hide paths.
+const PATH_CAVEAT: &str =
+    "kg: path — resolved static edges only; dynamic dispatch may hide paths";
+
 /// One resolved candidate: (path, line, qualname).
 pub type Candidate = (String, i64, String);
+
+/// One BFS level's out-edges grouped per source: `(dst qualname, dst path,
+/// site_line, dst id)` sorted by the pinned neighbor key (`path` is the
+/// destination file). Amendment 13.
+type LevelEdges = std::collections::HashMap<i64, Vec<(String, String, i64, i64)>>;
 
 pub struct Pointer {
     pub file: String,
@@ -99,6 +109,7 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         return Err(KgError::Ambiguous {
             name: name.to_string(),
             candidates: cands,
+            role: None,
         });
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -150,6 +161,7 @@ pub fn callees(
         return Err(KgError::Ambiguous {
             name: name.to_string(),
             candidates: cands,
+            role: None,
         });
     }
     // Callee pointer: the callee's definition line. AMBIGUOUS edges have no
@@ -211,6 +223,256 @@ pub fn callees(
         })
     })?;
     collect_output(conn, root, name, rows, limit, "0 callees found")
+}
+
+/// Shortest call path (Amendment 13): does `from` reach `to` through resolved
+/// call edges, and via which call sites? Forward direction only (reverse
+/// question = swap arguments, OQ5). Pinned determinism: multi-edges dedup to
+/// the smallest `site_line`, neighbors expand in
+/// `ORDER BY ds.qualname, df.path, e.site_line`, FIFO frontier with
+/// visited-on-enqueue, parent = first discoverer. No limit surface: a single
+/// shortest chain has at most `depth` hops (recorded deviation). Output:
+/// caveat header, hop call-site pointers in path order, final chain line of
+/// resolved full qualnames. Payload-journaled (Amendment 10), `name` = the
+/// `from` argument.
+pub fn path(conn: &Connection, root: &Path, from: &str, to: &str, depth: usize) -> Result<Vec<String>> {
+    let depth = depth.clamp(1, 10);
+    let (from_ids, from_cands) = target_ids(conn, from)?;
+    if from_ids.is_empty() {
+        return Err(KgError::NoResults(format!("symbol '{from}' not in index")));
+    }
+    if from_cands.len() > 1 {
+        return Err(KgError::Ambiguous {
+            name: from.to_string(),
+            candidates: from_cands,
+            role: Some("from"),
+        });
+    }
+    let (to_ids, to_cands) = target_ids(conn, to)?;
+    if to_ids.is_empty() {
+        return Err(KgError::NoResults(format!("symbol '{to}' not in index")));
+    }
+    if to_cands.len() > 1 {
+        return Err(KgError::Ambiguous {
+            name: to.to_string(),
+            candidates: to_cands,
+            role: Some("to"),
+        });
+    }
+    let from_id = from_ids[0];
+    let to_id = to_ids[0];
+    let from_qn = from_cands[0].2.clone();
+    let to_qn = to_cands[0].2.clone();
+    if from_id == to_id {
+        return Err(KgError::NoResults(format!(
+            "'{from_qn}' and '{to_qn}' resolve to the same symbol"
+        )));
+    }
+    let (chain_ids, hop_sites) = match path_bfs(conn, from_id, to_id, depth)? {
+        PathSearch::Exhausted => {
+            return Err(KgError::NoResults(format!(
+                "no call path from '{from_qn}' to '{to_qn}' at any depth <= {depth} (resolved edges only)"
+            )));
+        }
+        PathSearch::CapTruncated => {
+            return Err(KgError::NoResults(format!(
+                "no call path from '{from_qn}' to '{to_qn}' within depth {depth}; a longer path may exist (resolved edges only)"
+            )));
+        }
+        PathSearch::Found { chain_ids, hop_sites } => (chain_ids, hop_sites),
+    };
+    let hops = hop_sites.len();
+    // One batched lookup for the chain qualnames (final line) and the hop
+    // caller files (pointer lines: the call site lives in the caller's file).
+    let placeholders = chain_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT s.id, s.qualname, f.path
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE s.id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<rusqlite::types::Value> = chain_ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
+    let mut qn: std::collections::HashMap<i64, String> = Default::default();
+    let mut file: std::collections::HashMap<i64, String> = Default::default();
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    })?;
+    for r in rows {
+        let (id, qualname, fpath) = r?;
+        qn.insert(id, qualname);
+        file.insert(id, fpath);
+    }
+    let mut pointers: Vec<String> = Vec::with_capacity(hops);
+    let mut hop_files: BTreeSet<String> = BTreeSet::new();
+    for (i, &site) in hop_sites.iter().enumerate() {
+        let caller = chain_ids[i];
+        let Some(f) = file.get(&caller) else {
+            return Err(KgError::Internal("path hop file missing".to_string()));
+        };
+        pointers.push(format!("{f}:{site}"));
+        hop_files.insert(f.clone());
+    }
+    let n_files = hop_files.len();
+    let mut changed = 0usize;
+    for f in &hop_files {
+        if file_changed(conn, root, f) {
+            changed += 1;
+        }
+    }
+    let stale = changed > 0;
+    // Payload capture (Amendment 10a): hop pointer text, byte-identical to
+    // the stdout data lines; `name` = the `from` argument. `shown` = `total`
+    // = hop count (no cap surface exists).
+    let built_at = db::meta_get(conn, "built_at")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
+    crate::journal::record_payload(from, &pointers, stale, hops, hops, built_at, &source_rev);
+    crate::journal::record_result(hops, hops, hops, stale, 0);
+    let mut out = Vec::with_capacity(hops + 4);
+    out.push(PATH_CAVEAT.to_string());
+    if stale {
+        out.push(format!(
+            "kg: {changed} of {n_files} result files changed since build — run kg build"
+        ));
+    }
+    out.extend(pointers);
+    let mut chain_names: Vec<&str> = Vec::with_capacity(chain_ids.len());
+    for id in &chain_ids {
+        let Some(q) = qn.get(id) else {
+            return Err(KgError::Internal("path chain qualname missing".to_string()));
+        };
+        chain_names.push(q.as_str());
+    }
+    out.push(format!("kg: chain {} ({hops} hops)", chain_names.join(" -> ")));
+    Ok(out)
+}
+
+/// `path` BFS outcome (Amendment 13): the found chain with its per-hop call
+/// sites, or the two negative shapes the exit-1 contract distinguishes.
+enum PathSearch {
+    Found {
+        chain_ids: Vec<i64>,
+        hop_sites: Vec<i64>,
+    },
+    Exhausted,
+    CapTruncated,
+}
+
+/// Level-batched BFS over the resolved call-edge set (`kind = 'calls' AND
+/// dst_id IS NOT NULL`). One indexed query per frontier level (chunked at
+/// 500 ids per the build's insert-batch precedent), not a full-corpus
+/// adjacency load and not a query per node. Expansion order matches the
+/// pinned discipline exactly: frontier nodes in FIFO discovery order, each
+/// node's neighbors sorted by `(dst qualname, dst path, site_line)`,
+/// multi-edges deduped by the visited guard (the first row per pair carries
+/// the smallest `site_line`), parent = first discoverer. Worst case fetches
+/// every resolved call edge once; typical queries touch only the reachable
+/// subgraph.
+fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result<PathSearch> {
+    let level_edges = |ids: &[i64]| -> Result<LevelEdges> {
+        let mut grouped: LevelEdges = Default::default();
+        for chunk in ids.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT e.src_id, e.dst_id, e.site_line, ds.qualname, df.path
+                 FROM edges e
+                 JOIN symbols ds ON ds.id = e.dst_id
+                 JOIN files df ON df.id = ds.file_id
+                 WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL
+                   AND e.src_id IN ({placeholders})"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<rusqlite::types::Value> =
+                chunk.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?;
+            for r in rows {
+                let (src, dst, site, qn, fpath) = r?;
+                grouped.entry(src).or_default().push((qn, fpath, site, dst));
+            }
+        }
+        for neighbors in grouped.values_mut() {
+            neighbors.sort();
+        }
+        Ok(grouped)
+    };
+    let mut parent: std::collections::HashMap<i64, (i64, i64)> = Default::default();
+    let mut visited: std::collections::HashSet<i64> = Default::default();
+    let mut frontier: Vec<i64> = vec![from_id];
+    visited.insert(from_id);
+    let mut found = false;
+    let mut d = 0usize;
+    while !found && !frontier.is_empty() && d < depth {
+        let grouped = level_edges(&frontier)?;
+        let mut next: Vec<i64> = Vec::new();
+        for &v in &frontier {
+            let Some(neighbors) = grouped.get(&v) else { continue };
+            // Sorted by (dst qualname, dst path, site_line): the first
+            // unvisited row per destination carries the smallest site_line.
+            for (_, _, site, w) in neighbors {
+                if visited.contains(w) {
+                    continue;
+                }
+                visited.insert(*w);
+                parent.insert(*w, (v, *site));
+                if *w == to_id {
+                    found = true;
+                    break;
+                }
+                next.push(*w);
+            }
+            if found {
+                break;
+            }
+        }
+        frontier = next;
+        d += 1;
+    }
+    if found {
+        // Walk parents back to the seed: chain node ids + per-hop call sites.
+        let mut chain_ids: Vec<i64> = vec![to_id];
+        let mut hop_sites: Vec<i64> = Vec::new();
+        let mut cur = to_id;
+        while cur != from_id {
+            let Some(&(p, site)) = parent.get(&cur) else {
+                return Err(KgError::Internal(
+                    "path reconstruction lost a parent link".to_string(),
+                ));
+            };
+            hop_sites.push(site);
+            chain_ids.push(p);
+            cur = p;
+        }
+        chain_ids.reverse();
+        hop_sites.reverse();
+        return Ok(PathSearch::Found { chain_ids, hop_sites });
+    }
+    if !frontier.is_empty() && d == depth {
+        // Cap-truncation probe: an unvisited out-neighbor of any node at the
+        // maximum distance means a longer path may exist.
+        let grouped = level_edges(&frontier)?;
+        for neighbors in grouped.values() {
+            if neighbors.iter().any(|(_, _, _, w)| !visited.contains(w)) {
+                return Ok(PathSearch::CapTruncated);
+            }
+        }
+    }
+    Ok(PathSearch::Exhausted)
 }
 
 pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {

@@ -71,6 +71,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Build { .. } => "build",
         cli::Cmd::Callers { .. } => "callers",
         cli::Cmd::Callees { .. } => "callees",
+        cli::Cmd::Path { .. } => "path",
         cli::Cmd::Impact { .. } => "impact",
         cli::Cmd::Dead { .. } => "dead",
         cli::Cmd::Unresolved { .. } => "unresolved",
@@ -99,6 +100,11 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             ("name", name.clone()),
             ("depth", depth.to_string()),
             ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Path { from, to, depth } => vec![
+            ("name", from.clone()),
+            ("to", to.clone()),
+            ("depth", depth.to_string()),
         ],
         cli::Cmd::Impact { file, limit } => {
             vec![("file", file.clone()), ("limit", limit.to_string())]
@@ -167,6 +173,14 @@ fn run(cli: cli::Cli) -> Result<()> {
                 out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
             );
             query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Path { from, to, depth } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::path(&conn, &root, &from, &to, depth)? {
+                println!("{line}");
+            }
             Ok(())
         }
         cli::Cmd::Impact { file, limit } => {

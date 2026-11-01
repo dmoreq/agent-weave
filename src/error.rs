@@ -30,9 +30,13 @@ pub enum KgError {
     /// Ambiguous bare name: candidates print on stdout (CUJ4), message on
     /// stderr; exit 2. Carries the candidate list so non-CLI surfaces (MCP)
     /// can render the same contract without touching stdout directly.
+    /// `role` names the failing endpoint for two-target queries (`path`,
+    /// Amendment 13); `None` for single-name tools keeps their bytes
+    /// unchanged.
     Ambiguous {
         name: String,
         candidates: Vec<(String, i64, String)>,
+        role: Option<&'static str>,
     },
     CorruptIndex(String),
     Locked(u32),
@@ -74,11 +78,15 @@ impl fmt::Display for KgError {
         match self {
             KgError::NoResults(detail) => write!(f, "kg: {}: {}", self.class(), detail),
             KgError::Usage(detail) => write!(f, "kg: {}: {}", self.class(), detail),
-            KgError::Ambiguous { name, candidates } => write!(
+            KgError::Ambiguous { name, candidates, role } => write!(
                 f,
-                "kg: {}: ambiguous name '{name}' — {} candidates; use the Class.method qualname form",
+                "kg: {}: ambiguous name '{name}' — {} candidates{}; use the Class.method qualname form",
                 self.class(),
-                candidates.len()
+                candidates.len(),
+                match role {
+                    Some(r) => format!(" as the {r} endpoint"),
+                    None => String::new(),
+                }
             ),
             KgError::CorruptIndex(detail) => write!(f, "kg: {}: {}", self.class(), detail),
             KgError::Locked(pid) => {

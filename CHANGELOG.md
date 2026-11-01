@@ -7,6 +7,40 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added — `kg path <from> <to>` (Amendment 13, F5)
+
+- Shortest call path between two symbols over resolved call edges
+  (`kind = 'calls' AND dst_id IS NOT NULL`): level-batched BFS, deterministic
+  (FIFO frontier, neighbors ordered by `dst qualname, dst path, site_line`,
+  multi-edges deduped to the smallest `site_line`, parent = first
+  discoverer); `--depth N` (default 10, clamp 1-10).
+- Output contract (contract-bump): first-line caveat
+  `kg: path — resolved static edges only; dynamic dispatch may hide paths`,
+  hop call-site pointers in path order (no cap — `path` has no limit
+  surface, recorded deviation), final line
+  `kg: chain <resolved qualnames> (K hops)`. Exit 1 negatives distinguish
+  exhaustive vs depth-cap-truncated; exit 2 ambiguity names the failing
+  endpoint (`as the from|to endpoint`).
+- Journaled per Amendment 6 (`args` gains `to`; no `limit` key); payload
+  per Amendment 10 (`name` = the `from` argument; `usage --verify` unchanged).
+  MCP tool `path` with G10 byte parity.
+- Spec review: six independent Goldfish reviewers, 73 findings consolidated
+  to 20, 2 fix cycles, round-2 APPROVE
+  (`docs/baselines/reviews/R5-P5.md`); G17 gate evidence
+  (`docs/baselines/g17-path-2026-11-02.md`): 10/10 exact-byte fixtures,
+  8/8 frozen GT pairs, 0.6-1.4 ms in-process best-of-7 across the 85k-symbol
+  synth corpus and the 26-file self-index (spawn-inclusive wall < 10 ms).
+
+### Fixed
+
+- `tests/scripts/write_path_check.sh`: stale exclusion pattern (G5 was red
+  on the committed tree after the qualified `std::fs::rename(crate::db::...)`
+  refactor); `src/journal.rs` added to the kg_dir-scoped allowlist.
+- `db::probe_old`: a v4-stamped index from the Amendment 12 first landing
+  wave (no `clone_groups` table) now disables the fast path and rebuilds
+  fresh instead of failing carry-forward with
+  `no such table: olddb.clone_groups`.
+
 ### Added — `kg symbols --outline` (Amendment 12a, F1)
 
 - New `--outline` flag on `kg symbols <file>`: each line gains the stored

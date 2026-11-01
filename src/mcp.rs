@@ -35,6 +35,8 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": limit}), &["name"])},
         {"name": "callees", "description": "What does this symbol call — transitive with depth",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
+        {"name": "path", "description": "Shortest call path between two symbols — hop call-site pointers path:line over resolved edges; dynamic dispatch may hide paths",
+         "inputSchema": schema_obj(json!({"from": {"type": "string"}, "to": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum hops (default 10)"}}), &["from", "to"])},
         {"name": "impact", "description": "Files that call into <file>",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "limit": limit}), &["file"])},
         {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof",
@@ -207,6 +209,16 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             record(&out);
             Ok(crate::query::render_output(&out))
         }
+        "path" => {
+            let conn = crate::db::open_for_query(root)?;
+            Ok(join_lines(&crate::query::path(
+                &conn,
+                root,
+                &arg_str(args, "from").unwrap_or_default(),
+                &arg_str(args, "to").unwrap_or_default(),
+                arg_usize(args, "depth", 10),
+            )?))
+        }
         "impact" => {
             let conn = crate::db::open_for_query(root)?;
             let out = crate::query::impact(&conn, root, &arg_str(args, "file").unwrap_or_default(), arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?;
@@ -310,6 +322,15 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             }
             out.push(("depth", arg_usize(args, "depth", 1).to_string()));
             out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+        }
+        "path" => {
+            if let Some(from) = arg_str(args, "from") {
+                out.push(("name", from));
+            }
+            if let Some(to) = arg_str(args, "to") {
+                out.push(("to", to));
+            }
+            out.push(("depth", arg_usize(args, "depth", 10).to_string()));
         }
         "impact" => {
             if let Some(file) = arg_str(args, "file") {

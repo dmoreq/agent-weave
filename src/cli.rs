@@ -54,6 +54,18 @@ pub enum Cmd {
         #[arg(long, default_value_t = 1)]
         depth: usize,
     },
+    /// Shortest call path between two symbols via resolved call edges.
+    /// Resolved static edges only — dynamic dispatch may hide paths.
+    /// A reverse question is the same query with swapped arguments.
+    Path {
+        /// Symbol the path starts from (bare name or dotted qualname)
+        from: String,
+        /// Symbol the path must reach (bare name or dotted qualname)
+        to: String,
+        /// Maximum hops to search (default 10, max 10)
+        #[arg(long, default_value_t = 10)]
+        depth: usize,
+    },
     /// Files that call into <file> (impact direction: callers of the file)
     Impact {
         /// Repo-relative path of the indexed file
