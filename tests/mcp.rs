@@ -88,6 +88,9 @@ fn g10_initialize_tools_list_and_parity() {
     let cli_symbols_outline = Command::new(env!("CARGO_BIN_EXE_kg"))
         .arg("--root").arg(&repo).args(["symbols", "utils.py", "--outline"])
         .output().unwrap();
+    let cli_search = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root").arg(&repo).args(["search", "normalize"])
+        .output().unwrap();
     let cli_dead = Command::new(env!("CARGO_BIN_EXE_kg"))
         .arg("--root").arg(&repo).args(["dead"])
         .output().unwrap();
@@ -104,7 +107,7 @@ fn g10_initialize_tools_list_and_parity() {
         .iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        vec!["build", "callers", "callees", "impact", "dead", "unresolved", "symbols", "stats", "hotspots", "report", "usage"]
+        vec!["build", "callers", "callees", "impact", "dead", "unresolved", "symbols", "search", "stats", "hotspots", "report", "usage"]
     );
     assert!(!names.contains(&"doctor"), "doctor is not exposed (Amendment 8)");
 
@@ -118,6 +121,9 @@ fn g10_initialize_tools_list_and_parity() {
 
     let symbols_outline = rpc(&mut srv, 8, "tools/call", json!({"name": "symbols", "arguments": {"file": "utils.py", "outline": true}}));
     assert_eq!(result_text(&symbols_outline), String::from_utf8_lossy(&cli_symbols_outline.stdout).into_owned());
+
+    let search = rpc(&mut srv, 9, "tools/call", json!({"name": "search", "arguments": {"terms": "normalize"}}));
+    assert_eq!(result_text(&search), String::from_utf8_lossy(&cli_search.stdout).into_owned());
 
     let dead = rpc(&mut srv, 5, "tools/call", json!({"name": "dead", "arguments": {}}));
     assert_eq!(result_text(&dead), String::from_utf8_lossy(&cli_dead.stdout).into_owned());
@@ -135,7 +141,7 @@ fn g10_initialize_tools_list_and_parity() {
     // commands above added their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
     let mcp_lines = log.lines().filter(|l| l.contains("\"surface\":\"mcp\"")).count();
-    assert_eq!(mcp_lines, 5, "{log}");
+    assert_eq!(mcp_lines, 6, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -147,8 +153,8 @@ fn g10_initialize_tools_list_and_parity() {
         .count();
     assert_eq!(
         mcp_payload,
-        4,
-        "callers+symbols(plain)+symbols(outline)+dead, not stats: {payload}"
+        5,
+        "callers+symbols(plain)+symbols(outline)+search+dead, not stats: {payload}"
     );
     let callers_line = payload
         .lines()

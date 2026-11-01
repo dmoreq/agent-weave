@@ -129,8 +129,10 @@ rules:
   count asserts updated to 28/36/39, usage text "all 39"). F3 is therefore
   HARDENING, not creation: audit the SKILL.md trigger table against all
   subcommands, add the "Do NOT use for" column, grep-fallback guidance for
-  dynamic dispatch, output-contract summary; size budget <= 2,500 bytes
-  (repo schema bound 12KB/250 lines unchanged).
+  dynamic dispatch, output-contract summary; size budget <= 3,000 bytes
+  (raised from the proposed 2,500: the agent-skills repo invariant requires a
+  '## Related Skills' handoff section with >= 2 outgoing + >= 2 incoming
+  links; repo schema bound 12KB/250 lines unchanged).
 - Drift gate: `tests/skill_contract_drift.py` in the agent-skills repo —
   env `KG_BIN` points at a kg binary; renders `kg --help` + each
   subcommand's `--help`; asserts every subcommand/flag mentioned in the

@@ -43,6 +43,8 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"limit": limit}), &[])},
         {"name": "symbols", "description": "Symbols of one indexed file, ordered by line; optional outline adds the one-line signature column",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "outline": {"type": "boolean"}, "limit": limit}), &["file"])},
+        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms",
+         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "limit": limit}), &["terms"])},
         {"name": "stats", "description": "Index totals: files, symbols, edges, parse errors, sizes",
          "inputSchema": schema_obj(json!({}), &[])},
         {"name": "hotspots", "description": "Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density",
@@ -229,6 +231,15 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
+        "search" => {
+            let conn = crate::db::open_for_query(root)?;
+            Ok(join_lines(&crate::query::search(
+                &conn,
+                root,
+                &arg_str(args, "terms").unwrap_or_default(),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
+        }
         "stats" => Ok(crate::insights::stats(&crate::db::open_for_query(root)?, root)?),
         "hotspots" => Ok(join_lines(&crate::insights::hotspots(&crate::db::open_for_query(root)?, root, arg_usize(args, "limit", 10))?)),
         "report" => Ok(join_lines(&crate::insights::report(&crate::db::open_for_query(root)?, root)?)),
@@ -293,6 +304,12 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "dead" | "unresolved" | "hotspots" => {
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "search" => {
+            if let Some(terms) = arg_str(args, "terms") {
+                out.push(("terms", terms));
+            }
+            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
         }
         "usage" => {
             if args.get("verify").and_then(|v| v.as_bool()).unwrap_or(false) {

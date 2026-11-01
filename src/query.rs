@@ -25,11 +25,18 @@ pub struct Pointer {
     pub file: String,
     pub line: i64,
     pub tag: &'static str, // "" or " [ambiguous]"
+    /// Optional trailing detail rendered after the tag (search hits carry the
+    /// qualname here, Amendment 12b; empty for call-edge pointers).
+    pub detail: String,
 }
 
 impl Pointer {
     pub fn render(&self) -> String {
-        format!("{}:{}{}", self.file, self.line, self.tag)
+        if self.detail.is_empty() {
+            format!("{}:{}{}", self.file, self.line, self.tag)
+        } else {
+            format!("{}:{}{} {}", self.file, self.line, self.tag.trim_start(), self.detail)
+        }
     }
 }
 
@@ -109,6 +116,7 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
             file: path,
             line: site,
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
+            detail: String::new(),
         })
     })?;
     collect_output(
@@ -195,6 +203,7 @@ pub fn callees(
             file: path,
             line,
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
+            detail: String::new(),
         })
     })?;
     collect_output(conn, root, name, rows, limit, "0 callees found")
@@ -225,6 +234,7 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
             file: path,
             line: site,
             tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
+            detail: String::new(),
         })
     })?;
     collect_output(conn, root, &rel, rows, limit, "0 impacting files found")
@@ -249,7 +259,7 @@ pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput>
     let rows = stmt.query_map([], |r| {
         let path: String = r.get(1)?;
         let line: i64 = r.get(2)?;
-        Ok(Pointer { file: path, line, tag: "" })
+        Ok(Pointer { file: path, line, tag: "", detail: String::new() })
     })?;
     let mut out = collect_output(conn, root, "", rows, limit, "0 dead-code candidates found")?;
     out.header = Some(match out.header.take() {
@@ -372,6 +382,62 @@ pub fn symbols(
         eprintln!("[kg] capped at {} results ({} total)", shown, n_symbols);
     }
     Ok(out)
+}
+
+/// Symbol-level search (Amendment 12b): FTS5 `bm25()` over split identifier
+/// tokens. Hits are symbol identities — the tier field position stays empty
+/// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
+/// for cap, post-cap staleness, and payload capture.
+pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
+    // and rarer tokens rank higher — natural-language fit without brittle
+    // all-token AND requirements.
+    let expr = crate::extract::split_ident(terms)
+        .split_whitespace()
+        .map(|tok| format!("\"{}\"*", tok.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    if expr.is_empty() {
+        return Err(KgError::Usage("empty search terms".to_string()));
+    }
+    let mut stmt = conn.prepare(
+        "SELECT f.path, s.line_start, s.qualname
+         FROM symbols_fts ft
+         JOIN symbols s ON s.id = ft.rowid
+         JOIN files f ON f.id = s.file_id
+         WHERE symbols_fts MATCH ?1
+         ORDER BY bm25(symbols_fts)",
+    )?;
+    let rows = stmt.query_map([&expr], |r| {
+        Ok(Pointer {
+            file: r.get::<_, String>(0)?,
+            line: r.get::<_, i64>(1)?,
+            tag: "",
+            detail: r.get::<_, String>(2)?,
+        })
+    })?;
+    let out = collect_output(
+        conn,
+        root,
+        terms,
+        rows,
+        limit,
+        &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
+    )?;
+    crate::journal::record_result(out.pointers.len(), out.shown, out.total, out.stale, 0);
+    let mut lines = Vec::with_capacity(out.pointers.len() + 2);
+    if let Some(h) = &out.header {
+        lines.push(h.clone());
+    }
+    for p in &out.pointers {
+        lines.push(p.render());
+    }
+    if out.total > out.shown {
+        lines.push(format!("showing {} of {}", out.shown, out.total));
+        eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
+    }
+    Ok(lines)
 }
 
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by

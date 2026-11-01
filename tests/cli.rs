@@ -503,6 +503,28 @@ fn symbols_outline_adds_signature_and_default_stays_byte_identical() {
 }
 
 #[test]
+fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
+    let repo = fixture("search");
+    build(&repo);
+    // Hit: bm25-ranked pointers, tier position empty (symbol identities).
+    let out = kg(&repo).args(["search", "normalize"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("utils.py:1"), "{stdout}");
+    assert!(!stdout.contains("[ambiguous]"), "search hits carry no tier tag: {stdout}");
+
+    // No match: exit 1 with the documented reason line.
+    let out = kg(&repo).args(["search", "zzzqqqxyz"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("0 symbols matched"), "{stderr}");
+
+    // Empty terms: usage error, exit 2.
+    let out = kg(&repo).args(["search", "   "]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
 fn journal_written_and_usage_summarizes() {
     // Amendment 6: build + callers journal entries; kg usage aggregates them.
     let repo = fixture("journal");

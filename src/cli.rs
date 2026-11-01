@@ -86,6 +86,14 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
+    /// Symbol-level search: bm25-ranked FTS5 over identifier tokens
+    Search {
+        /// Space-separated terms; camelCase/snake_case are split and matched
+        terms: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
     /// Index totals: files, symbols, edges, parse errors, sizes
     Stats {},
     /// Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density

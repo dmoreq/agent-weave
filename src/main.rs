@@ -74,6 +74,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Dead { .. } => "dead",
         cli::Cmd::Unresolved { .. } => "unresolved",
         cli::Cmd::Symbols { .. } => "symbols",
+        cli::Cmd::Search { .. } => "search",
         cli::Cmd::Stats {} => "stats",
         cli::Cmd::Hotspots { .. } => "hotspots",
         cli::Cmd::Report {} => "report",
@@ -106,6 +107,12 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             vec![
                 ("file", file.clone()),
                 ("outline", outline.to_string()),
+                ("limit", limit.to_string()),
+            ]
+        }
+        cli::Cmd::Search { terms, limit } => {
+            vec![
+                ("terms", terms.clone()),
                 ("limit", limit.to_string()),
             ]
         }
@@ -209,6 +216,14 @@ fn run(cli: cli::Cli) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             for line in query::symbols(&conn, &root, &file, outline, limit)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Search { terms, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::search(&conn, &root, &terms, limit)? {
                 println!("{line}");
             }
             Ok(())

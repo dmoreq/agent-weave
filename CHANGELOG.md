@@ -37,6 +37,22 @@ changes bump the minor while 0.x is unstable.
   follows (F3 -> F1 -> F2 -> F4), one schema v4 bump for whatever survives
   the gates.
 
+### Added — `kg search` (Amendment 12b, F2)
+
+- New `kg search <terms>`: symbol-level FTS5 lookup — OR of prefix terms over
+  camelCase/snake_case-split identifier tokens, `bm25()`-ranked. Output
+  pointers `path:line qualname` (tier position empty — search hits are symbol
+  identities, not call edges), standard cap/staleness/exit-code contract;
+  empty terms exit 2, no match exits 1 with a reason line.
+- Schema v4 (same bump as F1): standalone virtual table `symbols_fts`,
+  repopulated by one pass from `symbols` at the end of every build (covers
+  fresh and carried rows). No new dependencies (FTS5 is SQLite builtin).
+- Journal `args` gains the `terms` key (Amendment 6 extension); `search`
+  joins the Amendment 10 payload list; MCP `search` tool with G10 byte-parity.
+- G14 gate PASS: mean per-query recall 0.850 on 20 frozen queries
+  (pooled 24/28, Wilson 95% [0.685, 0.943]) —
+  `docs/baselines/g14-search-2026-11-01.md`.
+
 ### Changed — performance ceiling pass (Amendment 11, G12)
 
 Four changes, all measured on a 2,025-file / 7.9 MB synthetic Python corpus

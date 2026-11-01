@@ -259,6 +259,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
         });
     }
     crate::db::insert_edge_rows(&conn, &edge_rows)?;
+    crate::db::populate_symbols_fts(&conn)?;
 
     // Meta manifest; counts are authoritative SQL totals over the whole index.
     crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;

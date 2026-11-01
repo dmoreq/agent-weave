@@ -299,6 +299,31 @@ fn signature_of(node: Node<'_>, src: &[u8]) -> String {
     sig
 }
 
+/// Lowercased token split of an identifier path for symbol search
+/// (Amendment 12b): camelCase humps, snake_case underscores, dots and other
+/// separators all become single spaces. `HierarchicalAddressParser.parse`
+/// -> "hierarchical address parser parse".
+pub fn split_ident(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut prev_lower = false;
+    for ch in s.chars() {
+        if ch == '_' {
+            out.push(' ');
+            prev_lower = false;
+        } else if ch.is_alphanumeric() {
+            if ch.is_uppercase() && prev_lower {
+                out.push(' ');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_lower = ch.is_lowercase();
+        } else {
+            out.push(' ');
+            prev_lower = false;
+        }
+    }
+    out
+}
+
 /// Dotted identifier chain for identifier/attribute nodes: `a.b.c` -> [a, b, c].
 /// Unwraps `type` wrapper nodes (annotations). Rust path keywords (`crate`,
 /// `self`, `super`) join the chain as plain segments.

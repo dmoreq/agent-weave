@@ -1,0 +1,20 @@
+{"repo": "kg", "query": "build lock concurrency", "expect": ["src.db.BuildLock"]}
+{"repo": "kg", "query": "schema version check on open", "expect": ["src.db.check_schema_version"]}
+{"repo": "kg", "query": "carry unchanged files forward fast path", "expect": ["src.db.carry_forward_unchanged", "src.db.load_carried"]}
+{"repo": "kg", "query": "create fresh database write meta", "expect": ["src.db.create_fresh", "src.db.set_meta"]}
+{"repo": "kg", "query": "query result cap limit", "expect": ["src.query.clamp_limit"]}
+{"repo": "kg", "query": "callers of a symbol", "expect": ["src.query.callers"]}
+{"repo": "kg", "query": "staleness detection file changed since build", "expect": ["src.query.file_changed", "src.doctor.stale_ratio"]}
+{"repo": "kg", "query": "journal payload rotation size threshold", "expect": ["src.journal.rotate_if_needed"]}
+{"repo": "kg", "query": "verify replay sampled payload pointers", "expect": ["src.journal.verify"]}
+{"repo": "kg", "query": "walk tree extract symbols", "expect": ["src.extract.walk_node", "src.extract.walk_children"]}
+{"repo": "kg", "query": "capture one line signature", "expect": ["src.extract.signature_of"]}
+{"repo": "kg", "query": "resolve call ambiguous candidates", "expect": ["src.extract.resolve_call"]}
+{"repo": "kg", "query": "doctor integrity orphans report", "expect": ["src.doctor.report", "src.doctor.report_orphans"]}
+{"repo": "kg", "query": "mcp dispatch tool json rpc", "expect": ["src.mcp.dispatch_tool", "src.mcp.call_tool"]}
+{"repo": "vihap", "query": "normalize unicode ascii diacritics", "expect": ["vihap.cleaners.unicode.normalize_ascii", "vihap.cleaners.unicode.normalize_unicode_nfkc"]}
+{"repo": "vihap", "query": "knowledge base singleton cache reset", "expect": ["vihap.knowledge.registry.get_knowledge_base", "vihap.knowledge.registry.reset_knowledge_base_cache"]}
+{"repo": "vihap", "query": "grammar alternation fragment builder", "expect": ["vihap.grammar.fragments.make_alternation"]}
+{"repo": "vihap", "query": "parse address pipeline entry", "expect": ["vihap.parsers.hierarchical_parser.HierarchicalAddressParser.parse"]}
+{"repo": "vihap", "query": "admin node resolution stage", "expect": ["vihap.parsers.hierarchical_parser.HierarchicalAddressParser._resolve_admin_nodes"]}
+{"repo": "vihap", "query": "street component validation stage", "expect": ["vihap.parsers.hierarchical_parser.HierarchicalAddressParser._resolve_street_components"]}

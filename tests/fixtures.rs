@@ -295,3 +295,27 @@ fn local_variable_shadows_same_named_module() {
         resolution.edges
     );
 }
+
+#[test]
+fn fts5_is_compiled_into_bundled_sqlite() {
+    // Amendment 12b smoke: the search surface needs FTS5; fail fast here if a
+    // future rusqlite bundled build drops it.
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    let on: i64 = conn
+        .query_row(
+            "SELECT sqlite_compileoption_used('ENABLE_FTS5')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(on, 1, "FTS5 missing from the bundled SQLite build");
+}
+
+#[test]
+fn split_ident_splits_camel_snake_and_dotted_idents() {
+    assert_eq!(kg::extract::split_ident("HierarchicalAddressParser.parse"), "hierarchical address parser parse");
+    assert_eq!(kg::extract::split_ident("get_knowledge_base"), "get knowledge base");
+    assert_eq!(kg::extract::split_ident("FNV-1a"), "fnv 1a");
+    assert_eq!(kg::extract::split_ident("normalize_ascii"), "normalize ascii");
+    assert_eq!(kg::extract::split_ident(""), "");
+}

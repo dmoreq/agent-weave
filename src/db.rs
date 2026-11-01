@@ -446,6 +446,26 @@ pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
     Ok(())
 }
 
+/// Populate the FTS5 symbol-search index from the fully-inserted symbols
+/// table (Amendment 12b): one pass covering fresh AND carried rows, called
+/// inside the build transaction after `insert_edge_rows`.
+pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("SELECT id, qualname, name FROM symbols")?;
+    let rows: Vec<(i64, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
+    for (id, qualname, name) in rows {
+        let text = format!(
+            "{} {}",
+            crate::extract::split_ident(&qualname),
+            crate::extract::split_ident(&name)
+        );
+        ins.execute(rusqlite::params![id, text])?;
+    }
+    Ok(())
+}
+
 pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
         "INSERT INTO meta(key, value) VALUES (?1, ?2)
