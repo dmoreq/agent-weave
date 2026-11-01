@@ -101,6 +101,12 @@ impl Drop for BuildLock {
 
 /// Open the index for querying with the full skew/corruption gate chain:
 /// missing -> exit 1 (CUJ7), corrupt -> exit 3 (CUJ3), skew -> exit 5 (CUJ5).
+/// Amendment 11a: no `PRAGMA quick_check` here — it is a full B-tree scan,
+/// linear in DB size, on every open (CLI and per-MCP-tool-call). Corruption
+/// still exits 3: SQLITE_NOTADB surfaces on the first statement against a
+/// non-SQLite file, SQLITE_CORRUPT when a query hits a malformed page, and
+/// both map to the contract message via `KgError::from(rusqlite::Error)`.
+/// Deep integrity remains `kg doctor` (`PRAGMA integrity_check`).
 pub fn open_for_query(root: &Path) -> Result<Connection> {
     let path = db_path(root);
     if !path.exists() {
@@ -110,18 +116,6 @@ pub fn open_for_query(root: &Path) -> Result<Connection> {
         )));
     }
     let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    // quick_check erroring at all means the file is not a usable SQLite DB
-    // (CUJ3): exit 3 with the contract message, never a panic.
-    let check: String = conn
-        .query_row("PRAGMA quick_check", [], |r| r.get(0))
-        .map_err(|_| {
-            KgError::CorruptIndex("index.db failed integrity check — run kg build".to_string())
-        })?;
-    if check != "ok" {
-        return Err(KgError::CorruptIndex(
-            "index.db failed integrity check — run kg build".to_string(),
-        ));
-    }
     check_schema_version(&conn)?;
     Ok(conn)
 }

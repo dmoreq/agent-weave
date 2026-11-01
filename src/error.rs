@@ -4,6 +4,25 @@
 
 use std::fmt;
 
+/// Contract stderr text for a corrupt index (CUJ3, Amendment 11a). Single
+/// source: open_for_query and the rusqlite corruption mapping both emit it.
+pub const CORRUPT_INDEX_MSG: &str = "index.db failed integrity check — run kg build";
+
+/// SQLite reports corruption as SQLITE_NOTADB (header unreadable at open) or
+/// SQLITE_CORRUPT (malformed page hit during a statement). Either maps to the
+/// exit-3 contract; everything else stays an internal error (exit 6).
+fn is_index_corruption(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(ffi, _)
+            if matches!(
+                ffi.code,
+                rusqlite::ffi::ErrorCode::DatabaseCorrupt
+                    | rusqlite::ffi::ErrorCode::NotADatabase
+            )
+    )
+}
+
 #[derive(Debug)]
 pub enum KgError {
     NoResults(String),
@@ -84,7 +103,13 @@ impl std::error::Error for KgError {}
 
 impl From<rusqlite::Error> for KgError {
     fn from(e: rusqlite::Error) -> Self {
-        KgError::Internal(format!("database error: {e}"))
+        // Amendment 11a: corruption is detected where SQLite reports it (open
+        // or any statement), replacing the per-open quick_check scan.
+        if is_index_corruption(&e) {
+            KgError::CorruptIndex(CORRUPT_INDEX_MSG.to_string())
+        } else {
+            KgError::Internal(format!("database error: {e}"))
+        }
     }
 }
 
