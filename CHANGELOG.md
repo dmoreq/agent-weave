@@ -7,6 +7,33 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Changed — performance ceiling pass (Amendment 11, G12)
+
+Four changes, all measured on a 2,025-file / 7.9 MB synthetic Python corpus
+(index 4.6 MB, same seed as the review baseline) plus the kg self-index; gates
+`cargo test --locked` (91 tests), `cargo clippy -D warnings`, G2 self
+precision/recall PASS.
+
+- Query path: `PRAGMA quick_check` removed from `open_for_query` (full B-tree
+  scan, 0.71-1.10 ms/MB measured, ran on every CLI open and every MCP tool
+  call). Corruption now exits 3 via SQLITE_NOTADB/SQLITE_CORRUPT mapping with
+  the unchanged contract message; `kg doctor` keeps `integrity_check`.
+  `kg callers` best-of-7: 15.1 ms -> 7.6 ms; `kg unresolved` 13.9 -> 7.6 ms;
+  latency is now flat at spawn floor + query regardless of index size.
+- Build inserts: one transaction per build (500-row prepared statement batches
+  retained; per-chunk BEGIN/COMMIT fsyncs dropped). Insert phase measured on
+  identical row volume: 154 ms -> 55 ms; db phase 0.39 s -> 0.09 s.
+- Parse+extract: parallel on `std::thread::scope` workers
+  (`available_parallelism`, capped 8; no new deps, no unsafe, order-preserving
+  merge). Parse phase 0.66 s -> 0.11 s; `kg build --force` wall 1.16 s ->
+  0.27 s on the corpus, 0.43 s -> 0.13 s on kg self.
+- Schema v3 (additive): `files.loc`, `files.cyclomatic` computed during the
+  build parse phase; `kg hotspots`/`kg report` read the index instead of
+  re-parsing every file per call. hotspots 409-781 ms -> 31 ms; report
+  560 ms -> 44 ms. Behavior deltas: files deleted from disk are no longer
+  silently skipped by hotspots; metrics are frozen at each file's last fresh
+  extraction (changed files are always re-extracted by the fast-path rules).
+
 ### Added — P0 baseline (f9d57b9..1ca1d0e)
 
 - Frozen A/B baselines: 5 navigation task definitions (T1-T5), 30 verified
