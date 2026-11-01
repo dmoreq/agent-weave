@@ -7,6 +7,22 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added — `kg symbols --outline` (Amendment 12a, F1)
+
+- New `--outline` flag on `kg symbols <file>`: each line gains the stored
+  one-line signature (first line of the symbol's node text, trimmed, hard
+  cap 160 chars, no bodies). Default output (no flag) is byte-identical to
+  the previous contract — contract-bump note: additive flag only, pointer
+  shape unchanged, exit codes unchanged.
+- Schema v4 (additive): `symbols.signature TEXT NOT NULL DEFAULT ''`,
+  captured during the build parse phase at zero extra passes; carried
+  forward by the fast path. Old indexes exit 5 with the rebuild hint
+  (single normative version policy).
+- Journal `args` for `symbols` gains the `outline` key (Amendment 6
+  extension); MCP `symbols` tool gains the optional `outline` arg with G10
+  byte-parity coverage.
+
+
 ### Added — P4 roadmap amendment (Amendment 12, docs)
 
 - `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling

@@ -195,7 +195,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v3 — run kg build"),
+        stderr.contains("schema v99, binary expects v4 — run kg build"),
         "{stderr}"
     );
 }
@@ -456,6 +456,50 @@ fn symbols_lists_file_symbols_and_unknown_exit1() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not indexed"), "{stderr}");
+}
+
+#[test]
+fn symbols_outline_adds_signature_and_default_stays_byte_identical() {
+    let repo = fixture("symbols-outline");
+    build(&repo);
+    let base = kg(&repo).args(["symbols", "utils.py"]).output().unwrap();
+    assert_eq!(base.status.code(), Some(0));
+    let plain = String::from_utf8_lossy(&base.stdout).into_owned();
+    let out = kg(&repo)
+        .args(["symbols", "utils.py", "--outline"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let outlined = String::from_utf8_lossy(&out.stdout).into_owned();
+
+    // Amendment 12a: identical line count; each outline line is the plain
+    // line plus a one-line signature (<= 160 chars, never a body).
+    let plain_lines: Vec<&str> = plain.lines().collect();
+    let outlined_lines: Vec<&str> = outlined.lines().collect();
+    assert_eq!(plain_lines.len(), outlined_lines.len(), "{outlined}");
+    for (p, o) in plain_lines.iter().zip(outlined_lines.iter()) {
+        // Empty-signature rows (module symbols) stay byte-identical.
+        let sig = match o.strip_prefix(format!("{p} ").as_str()) {
+            Some(s) => s,
+            None => {
+                assert_eq!(p, o, "outline line '{o}' diverges from plain '{p}'");
+                continue;
+            }
+        };
+        assert!(sig.chars().count() <= 160, "signature over cap: {sig}");
+        assert!(
+            !sig.contains("return"),
+            "signature must not carry bodies: {sig}"
+        );
+    }
+    // At least one def line actually gained a signature.
+    assert!(
+        outlined_lines
+            .iter()
+            .zip(plain_lines.iter())
+            .any(|(o, p)| o.len() > p.len() + 1),
+        "no line gained a signature: {outlined}"
+    );
 }
 
 #[test]

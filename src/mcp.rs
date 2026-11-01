@@ -41,8 +41,8 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"limit": limit}), &[])},
         {"name": "unresolved", "description": "Per-file unresolved-callee counts — where kg could not resolve",
          "inputSchema": schema_obj(json!({"limit": limit}), &[])},
-        {"name": "symbols", "description": "Symbols of one indexed file, ordered by line",
-         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "limit": limit}), &["file"])},
+        {"name": "symbols", "description": "Symbols of one indexed file, ordered by line; optional outline adds the one-line signature column",
+         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "outline": {"type": "boolean"}, "limit": limit}), &["file"])},
         {"name": "stats", "description": "Index totals: files, symbols, edges, parse errors, sizes",
          "inputSchema": schema_obj(json!({}), &[])},
         {"name": "hotspots", "description": "Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density",
@@ -220,7 +220,14 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
         }
         "symbols" => {
             let conn = crate::db::open_for_query(root)?;
-            Ok(join_lines(&crate::query::symbols(&conn, root, &arg_str(args, "file").unwrap_or_default(), arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?))
+            let outline = args.get("outline").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(join_lines(&crate::query::symbols(
+                &conn,
+                root,
+                &arg_str(args, "file").unwrap_or_default(),
+                outline,
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
         }
         "stats" => Ok(crate::insights::stats(&crate::db::open_for_query(root)?, root)?),
         "hotspots" => Ok(join_lines(&crate::insights::hotspots(&crate::db::open_for_query(root)?, root, arg_usize(args, "limit", 10))?)),
@@ -280,6 +287,8 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(file) = arg_str(args, "file") {
                 out.push(("file", file));
             }
+            let outline = args.get("outline").and_then(|v| v.as_bool()).unwrap_or(false);
+            out.push(("outline", outline.to_string()));
             out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
         }
         "dead" | "unresolved" | "hotspots" => {

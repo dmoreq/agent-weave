@@ -102,8 +102,12 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         }
         cli::Cmd::Dead { limit } => vec![("limit", limit.to_string())],
         cli::Cmd::Unresolved { limit } => vec![("limit", limit.to_string())],
-        cli::Cmd::Symbols { file, limit } => {
-            vec![("file", file.clone()), ("limit", limit.to_string())]
+        cli::Cmd::Symbols { file, outline, limit } => {
+            vec![
+                ("file", file.clone()),
+                ("outline", outline.to_string()),
+                ("limit", limit.to_string()),
+            ]
         }
         cli::Cmd::Stats {} => vec![],
         cli::Cmd::Hotspots { limit } => vec![("limit", limit.to_string())],
@@ -201,10 +205,10 @@ fn run(cli: cli::Cli) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Symbols { file, limit } => {
+        cli::Cmd::Symbols { file, outline, limit } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in query::symbols(&conn, &root, &file, limit)? {
+            for line in query::symbols(&conn, &root, &file, outline, limit)? {
                 println!("{line}");
             }
             Ok(())

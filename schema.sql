@@ -1,6 +1,6 @@
--- kg schema v3 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
--- v2 -> v3 adds files.loc/files.cyclomatic, Amendment 11d: hotspots metrics
--- computed once at build, not re-parsed per query).
+-- kg schema v4 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
+-- v2 -> v3 adds files.loc/files.cyclomatic; v3 -> v4 adds symbols.signature,
+-- Amendment 12a: one-line signature, no bodies, captured once at build).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -30,7 +30,10 @@ CREATE TABLE symbols(
     qualname TEXT NOT NULL,
     file_id INTEGER NOT NULL REFERENCES files(id),
     line_start INTEGER NOT NULL,
-    line_end INTEGER NOT NULL
+    line_end INTEGER NOT NULL,
+    -- One-line signature (Amendment 12a): first line of the symbol's node
+    -- text, trimmed, hard cap 160 chars. Empty for module symbols. No bodies.
+    signature TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE edges(
     id INTEGER PRIMARY KEY,

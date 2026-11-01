@@ -337,8 +337,8 @@ pub fn carry_forward_unchanged(
         }
     }
     new.execute_batch(
-        "INSERT INTO symbols(id, kind, name, qualname, file_id, line_start, line_end)
-         SELECT id, kind, name, qualname, file_id, line_start, line_end
+        "INSERT INTO symbols(id, kind, name, qualname, file_id, line_start, line_end, signature)
+         SELECT id, kind, name, qualname, file_id, line_start, line_end, signature
          FROM olddb.symbols WHERE file_id IN (SELECT id FROM files);
          INSERT INTO edges(id, src_id, dst_id, dst_name, kind, confidence, site_line)
          SELECT id, src_id, dst_id, dst_name, kind, confidence, site_line
@@ -395,8 +395,8 @@ pub fn insert_symbols(conn: &Connection, symbols: &[NewSymbol], file_ids: &[i64]
     let mut ids = Vec::with_capacity(symbols.len());
     for chunk in symbols.chunks(500) {
         let mut stmt = conn.prepare(
-            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end, signature)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
         for s in chunk {
             stmt.execute(rusqlite::params![
@@ -405,7 +405,8 @@ pub fn insert_symbols(conn: &Connection, symbols: &[NewSymbol], file_ids: &[i64]
                 s.qualname,
                 file_ids[s.file_idx],
                 s.line_start as i64,
-                s.line_end as i64
+                s.line_end as i64,
+                s.signature
             ])?;
             ids.push(conn.last_insert_rowid());
         }

@@ -79,6 +79,9 @@ pub enum Cmd {
     Symbols {
         /// Repo-relative path of the indexed file
         file: String,
+        /// Append the one-line signature column (Amendment 12a)
+        #[arg(long)]
+        outline: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,

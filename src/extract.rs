@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -64,6 +64,9 @@ pub struct NewSymbol {
     /// 1-based lines (tree-sitter rows are 0-based; offset at emission).
     pub line_start: usize,
     pub line_end: usize,
+    /// One-line signature (Amendment 12a): first line of the node's text,
+    /// trimmed, hard cap 160 chars. Empty for module/synthetic symbols.
+    pub signature: String,
 }
 
 #[derive(Debug, Clone)]
@@ -245,6 +248,7 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
             file_idx,
             line_start: 1,
             line_end: 1,
+            signature: String::new(),
         }],
         edges: Vec::new(),
         inherits: Vec::new(),
@@ -276,6 +280,23 @@ impl WalkCtx {
 
 fn text(node: Node<'_>, src: &[u8]) -> String {
     node.utf8_text(src).unwrap_or("").to_string()
+}
+
+/// One-line signature (Amendment 12a): first line of the node's text,
+/// trimmed, hard cap 160 chars. Never spans the body: capture stops at the
+/// first newline, so the stored text is a header fragment by construction.
+fn signature_of(node: Node<'_>, src: &[u8]) -> String {
+    let start = node.start_byte();
+    let stop = src.len().min(start + 512);
+    let mut end = start;
+    while end < stop && src[end] != b'\n' {
+        end += 1;
+    }
+    let mut sig = String::from_utf8_lossy(&src[start..end]).trim().to_string();
+    if sig.chars().count() > 160 {
+        sig = sig.chars().take(160).collect();
+    }
+    sig
 }
 
 /// Dotted identifier chain for identifier/attribute nodes: `a.b.c` -> [a, b, c].
@@ -435,6 +456,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 name: name.clone(),
                 qualname: qualname.clone(),
                 file_idx: fx.file_idx,
+                signature: signature_of(node, src),
                 line_start: start,
                 line_end: node.end_position().row + 1,
             });
@@ -474,6 +496,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 name: name.clone(),
                 qualname: qualname.clone(),
                 file_idx: fx.file_idx,
+                signature: signature_of(node, src),
                 line_start: start,
                 line_end: node.end_position().row + 1,
             });
@@ -775,6 +798,7 @@ fn define_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
         name: name.clone(),
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
+        signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -815,6 +839,7 @@ fn define_class_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
         name: name.clone(),
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
+        signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -880,6 +905,7 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
         name: name.clone(),
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
+        signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -923,6 +949,7 @@ fn record_ts_arrow_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction,
         name: name.clone(),
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
+        signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -1252,6 +1279,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             file_idx: usize::MAX,
             line_start: 0,
             line_end: 0,
+            signature: String::new(),
         });
         t.existing_ids.push(Some(c.row_id));
         t.by_qualname.entry(c.qualname.clone()).or_default().push(idx);

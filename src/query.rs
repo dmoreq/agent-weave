@@ -295,22 +295,37 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
 }
 
 /// Symbols of one indexed file (Amendment 5): `path:line kind qualname` by
-/// line; single-file staleness header.
-pub fn symbols(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<Vec<String>> {
+/// line; single-file staleness header. With `outline` (Amendment 12a) each
+/// line gains the stored one-line signature; without it, byte-identical to
+/// the pre-v4 contract.
+pub fn symbols(
+    conn: &Connection,
+    root: &Path,
+    file: &str,
+    outline: bool,
+    limit: usize,
+) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     let rel = file.trim_start_matches("./").to_string();
-    let mut stmt = conn.prepare(
-        "SELECT s.kind, s.qualname, s.line_start
+    let sql = if outline {
+        "SELECT s.kind, s.qualname, s.line_start, s.signature
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE f.path = ?1
-         ORDER BY s.line_start",
-    )?;
+         ORDER BY s.line_start"
+    } else {
+        "SELECT s.kind, s.qualname, s.line_start, ''
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE f.path = ?1
+         ORDER BY s.line_start"
+    };
+    let mut stmt = conn.prepare(sql)?;
     let rows = stmt
         .query_map([&rel], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -323,7 +338,13 @@ pub fn symbols(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
     let data_lines: Vec<String> = rows
         .into_iter()
         .take(shown)
-        .map(|(kind, qualname, line)| format!("{rel}:{line} {kind} {qualname}"))
+        .map(|(kind, qualname, line, signature)| {
+            if signature.is_empty() {
+                format!("{rel}:{line} {kind} {qualname}")
+            } else {
+                format!("{rel}:{line} {kind} {qualname} {signature}")
+            }
+        })
         .collect();
     // Payload capture (Amendment 10a): the `path:line kind qualname` data
     // lines only — never the staleness header or the cap footer.
