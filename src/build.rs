@@ -88,27 +88,68 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     }
 
     // Parse + extract fresh files only (streamed; no corpus accumulation).
+    // Amendment 11c: CPU-bound tree-sitter work on scoped workers — no new
+    // dependencies, no unsafe. Trees never cross threads (not Send); only
+    // owned extraction rows do. Chunks are contiguous and joined in spawn
+    // order, so the merged order equals the serial loop's and file_idx (the
+    // index into `fresh`, consumed by insert_files/insert_symbols) is
+    // unchanged.
     let t0 = Instant::now();
     let mut fresh_rows: Vec<crate::db::FilesRow> = Vec::with_capacity(fresh.len());
     let mut extractions: Vec<crate::extract::FileExtraction> = Vec::with_capacity(fresh.len());
     let mut fresh_error_files = 0usize;
-    for (idx, f) in fresh.iter().enumerate() {
-        let bytes = std::fs::read(&f.abs)?;
-        let parsed = crate::parse::parse_source(&bytes, crate::parse::Lang::from_rel(&f.rel))?;
-        if parsed.error_nodes > 0 {
-            fresh_error_files += 1;
+    let mut extract_secs_sum = 0f64;
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    let chunk_len = (fresh.len().div_ceil(workers)).max(1);
+    std::thread::scope(|scope| -> Result<()> {
+        let mut handles = Vec::new();
+        for (base, chunk) in fresh.chunks(chunk_len).enumerate() {
+            let chunk = chunk.to_vec();
+            handles.push(scope.spawn(move || -> Result<(Vec<(crate::db::FilesRow, crate::extract::FileExtraction)>, f64)> {
+                let mut units = Vec::with_capacity(chunk.len());
+                let mut secs = 0f64;
+                for (local, f) in chunk.into_iter().enumerate() {
+                    let idx = base * chunk_len + local;
+                    let bytes = std::fs::read(&f.abs)?;
+                    let parsed =
+                        crate::parse::parse_source(&bytes, crate::parse::Lang::from_rel(&f.rel))?;
+                    let e0 = Instant::now();
+                    let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
+                    secs += e0.elapsed().as_secs_f64();
+                    units.push((
+                        crate::db::FilesRow {
+                            rel: f.rel,
+                            size: f.size as i64,
+                            mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
+                            content_hash: crate::hash::fnv1a64(&bytes) as i64,
+                            parse_status: parsed.status,
+                            error_nodes: parsed.error_nodes,
+                            unresolved: 0,
+                        },
+                        fx,
+                    ));
+                }
+                Ok((units, secs))
+            }));
         }
-        extractions.push(crate::extract::extract_file(idx, &f.rel, &bytes, &parsed));
-        fresh_rows.push(crate::db::FilesRow {
-            rel: f.rel.clone(),
-            size: f.size as i64,
-            mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
-            content_hash: crate::hash::fnv1a64(&bytes) as i64,
-            parse_status: parsed.status,
-            error_nodes: parsed.error_nodes,
-            unresolved: 0,
-        });
-    }
+        for h in handles {
+            let (units, secs) = h
+                .join()
+                .map_err(|_| KgError::Internal("parse worker panicked".to_string()))??;
+            extract_secs_sum += secs;
+            for (row, fx) in units {
+                if row.error_nodes > 0 {
+                    fresh_error_files += 1;
+                }
+                fresh_rows.push(row);
+                extractions.push(fx);
+            }
+        }
+        Ok(())
+    })?;
     let parse_secs = t0.elapsed().as_secs_f64();
 
     // Parse-quality gate (CUJ8): rate over ALL files, abort before DB work.
@@ -252,6 +293,8 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
 
     // CPU seconds are measured by the G1 harness (/usr/bin/time -l); the
     // binary reports wall + per-phase timings (std-only constraint).
+    // Amendment 11c: parse= is the parallel phase's wall time and extract= the
+    // summed per-worker extraction time — the two overlap on parallel builds.
     if stats.skipped_large > 0 {
         eprintln!("[kg] skipped {} file(s) over the 1MB size cap", stats.skipped_large);
     }
