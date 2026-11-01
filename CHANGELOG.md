@@ -7,6 +7,20 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added — P4 roadmap amendment (Amendment 12, docs)
+
+- `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
+  features distilled from the pi-sherlock reference analysis — F1
+  `kg symbols --outline` (signature column), F2 `kg search` (FTS5 symbol
+  lookup), F3 skill hardening + drift gate, F4 `kg clones` (shingle
+  candidates). Proposal spec-reviewed by an independent stateless Goldfish
+  reviewer (round 1 NEEDS FIXES with 12 findings, round 2 APPROVE; record
+  `docs/baselines/reviews/R4-P4.md`). OQ4a (signature text) and OQ4b
+  (symbol-slice `search` deferral lift) approved by the owner 2026-11-01.
+  Gates G13-G16 registered in the spec's Gate Registry. Implementation
+  follows (F3 -> F1 -> F2 -> F4), one schema v4 bump for whatever survives
+  the gates.
+
 ### Changed — performance ceiling pass (Amendment 11, G12)
 
 Four changes, all measured on a 2,025-file / 7.9 MB synthetic Python corpus
