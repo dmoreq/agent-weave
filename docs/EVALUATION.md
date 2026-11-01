@@ -94,6 +94,7 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 | G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction, -64.8% bytes, zero correctness delta — PASS |
 | G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.850 recall — PASS |
 | G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
+| G17 call-path traversal | `kg path` vs 10 exact-byte fixtures + 8 frozen GT pairs (hop edges verified EXTRACTED at freeze) + latency | 10/10 fixtures byte-exact; 8/8 GT agreement; 0.6-1.4 ms in-process best-of-7 across the 85k-symbol synth corpus and the self-index (budget 20 ms) — PASS. Routes are resolved-edge CANDIDATES: dynamic dispatch may hide paths |
 
 ## 5. Agent A/B — the measured case for kg
 
@@ -181,6 +182,7 @@ raise model capability.
 | G2/G11/G12 gates | `baselines/ground-truth*.md`, gate rows in the spec |
 | G13 outline | `baselines/g13-outline-2026-11-01.md` |
 | G14 search | `baselines/g14-search-2026-11-01.md` |
+| G17 path | `baselines/g17-path-2026-11-02.md`, frozen pairs `baselines/path-gt.jsonl` |
 | G16 clones | `baselines/g16-clones-2026-11-01.md` |
 | P4 spec + implementation reviews | `baselines/reviews/R4-P4.md`, `baselines/reviews/` (R4b record) |
 | agent A/B + routing + replication | `baselines/grok-a-b-2026-11-01.md` (+ `baselines/grok-a-b-2026-11-01/` manifests and audits) |
