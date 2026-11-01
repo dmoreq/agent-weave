@@ -10,12 +10,14 @@ if grep -rnE "$FORBIDDEN" "$SRC" >/dev/null 2>&1; then
   grep -rnE "$FORBIDDEN" "$SRC" >&2
   exit 1
 fi
-# Write primitives must appear only in db.rs (kg_dir-scoped) and doctor (invalidate).
-# Allowed outside db.rs/doctor.rs: the atomic swap rename in main.rs (both
-# paths are kg_dir-scoped helpers) and walk.rs's #[cfg(test)] fixture writes.
+# Write primitives must appear only in db.rs (kg_dir-scoped helpers),
+# doctor.rs (invalidate), and journal.rs (kg_dir-scoped usage/payload
+# journals, Amendments 6/10). Allowed outside those: build.rs's atomic swap
+# rename (both paths are kg_dir-scoped helpers) and walk.rs's #[cfg(test)]
+# fixture writes.
 VIOLATIONS=$(grep -rn "fs::write\|fs::rename\|OpenOptions" "$SRC" \
-  | grep -v "src/db.rs" | grep -v "src/doctor.rs" \
-  | grep -v "fs::rename(db::db_new_path" \
+  | grep -v "src/db.rs" | grep -v "src/doctor.rs" | grep -v "src/journal.rs" \
+  | grep -vE "fs::rename\((crate::)?db::db_new_path" \
   | grep -v 'src/walk.rs.*fs::write' || true)
 if [ -n "$VIOLATIONS" ]; then
   echo "G5 write-path: writes outside db.rs/doctor.rs:" >&2
