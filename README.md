@@ -14,7 +14,7 @@ per session:
 - **file structure** — `kg symbols <file> --outline` (one-line signatures)
 
 Consultative only: no hooks, no daemon, no network, no writes outside `.kg/`.
-One static binary, five pinned dependencies, zero unsafe Rust.
+One binary with no daemon and no network at runtime, nine direct dependencies, zero unsafe Rust.
 
 Measured results (see [docs/EVALUATION.md](docs/EVALUATION.md) for methodology,
 reproduction commands, and threats to validity):
@@ -22,15 +22,20 @@ reproduction commands, and threats to validity):
 | question | measured |
 |----------|----------|
 | Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall + precision 100% on 3 frozen GT sets |
-| Is it fast enough for an agent loop? | queries 5-10 ms end-to-end at any index size; builds 0.1-0.5 s on 25-600-file repos |
-| Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (42 instrumented agent runs) |
-| Structure and duplication lookups? | `kg search` recall 0.850 on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7%; `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
+| Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.33 s on the committed 2,025-file corpus |
+| Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
+| Structure and duplication lookups? | `kg search` recall 0.800 (23/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
+| Does everything help every host? | **No.** Route queries (`path`) cut tool calls 38-91% on Grok and 71% on OpenCode; `search` showed no economics gain in its 24-run battery; `clones` transferred on Grok (−59% calls) but not OpenCode (−17%). Utility is host-dependent — see EVALUATION §5. |
 
 ## Install
 
 ```
-cargo install --path .
+cargo install --path . --locked
 ```
+
+Requires a Rust stable toolchain and a C compiler (bundled SQLite and
+tree-sitter grammars). Not yet on crates.io; install from a clone. Supported:
+macOS arm64/x86_64 and Linux x86_64/aarch64 (CI-built).
 
 ## Usage
 
@@ -73,7 +78,8 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 ## Agent integration
 
-- **MCP**: `kg mcp` serves every subcommand as a JSON-RPC tool over stdio;
+- **MCP**: `kg mcp` serves 15 of 16 subcommands as JSON-RPC tools over stdio
+  (`doctor` is CLI-only);
   tool results are byte-identical to CLI stdout (conformance-tested).
 - **Skill**: [`skills/kg-first/SKILL.md`](skills/kg-first/SKILL.md) is the
   measured routing policy for code agents — when to query kg first, how to
@@ -99,12 +105,13 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 ## Limitations
 
-- Resolution is static: dynamic dispatch and untyped attribute calls are
-  unresolved by design (10-48% of raw call sites in the evaluation corpora,
-  depending on language and style); the tool says so and recommends grep.
+- Resolution is static: static analysis covers 10-48% of raw call sites
+  (unresolved 51.8-90.4% across six measured corpora; Django 71.7%, vscode
+  62.9%); dynamic dispatch and untyped attribute calls are unresolved by
+  design. The tool reports the gap per file and recommends grep.
 - The index is per-repo and local; cross-repo questions are out of scope.
 - Staleness is detected, never auto-repaired: run `kg build` after edits
-  (0.1-0.5 s typical).
+  (0.06-0.46 s on 27-596-file repos; 1.65 s no-op at 2,025 files).
 
 ## Project docs
 

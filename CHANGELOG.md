@@ -37,10 +37,37 @@ changes bump the minor while 0.x is unstable.
   tokens (derived data; schema stays v4; the FTS is repopulated at build
   end). Signature-only vocabulary ("usize", "option path", "any", "i64 vec")
   now retrieves the symbols that carry it — frozen gap set 6/6 improved,
-  frozen G14 recall unchanged at 0.850.
+  frozen G14 recall unchanged at 0.850 pre-rebuild; the shipped P6 index
+  measures 0.800 (23/28) — the G18(i) premise is corrected in the R6
+  remediation (R6c F2).
 - Search hit lines gain the stored one-line signature:
   `path:line qualname signature` (contract bump; empty signature keeps the
   12b byte shape). Payload/G10 parity unchanged.
+
+### Fixed — R6 remediation (Amendment 15, schema v5)
+
+- Build abort on deeply nested source replaced by an explicit depth guard
+  (8,192) and 64 MB worker stacks; 2,000-20,000 nesting now builds cleanly.
+- `clones` pair generation bounded (64 regions/group, 20,000 pairs) with a
+  lower-bound note — a shared license header no longer OOMs.
+- `callees --depth N` now closes exactly N levels (was N+1).
+- Fast path heals resolution gaps via schema v5 `unresolved_calls`: a new
+  symbol re-extracts only the carried files whose unresolved names match.
+- Rust `impl` methods scope to the impl type (grammar `type` field).
+- Constructor calls emit edges to both the class and its constructor.
+- MCP: 8 MiB frame cap, per-call panic isolation, `--no-journal` honored,
+  `stats`/`build` newline parity.
+- Grammar identity derived from `Cargo.lock`; `.git/index` no longer
+  rewritten; broken pipe exits 0; tracked-but-gitignored files indexed;
+  deterministic search tie-break.
+- Bounded query cost: SQL LIMIT+COUNT (1.05M-edge callers 550 ms/109 MB ->
+  0.14 s/7.4 MB; 1M-symbol search 1.02 s/162 MB -> 4.2 MB), work-queue dirty
+  closure (4,000-chain edit 42.5 s -> 0.26 s), search terms cap 32,
+  ambiguity render cap 50 with true total.
+- Claims corrected: unresolved rate inverted (coverage 10-48% / unresolved
+  52-90%), G14 0.800 on the shipped index (was 0.850 pre-P6), G13 -62.7%
+  (was -64.8%), denominators (40 primary runs + 2 fills; 10-run second host),
+  test count 105, self-index epoch-labeled.
 
 ### Fixed
 

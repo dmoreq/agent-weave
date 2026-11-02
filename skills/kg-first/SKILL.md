@@ -1,6 +1,6 @@
 ---
 name: kg-first
-description: Routing policy for code agents with the kg code index available. Use when locating callers, callees, impact of a change, symbol definitions, file structure, or the call route between two symbols — query kg first and fall back to grep only for what it cannot answer. Encodes the measured economics (-27% input tokens at equal recall) and the failure modes (ambiguous bare names, result caps, staleness) from 42 instrumented agent runs.
+description: Routing policy for code agents with the kg code index available. Use when locating callers, callees, impact of a change, symbol definitions, file structure, or the call route between two symbols — query kg first and fall back to grep only for what it cannot answer. Encodes the measured economics (-27% input tokens at equal recall) and the failure modes (ambiguous bare names, result caps, staleness) from 40 primary instrumented agent runs.
 ---
 
 # kg-first navigation
@@ -47,7 +47,7 @@ context you carry for zero information gain.
    within resolved edges; `within depth D; a longer path may exist` means
    the cap stopped the search (max 10 hops). A K-hop route fails if ANY hop
    edge is unresolved, so repeated no-path results likely reflect the
-   10-48% unresolved call-site rate, not a missing connection — fall back to
+   52-90% unresolved call-site share (10-48% resolution coverage), not a missing connection — fall back to
    composing `callees`/`callers` or grep instead of re-querying `path`.
 
 ## Staleness discipline
@@ -62,7 +62,7 @@ trusting those pointers.
 - Semantic questions ("where is behavior X implemented") — kg resolves names,
   not meanings. Grep/read.
 - Dynamic dispatch, untyped attribute calls, external-library calls — kg
-  reports them as unresolved by design (10-48% of raw call sites depending on
+  reports them as unresolved by design (static coverage 10-48% of raw call sites; unresolved 52-90% depending on
   codebase) and says `grep fallback recommended`. Believe it.
 - Questions about code in another repository — the index is per-repo.
 

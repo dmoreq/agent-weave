@@ -11,7 +11,7 @@ without being labeled as such.
 | question | answer (measured) |
 |----------|-------------------|
 | Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets |
-| Is the query loop fast? | 5-10 ms end-to-end per invocation (spawn floor ~6 ms) at any index size measured; independent of DB size after the integrity-scan removal |
+| Is the query loop fast? | 5-11 ms best-of-7 end-to-end per invocation (spawn floor ~6 ms); < 10 ms on a 382 MB index (11k-file tree); query memory is bounded by the display cap since schema v5 — `docs/baselines/perf-v5-2026-11-02.md` |
 | Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.13 s on the self-index; peak RSS <= 40 MB |
 | Does it make a coding agent better? | navigation recall 98.6% vs 81.9% grep-only, at flat token cost |
 | Does it make an agent cheaper? | only when routed: query-first policy cut input tokens **-27.3%** (1,058,613 → 769,306 per run) at unchanged recall |
@@ -38,7 +38,7 @@ Corpora are referred to by neutral labels throughout:
 - **Correctness scoring**: mechanical checker (`baselines/harness/check.py`)
   compares answer JSON against frozen expected sets — precision, recall,
   ordering, grouping. No hand-picking; disagreements audited individually.
-- **Agent A/B**: 42 instrumented agent runs across two hosts (a TUI coding
+- **Agent A/B**: 40 primary instrumented agent runs (+2 alternate T5 fills) across two hosts (a TUI coding
   agent and an MCP-connected CLI agent), two arms (grep-only vs kg-available),
   with per-call byte accounting and per-session token accounting taken from
   host-recorded stores, not self-reports (`baselines/grok-a-b-2026-11-01.md`).
@@ -75,11 +75,11 @@ binary):
 | Parse errors | 0 across all corpora |
 | Pointer authenticity (callers/impact/dead/symbols spot-checked against source lines) | **777/777 (100%)** |
 | Fast path | second build carries 100% of files on every corpus |
-| Corrupt-index contract | non-SQLite and truncated files both exit 3 with the contract message |
+| Corrupt-index contract | garbage/non-SQLite pages exit 3 with the contract message; a zero-length file exits 5 (schema-skew class, documented) |
 | Dirty closure | callee-side and caller-side edits both preserve cross-file edges; table totals invariant |
 | MCP vs CLI parity | tool text byte-identical to CLI stdout (1,793-byte sample) |
 | Staleness | silent on fresh indexes; header fires after a live edit |
-| Extraction determinism | parallel rebuilds produce identical table content (files+symbols+edges) |
+| Extraction determinism | parallel workers merge in deterministic order (build.rs); totals are asserted by the conformance suite |
 
 Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 
@@ -87,18 +87,18 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 
 | gate | what it measures | result |
 |------|------------------|--------|
-| G2 precision/recall | `kg callers` vs 60 frozen ground-truth call sites on 3 GT sets | recall 100% (29/29, 20/20, 10/10); EXTRACTED-tier precision 100% — all PASS |
-| G3 query latency | p95 over repeated pointer queries | 9.8-10.1 ms (limit 20 ms) |
-| G11 payload conformance | 1 payload line per successful pointer call, byte-equal pointers, verify FAIL=0 | 594 pointers verified, FAIL=0 |
-| G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, parallel == serial | PASS (91/91 tests) |
-| G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction, -64.8% bytes, zero correctness delta — PASS |
-| G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.850 recall — PASS |
+| G2 precision/recall | `kg callers` vs 60 frozen ground-truth call sites on 3 GT sets | recall 100% (29/29, 20/20) on vihap/finguard; the self set is 10/10 only at its frozen epoch `56f448a` (line-shifted on HEAD, epoch-labeled); EXTRACTED-tier precision 493/495 (99.6%) — PASS with epoch/precision notes |
+| G3 query latency | p95 over repeated pointer queries | 5-11 ms best-of-7 (limit 20 ms; re-run 9.8-10.5 ms on a 382 MB index) |
+| G11 payload conformance | 1 payload line per successful pointer call, byte-equal pointers, verify FAIL=0 | 594 pointers verified, FAIL=0 (CHANGELOG A11 entry; `kg usage --verify` on a fresh build reproduces FAIL=0) |
+| G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, parallel == serial | PASS (105/105 tests at schema v5) |
+| G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction vs the grep baseline (+1 call vs the plain-kg control), -62.7% bytes, zero correctness delta — PASS |
+| G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.800 recall (23/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure (ranking trade-off recorded in the P6 report) — PASS (bar 0.70) |
 | G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
 | G17 call-path traversal | `kg path` vs 10 exact-byte fixtures + 8 frozen GT pairs (hop edges verified EXTRACTED at freeze) + latency | 10/10 fixtures byte-exact; 8/8 GT agreement; 0.6-1.4 ms in-process best-of-7 across the 85k-symbol synth corpus and the self-index (budget 20 ms) — PASS. Routes are resolved-edge CANDIDATES: dynamic dispatch may hide paths |
 
 ## 5. Agent A/B — the measured case for kg
 
-42 instrumented runs total; the headline experiment is 20 runs on corpus A
+40 primary instrumented runs (+2 alternate T5 fills); the headline experiment is 20 runs on corpus A
 (5 frozen tasks x 2 arms x 2 runs, one agent host), replicated with a
 query-first routing policy (+10 runs) and cross-checked on a second host.
 
@@ -110,7 +110,7 @@ correctness 24/24 in BOTH arms, so no loss; routed arm cut kg calls
 5.2 -> 1.5 kg calls / 27.0K -> 17.4K input tokens on OpenCode
 gpt-6-sol. One `path` call answers most route questions; the control arm
 stays correct at high exploration cost. Stage 2 — `kg search`, same
-26+24-run protocol: correctness 24/24 in both arms, but no economics gain
+24-run protocol: correctness 24/24 in both arms, but no economics gain over 24 runs
 (−18% tool calls Grok, +3% OpenCode; kg calls up) — utility UNPROVEN for
 single-target lookups whose vocabulary matches identifiers. Stage 3 —
 `kg clones`, 16 runs on a seeded fixture: correctness 16/16 both arms;
@@ -152,18 +152,19 @@ Measured effect of routing (n=10 vs n=10, same host):
 | input tokens | 1,058,613 | 1,028,665 | **769,306 (-27.3%)** |
 | output tokens | 13,773 | 13,403 | 10,850 (-21.2%) |
 | model calls | 20.2 | 19.9 | 17.2 (-14.9%) |
-| kg calls | 0 | 3.8 | 8.8 |
+| kg calls | 0 | 3.7 | 8.8 |
 | gating recall | 81.9% | 98.6% | 98.6% |
 
-The saving is NOT from kg's output being smaller (tool outputs are ~2-3% of
-input tokens). It compounds from a shorter trajectory: one kg call replaces a
+The saving is NOT from kg's output being smaller (tool outputs are ~2.1-2.3% of
+input tokens). Input rows are n=10/arm; output and model-call rows are
+n=9/arm (the n=10 means for those two rows were not recorded). It compounds from a shorter trajectory: one kg call replaces a
 grep-noise loop, the transcript stays short, and every subsequent model call
 re-sends less. This is why routing must be enforced by prompt/skill, not
 hoped for.
 
 ### 5.3 Host dominance
 
-The same routed policy on a second host/model (12 runs) kept compliance
+The same routed policy on a second host/model (10 runs + 2 alternate T5 fills) kept compliance
 (4.4 kg calls/run) and the structural wins (T2 100%, T5 100%), but gating
 recall fell to 85.9% — vs 98.6% on the first host with identical tool
 access. kg supplies correct data; the ceiling on final answers is the
@@ -173,8 +174,9 @@ raise model capability.
 ### 5.4 Where kg does not help
 
 - Semantic questions ("where is X behavior implemented") — out of scope.
-- Dynamic dispatch and untyped attribute calls: 10-48% of raw call sites per
-  corpus remain unresolved by design; the tool says so and recommends grep.
+- Dynamic dispatch and untyped attribute calls: static resolution covers
+  10-48% of raw call sites (unresolved 51.8-90.4% across six measured corpora;
+  Django 71.7%, vscode 62.9%); the tool reports the gap and recommends grep.
 - Notebook-heavy corpora (corpus D/F class): resolution coverage ~10-19%,
   leverage concentrates in `hotspots`/`report` instead.
 
@@ -197,14 +199,14 @@ raise model capability.
 
 | claim | record |
 |-------|--------|
-| perf ceiling pass | `baselines/` CHANGELOG section (Amendment 11) |
+| perf ceiling pass | `baselines/perf-v5-2026-11-02.md` (schema v5); the pre-v4 A11 table lives in the root CHANGELOG |
 | multi-repo verification | `baselines/multi-repo-verification-2026-11-01-post-a11.md` |
 | G2/G11/G12 gates | `baselines/ground-truth*.md`, gate rows in the spec |
 | G13 outline | `baselines/g13-outline-2026-11-01.md` |
 | G14 search | `baselines/g14-search-2026-11-01.md` |
 | G17 path | `baselines/g17-path-2026-11-02.md`, frozen pairs `baselines/path-gt.jsonl` |
 | G16 clones | `baselines/g16-clones-2026-11-01.md` |
-| P4 spec + implementation reviews | `baselines/reviews/R4-P4.md`, `baselines/reviews/` (R4b record) |
+| P4 spec + implementation reviews | `baselines/reviews/R4-P4.md` (the R4b implementation review is a section inside it) |
 | agent A/B + routing + replication | `baselines/grok-a-b-2026-11-01.md` (+ `baselines/grok-a-b-2026-11-01/` manifests and audits) |
 | feature-utility A/B (path, Stage 1) | `baselines/agent-utility-2026-11-02.md`, protocol `baselines/tasks-utility.md`, run artifacts `baselines/utility-run-2026-11-02/` |
 | tasks, ground truth, harness | `baselines/tasks.md`, `baselines/ground-truth*.md`, `baselines/harness/` |

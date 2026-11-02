@@ -179,7 +179,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
         None => crate::extract::CarriedIndex::default(),
     };
     let resolution = crate::extract::resolve(extractions, carried_index);
-    let extract_secs = t0.elapsed().as_secs_f64();
+    let _resolve_secs = t0.elapsed().as_secs_f64();
     // Per-file unresolved counts: parallel to the fresh-file order.
     for (row, unresolved) in fresh_rows
         .iter_mut()
@@ -325,7 +325,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
         wall = started.elapsed().as_secs_f64(),
         w = walk_secs,
         p = parse_secs,
-        e = extract_secs,
+        e = extract_secs_sum,
         d = db_secs,
     ))
 }
