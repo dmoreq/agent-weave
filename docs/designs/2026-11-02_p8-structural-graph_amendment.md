@@ -12,7 +12,8 @@
   (docstring search) was attempted and reverted; G20 failed its Stage 2c
   utility leg. This proposal does not depend on docstrings.
 - Canonical target after approval: Amendment 19, Gate Registry G23-G28,
-  schema v6.
+  schema v6. Post-review optimization: Amendment 20 (§6.1) adds schema v7
+  `symbols.file_path` and the path-ordered complexity index.
 - ID note: F4 extends Amendment 18(d)'s grouped `impact` contract; it does
   not re-claim it. The next free canonical IDs are Amendment 19 and
   G23-G28.

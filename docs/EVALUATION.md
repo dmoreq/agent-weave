@@ -10,9 +10,9 @@ without being labeled as such.
 
 | question | answer (measured) |
 |----------|-------------------|
-| Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets |
+| Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets; P8 real-corpus GT 71/71 at 1.000 (imports 40, tests 20, inheritance 11) |
 | Is the query loop fast? | 5-11 ms best-of-7 end-to-end per invocation (spawn floor ~6 ms); < 10 ms on a 382 MB index (11k-file tree); query memory is bounded by the display cap since schema v5 — `docs/baselines/perf-v5-2026-11-02.md` |
-| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.10-0.16 s on the self-index (~18 MB RSS); 2.33 s / 183 MB at the 2,025-file synthetic corpus — `baselines/perf-v5-2026-11-02.md` |
+| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.10-0.16 s on the self-index (~18 MB RSS); 2.82 s best-of-7 at the 2,025-file synthetic corpus (1.25x budget 2.91 s) — `baselines/perf-v5-2026-11-02.md`, `tests/scripts/timing_assert.sh` |
 | Does it make a coding agent better? | navigation recall 98.6% vs 81.9% grep-only, at flat token cost |
 | Does it make an agent cheaper? | only when routed: query-first policy cut input tokens **-27.3%** (1,058,613 → 769,306 per run) at unchanged recall |
 | Does it answer semantic questions? | No — static resolution only. Out of scope by design. |
@@ -99,6 +99,7 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 | G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.775 recall (22/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure and 0.800 pre-R7 (ranking trade-offs recorded in the P6 and R7 reports) — PASS (bar 0.70) |
 | G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
 | G17 call-path traversal | `kg path` vs 10 exact-byte fixtures + 8 frozen GT pairs (hop edges verified EXTRACTED at freeze) + latency | 10/10 fixtures byte-exact; 8/8 GT agreement; 0.6-1.4 ms in-process best-of-7 across the 85k-symbol synth corpus and the self-index (budget 20 ms) — PASS. Routes are resolved-edge CANDIDATES: dynamic dispatch may hide paths |
+| G23-G28 structural graph | P8 fixture suite plus frozen real-corpus GT | imports 40/40, tests 20/20, inheritance 11/11; Rust/TS/Python exact-byte controls; schema v7 carry/probe/order tests — PASS |
 
 ## 5. Agent A/B — the measured case for kg
 
@@ -211,6 +212,8 @@ raise model capability.
 | G13 outline | `baselines/g13-outline-2026-11-01.md` |
 | G14 search | `baselines/g14-search-2026-11-01.md` |
 | G17 path | `baselines/g17-path-2026-11-02.md`, frozen pairs `baselines/path-gt.jsonl` |
+| P8 real-corpus GT | `baselines/real-corpus-gt-2026-11-02.md`, `baselines/import-gt.jsonl`, `baselines/tests-gt.jsonl`, `baselines/inheritance-gt.jsonl` |
+| P8 evaluation and fixes | `baselines/reviews/R10-P8-evaluation.md` |
 | G16 clones | `baselines/g16-clones-2026-11-01.md` |
 | P4 spec + implementation reviews | `baselines/reviews/R4-P4.md` (the R4b implementation review is a section inside it) |
 | agent A/B + routing + replication | `baselines/grok-a-b-2026-11-01.md` (+ `baselines/grok-a-b-2026-11-01/` manifests and audits) |
@@ -275,3 +278,44 @@ cell, directional; path is n=2. Two limitations are recorded in the baseline:
 agy exceeded the 25-tool budget in 5 control cells, and F2 is scored against a host-specific expected overlay
 containing two verified sites that v0.2.1 now resolves; the shared frozen
 oracle is unchanged.
+
+## 10. P8 structural graph (2026-11-02, Amendment 19/20, schema v7)
+
+Four independent Goldfish lenses evaluated F1-F12 at `c39e21f`; the R10
+record (`baselines/reviews/R10-P8-evaluation.md`) found F5/F8/F11/schema v6 at
+ceiling and the rest below. The fix cycle below closes every Critical and
+Important finding.
+
+| surface | measured | command |
+|---------|----------|---------|
+| schema v7 fresh build, 2,025-file synthetic corpus | **2.82 s** best-of-7 wall (budget 2.91 s; 1.25x frozen 2.33 s) | `target/release/kg build --force` x7 |
+| `kg dead --limit 50`, 85,050 symbols | **147.5 ms** best-of-7 (budget 200 ms) | `tests/scripts/timing_assert.sh` |
+| `kg complexity --limit 1` | **19.3 ms** best-of-7 (budget 50 ms) | same |
+| `kg complexity --path synth` | **26.2 ms** best-of-7 (budget 100 ms) | same |
+| `kg symbols synth --limit 50` | **21.9 ms** best-of-7 (budget 50 ms) | same |
+| `kg tests <no-hit>` | **5.4 ms** best-of-5 | same |
+| `kg impact <file> --depth 10` | **5.1 ms** best-of-5 | same |
+| Flutter corpus build smoke | 124 indexed files, 735 symbols, 0 parse errors, 3.46 s | `kg build --root <flutter>` |
+| test suite | 175 tests (25 lib + 25 bin + 93 CLI + 26 fixture + 6 MCP) | `cargo test --locked` |
+
+Real-corpus gates are local-only and frozen at kg `342ebc3`, vihap `efcd310`,
+finguard `dddfe07`, Flutter `20f82749394`:
+
+| gate | GT rows | result | harness |
+|------|---------|--------|---------|
+| F7 imports | 40 (25 vihap + 15 kg self) | **40/40 = 1.000**, Wilson 95% 0.912-1.000 | `tests/scripts/import_recall.py` |
+| F8 tests | 20 vihap symbols across 20 test files | **20/20 = 1.000**, Wilson 95% 0.839-1.000 | `tests/scripts/tests_recall.py` |
+| F1 inheritance | 10 vihap Python + 1 finguard TS | **11/11 = 1.000**, Wilson 95% 0.741-1.000 | `tests/scripts/inheritance_recall.py` |
+
+GT was derived from source ASTs (Python `ast`, tree-sitter Rust/TS) before
+measuring kg. Entry construction and exclusions are recorded in
+`baselines/real-corpus-gt-2026-11-02.md`.
+
+Contract and accuracy changes in this batch: schema v7 denormalizes
+`symbols.file_path` for deterministic complexity ordering; Rust use trees and
+module mapping; TS extension/index collapse and default-import semantics;
+two-pass exports; TS arrow metric ranges; import-site dedup and callable-only
+context tags; complexity/api staleness and payloads; directory-scope
+no-result text; bounded `tests`/`impact` collectors. Pinned limits remain:
+Dart is not indexed (P9), cross-file Rust `impl Trait for Type` is omitted,
+and function-local imports are not test-impact seeds.

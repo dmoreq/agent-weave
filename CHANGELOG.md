@@ -16,6 +16,36 @@ changes bump the minor while 0.x is unstable.
   Fresh inserts and carry-forward both populate the column; `probe_old`
   rejects a v7-stamped index that lacks it.
 
+### Fixed — P8 review cycle (R10)
+
+- Rust imports: structural `use` trees (grouped, alias, `self`/`super`,
+  wildcard, single-segment), `mod.rs`/`lib.rs`/`index.*` module mapping, and
+  external-crate suppression. Star imports suppress unresolved names only on
+  their own statement; deleted destinations become unresolved and restore
+  when the file returns.
+- TypeScript imports: `.ts/.tsx/.js/.jsx/.mts/.cts/.mjs/.cjs` and trailing
+  `index` collapse to one module identity; default imports emit no symbol
+  edge; `from pkg import mod` keeps only the canonical child edge unless the
+  statement also imports a symbol.
+- Exports: two-pass resolution exports methods of `impl Type` declared before
+  `pub struct Type`; TS arrow exports and local `export { X }` are tagged;
+  `api` covers interfaces.
+- Metrics/complexity: TS const arrows use the arrow node for both metrics and
+  line range; `complexity` excludes zero-metric trait signatures; schema v7
+  orders ties by path with a covering index.
+- Contract: import sites count once per statement; `--context` tags only
+  function/method sites; `complexity`/`api` carry staleness and payloads;
+  unknown directory scopes report `0 symbols in '<dir>' (indexed)`; `context`
+  enforces its documented 50-row section cap; `timing_assert.sh` measures
+  semantic exit codes with one interpreter.
+- Latency: `tests` and `impact --depth>1` keep only the top-`limit` display
+  set plus an exact distinct count; fresh build best-of-7 is 2.82 s on the
+  2,025-file corpus (budget 2.91 s).
+- Gates: committed real-corpus ground truth and harnesses for imports
+  (40 pairs), tests (20 symbols), and inheritance (11 pairs), plus a
+  Flutter-corpus build smoke; P8 determinism dumps include schema-v7 columns
+  and `unresolved_calls`.
+
 ### Added — P8 structural graph (Amendment 19, schema v6)
 
 - `kg implementers <name>`: resolved inbound `inherits` edges; Rust

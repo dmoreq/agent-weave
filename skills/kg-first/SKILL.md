@@ -27,6 +27,7 @@ source:
 | which functions exceed complexity/length | `kg complexity --min-cyc 11` — cyclomatic/branches/nesting/effective LOC, not cognitive complexity |
 | what is in this directory | `kg symbols <dir> --outline`; `kg files --path <dir>` for the file inventory |
 | find a symbol by (partial) name, qualified path, or signature vocabulary | `kg search <terms>` — qualified input matches the exact phrase; exact names rank first; plurals fall back to stems |
+| resolve many names at once | `kg resolve --stdin < names.txt` — one `found`/`ambiguous`/`missing` line per name |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |
 | is this logic duplicated elsewhere | `kg clones [--min-lines N]` — candidates only, never proof; spans name the enclosing symbol per side |
 | what is risky / dead / unresolved | `kg hotspots`, `kg dead --exclude-tests`, `kg unresolved`; `kg unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
@@ -58,8 +59,9 @@ context you carry for zero information gain.
    composing `callees`/`callers` or grep instead of re-querying `path`.
 4. **Static-surface caveats**: `implementers`, `imports`, `tests`, `api`, and
    `complexity` are static. Import/inherit coverage is unmeasured; a negative
-   is not proof. `tests` misses Rust `#[test]` names outside `test_*` and TS
-   `describe`/`it` callbacks. `dead` is a candidate list, not proof.
+   is not proof. `tests` misses Rust `#[test]` names outside `test_*`, TS
+   `describe`/`it` callbacks, and function-local imports. `dead` is a
+   candidate list, not proof.
 
 ## Staleness discipline
 
