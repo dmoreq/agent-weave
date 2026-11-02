@@ -2,7 +2,7 @@
 //! result-set-scoped staleness, caps, tier tags, and empty-result reason lines
 //! (response contract; CUJ2/CUJ3/CUJ4/CUJ7).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -19,7 +19,7 @@ pub const MAX_LIMIT: usize = 10_000;
 
 /// Permanent honesty caveat for `kg dead` (Amendment 5): candidates, not proof.
 const DEAD_CAVEAT: &str =
-    "kg: dead-code candidates — dynamic dispatch, entry points, and external callers are not proven absent";
+    "kg: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, and external callers are not proven absent";
 
 /// Permanent honesty caveat for `kg clones` (Amendment 12d): candidates, not proof.
 const CLONES_CAVEAT: &str =
@@ -33,8 +33,230 @@ const PATH_CAVEAT: &str = "kg: path — resolved static edges only; dynamic disp
 const CONTEXT_CAVEAT: &str =
     "kg: context — resolved static edges only; dynamic dispatch may hide callers or callees";
 
+/// Permanent honesty caveat for `kg implementers` (Amendment 19).
+const IMPLEMENTERS_CAVEAT: &str = "kg: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
+
+/// `impact` caveats (Amendment 19): the default calls-only shape stays
+/// byte-identical; the extended shapes state their static-edge limit.
+const IMPACT_EDGES_CAVEAT: &str =
+    "kg: impact — resolved static edges only; unresolved imports/inherits are omitted";
+const IMPACT_CALLS_CAVEAT: &str =
+    "kg: impact — resolved static call edges only; dynamic dispatch may hide dependents";
+
+/// `kg imports` caveat (Amendment 19): outbound resolved imports only.
+const IMPORTS_CAVEAT: &str =
+    "kg: imports — resolved static imports only; external and unresolved imports are omitted";
+
+/// `kg tests` caveat (Amendment 19): static candidates only.
+const TESTS_CAVEAT: &str = "kg: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed";
+
+fn is_test_symbol_name(name: &str) -> bool {
+    name.starts_with("test_")
+        || (name.starts_with("test") && name.chars().nth(4).is_some_and(|c| c.is_ascii_uppercase()))
+}
+
+pub fn test_impact(
+    conn: &Connection,
+    root: &Path,
+    target: &str,
+    depth: usize,
+    limit: usize,
+) -> Result<QueryOutput> {
+    let limit = clamp_limit(limit)?;
+    let depth = depth.clamp(1, 10);
+    let target = target.trim_start_matches("./").trim_end_matches('/');
+    let file_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE path = ?1",
+            [target],
+            |r| r.get(0),
+        )
+        .map(|c: i64| c > 0)?;
+    let seed_ids: Vec<i64> = if file_exists {
+        let mut stmt = conn.prepare(
+            "SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
+        )?;
+        let rows = stmt.query_map([target], |r| r.get(0))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    } else {
+        let (ids, cands) = target_ids(conn, target)?;
+        if ids.is_empty() {
+            return Err(KgError::NoResults(format!(
+                "symbol '{target}' not in index"
+            )));
+        }
+        if cands.len() > 1 {
+            return Err(KgError::Ambiguous {
+                name: target.to_string(),
+                total: ids.len(),
+                candidates: cands,
+                role: None,
+            });
+        }
+        ids
+    };
+    let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
+    let mut visited: HashSet<i64> = seed_set.clone();
+    let mut current = seed_ids;
+    let mut tests: HashMap<i64, (String, i64, String)> = HashMap::new();
+    let mut truncated = false;
+    for d in 1..=depth {
+        if current.is_empty() {
+            break;
+        }
+        let mut next = Vec::new();
+        for chunk in current.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT DISTINCT e.src_id, s.name, s.kind, f.path, s.line_start, s.qualname
+                 FROM edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
+                 ORDER BY f.path, s.line_start, s.qualname"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|i| rusqlite::types::Value::from(*i))
+                .collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, name, kind, path, line, qualname) = row?;
+                if !seed_set.contains(&id)
+                    && matches!(kind.as_str(), "function" | "method")
+                    && is_test_symbol_name(&name)
+                {
+                    tests.entry(id).or_insert((path, line, qualname));
+                }
+                if visited.insert(id) {
+                    next.push(id);
+                }
+            }
+        }
+        if d == depth && !next.is_empty() {
+            truncated = true;
+        }
+        current = next;
+    }
+    if tests.is_empty() {
+        return Err(if truncated {
+            KgError::NoResultsCaveated {
+                caveat: TESTS_CAVEAT,
+                detail: format!(
+                    "no test candidate within depth {depth}; a longer route may exist (static call edges only)"
+                ),
+            }
+        } else {
+            KgError::NoResultsCaveated {
+                caveat: TESTS_CAVEAT,
+                detail: "0 test candidates found (static call edges only)".to_string(),
+            }
+        });
+    }
+    let mut rows: Vec<_> = tests.into_values().collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    let total = rows.len();
+    let pointers: Vec<Pointer> = rows
+        .into_iter()
+        .map(|(file, line, qualname)| Pointer {
+            file,
+            line,
+            tag: "",
+            detail: qualname,
+        })
+        .collect();
+    let mut out = collect_output(
+        conn,
+        root,
+        "",
+        pointers.into_iter().map(Ok),
+        limit,
+        "0 test candidates found (static call edges only)",
+        Some(total),
+    )?;
+    let mut header = TESTS_CAVEAT.to_string();
+    if let Some(stale) = out.header.take() {
+        header.push('\n');
+        header.push_str(&stale);
+    }
+    if truncated {
+        header.push_str(&format!(
+            "\nkg: depth cap {depth} reached; deeper tests may exist"
+        ));
+    }
+    out.header = Some(header);
+    Ok(out)
+}
+
+pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
+    let limit = clamp_limit(limit)?;
+    let rel = file.trim_start_matches("./").to_string();
+    let exists: bool = conn
+        .query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| {
+            r.get(0)
+        })
+        .map(|c: i64| c > 0)?;
+    if !exists {
+        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+    }
+    let total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM edges e
+         JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+         WHERE f.path = ?1 AND e.kind = 'imports'",
+        [&rel],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    if total == 0 {
+        return Err(KgError::NoResultsCaveated {
+            caveat: IMPORTS_CAVEAT,
+            detail: "0 imports found (external and unresolved imports are omitted)".to_string(),
+        });
+    }
+    let sql = format!(
+        "SELECT e.site_line, e.dst_name FROM edges e
+         JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+         WHERE f.path = ?1 AND e.kind = 'imports'
+         ORDER BY e.site_line, e.dst_name LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([&rel], |r| {
+        Ok(Pointer {
+            file: rel.clone(),
+            line: r.get(0)?,
+            tag: "",
+            detail: r.get(1)?,
+        })
+    })?;
+    let mut out = collect_output(
+        conn,
+        root,
+        &rel,
+        rows,
+        limit,
+        "0 imports found (external and unresolved imports are omitted)",
+        Some(total),
+    )?;
+    out.header = Some(match out.header.take() {
+        Some(stale) => format!("{IMPORTS_CAVEAT}\n{stale}"),
+        None => IMPORTS_CAVEAT.to_string(),
+    });
+    Ok(out)
+}
+
 /// One resolved candidate: (path, line, qualname).
 pub type Candidate = (String, i64, String);
+
+/// One symbol row with metrics: (kind, qualname, line, signature,
+/// cyclomatic, branches, nesting, effective_loc). Amendment 19.
+type SymbolRow = (String, String, i64, String, i64, i64, i64, i64);
 
 /// One BFS level's out-edges grouped per source: `(dst qualname, dst path,
 /// site_line, dst id)` sorted by the pinned neighbor key (`path` is the
@@ -196,6 +418,77 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         "0 callers found (dynamic dispatch possible — grep fallback recommended)",
         Some(total),
     )
+}
+
+pub fn implementers(
+    conn: &Connection,
+    root: &Path,
+    name: &str,
+    limit: usize,
+) -> Result<QueryOutput> {
+    let limit = clamp_limit(limit)?;
+    let (ids, cands) = target_ids(conn, name)?;
+    if ids.is_empty() {
+        return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
+    }
+    if cands.len() > 1 {
+        return Err(KgError::Ambiguous {
+            name: name.to_string(),
+            total: ids.len(),
+            candidates: cands,
+            role: None,
+        });
+    }
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
+    let total: usize = conn.query_row(
+        &format!(
+            "SELECT COUNT(DISTINCT e.src_id) FROM edges e
+             WHERE e.dst_id IN ({placeholders}) AND e.kind = 'inherits'"
+        ),
+        rusqlite::params_from_iter(params.iter()),
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    let sql = format!(
+        "SELECT DISTINCT f.path, s.line_start, s.qualname
+         FROM edges e
+         JOIN symbols s ON s.id = e.src_id
+         JOIN files f ON f.id = s.file_id
+         WHERE e.dst_id IN ({placeholders}) AND e.kind = 'inherits'
+         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+        Ok(Pointer {
+            file: r.get(0)?,
+            line: r.get(1)?,
+            tag: "",
+            detail: r.get(2)?,
+        })
+    })?;
+    if total == 0 {
+        return Err(KgError::NoResultsCaveated {
+            caveat: IMPLEMENTERS_CAVEAT,
+            detail: "0 implementers found (resolved inherits edges only)".to_string(),
+        });
+    }
+    let mut out = collect_output(
+        conn,
+        root,
+        name,
+        rows,
+        limit,
+        "0 implementers found (resolved inherits edges only)",
+        Some(total),
+    )?;
+    out.header = Some(match out.header.take() {
+        Some(stale) => format!("{IMPLEMENTERS_CAVEAT}\n{stale}"),
+        None => IMPLEMENTERS_CAVEAT.to_string(),
+    });
+    Ok(out)
 }
 
 pub fn callees(
@@ -738,14 +1031,130 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     Ok(out)
 }
 
+fn parse_edge_kinds(spec: &str) -> Result<Vec<&'static str>> {
+    let mut out: Vec<&'static str> = Vec::new();
+    let mut saw_all = false;
+    for raw in spec.split(',') {
+        let part = raw.trim();
+        match part {
+            "calls" => out.push("calls"),
+            "imports" => out.push("imports"),
+            "inherits" => out.push("inherits"),
+            "all" => {
+                saw_all = true;
+                out.extend(["calls", "imports", "inherits"]);
+            }
+            "" => {
+                return Err(KgError::Usage(
+                    "--edges requires calls,imports,inherits,all".to_string(),
+                ))
+            }
+            other => {
+                return Err(KgError::Usage(format!(
+                    "unknown --edges value '{other}' (calls,imports,inherits,all)"
+                )))
+            }
+        }
+    }
+    if saw_all && spec.split(',').any(|p| p.trim() != "all") {
+        return Err(KgError::Usage(
+            "--edges all cannot be combined with explicit kinds".to_string(),
+        ));
+    }
+    out.sort_unstable();
+    out.dedup();
+    if out.is_empty() {
+        return Err(KgError::Usage(
+            "--edges requires at least one kind".to_string(),
+        ));
+    }
+    Ok(out)
+}
+
+fn path_in_scope(path: &str, scope: &str) -> bool {
+    path == scope || path.starts_with(&format!("{scope}/"))
+}
+
+pub fn validate_path_scope(path: &str, allow_root: bool) -> Result<()> {
+    let p = path.trim().trim_start_matches("./").trim_end_matches('/');
+    if (!allow_root && (p.is_empty() || p == "."))
+        || p == ".."
+        || p.starts_with('/')
+        || p.contains('\\')
+    {
+        return Err(KgError::Usage(format!(
+            "invalid scope '{path}' (repo-relative path required)"
+        )));
+    }
+    Ok(())
+}
+
+pub fn path_scope_sql_pub(alias: &str, path: Option<&str>) -> String {
+    path_scope_sql(alias, path)
+}
+
+fn path_scope_sql(alias: &str, path: Option<&str>) -> String {
+    match path {
+        None => String::new(),
+        Some(path) => {
+            let escaped = path
+                .trim_start_matches("./")
+                .trim_end_matches('/')
+                .replace('\'', "''");
+            format!(
+                " AND ({alias}.path = '{escaped}' OR substr({alias}.path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
+            )
+        }
+    }
+}
+
+fn edge_kind_sql(kinds: &[&str]) -> String {
+    kinds
+        .iter()
+        .map(|k| format!("'{k}'"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn impact_detail(context: bool, qualname: &str, explain: bool, kind: &str, depth: usize) -> String {
+    let mut parts = Vec::new();
+    if context && !qualname.is_empty() {
+        parts.push(format!("[in {qualname}]"));
+    }
+    if explain {
+        parts.push(format!("[{kind} depth={depth}]"));
+    }
+    parts.join(" ")
+}
+
+fn impact_empty_detail(kinds: &[&str]) -> String {
+    let has_imports = kinds.contains(&"imports");
+    let has_inherits = kinds.contains(&"inherits");
+    match (has_imports, has_inherits) {
+        (true, true) => "0 impacting files found (unresolved imports/bases are omitted)",
+        (true, false) => "0 impacting files found (unresolved imports are omitted)",
+        (false, true) => "0 impacting files found (unresolved bases are omitted)",
+        (false, false) => "0 impacting files found",
+    }
+    .to_string()
+}
+
+#[allow(clippy::too_many_arguments)] // CLI surface; a params struct adds no value here.
 pub fn impact(
     conn: &Connection,
     root: &Path,
     file: &str,
     limit: usize,
     sites: bool,
+    depth: usize,
+    edges: &str,
+    context: bool,
+    explain: bool,
 ) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
+    let depth = depth.clamp(1, 10);
+    let kinds = parse_edge_kinds(edges)?;
+    let kind_sql = edge_kind_sql(&kinds);
     let rel = file.trim_start_matches("./").to_string();
     let exists: bool = conn
         .query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| {
@@ -755,84 +1164,329 @@ pub fn impact(
     if !exists {
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
-    // Direction semantics (CLI help): files that call INTO <file>.
-    // Default (Amendment 18): one row per caller FILE with a site count — the
-    // per-site list could not answer "which files" once capped.
-    if !sites {
-        let total_files: usize = conn.query_row(
-            "SELECT COUNT(DISTINCT sf.path) FROM edges e
-             JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-             JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-             WHERE df.path = ?1 AND e.kind = 'calls'",
+    let extended = depth > 1 || kinds.iter().any(|k| *k != "calls");
+    let caveat = if extended {
+        if kinds.iter().any(|k| *k != "calls") {
+            IMPACT_EDGES_CAVEAT
+        } else {
+            IMPACT_CALLS_CAVEAT
+        }
+    } else {
+        ""
+    };
+    // Grouped mode cannot carry a meaningful per-edge tag; --context and
+    // --explain switch to per-site rows at depth 1.
+    let sites = sites || (depth == 1 && (context || explain));
+    if depth > 1 && sites {
+        return Err(KgError::Usage(
+            "--sites is only valid with --depth 1".to_string(),
+        ));
+    }
+
+    if depth == 1 {
+        if !sites {
+            let total_files: usize = conn.query_row(
+                &format!(
+                    "SELECT COUNT(DISTINCT sf.path) FROM edges e
+                     JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+                     JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+                     WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
+                ),
+                [&rel],
+                |r| r.get::<_, i64>(0),
+            )? as usize;
+            if total_files == 0 {
+                if extended {
+                    return Err(KgError::NoResultsCaveated {
+                        caveat,
+                        detail: {
+                            let has_imports = kinds.contains(&"imports");
+                            let has_inherits = kinds.contains(&"inherits");
+                            match (has_imports, has_inherits) {
+                                (true, true) => {
+                                    "0 impacting files found (unresolved imports/bases are omitted)"
+                                }
+                                (true, false) => {
+                                    "0 impacting files found (unresolved imports are omitted)"
+                                }
+                                (false, true) => {
+                                    "0 impacting files found (unresolved bases are omitted)"
+                                }
+                                (false, false) => "0 impacting files found",
+                            }
+                            .to_string()
+                        },
+                    });
+                }
+                return Err(KgError::NoResults("0 impacting files found".to_string()));
+            }
+            let mut stmt = conn.prepare(&format!(
+                "SELECT sf.path, MIN(e.site_line) AS line, COUNT(*) AS n
+                 FROM edges e
+                 JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+                 JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+                 WHERE df.path = ?1 AND e.kind IN ({kind_sql})
+                 GROUP BY sf.path ORDER BY sf.path LIMIT {limit}"
+            ))?;
+            let rows = stmt.query_map([&rel], |r| {
+                Ok(Pointer {
+                    file: r.get::<_, String>(0)?,
+                    line: r.get::<_, i64>(1)?,
+                    tag: "",
+                    detail: format!("({} sites)", r.get::<_, i64>(2)?),
+                })
+            })?;
+            let mut out = collect_output(
+                conn,
+                root,
+                &rel,
+                rows,
+                limit,
+                "0 impacting files found",
+                Some(total_files),
+            )?;
+            if extended {
+                out.header = Some(match out.header.take() {
+                    Some(stale) => format!("{caveat}\n{stale}"),
+                    None => caveat.to_string(),
+                });
+            }
+            return Ok(out);
+        }
+
+        let total: usize = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM edges e
+                 JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+                 WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
+            ),
             [&rel],
             |r| r.get::<_, i64>(0),
         )? as usize;
-        let mut stmt = conn.prepare(&format!(
-            "SELECT sf.path, MIN(e.site_line) AS line, COUNT(*) AS n
+        if total == 0 {
+            if extended {
+                return Err(KgError::NoResultsCaveated {
+                    caveat,
+                    detail: "0 impacting files found".to_string(),
+                });
+            }
+            return Err(KgError::NoResults("0 impacting files found".to_string()));
+        }
+        let sql = format!(
+            "SELECT e.site_line, e.confidence, sf.path, ss.qualname, e.kind
              FROM edges e
              JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
              JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-             WHERE df.path = ?1 AND e.kind = 'calls'
-             GROUP BY sf.path ORDER BY sf.path LIMIT {limit}"
-        ))?;
+             WHERE df.path = ?1 AND e.kind IN ({kind_sql})
+             ORDER BY sf.path, e.site_line, ss.qualname, e.id LIMIT {limit}"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([&rel], |r| {
+            let site: i64 = r.get(0)?;
+            let conf: String = r.get(1)?;
+            let path: String = r.get(2)?;
+            let qn: String = r.get(3)?;
+            let kind: String = r.get(4)?;
             Ok(Pointer {
-                file: r.get::<_, String>(0)?,
-                line: r.get::<_, i64>(1)?,
-                tag: "",
-                detail: format!("({} sites)", r.get::<_, i64>(2)?),
+                file: path,
+                line: site,
+                tag: if conf == "AMBIGUOUS" {
+                    " [ambiguous]"
+                } else {
+                    ""
+                },
+                detail: impact_detail(context, &qn, explain, &kind, 1),
             })
         })?;
-        return collect_output(
+        let mut out = collect_output(
             conn,
             root,
             &rel,
             rows,
             limit,
             "0 impacting files found",
-            Some(total_files),
-        );
+            Some(total),
+        )?;
+        if extended {
+            out.header = Some(match out.header.take() {
+                Some(stale) => format!("{caveat}\n{stale}"),
+                None => caveat.to_string(),
+            });
+        }
+        return Ok(out);
     }
-    let total: usize = conn.query_row(
-        "SELECT COUNT(*) FROM edges e
-         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-         WHERE df.path = ?1 AND e.kind = 'calls'",
-        [&rel],
-        |r| r.get::<_, i64>(0),
-    )? as usize;
-    let sql = format!(
-        "SELECT e.site_line, e.confidence, sf.path
-         FROM edges e
-         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-         JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-         WHERE df.path = ?1 AND e.kind = 'calls'
-         ORDER BY sf.path, e.site_line LIMIT {limit}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([&rel], |r| {
-        let site: i64 = r.get(0)?;
-        let conf: String = r.get(1)?;
-        let path: String = r.get(2)?;
-        Ok(Pointer {
+
+    // depth > 1: reverse BFS. R1 is the exact depth-1 edge set; deeper levels
+    // expand from R1's source symbols, so deeper search is monotone.
+    if total_impact_targets(conn, &rel)? == 0 {
+        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+    }
+    let mut records: HashMap<String, (usize, i64, String, String)> = HashMap::new();
+    let (mut frontier, mut visited) = direct_impact_level(conn, &rel, &kind_sql, &mut records, 1)?;
+    for d in 2..=depth {
+        let next = level_impact(conn, &frontier, &mut visited, &kind_sql, &mut records, d)?;
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+    let truncated = depth > 1 && !frontier.is_empty();
+    let total = records.len();
+    if total == 0 {
+        return Err(KgError::NoResultsCaveated {
+            caveat,
+            detail: impact_empty_detail(&kinds),
+        });
+    }
+    let mut paths: Vec<_> = records.into_iter().collect();
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    let pointers: Vec<Pointer> = paths
+        .into_iter()
+        .map(|(path, (d, line, kind, qn))| Pointer {
             file: path,
-            line: site,
-            tag: if conf == "AMBIGUOUS" {
-                " [ambiguous]"
-            } else {
-                ""
-            },
-            detail: String::new(),
+            line,
+            tag: "",
+            detail: impact_detail(context, &qn, explain, &kind, d),
         })
-    })?;
-    collect_output(
+        .collect();
+    let mut out = collect_output(
         conn,
         root,
         &rel,
-        rows,
+        pointers.into_iter().map(Ok),
         limit,
         "0 impacting files found",
         Some(total),
-    )
+    )?;
+    let mut header = caveat.to_string();
+    if let Some(stale) = out.header.take() {
+        header.push('\n');
+        header.push_str(&stale);
+    }
+    if truncated {
+        header.push_str(&format!(
+            "\nkg: depth cap {depth} reached; deeper dependents may exist"
+        ));
+    }
+    out.header = Some(header);
+    Ok(out)
+}
+
+fn total_impact_targets(conn: &Connection, rel: &str) -> Result<usize> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
+        [rel],
+        |r| r.get::<_, i64>(0),
+    )? as usize)
+}
+
+fn direct_impact_level(
+    conn: &Connection,
+    rel: &str,
+    kind_sql: &str,
+    records: &mut HashMap<String, (usize, i64, String, String)>,
+    depth: usize,
+) -> Result<(Vec<i64>, HashSet<i64>)> {
+    let sql = format!(
+        "SELECT e.src_id, e.site_line, e.kind, sf.path, ss.qualname
+         FROM edges e
+         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+         JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+         WHERE df.path = ?1 AND e.kind IN ({kind_sql})
+         ORDER BY sf.path, e.site_line, ss.qualname, e.id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([rel], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut frontier = Vec::new();
+    let mut visited = HashSet::new();
+    let target_ids: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
+        )?;
+        let rows = stmt.query_map([rel], |r| r.get(0))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    for id in target_ids {
+        visited.insert(id);
+    }
+    for r in rows {
+        let (src, line, kind, path, qn) = r?;
+        record_first(records, path, depth, line, kind, qn);
+        if visited.insert(src) {
+            frontier.push(src);
+        }
+    }
+    Ok((frontier, visited))
+}
+
+fn level_impact(
+    conn: &Connection,
+    frontier: &[i64],
+    visited: &mut HashSet<i64>,
+    kind_sql: &str,
+    records: &mut HashMap<String, (usize, i64, String, String)>,
+    depth: usize,
+) -> Result<Vec<i64>> {
+    if frontier.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut next = Vec::new();
+    for chunk in frontier.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT e.src_id, e.site_line, e.kind, sf.path, ss.qualname
+             FROM edges e
+             JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+             WHERE e.dst_id IN ({placeholders}) AND e.kind IN ({kind_sql})
+             ORDER BY sf.path, e.site_line, ss.qualname, e.id"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<rusqlite::types::Value> = chunk
+            .iter()
+            .map(|i| rusqlite::types::Value::from(*i))
+            .collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })?;
+        for r in rows {
+            let (src, line, kind, path, qn) = r?;
+            record_first(records, path, depth, line, kind, qn);
+            if visited.insert(src) {
+                next.push(src);
+            }
+        }
+    }
+    Ok(next)
+}
+
+fn record_first(
+    records: &mut HashMap<String, (usize, i64, String, String)>,
+    path: String,
+    depth: usize,
+    line: i64,
+    kind: String,
+    qualname: String,
+) {
+    match records.get(&path) {
+        Some((d, l, _, _)) if (*d, *l) <= (depth, line) => {}
+        _ => {
+            records.insert(path, (depth, line, kind, qualname));
+        }
+    }
 }
 
 /// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
@@ -843,34 +1497,71 @@ pub fn dead(
     root: &Path,
     limit: usize,
     exclude_tests: bool,
+    exclude_generated: bool,
+    path: Option<&str>,
 ) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
     // AMBIGUOUS suppression is per-symbol (R7): a bare-name ambiguous call
     // suppresses only same-named symbols in the caller's own file; a symbol
     // elsewhere with the same bare name is not presumed referenced.
     // One materialized referenced-id set, shared by COUNT and the page query.
     // The previous correlated NOT EXISTS re-scanned edges per candidate
     // symbol (R7 review).
-    let referenced = "WITH referenced_ids(id) AS MATERIALIZED (
-           SELECT dst_id FROM edges WHERE kind = 'calls' AND dst_id IS NOT NULL
+    let referenced = "WITH trait_parents(qualname) AS MATERIALIZED (
+           SELECT DISTINCT qualname FROM symbols
+            WHERE kind IN ('trait', 'interface')
+       ),
+       referenced_ids(id) AS MATERIALIZED (
+           SELECT dst_id FROM edges
+            WHERE kind IN ('calls', 'imports', 'inherits') AND dst_id IS NOT NULL
            UNION
            SELECT s2.id FROM edges e
              JOIN symbols s2 ON s2.qualname = e.dst_name
-            WHERE e.kind = 'calls' AND e.confidence = 'AMBIGUOUS'
+            WHERE e.kind IN ('calls', 'imports', 'inherits')
+              AND e.confidence = 'AMBIGUOUS'
            UNION
            SELECT s2.id FROM edges e
              JOIN symbols src ON src.id = e.src_id
              JOIN symbols s2 ON s2.name = e.dst_name AND s2.file_id = src.file_id
-            WHERE e.kind = 'calls' AND e.confidence = 'AMBIGUOUS'
+            WHERE e.kind IN ('calls', 'imports', 'inherits')
+              AND e.confidence = 'AMBIGUOUS'
        )";
-    let mut predicate = "s.kind IN ('function', 'method', 'class')
-           AND s.id NOT IN (SELECT id FROM referenced_ids)"
-        .to_string();
+    let mut predicate = "s.kind IN ('function', 'method', 'class', 'trait', 'interface')
+           AND s.id NOT IN (SELECT id FROM referenced_ids)
+           AND NOT EXISTS (
+               SELECT 1 FROM trait_parents tp
+                WHERE s.qualname >= tp.qualname || '.'
+                  AND s.qualname < tp.qualname || '/'
+           )"
+    .to_string();
     if exclude_tests {
         predicate.push_str(
             " AND f.path NOT LIKE 'tests/%' AND f.path NOT LIKE '%/tests/%'
-              AND s.name NOT LIKE 'test\\_%' ESCAPE '\\'",
+              AND f.path NOT LIKE 'test/%' AND f.path NOT LIKE '%/test/%'
+              AND f.path NOT LIKE '__tests__/%' AND f.path NOT LIKE '%/__tests__/%'
+              AND f.path NOT LIKE 'test\\_%.py' ESCAPE '\\'
+              AND f.path NOT LIKE '%\\_test.py' ESCAPE '\\'
+              AND f.path NOT LIKE '%.test.%'
+              AND f.path NOT LIKE '%.spec.%'
+              AND f.path NOT LIKE '%\\_test.dart' ESCAPE '\\'
+              AND s.name NOT LIKE 'test\\_%' ESCAPE '\\'
+              AND s.name NOT GLOB 'test[A-Z]*'",
         );
+    }
+    if exclude_generated {
+        predicate.push_str(" AND f.generated = 0");
+    }
+    if let Some(path) = path {
+        let escaped = path
+            .trim_start_matches("./")
+            .trim_end_matches('/')
+            .replace('\'', "''");
+        predicate.push_str(&format!(
+            " AND (f.path = '{escaped}' OR substr(f.path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
+        ));
     }
     let predicate = predicate.as_str();
     let total: usize = conn.query_row(
@@ -919,22 +1610,362 @@ pub fn dead(
     Ok(out)
 }
 
+/// `kg complexity` (Amendment 19): per-symbol metric ranking.
+#[allow(clippy::too_many_arguments)] // CLI surface; a params struct adds no value here.
+pub fn complexity(
+    conn: &Connection,
+    min_cyc: usize,
+    min_loc: usize,
+    min_branches: usize,
+    min_nest: usize,
+    path: Option<&str>,
+    exclude_generated: bool,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
+    let mut gen_filter = path_scope_sql("f", path);
+    if exclude_generated {
+        gen_filter.push_str(" AND s.file_id NOT IN (SELECT id FROM files WHERE generated = 1)");
+    }
+    let total: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE s.kind IN ('function','method')
+           AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
+           AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}"
+        ),
+        rusqlite::params![
+            min_cyc as i64,
+            min_loc as i64,
+            min_branches as i64,
+            min_nest as i64
+        ],
+        |r| r.get(0),
+    )?;
+    if total == 0 {
+        return Err(KgError::NoResultsCaveated {
+            caveat: "kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic",
+            detail: "0 symbols match the thresholds".to_string(),
+        });
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.path, s.line_start, s.cyclomatic, s.branches, s.nesting,
+                s.effective_loc, s.qualname
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE s.kind IN ('function','method')
+           AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
+           AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}
+         ORDER BY s.cyclomatic DESC, s.effective_loc DESC, s.qualname,
+                  s.file_id, s.line_start LIMIT {limit}"
+    ))?;
+    let rows: Vec<String> = stmt
+        .query_map(
+            rusqlite::params![
+                min_cyc as i64,
+                min_loc as i64,
+                min_branches as i64,
+                min_nest as i64
+            ],
+            |r| {
+                Ok(format!(
+                    "{}:{} cyc={} branches={} nest={} loc={} {}",
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, String>(6)?
+                ))
+            },
+        )?
+        .collect::<std::result::Result<_, _>>()?;
+    let shown = rows.len().min(limit);
+    let mut out = vec![
+        "kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic".to_string(),
+    ];
+    out.extend(rows.into_iter().take(shown));
+    if (total as usize) > shown {
+        out.push(format!("showing {shown} of {total}"));
+        eprintln!("[kg] capped at {shown} results ({total} total)");
+    }
+    crate::journal::record_result(total as usize, shown, total as usize, false, 0);
+    Ok(out)
+}
+
+/// `kg resolve --stdin` (Amendment 19): batch name resolution with per-name
+/// found/ambiguous/missing lines and a CLI exit code (0/1/2).
+pub fn resolve_names(conn: &Connection, names: &[String]) -> Result<(Vec<String>, i32)> {
+    let mut out = Vec::new();
+    let mut exit = 0;
+    for name in names {
+        let name = name.trim();
+        if name.is_empty() || name.starts_with('#') {
+            continue;
+        }
+        let (ids, cands) = target_ids(conn, name)?;
+        if ids.is_empty() {
+            out.push(format!("missing {name}"));
+            exit = exit.max(1);
+        } else if ids.len() > 1 {
+            for (path, line, qualname) in cands.iter().take(MAX_AMBIGUOUS_CANDIDATES) {
+                out.push(format!("ambiguous {name} {path}:{line} {qualname}"));
+            }
+            exit = 2;
+        } else if let Some((path, line, qualname)) = cands.first() {
+            out.push(format!("found {name} {path}:{line} {qualname}"));
+        }
+    }
+    Ok((out, exit))
+}
+
+/// `kg files` (Amendment 19): indexed file inventory, build-time values.
+pub fn files(conn: &Connection, path: Option<&str>, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
+    let scope = path.map(|p| p.trim_start_matches("./").trim_end_matches('/'));
+    let mut sql = String::from(
+        "SELECT f.path, COUNT(s.id), f.size, f.generated
+         FROM files f LEFT JOIN symbols s ON s.file_id = f.id",
+    );
+    let mut params: Vec<String> = Vec::new();
+    if let Some(scope) = scope {
+        sql.push_str(" WHERE (f.path = ?1 OR substr(f.path, 1, length(?1) + 1) = ?1 || '/')");
+        params.push(scope.to_string());
+    }
+    let total: usize = if let Some(scope) = scope {
+        conn.query_row(
+            "SELECT COUNT(*) FROM files f WHERE f.path = ?1 OR substr(f.path, 1, length(?1) + 1) = ?1 || '/'",
+            [scope],
+            |r| r.get::<_, i64>(0),
+        )? as usize
+    } else {
+        conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get::<_, i64>(0))? as usize
+    };
+    sql.push_str(&format!(" GROUP BY f.id ORDER BY f.path LIMIT {limit}"));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<(String, i64, i64, i64)> = if params.is_empty() {
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<std::result::Result<_, _>>()?
+    } else {
+        stmt.query_map([&params[0]], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?
+        .collect::<std::result::Result<_, _>>()?
+    };
+    let files_caveat = "kg: files — build-time inventory; files created after the build are absent";
+    if rows.is_empty() {
+        return Err(KgError::NoResultsCaveated {
+            caveat: files_caveat,
+            detail: match scope {
+                Some(s) => format!("0 indexed files in '{s}'"),
+                None => "0 indexed files".to_string(),
+            },
+        });
+    }
+    let shown = rows.len();
+    let mut out = vec![files_caveat.to_string()];
+    out.extend(rows.into_iter().map(|(path, syms, bytes, gen)| {
+        format!("{path} symbols={syms} bytes={bytes} generated={gen}")
+    }));
+    if total > shown {
+        out.push(format!("showing {shown} of {total}"));
+        eprintln!("[kg] capped at {shown} results ({total} total)");
+    }
+    crate::journal::record_result(total, shown, total, false, 0);
+    Ok(out)
+}
+
+/// `kg api` (Amendment 19): exported/public symbol inventory for a file or
+/// directory. Visibility is a static name heuristic in v1.
+pub fn api(
+    conn: &Connection,
+    root: &Path,
+    path: &str,
+    include_private: bool,
+    exclude_generated: bool,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    let rel = path
+        .trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string();
+    let root_scope = rel.is_empty() || rel == ".";
+    let mut where_sql = String::from("s.kind IN ('function','method','class','trait','interface')");
+    if !root_scope {
+        where_sql.push_str(" AND (f.path = ?1 OR substr(f.path, 1, length(?1) + 1) = ?1 || '/')");
+    }
+    if !include_private {
+        where_sql.push_str(" AND s.exported = 1");
+    }
+    if exclude_generated {
+        where_sql.push_str(" AND s.file_id NOT IN (SELECT id FROM files WHERE generated = 1)");
+    }
+    let total: usize = if root_scope {
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {where_sql}"
+            ),
+            [],
+            |r| r.get::<_, i64>(0),
+        )? as usize
+    } else {
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {where_sql}"
+            ),
+            [&rel],
+            |r| r.get::<_, i64>(0),
+        )? as usize
+    };
+    if total == 0 {
+        return Err(KgError::NoResultsCaveated {
+            caveat: "kg: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete",
+            detail: format!("0 exported symbols in '{path}'"),
+        });
+    }
+    let sql = format!(
+        "SELECT f.path, s.line_start, s.kind, s.qualname, s.signature
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE {where_sql}
+         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let map_row = |r: &rusqlite::Row<'_>| {
+        let mut text = format!(
+            "{}:{} {} {}",
+            r.get::<_, String>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?
+        );
+        let sig: String = r.get(4)?;
+        if !sig.is_empty() {
+            text.push(' ');
+            text.push_str(&sig);
+        }
+        Ok(text)
+    };
+    let rows: Vec<String> = if root_scope {
+        stmt.query_map([], map_row)?
+            .collect::<std::result::Result<_, _>>()?
+    } else {
+        stmt.query_map([&rel], map_row)?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    let shown = rows.len();
+    let stale = rows.iter().take(shown).any(|line| {
+        line.split(':')
+            .next()
+            .is_some_and(|p| file_changed(conn, root, p))
+    });
+    let mut out = vec![
+        "kg: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete".to_string(),
+    ];
+    if stale {
+        out.push("kg: result files changed since build — run kg build".to_string());
+    }
+    out.extend(rows.into_iter().take(shown));
+    if total > shown {
+        out.push(format!("showing {shown} of {total}"));
+        eprintln!("[kg] capped at {shown} results ({total} total)");
+    }
+    crate::journal::record_result(total, shown, total, stale, 0);
+    Ok(out)
+}
+
+/// Unresolved edge names with locations (Amendment 19). Report shape: header,
+/// then one `path:line kind name` row per unresolved site.
+pub fn unresolved_names(
+    conn: &Connection,
+    root: &Path,
+    path: Option<&str>,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
+    let scope = path_scope_sql("f", path);
+    let total: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM unresolved_calls u JOIN files f ON f.id = u.file_id WHERE u.site_line > 0 {scope}"
+        ),
+        [],
+        |r| r.get(0),
+    )?;
+    if total == 0 {
+        return Err(KgError::NoResults(
+            "0 unresolved names (external/builtin calls are not counted)".to_string(),
+        ));
+    }
+    let files: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(DISTINCT u.file_id) FROM unresolved_calls u JOIN files f ON f.id = u.file_id WHERE u.site_line > 0 {scope}"
+        ),
+        [],
+        |r| r.get(0),
+    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.path, u.site_line, u.kind, u.dst_name
+         FROM unresolved_calls u JOIN files f ON f.id = u.file_id
+         WHERE u.site_line > 0 {scope}
+         ORDER BY f.path, u.site_line, u.kind, u.dst_name LIMIT {limit}"
+    ))?;
+    let rows: Vec<(String, i64, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .collect::<std::result::Result<_, _>>()?;
+    let shown = rows.len().min(limit);
+    let stale = rows
+        .iter()
+        .any(|(path, _, _, _)| file_changed(conn, root, path));
+    let mut out = vec![format!(
+        "kg: unresolved={total} rows in {files} files (call/import/inherit)"
+    )];
+    if stale {
+        out.push("kg: result files changed since build — run kg build".to_string());
+    }
+    out.extend(
+        rows.into_iter()
+            .take(shown)
+            .map(|(path, line, kind, name)| format!("{path}:{line} {kind} {name}")),
+    );
+    if (total as usize) > shown {
+        out.push(format!("showing {shown} of {total} rows"));
+        eprintln!("[kg] capped at {shown} results ({total} total)");
+    }
+    crate::journal::record_result(total as usize, shown, total as usize, stale, 0);
+    Ok(out)
+}
+
 /// Unresolved-callee report (Amendment 5): files with counts, descending.
 /// Report shape — cap, no staleness; header carries the index total.
-pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
+pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
-    let total: i64 = conn.query_row("SELECT COALESCE(SUM(unresolved), 0) FROM files", [], |r| {
-        r.get(0)
-    })?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
+    let scope = path_scope_sql("f", path);
+    let total: i64 = conn.query_row(
+        &format!("SELECT COALESCE(SUM(unresolved), 0) FROM files f WHERE 1=1 {scope}"),
+        [],
+        |r| r.get(0),
+    )?;
     if total == 0 {
         return Err(KgError::NoResults(
             "0 unresolved in indexed scope (external/builtin calls are not counted)".to_string(),
         ));
     }
-    let mut stmt = conn.prepare(
-        "SELECT path, unresolved FROM files WHERE unresolved > 0
-         ORDER BY unresolved DESC, path",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.path, f.unresolved FROM files f WHERE f.unresolved > 0 {scope}
+         ORDER BY f.unresolved DESC, f.path"
+    ))?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -943,15 +1974,16 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
     // Name-level view (R7 L4): file counts alone say where resolution failed,
     // not what it missed. `[internal]` marks names that exist in the index —
     // an actionable resolver gap — versus external/builtin calls.
-    let mut name_stmt = conn.prepare(
+    let mut name_stmt = conn.prepare(&format!(
         "SELECT uc.dst_name, COUNT(*) AS n,
                 EXISTS(SELECT 1 FROM symbols s
                        WHERE s.name = uc.dst_name OR s.qualname = uc.dst_name)
-         FROM unresolved_calls uc
+         FROM unresolved_calls uc JOIN files f ON f.id = uc.file_id
+         WHERE uc.kind = 'call' {scope}
          GROUP BY uc.dst_name
          ORDER BY n DESC, uc.dst_name
-         LIMIT 10",
-    )?;
+         LIMIT 10"
+    ))?;
     let names = name_stmt
         .query_map([], |r| {
             Ok((
@@ -962,16 +1994,23 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let internal: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM (
-            SELECT uc.dst_name FROM unresolved_calls uc
-            WHERE EXISTS(SELECT 1 FROM symbols s
+        &format!(
+            "SELECT COUNT(*) FROM (
+            SELECT uc.dst_name FROM unresolved_calls uc JOIN files f ON f.id = uc.file_id
+            WHERE uc.kind = 'call'
+              AND EXISTS(SELECT 1 FROM symbols s
                          WHERE s.name = uc.dst_name OR s.qualname = uc.dst_name)
-            GROUP BY uc.dst_name)",
+              {scope}
+            GROUP BY uc.dst_name)"
+        ),
         [],
         |r| r.get(0),
     )?;
     let distinct: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT dst_name) FROM unresolved_calls",
+        &format!(
+            "SELECT COUNT(DISTINCT uc.dst_name) FROM unresolved_calls uc
+             JOIN files f ON f.id = uc.file_id WHERE uc.kind = 'call' {scope}"
+        ),
         [],
         |r| r.get(0),
     )?;
@@ -1010,20 +2049,33 @@ pub fn symbols(
     root: &Path,
     file: &str,
     outline: bool,
+    metrics: bool,
     limit: usize,
 ) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
-    let rel = file.trim_start_matches("./").to_string();
+    let rel = file
+        .trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string();
+    let is_file: i64 =
+        conn.query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| {
+            r.get(0)
+        })?;
+    if is_file == 0 {
+        return symbols_directory(conn, root, &rel, outline, metrics, limit);
+    }
     let sql = if outline {
-        "SELECT s.kind, s.qualname, s.line_start, s.signature
+        "SELECT s.kind, s.qualname, s.line_start, s.signature,
+                s.cyclomatic, s.branches, s.nesting, s.effective_loc
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE f.path = ?1
-         ORDER BY s.line_start"
+         ORDER BY s.line_start, s.qualname"
     } else {
-        "SELECT s.kind, s.qualname, s.line_start, ''
+        "SELECT s.kind, s.qualname, s.line_start, '',
+                s.cyclomatic, s.branches, s.nesting, s.effective_loc
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE f.path = ?1
-         ORDER BY s.line_start"
+         ORDER BY s.line_start, s.qualname"
     };
     let mut stmt = conn.prepare(sql)?;
     let rows = stmt
@@ -1033,6 +2085,10 @@ pub fn symbols(
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, i64>(5)?,
+                r.get::<_, i64>(6)?,
+                r.get::<_, i64>(7)?,
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -1045,12 +2101,16 @@ pub fn symbols(
     let data_lines: Vec<String> = rows
         .into_iter()
         .take(shown)
-        .map(|(kind, qualname, line, signature)| {
-            if signature.is_empty() {
-                format!("{rel}:{line} {kind} {qualname}")
-            } else {
-                format!("{rel}:{line} {kind} {qualname} {signature}")
+        .map(|(kind, qualname, line, signature, cyc, br, nest, loc)| {
+            let mut text = format!("{rel}:{line} {kind} {qualname}");
+            if !signature.is_empty() {
+                text.push(' ');
+                text.push_str(&signature);
             }
+            if metrics {
+                text.push_str(&format!(" cyc={cyc} branches={br} nest={nest} loc={loc}"));
+            }
+            text
         })
         .collect();
     // Payload capture (Amendment 10a): the `path:line kind qualname` data
@@ -1081,11 +2141,128 @@ pub fn symbols(
     Ok(out)
 }
 
+/// Directory mode for `kg symbols <dir>` (Amendment 19): indexed prefix only,
+/// grouped per file, cap counts symbol data lines.
+fn symbols_directory(
+    conn: &Connection,
+    root: &Path,
+    dir: &str,
+    outline: bool,
+    metrics: bool,
+    limit: usize,
+) -> Result<Vec<String>> {
+    validate_path_scope(dir, true)?;
+    let prefix = format!("{dir}/");
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE substr(f.path, 1, length(?1)) = ?1",
+        [&prefix],
+        |r| r.get(0),
+    )?;
+    if total == 0 {
+        return Err(KgError::NoResults(format!("path '{dir}' not indexed")));
+    }
+    let n_files: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM files f WHERE substr(f.path, 1, length(?1)) = ?1",
+        [&prefix],
+        |r| r.get(0),
+    )?;
+    let sql = format!(
+        "SELECT f.path, s.kind, s.qualname, s.line_start, s.signature,
+                s.cyclomatic, s.branches, s.nesting, s.effective_loc
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE substr(f.path, 1, length(?1)) = ?1
+         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<(String, SymbolRow)> = stmt
+        .query_map([&prefix], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    if outline {
+                        r.get::<_, String>(4)?
+                    } else {
+                        String::new()
+                    },
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, i64>(6)?,
+                    r.get::<_, i64>(7)?,
+                    r.get::<_, i64>(8)?,
+                ),
+            ))
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+    let displayed_paths: std::collections::BTreeSet<&str> =
+        rows.iter().map(|(p, _)| p.as_str()).collect();
+    let changed = displayed_paths
+        .iter()
+        .filter(|p| file_changed(conn, root, p))
+        .count();
+    let mut out = Vec::new();
+    if changed > 0 {
+        out.push(format!(
+            "kg: {changed} of {} result files changed since build — run kg build",
+            displayed_paths.len()
+        ));
+    }
+    out.push(format!("kg: dir {dir} — {n_files} files, {total} symbols"));
+    let mut data_lines = Vec::new();
+    let mut last_path = "";
+    for (path, (kind, qualname, line, signature, cyc, br, nest, loc)) in &rows {
+        if path != last_path {
+            out.push(path.clone());
+            last_path = path;
+        }
+        let mut text = format!("{path}:{line} {kind} {qualname}");
+        if !signature.is_empty() {
+            text.push(' ');
+            text.push_str(signature);
+        }
+        if metrics {
+            text.push_str(&format!(" cyc={cyc} branches={br} nest={nest} loc={loc}"));
+        }
+        data_lines.push(text.clone());
+        out.push(text);
+    }
+    let shown = rows.len();
+    if total as usize > shown {
+        out.push(format!("showing {shown} of {total}"));
+        eprintln!("[kg] capped at {shown} results ({total} total)");
+    }
+    let built_at = db::meta_get(conn, "built_at")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
+    crate::journal::record_payload(
+        dir,
+        &data_lines,
+        changed > 0,
+        shown,
+        total as usize,
+        built_at,
+        &source_rev,
+    );
+    crate::journal::record_result(total as usize, shown, total as usize, changed > 0, 0);
+    Ok(out)
+}
+
 /// Symbol-level search (Amendment 12b): FTS5 `bm25()` over split identifier
 /// tokens. Hits are symbol identities — the tier field position stays empty
 /// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
 /// for cap, post-cap staleness, and payload capture.
-pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
+pub fn search(
+    conn: &Connection,
+    root: &Path,
+    terms: &str,
+    kind: Option<&str>,
+    path: Option<&str>,
+    exact: bool,
+    limit: usize,
+) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
     // and rarer tokens rank higher — natural-language fit without brittle
@@ -1127,8 +2304,17 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     // Amendment 14b: hits carry the stored one-line signature after the
     // qualname — the agent no longer needs a follow-up `symbols` call to
     // learn what the hit is. Empty signature keeps the 12b byte shape.
+    let mut filter = path_scope_sql("f", path);
+    if let Some(kind) = kind {
+        let escaped = kind.replace('\'', "''");
+        filter.push_str(&format!(" AND s.kind = '{escaped}'"));
+    }
     let mut total: usize = conn.query_row(
-        "SELECT COUNT(*) FROM symbols_fts WHERE symbols_fts MATCH ?1",
+        &format!(
+            "SELECT COUNT(*) FROM symbols_fts ft
+             JOIN symbols s ON s.id = ft.rowid JOIN files f ON f.id = s.file_id
+             WHERE symbols_fts MATCH ?1 {filter}"
+        ),
         [&expr],
         |r| r.get::<_, i64>(0),
     )? as usize;
@@ -1165,7 +2351,7 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
          FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid
          JOIN files f ON f.id = s.file_id
-         WHERE symbols_fts MATCH ?1
+         WHERE symbols_fts MATCH ?1 {filter}
          -- Tie-break on stable columns: rowids differ between fresh and
          -- carried builds, so bm25 alone is not deterministic (R6d A9).
          ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
@@ -1200,20 +2386,28 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     // Exact-identity path (R7): a single token that is an exact symbol name
     // or qualname returns those identities directly (top-1 measured 90-92%
     // through bm25; ~100% here). Fuzzy FTS order stays for other queries.
-    if toks.len() == 1 {
+    if toks.len() == 1 || exact {
+        let exact_name = if exact {
+            terms.trim().to_string()
+        } else {
+            toks.join(" ")
+        };
         let exact_total: usize = conn.query_row(
-            "SELECT COUNT(*) FROM symbols s WHERE s.name = ?1 OR s.qualname = ?1",
-            [toks[0].as_str()],
+            &format!(
+                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+                 WHERE (s.name = ?1 OR s.qualname = ?1) {filter}"
+            ),
+            [exact_name.as_str()],
             |r| r.get::<_, i64>(0),
         )? as usize;
         if exact_total > 0 {
             let mut stmt = conn.prepare(&format!(
                 "SELECT f.path, s.line_start, s.qualname, s.signature
                  FROM symbols s JOIN files f ON f.id = s.file_id
-                 WHERE s.name = ?1 OR s.qualname = ?1
+                 WHERE (s.name = ?1 OR s.qualname = ?1) {filter}
                  ORDER BY s.qualname, f.path LIMIT {limit}"
             ))?;
-            let rows = stmt.query_map([toks[0].as_str()], |r| {
+            let rows = stmt.query_map([exact_name.as_str()], |r| {
                 let qualname: String = r.get(2)?;
                 let signature: String = r.get(3)?;
                 Ok(Pointer {
@@ -1252,18 +2446,28 @@ pub fn clones(
     conn: &Connection,
     root: &Path,
     min_lines: usize,
+    path: Option<&str>,
+    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
     let min_lines = min_lines.max(crate::clones::WINDOW);
-    let mut stmt = conn.prepare(
+    let gen_filter = if exclude_generated {
+        " AND f.generated = 0"
+    } else {
+        ""
+    };
+    let mut stmt = conn.prepare(&format!(
         "SELECT cg.shingle_hash, f.path, cg.line_start, cg.line_end
          FROM clone_groups cg JOIN files f ON f.id = cg.file_id
          WHERE cg.shingle_hash IN (
              SELECT shingle_hash FROM clone_groups
-             GROUP BY shingle_hash HAVING COUNT(*) >= 2)
-         ORDER BY cg.shingle_hash, f.path, cg.line_start",
-    )?;
+             GROUP BY shingle_hash HAVING COUNT(*) >= 2) {gen_filter}
+         ORDER BY cg.shingle_hash, f.path, cg.line_start"
+    ))?;
     let mut groups: std::collections::BTreeMap<i64, Vec<(String, i64, i64)>> = Default::default();
     let rows = stmt.query_map([], |r| {
         Ok((
@@ -1363,6 +2567,11 @@ pub fn clones(
     merged_pairs.retain(|(_, sa, ea, _, sb, eb)| {
         (*ea - *sa + 1) >= min_lines as i64 && (*eb - *sb + 1) >= min_lines as i64
     });
+    if let Some(scope) = path {
+        let scope = scope.trim_start_matches("./").trim_end_matches('/');
+        merged_pairs
+            .retain(|(fa, _, _, fb, _, _)| path_in_scope(fa, scope) && path_in_scope(fb, scope));
+    }
     // Longest merged spans first, deterministic tie-break by paths/spans.
     merged_pairs.sort_by(|a, b| {
         let la = (a.2 - a.1).max(a.5 - a.4);

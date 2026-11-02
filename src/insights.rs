@@ -32,6 +32,7 @@ pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
         }
     };
     let files = count_or_meta("file_count", "SELECT COUNT(*) FROM files")?;
+    let generated = q("SELECT COUNT(*) FROM files WHERE generated = 1")?;
     let symbols = count_or_meta("symbol_count", "SELECT COUNT(*) FROM symbols")?;
     let edges = count_or_meta("edge_count", "SELECT COUNT(*) FROM edges")?;
     let calls = count_or_meta(
@@ -67,7 +68,7 @@ pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
         )
         .unwrap_or_else(|_| "?".into());
     Ok(format!(
-        "kg stats: files={files} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} kg={kg_version} grammar={grammar}"
+        "kg stats: files={files} generated={generated} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} kg={kg_version} grammar={grammar}"
     ))
 }
 
@@ -132,13 +133,28 @@ fn normalize(v: f64, lo: f64, hi: f64) -> f64 {
     }
 }
 
-pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<String>> {
+pub fn hotspots(
+    conn: &Connection,
+    root: &Path,
+    limit: usize,
+    path: Option<&str>,
+    exclude_generated: bool,
+) -> Result<Vec<String>> {
     if limit == 0 {
         return Err(KgError::Usage("--limit must be >= 1".to_string()));
     }
+    if let Some(p) = path {
+        crate::query::validate_path_scope(p, false)?;
+    }
     // Amendment 11d: loc/cyclomatic are stored per file at build time —
     // hotspots is a single scan + git log, not a whole-repo re-parse.
-    let mut stmt = conn.prepare("SELECT path, loc, cyclomatic FROM files")?;
+    let mut scope = crate::query::path_scope_sql_pub("f", path);
+    if exclude_generated {
+        scope.push_str(" AND f.generated = 0");
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.path, f.loc, f.cyclomatic FROM files f WHERE 1=1 {scope}"
+    ))?;
     let rows: Vec<(String, i64, i64)> = stmt
         .query_map([], |r| {
             Ok((
@@ -207,11 +223,25 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
         .collect())
 }
 
-pub fn report(conn: &Connection, root: &Path) -> Result<Vec<String>> {
+pub fn report(
+    conn: &Connection,
+    root: &Path,
+    path: Option<&str>,
+    exclude_generated: bool,
+) -> Result<Vec<String>> {
+    if let Some(p) = path {
+        crate::query::validate_path_scope(p, false)?;
+    }
     let mut out = Vec::new();
     // Freshness (R7 L4): the report is a build snapshot, but agents read it
     // as current. Check a bounded sample of indexed files and say so.
-    let mut stmt = conn.prepare("SELECT path FROM files LIMIT 5000")?;
+    let mut scope = crate::query::path_scope_sql_pub("f", path);
+    if exclude_generated {
+        scope.push_str(" AND f.generated = 0");
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.path FROM files f WHERE 1=1 {scope} LIMIT 5000"
+    ))?;
     let paths = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -227,13 +257,37 @@ pub fn report(conn: &Connection, root: &Path) -> Result<Vec<String>> {
     }
     // Section 1: index overview.
     out.push(format!("## 1. index overview\n{}", stats(conn, root)?));
+    if let Some(scope) = path {
+        let scope = scope
+            .trim_start_matches("./")
+            .trim_end_matches('/')
+            .replace('\'', "''");
+        let scoped_files: i64 = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM files f WHERE f.path = '{scope}' OR substr(f.path, 1, length('{scope}') + 1) = '{scope}' || '/'"
+            ),
+            [],
+            |r| r.get(0),
+        )?;
+        let scoped_symbols: i64 = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = '{scope}' OR substr(f.path, 1, length('{scope}') + 1) = '{scope}' || '/'"
+            ),
+            [],
+            |r| r.get(0),
+        )?;
+        out.push(format!(
+            "  scoped files={scoped_files} symbols={scoped_symbols}"
+        ));
+    }
     // Section 2: architecture map — top packages by symbol count.
     out.push("## 2. architecture map (top packages by symbols)".to_string());
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT SUBSTR(f.path, 1, INSTR(f.path || '/', '/') - 1) AS pkg, COUNT(*) AS n
          FROM symbols s JOIN files f ON f.id = s.file_id
-         GROUP BY pkg ORDER BY n DESC LIMIT 8",
-    )?;
+         WHERE 1=1 {scope}
+         GROUP BY pkg ORDER BY n DESC LIMIT 8"
+    ))?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -242,17 +296,22 @@ pub fn report(conn: &Connection, root: &Path) -> Result<Vec<String>> {
     }
     // Section 3: hotspots top-5.
     out.push("## 3. hotspots (top 5)".to_string());
-    for line in hotspots(conn, root, 5)? {
+    for line in hotspots(conn, root, 5, path, exclude_generated)? {
         out.push(format!("  {line}"));
     }
     // Section 4: most-called symbols (fan-in top 8).
     out.push("## 4. most-called symbols (fan-in top 8)".to_string());
-    let mut stmt = conn.prepare(
+    let mut fan_scope = crate::query::path_scope_sql_pub("df", path);
+    if exclude_generated {
+        fan_scope.push_str(" AND df.generated = 0");
+    }
+    let mut stmt = conn.prepare(&format!(
         "SELECT ds.qualname, COUNT(*) AS n
          FROM edges e JOIN symbols ds ON ds.id = e.dst_id
-         WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL
-         GROUP BY e.dst_id ORDER BY n DESC LIMIT 8",
-    )?;
+         JOIN files df ON df.id = ds.file_id
+         WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL {fan_scope}
+         GROUP BY e.dst_id ORDER BY n DESC LIMIT 8"
+    ))?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
         .collect::<std::result::Result<Vec<_>, _>>()?;

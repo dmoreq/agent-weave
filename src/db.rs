@@ -27,6 +27,8 @@ pub const GRAMMAR_VERSION: &str = env!("KG_GRAMMAR_VERSION");
 /// signatures predate the multi-line capture are fully re-extracted once.
 /// This is not a schema change — the table shape is unchanged.
 pub const SIGNATURE_VERSION: &str = "2";
+/// Per-symbol metric-rule version (Amendment 19); a mismatch disables the fast path.
+pub const METRICS_VERSION: &str = "1";
 
 pub fn kg_dir(root: &Path) -> PathBuf {
     root.join(".kg")
@@ -185,6 +187,51 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
     if has_clone_groups == 0 {
         return Ok(None);
     }
+    // Amendment 19: a v6-stamped index can still be partial (the v4 lesson).
+    // Require every new column and the complexity index before enabling the
+    // fast path; otherwise fall back to a full fresh build.
+    let required_columns = [
+        ("symbols", "cyclomatic"),
+        ("symbols", "branches"),
+        ("symbols", "nesting"),
+        ("symbols", "effective_loc"),
+        ("symbols", "exported"),
+        ("files", "generated"),
+        ("unresolved_calls", "site_line"),
+        ("unresolved_calls", "kind"),
+    ];
+    for (table, column) in required_columns {
+        let present: i64 = old
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+                rusqlite::params![table, column],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if present == 0 {
+            return Ok(None);
+        }
+    }
+    let has_complexity_index: i64 = old
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'symbols_complexity_idx'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_complexity_index == 0 {
+        return Ok(None);
+    }
+    let has_symbols_fts: i64 = old
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'symbols_fts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_symbols_fts == 0 {
+        return Ok(None);
+    }
     let grammar: String = match old.query_row(
         "SELECT value FROM meta WHERE key = 'grammar_version'",
         [],
@@ -204,6 +251,16 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
         )
         .unwrap_or_default();
     if sig_version != SIGNATURE_VERSION {
+        return Ok(None);
+    }
+    let metrics_version = old
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'metrics_version'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap_or_default();
+    if metrics_version != METRICS_VERSION {
         return Ok(None);
     }
     Ok(Some(old))
@@ -351,13 +408,22 @@ pub fn gap_files_for_new_names(
     Ok(out)
 }
 
-/// Insert unresolved call names for the fresh rows (schema v5, Amendment 15).
-pub fn insert_unresolved_calls(conn: &Connection, rows: &[(i64, String)]) -> Result<()> {
-    let mut stmt =
-        conn.prepare("INSERT INTO unresolved_calls(file_id, dst_name) VALUES (?1, ?2)")?;
+/// Insert unresolved edge sites for the fresh rows (schema v6, Amendment 19).
+pub fn insert_unresolved_calls(
+    conn: &Connection,
+    rows: &[(i64, String, &'static str, usize)],
+) -> Result<()> {
+    if rows.iter().any(|(_, _, _, site_line)| *site_line == 0) {
+        return Err(crate::error::KgError::Internal(
+            "unresolved edge row has site_line 0".to_string(),
+        ));
+    }
+    let mut stmt = conn.prepare(
+        "INSERT INTO unresolved_calls(file_id, dst_name, kind, site_line) VALUES (?1, ?2, ?3, ?4)",
+    )?;
     for chunk in rows.chunks(500) {
-        for (file_id, name) in chunk {
-            stmt.execute(rusqlite::params![file_id, name])?;
+        for (file_id, name, kind, site_line) in chunk {
+            stmt.execute(rusqlite::params![file_id, name, kind, *site_line as i64])?;
         }
     }
     Ok(())
@@ -434,8 +500,8 @@ pub fn carry_forward_unchanged(
     let mut reused = Vec::new();
     {
         let mut stmt = new.prepare(
-            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic)
-             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic
+            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated)
+             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
         let mut refresh_mtime = new.prepare("UPDATE files SET mtime = ?1 WHERE path = ?2")?;
@@ -455,8 +521,8 @@ pub fn carry_forward_unchanged(
         }
     }
     new.execute_batch(
-        "INSERT INTO symbols(id, kind, name, qualname, file_id, line_start, line_end, signature)
-         SELECT id, kind, name, qualname, file_id, line_start, line_end, signature
+        "INSERT INTO symbols(id, kind, name, qualname, file_id, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
+         SELECT id, kind, name, qualname, file_id, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported
          FROM olddb.symbols WHERE file_id IN (SELECT id FROM files);
          INSERT INTO edges(id, src_id, dst_id, dst_name, kind, confidence, site_line)
          SELECT id, src_id, dst_id, dst_name, kind, confidence, site_line
@@ -466,8 +532,8 @@ pub fn carry_forward_unchanged(
          INSERT INTO clone_groups(shingle_hash, file_id, line_start, line_end)
          SELECT shingle_hash, file_id, line_start, line_end
          FROM olddb.clone_groups WHERE file_id IN (SELECT id FROM files);
-         INSERT INTO unresolved_calls(file_id, dst_name)
-         SELECT file_id, dst_name FROM olddb.unresolved_calls
+         INSERT INTO unresolved_calls(file_id, dst_name, kind, site_line)
+         SELECT file_id, dst_name, kind, site_line FROM olddb.unresolved_calls
          WHERE file_id IN (SELECT id FROM files);",
     )?;
     Ok(reused)
@@ -486,6 +552,8 @@ pub struct FilesRow {
     /// Hotspots metrics (Amendment 11d), computed on the build's parse tree.
     pub loc: i64,
     pub cyclomatic: i64,
+    /// Generated-file tag (Amendment 19).
+    pub generated: i64,
 }
 
 /// Amendment 11b: caller holds the build transaction; 500-row prepared
@@ -494,8 +562,8 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(rows.len());
     for chunk in rows.chunks(500) {
         let mut stmt = conn.prepare(
-            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?;
         for r in chunk {
             stmt.execute(rusqlite::params![
@@ -507,7 +575,8 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
                 r.error_nodes as i64,
                 r.unresolved as i64,
                 r.loc,
-                r.cyclomatic
+                r.cyclomatic,
+                r.generated
             ])?;
             ids.push(conn.last_insert_rowid());
         }
@@ -523,8 +592,8 @@ pub fn insert_symbols(
     let mut ids = Vec::with_capacity(symbols.len());
     for chunk in symbols.chunks(500) {
         let mut stmt = conn.prepare(
-            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end, signature)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
         for s in chunk {
             stmt.execute(rusqlite::params![
@@ -534,7 +603,12 @@ pub fn insert_symbols(
                 file_ids[s.file_idx],
                 s.line_start as i64,
                 s.line_end as i64,
-                s.signature
+                s.signature,
+                s.cyclomatic as i64,
+                s.branches as i64,
+                s.nesting as i64,
+                s.effective_loc as i64,
+                i64::from(s.exported)
             ])?;
             ids.push(conn.last_insert_rowid());
         }

@@ -63,6 +63,33 @@ pub enum Cmd {
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
+    /// Who inherits from or implements this symbol (resolved inherits edges)
+    Implementers {
+        /// Symbol name or dotted qualname
+        name: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// What does this file import (outbound resolved imports)
+    Imports {
+        /// Repo-relative path of the indexed file
+        file: String,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Which tests reach this symbol or file (static call-edge candidates)
+    Tests {
+        /// Symbol name/qualname or repo-relative file path
+        name: String,
+        /// Transitive depth (default 10; max 10)
+        #[arg(long, default_value_t = 10)]
+        depth: usize,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
     /// Shortest call path between two symbols via resolved call edges.
     /// Resolved static edges only — dynamic dispatch may hide paths.
     /// A reverse question is the same query with swapped arguments.
@@ -82,6 +109,18 @@ pub enum Cmd {
         /// Show every call-site pointer instead of one row per caller file
         #[arg(long)]
         sites: bool,
+        /// Transitive depth (default 1; max 10)
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
+        /// Edge kinds: calls,imports,inherits,all (default calls)
+        #[arg(long, default_value = "calls")]
+        edges: String,
+        /// Append the enclosing symbol to each pointer
+        #[arg(long)]
+        context: bool,
+        /// Append edge kind/depth to each pointer
+        #[arg(long)]
+        explain: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -92,23 +131,87 @@ pub enum Cmd {
         /// Exclude tests/ paths and test_* symbols (policy filter)
         #[arg(long)]
         exclude_tests: bool,
+        /// Exclude generated files (path/marker detection)
+        #[arg(long)]
+        exclude_generated: bool,
+        /// Restrict to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
     /// Per-file unresolved-callee counts (where kg could not resolve calls)
     Unresolved {
-        /// How many files to show (default 50, max 10000)
+        /// List unresolved edge sites with file:line instead of per-file counts
+        #[arg(long)]
+        names: bool,
+        /// Restrict to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
+        /// How many rows/files to show (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
     /// Symbols of one indexed file, ordered by line
     Symbols {
-        /// Repo-relative path of the indexed file
+        /// Repo-relative path of the indexed file or directory
         file: String,
         /// Append the one-line signature column (Amendment 12a)
         #[arg(long)]
         outline: bool,
+        /// Append per-symbol metrics (Amendment 19)
+        #[arg(long)]
+        metrics: bool,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Per-symbol complexity ranking (cyclomatic, branches, nesting, effective LOC)
+    Complexity {
+        #[arg(long, default_value_t = 1)]
+        min_cyc: usize,
+        #[arg(long, default_value_t = 0)]
+        min_loc: usize,
+        #[arg(long, default_value_t = 0)]
+        min_branches: usize,
+        #[arg(long, default_value_t = 0)]
+        min_nest: usize,
+        /// Restrict to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
+        /// Exclude generated files
+        #[arg(long)]
+        exclude_generated: bool,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Public/exported symbol inventory for a file or directory
+    Api {
+        /// Repo-relative file or directory path
+        path: String,
+        /// Include private (underscore-prefixed) symbols
+        #[arg(long)]
+        include_private: bool,
+        /// Exclude generated files
+        #[arg(long)]
+        exclude_generated: bool,
+        /// Maximum results shown (default 50, max 10000)
+        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+        limit: usize,
+    },
+    /// Batch-resolve names from stdin (found/ambiguous/missing)
+    Resolve {
+        /// Read one name per line from stdin
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Indexed file inventory with symbol/byte counts
+    Files {
+        /// Restrict to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -117,6 +220,15 @@ pub enum Cmd {
     Search {
         /// Space-separated terms; camelCase/snake_case are split and matched
         terms: String,
+        /// Filter by symbol kind (function, method, class, module, ...)
+        #[arg(long)]
+        kind: Option<String>,
+        /// Restrict to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
+        /// Match the full qualname or bare name exactly
+        #[arg(long)]
+        exact: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -126,6 +238,12 @@ pub enum Cmd {
         /// Minimum duplicated-block lines per side (floor: the 5-line build window)
         #[arg(long, default_value_t = 5)]
         min_lines: usize,
+        /// Restrict to pairs where both regions are under this prefix
+        #[arg(long)]
+        path: Option<String>,
+        /// Exclude generated files
+        #[arg(long)]
+        exclude_generated: bool,
         /// Maximum pair lines shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -137,9 +255,22 @@ pub enum Cmd {
         /// How many files to show (default 10, max 100)
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        /// Restrict to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
+        /// Exclude generated files
+        #[arg(long)]
+        exclude_generated: bool,
     },
     /// Four-section architecture report (overview, map, hotspots, fan-in)
-    Report {},
+    Report {
+        /// Restrict sections 2-4 to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
+        /// Exclude generated files
+        #[arg(long)]
+        exclude_generated: bool,
+    },
     /// Inspect index health (integrity, versions, staleness, orphans)
     Doctor {
         /// Delete the index entirely (one-command exit to grep-only)

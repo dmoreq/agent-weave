@@ -60,6 +60,12 @@ pub enum KgError {
         threshold: f64,
     },
     Internal(String),
+    /// Batch surface whose stdout text is already complete; MCP must return
+    /// it with `isError` instead of routing through the error renderer.
+    BatchOutput {
+        text: String,
+        code: i32,
+    },
 }
 
 impl KgError {
@@ -72,6 +78,7 @@ impl KgError {
             KgError::Locked(_) => 4,
             KgError::SchemaMismatch { .. } => 5,
             KgError::Internal(_) => 6,
+            KgError::BatchOutput { code, .. } => *code,
             KgError::ParseQuality { .. } => 7,
         }
     }
@@ -86,6 +93,7 @@ impl KgError {
             KgError::SchemaMismatch { .. } => "schema-mismatch",
             KgError::ParseQuality { .. } => "parse-quality",
             KgError::Internal(_) => "internal",
+            KgError::BatchOutput { .. } => "batch",
         }
     }
 }
@@ -122,6 +130,7 @@ impl fmt::Display for KgError {
                 threshold * 100.0
             ),
             KgError::Internal(detail) => write!(f, "kg: {}: {}", self.class(), detail),
+            KgError::BatchOutput { text, .. } => write!(f, "{text}"),
         }
     }
 }

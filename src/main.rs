@@ -3,6 +3,8 @@
 //! Panic-free boundary: a panic aborts with exit 6, never partial stdout.
 #![forbid(unsafe_code)]
 
+use std::io::Read;
+
 mod build;
 mod cli;
 mod clones;
@@ -109,16 +111,23 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Callers { .. } => "callers",
         cli::Cmd::Callees { .. } => "callees",
         cli::Cmd::Context { .. } => "context",
+        cli::Cmd::Implementers { .. } => "implementers",
+        cli::Cmd::Imports { .. } => "imports",
+        cli::Cmd::Tests { .. } => "tests",
         cli::Cmd::Path { .. } => "path",
         cli::Cmd::Impact { .. } => "impact",
         cli::Cmd::Dead { .. } => "dead",
         cli::Cmd::Unresolved { .. } => "unresolved",
         cli::Cmd::Symbols { .. } => "symbols",
+        cli::Cmd::Complexity { .. } => "complexity",
+        cli::Cmd::Api { .. } => "api",
+        cli::Cmd::Resolve { .. } => "resolve",
+        cli::Cmd::Files { .. } => "files",
         cli::Cmd::Search { .. } => "search",
         cli::Cmd::Clones { .. } => "clones",
         cli::Cmd::Stats {} => "stats",
         cli::Cmd::Hotspots { .. } => "hotspots",
-        cli::Cmd::Report {} => "report",
+        cli::Cmd::Report { .. } => "report",
         cli::Cmd::Doctor { .. } => "doctor",
         cli::Cmd::Usage { .. } => "usage",
         cli::Cmd::Mcp {} => "mcp",
@@ -150,42 +159,137 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         cli::Cmd::Context { name, limit } => {
             vec![("name", name.clone()), ("limit", limit.to_string())]
         }
-        cli::Cmd::Impact { file, sites, limit } => vec![
+        cli::Cmd::Implementers { name, limit } => {
+            vec![("name", name.clone()), ("limit", limit.to_string())]
+        }
+        cli::Cmd::Imports { file, limit } => {
+            vec![("file", file.clone()), ("limit", limit.to_string())]
+        }
+        cli::Cmd::Tests { name, depth, limit } => vec![
+            ("name", name.clone()),
+            ("depth", depth.to_string()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Impact {
+            file,
+            sites,
+            depth,
+            edges,
+            context,
+            explain,
+            limit,
+        } => vec![
             ("file", file.clone()),
             ("sites", sites.to_string()),
+            ("depth", depth.to_string()),
+            ("edges", edges.clone()),
+            ("context", context.to_string()),
+            ("explain", explain.to_string()),
             ("limit", limit.to_string()),
         ],
         cli::Cmd::Dead {
             exclude_tests,
+            exclude_generated,
+            path,
             limit,
         } => vec![
             ("exclude_tests", exclude_tests.to_string()),
+            ("exclude_generated", exclude_generated.to_string()),
+            ("path", path.clone().unwrap_or_default()),
             ("limit", limit.to_string()),
         ],
-        cli::Cmd::Unresolved { limit } => vec![("limit", limit.to_string())],
+        cli::Cmd::Unresolved { names, path, limit } => vec![
+            ("names", names.to_string()),
+            ("path", path.clone().unwrap_or_default()),
+            ("limit", limit.to_string()),
+        ],
         cli::Cmd::Symbols {
             file,
             outline,
+            metrics,
             limit,
         } => {
             vec![
                 ("file", file.clone()),
                 ("outline", outline.to_string()),
+                ("metrics", metrics.to_string()),
                 ("limit", limit.to_string()),
             ]
         }
-        cli::Cmd::Search { terms, limit } => {
-            vec![("terms", terms.clone()), ("limit", limit.to_string())]
-        }
-        cli::Cmd::Clones { min_lines, limit } => {
-            vec![
-                ("min_lines", min_lines.to_string()),
-                ("limit", limit.to_string()),
-            ]
-        }
+        cli::Cmd::Complexity {
+            min_cyc,
+            min_loc,
+            min_branches,
+            min_nest,
+            path,
+            exclude_generated,
+            limit,
+        } => vec![
+            ("min_cyc", min_cyc.to_string()),
+            ("min_loc", min_loc.to_string()),
+            ("min_branches", min_branches.to_string()),
+            ("min_nest", min_nest.to_string()),
+            ("path", path.clone().unwrap_or_default()),
+            ("exclude_generated", exclude_generated.to_string()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Api {
+            path,
+            include_private,
+            exclude_generated,
+            limit,
+        } => vec![
+            ("path", path.clone()),
+            ("include_private", include_private.to_string()),
+            ("exclude_generated", exclude_generated.to_string()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Resolve { .. } => vec![("candidate_limit", "50".to_string())],
+        cli::Cmd::Files { path, limit } => vec![
+            ("path", path.clone().unwrap_or_default()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Search {
+            terms,
+            kind,
+            path,
+            exact,
+            limit,
+        } => vec![
+            ("terms", terms.clone()),
+            ("kind", kind.clone().unwrap_or_default()),
+            ("path", path.clone().unwrap_or_default()),
+            ("exact", exact.to_string()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Clones {
+            min_lines,
+            path,
+            exclude_generated,
+            limit,
+        } => vec![
+            ("min_lines", min_lines.to_string()),
+            ("path", path.clone().unwrap_or_default()),
+            ("exclude_generated", exclude_generated.to_string()),
+            ("limit", limit.to_string()),
+        ],
         cli::Cmd::Stats {} => vec![],
-        cli::Cmd::Hotspots { limit } => vec![("limit", limit.to_string())],
-        cli::Cmd::Report {} => vec![],
+        cli::Cmd::Hotspots {
+            limit,
+            path,
+            exclude_generated,
+        } => vec![
+            ("limit", limit.to_string()),
+            ("path", path.clone().unwrap_or_default()),
+            ("exclude_generated", exclude_generated.to_string()),
+        ],
+        cli::Cmd::Report {
+            path,
+            exclude_generated,
+        } => vec![
+            ("path", path.clone().unwrap_or_default()),
+            ("exclude_generated", exclude_generated.to_string()),
+        ],
         cli::Cmd::Doctor { invalidate } => vec![("invalidate", invalidate.to_string())],
         cli::Cmd::Usage { .. } => vec![],
         cli::Cmd::Mcp {} => vec![],
@@ -239,6 +343,48 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             }
             Ok(())
         }
+        cli::Cmd::Implementers { name, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            let out = query::implementers(&conn, &root, &name, limit)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
+            query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Imports { file, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            let out = query::imports(&conn, &root, &file, limit)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
+            query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Tests { name, depth, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            let out = query::test_impact(&conn, &root, &name, depth, limit)?;
+            journal::record_result(
+                out.pointers.len(),
+                out.shown,
+                out.total,
+                out.stale,
+                out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
+            );
+            query::print_output(&out);
+            Ok(())
+        }
         cli::Cmd::Path { from, to, depth } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
@@ -247,10 +393,20 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Impact { file, sites, limit } => {
+        cli::Cmd::Impact {
+            file,
+            sites,
+            depth,
+            edges,
+            context,
+            explain,
+            limit,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::impact(&conn, &root, &file, limit, sites)?;
+            let out = query::impact(
+                &conn, &root, &file, limit, sites, depth, &edges, context, explain,
+            )?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,
@@ -263,11 +419,20 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
         }
         cli::Cmd::Dead {
             exclude_tests,
+            exclude_generated,
+            path,
             limit,
         } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::dead(&conn, &root, limit, exclude_tests)?;
+            let out = query::dead(
+                &conn,
+                &root,
+                limit,
+                exclude_tests,
+                exclude_generated,
+                path.as_deref(),
+            )?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,
@@ -293,10 +458,15 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             Ok(())
         }
         cli::Cmd::Mcp {} => mcp::serve(root_arg, no_journal),
-        cli::Cmd::Unresolved { limit } => {
+        cli::Cmd::Unresolved { names, path, limit } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in query::unresolved(&conn, limit)? {
+            let lines = if names {
+                query::unresolved_names(&conn, &root, path.as_deref(), limit)?
+            } else {
+                query::unresolved(&conn, path.as_deref(), limit)?
+            };
+            for line in lines {
                 println!("{line}");
             }
             Ok(())
@@ -304,27 +474,163 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
         cli::Cmd::Symbols {
             file,
             outline,
+            metrics,
             limit,
         } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in query::symbols(&conn, &root, &file, outline, limit)? {
+            for line in query::symbols(&conn, &root, &file, outline, metrics, limit)? {
                 println!("{line}");
             }
             Ok(())
         }
-        cli::Cmd::Search { terms, limit } => {
+        cli::Cmd::Complexity {
+            min_cyc,
+            min_loc,
+            min_branches,
+            min_nest,
+            path,
+            exclude_generated,
+            limit,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in query::search(&conn, &root, &terms, limit)? {
+            for line in query::complexity(
+                &conn,
+                min_cyc,
+                min_loc,
+                min_branches,
+                min_nest,
+                path.as_deref(),
+                exclude_generated,
+                limit,
+            )? {
                 println!("{line}");
             }
             Ok(())
         }
-        cli::Cmd::Clones { min_lines, limit } => {
+        cli::Cmd::Api {
+            path,
+            include_private,
+            exclude_generated,
+            limit,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in query::clones(&conn, &root, min_lines, limit)? {
+            for line in query::api(
+                &conn,
+                &root,
+                &path,
+                include_private,
+                exclude_generated,
+                limit,
+            )? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Resolve { stdin } => {
+            if !stdin {
+                return Err(crate::error::KgError::Usage(
+                    "resolve requires --stdin".to_string(),
+                ));
+            }
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            let mut input = String::new();
+            std::io::stdin().read_to_string(&mut input)?;
+            if input.len() > 1024 * 1024 {
+                return Err(crate::error::KgError::Usage(
+                    "resolve input exceeds 1 MiB".to_string(),
+                ));
+            }
+            let mut names = Vec::new();
+            for line in input.lines() {
+                if line.len() > 4096 {
+                    return Err(crate::error::KgError::Usage(
+                        "resolve line exceeds 4096 bytes".to_string(),
+                    ));
+                }
+                let trimmed = line.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                    names.push(trimmed.to_string());
+                }
+            }
+            if names.len() > 1000 {
+                return Err(crate::error::KgError::Usage(
+                    "resolve accepts at most 1000 names".to_string(),
+                ));
+            }
+            if names.is_empty() {
+                return Err(crate::error::KgError::NoResults(
+                    "no names on stdin".to_string(),
+                ));
+            }
+            crate::journal::begin(
+                "cli",
+                "resolve",
+                &[
+                    ("count", names.len().to_string()),
+                    ("candidate_limit", "50".to_string()),
+                ],
+            );
+            let (lines, exit) = query::resolve_names(&conn, &names)?;
+            for line in &lines {
+                println!("{line}");
+            }
+            journal::record_result(lines.len(), lines.len(), lines.len(), false, 0);
+            if exit != 0 {
+                journal::finalize(Some(&root), exit, 0);
+                std::process::exit(exit);
+            }
+            Ok(())
+        }
+        cli::Cmd::Files { path, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::files(&conn, path.as_deref(), limit)? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Search {
+            terms,
+            kind,
+            path,
+            exact,
+            limit,
+        } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::search(
+                &conn,
+                &root,
+                &terms,
+                kind.as_deref(),
+                path.as_deref(),
+                exact,
+                limit,
+            )? {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        cli::Cmd::Clones {
+            min_lines,
+            path,
+            exclude_generated,
+            limit,
+        } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::clones(
+                &conn,
+                &root,
+                min_lines,
+                path.as_deref(),
+                exclude_generated,
+                limit,
+            )? {
                 println!("{line}");
             }
             Ok(())
@@ -335,18 +641,26 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             println!("{}", insights::stats(&conn, &root)?);
             Ok(())
         }
-        cli::Cmd::Hotspots { limit } => {
+        cli::Cmd::Hotspots {
+            limit,
+            path,
+            exclude_generated,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in insights::hotspots(&conn, &root, limit)? {
+            for line in insights::hotspots(&conn, &root, limit, path.as_deref(), exclude_generated)?
+            {
                 println!("{line}");
             }
             Ok(())
         }
-        cli::Cmd::Report {} => {
+        cli::Cmd::Report {
+            path,
+            exclude_generated,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in insights::report(&conn, &root)? {
+            for line in insights::report(&conn, &root, path.as_deref(), exclude_generated)? {
                 println!("{line}");
             }
             Ok(())

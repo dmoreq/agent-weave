@@ -250,13 +250,20 @@ pub fn run_build(
         crate::db::carry_forward_unchanged(&conn, &root, &unchanged)?;
     }
     let fresh_file_ids = crate::db::insert_files(&conn, &fresh_rows)?;
-    // Schema v5 / Amendment 15: unresolved call names per fresh file, so a
+    // Schema v6 / Amendment 19: unresolved edge sites per fresh file, so a
     // later build can re-extract exactly the files whose gaps a new symbol
     // could heal.
-    let unresolved_rows: Vec<(i64, String)> = resolution
+    let unresolved_rows: Vec<(i64, String, &'static str, usize)> = resolution
         .unresolved_calls
         .iter()
-        .map(|(fi, name)| (fresh_file_ids[*fi], name.clone()))
+        .map(|u| {
+            (
+                fresh_file_ids[u.file_idx],
+                u.name.clone(),
+                u.kind,
+                u.site_line,
+            )
+        })
         .collect();
     crate::db::insert_unresolved_calls(&conn, &unresolved_rows)?;
 
@@ -317,6 +324,7 @@ pub fn run_build(
     crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;
     crate::db::set_meta(&conn, "grammar_version", crate::db::GRAMMAR_VERSION)?;
     crate::db::set_meta(&conn, "signature_version", crate::db::SIGNATURE_VERSION)?;
+    crate::db::set_meta(&conn, "metrics_version", crate::db::METRICS_VERSION)?;
     crate::db::set_meta(
         &conn,
         "built_at",
@@ -450,6 +458,7 @@ fn extract_units(
                                 crate::parse::decision_kinds(lang),
                             ) as i64;
                             let shingles = crate::clones::shingles(&bytes);
+                            let generated = i64::from(crate::walk::is_generated(&f.rel, &bytes));
                             units.push((
                                 crate::db::FilesRow {
                                     rel: f.rel,
@@ -464,6 +473,7 @@ fn extract_units(
                                         parsed.tree.root_node(),
                                     ),
                                     cyclomatic,
+                                    generated,
                                 },
                                 fx,
                                 shingles,

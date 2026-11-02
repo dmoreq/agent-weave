@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -218,9 +218,9 @@ const STDLIB_MODULES: &[&str] = &[
     "os.path",
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NewSymbol {
-    pub kind: &'static str, // module | class | function | method
+    pub kind: &'static str, // module | class | function | method | trait | interface
     pub name: String,
     pub qualname: String,
     pub file_idx: usize,
@@ -230,6 +230,13 @@ pub struct NewSymbol {
     /// One-line signature (Amendment 12a): first line of the node's text,
     /// trimmed, hard cap 160 chars. Empty for module/synthetic symbols.
     pub signature: String,
+    /// Per-symbol metrics (Amendment 19); 0 for non-callables.
+    pub cyclomatic: usize,
+    pub branches: usize,
+    pub nesting: usize,
+    pub effective_loc: usize,
+    /// Public-surface flag (Amendment 19); language rules in the spec.
+    pub exported: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -249,6 +256,16 @@ pub struct ExtractStats {
     pub unresolved_callees: usize,
 }
 
+/// One unresolved edge site (Amendment 19). `kind` is call|import|inherit;
+/// `site_line` is 1-based in the source file.
+#[derive(Debug, Clone)]
+pub struct UnresolvedSite {
+    pub file_idx: usize,
+    pub name: String,
+    pub kind: &'static str,
+    pub site_line: usize,
+}
+
 pub struct Resolution {
     pub symbols: Vec<NewSymbol>,
     /// Parallel to `symbols`: Some(row_id) for symbols carried forward from the
@@ -259,10 +276,10 @@ pub struct Resolution {
     /// the binary's meta total is the per-file SQL sum instead.
     #[allow(dead_code)]
     pub stats: ExtractStats,
-    /// Unresolved call sites as (fresh-file index, callee display name).
-    /// Amendment 15 / schema v5: lets the fast path re-extract exactly the
-    /// carried files whose unresolved names became resolvable after a change.
-    pub unresolved_calls: Vec<(usize, String)>,
+    /// Unresolved edge sites as (fresh-file index, written name, kind, line).
+    /// Amendment 15/19: lets the fast path re-extract exactly the carried
+    /// files whose unresolved names became resolvable after a change.
+    pub unresolved_calls: Vec<UnresolvedSite>,
     pub unresolved_per_file: Vec<usize>,
 }
 
@@ -296,6 +313,9 @@ pub struct CarriedIndex {
 enum ImportTarget {
     /// `import a.b.c` binds "a"; `import a.b.c as z` binds the full path to z.
     ModuleRoot { path: String },
+    /// A module-level import edge target (Amendment 19): `import a.b`,
+    /// `from pkg import mod`, TS `import './x'`, Rust `use`/`mod`.
+    Module { path: String },
     /// `from m import n [as y]` binds the symbol (m, n).
     Symbol { module: String, name: String },
 }
@@ -350,6 +370,11 @@ pub struct FileExtraction {
     pub edges: Vec<NewEdge>,
     /// (src local idx, base dotted chain)
     inherits: Vec<(usize, Vec<String>)>,
+    /// Rust `impl Trait for Type` edges: edge-only, never `class_bases`.
+    impl_inherits: Vec<(usize, Vec<String>, usize)>,
+    /// Rust impls collected before symbol lookup:
+    /// (target qualname, trait chain, impl line). Same-file only in v1.
+    rust_impls: Vec<(String, Vec<String>, usize)>,
     assignments: Vec<Assignment>,
     params: Vec<ParamType>,
     self_fields: Vec<SelfField>,
@@ -415,9 +440,13 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
             line_start: 1,
             line_end: 1,
             signature: String::new(),
+
+            ..Default::default()
         }],
         edges: Vec::new(),
         inherits: Vec::new(),
+        impl_inherits: Vec::new(),
+        rust_impls: Vec::new(),
         assignments: Vec::new(),
         params: Vec::new(),
         self_fields: Vec::new(),
@@ -429,7 +458,103 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
     let mut ctx = WalkCtx::default();
     let root = parsed.tree.root_node();
     walk_children(root, src, &mut fx, &mut ctx);
+    finalize_exports(&mut fx, src);
+    finalize_rust_impls(&mut fx);
     fx
+}
+
+fn python_all_names(src: &[u8]) -> Option<std::collections::HashSet<String>> {
+    let text = String::from_utf8_lossy(src);
+    let start = text.find("__all__")?;
+    let rest = &text[start..];
+    let end = rest.find(']').unwrap_or(rest.len().min(4096));
+    let mut out = std::collections::HashSet::new();
+    let mut chars = rest[..end].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '"' || c == '\'' {
+            let quote = c;
+            let mut name = String::new();
+            while let Some(&n) = chars.peek() {
+                chars.next();
+                if n == quote {
+                    break;
+                }
+                name.push(n);
+            }
+            if !name.is_empty() {
+                out.insert(name);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Populate the exported/public flag from language rules (Amendment 19).
+fn finalize_exports(fx: &mut FileExtraction, src: &[u8]) {
+    let lines: Vec<&[u8]> = src.split(|b| *b == b'\n').collect();
+    let all_names = if fx.lang == Lang::Python {
+        python_all_names(src)
+    } else {
+        None
+    };
+    for i in 0..fx.symbols.len() {
+        let kind = fx.symbols[i].kind;
+        let name = fx.symbols[i].name.clone();
+        let qualname = fx.symbols[i].qualname.clone();
+        let signature = fx.symbols[i].signature.clone();
+        let line = fx.symbols[i].line_start.saturating_sub(1);
+        let parent_qn = qualname.rsplit_once('.').map(|(p, _)| p.to_string());
+        let parent_exported = parent_qn
+            .as_ref()
+            .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p))
+            .map(|s| s.exported)
+            .unwrap_or(false);
+        let exported = match fx.lang {
+            Lang::Python => {
+                if kind == "module" {
+                    false
+                } else if let Some(all) = &all_names {
+                    all.contains(&name)
+                } else if kind == "method" {
+                    parent_exported && !name.starts_with('_')
+                } else {
+                    qualname == format!("{}.{}", fx.module, name) && !name.starts_with('_')
+                }
+            }
+            Lang::Rust => {
+                let sig = signature.trim_start();
+                let is_pub = sig.starts_with("pub ");
+                is_pub && (kind != "method" || parent_exported)
+            }
+            Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
+                let source_line = lines
+                    .get(line)
+                    .map(|l| String::from_utf8_lossy(l).to_string())
+                    .unwrap_or_default();
+                if source_line.contains("export ") || source_line.starts_with("export") {
+                    true
+                } else {
+                    kind == "method" && parent_exported
+                }
+            }
+        };
+        fx.symbols[i].exported = exported;
+    }
+}
+
+/// Resolve Rust `impl Trait for Type` pairs against same-file type symbols.
+/// Cross-file impls are out of scope in v1 (Amendment 19).
+fn finalize_rust_impls(fx: &mut FileExtraction) {
+    let impls = std::mem::take(&mut fx.rust_impls);
+    for (target_qn, trait_chain, line) in impls {
+        if let Some(idx) = fx
+            .symbols
+            .iter()
+            .position(|s| s.kind == "class" && s.qualname == target_qn)
+        {
+            fx.impl_inherits.push((idx, trait_chain, line));
+        }
+    }
 }
 
 #[derive(Default)]
@@ -527,7 +652,9 @@ pub fn split_ident(s: &str) -> String {
 /// `self`, `super`) join the chain as plain segments.
 fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
     match node.kind() {
-        "identifier" | "this" | "super" | "crate" => Some(vec![text(node, src)]),
+        "identifier" | "this" | "super" | "crate" | "type_identifier" => {
+            Some(vec![text(node, src)])
+        }
         "attribute" => {
             let obj = node.child_by_field_name("object")?;
             let attr = node.child_by_field_name("attribute")?;
@@ -564,6 +691,21 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             let mut cursor = node.walk();
             let inner = node.named_children(&mut cursor).next();
             inner.and_then(|ch| dotted_chain(ch, src))
+        }
+        "generic_type" => {
+            // `Trait<T>`: use the first type identifier as the base name.
+            let mut stack = vec![node];
+            while let Some(n) = stack.pop() {
+                if n.kind() == "type_identifier" {
+                    return Some(vec![text(n, src)]);
+                }
+                let mut c = n.walk();
+                let children: Vec<_> = n.children(&mut c).collect();
+                for child in children.into_iter().rev() {
+                    stack.push(child);
+                }
+            }
+            None
         }
         // Constructor-call receiver: `Base().m()` / `super().m()` /
         // `super(C, self).m()` (Amendment 18). Non-uppercase factory calls
@@ -617,7 +759,23 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             );
         }
         "struct_item" | "enum_item" => {
-            define_class_ts(node, src, fx, ctx);
+            define_class_ts(node, src, fx, ctx, "class");
+        }
+        "trait_item" => {
+            define_class_ts(node, src, fx, ctx, "trait");
+        }
+        "function_signature_item" => {
+            define_function(
+                node,
+                src,
+                fx,
+                ctx,
+                if ctx.class_stack.is_empty() {
+                    "function"
+                } else {
+                    "method"
+                },
+            );
         }
         "mod_item" if node.child_by_field_name("body").is_some() => {
             // Inline `mod name { ... }` is a scope, not just an alias (R7).
@@ -639,6 +797,8 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 signature: String::new(),
                 line_start: node.start_position().row + 1,
                 line_end: node.end_position().row + 1,
+
+                ..Default::default()
             });
             if let Some(pidx) = parent_symbol_idx(fx, ctx) {
                 fx.edges.push(NewEdge {
@@ -676,6 +836,8 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 signature: String::new(),
                 line_start: node.start_position().row + 1,
                 line_end: node.end_position().row + 1,
+
+                ..Default::default()
             });
             if let Some(pidx) = parent_symbol_idx(fx, ctx) {
                 fx.edges.push(NewEdge {
@@ -705,6 +867,12 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             } else {
                 format!("{}.{}", ctx.class_stack.last().unwrap(), type_name)
             };
+            if let Some(trait_node) = node.child_by_field_name("trait") {
+                if let Some(chain) = dotted_chain(trait_node, src) {
+                    fx.rust_impls
+                        .push((qualname.clone(), chain, node.start_position().row + 1));
+                }
+            }
             ctx.class_stack.push(qualname);
             walk_children(node, src, fx, ctx);
             ctx.class_stack.pop();
@@ -714,7 +882,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             define_function(node, src, fx, ctx, "function");
         }
         "class_declaration" | "abstract_class_declaration" => {
-            define_class_ts(node, src, fx, ctx);
+            define_class_ts(node, src, fx, ctx, "class");
+        }
+        "interface_declaration" => {
+            define_class_ts(node, src, fx, ctx, "interface");
         }
         "method_definition" => {
             define_method_ts(node, src, fx, ctx);
@@ -737,7 +908,12 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 if node.child_by_field_name("body").is_none() {
                     if let Some(root) = fx.dir.split('.').next().map(|p| p.to_string()) {
                         let path = format!("{root}.{name}");
-                        fx.aliases.push((name, ImportTarget::ModuleRoot { path }));
+                        fx.aliases
+                            .push((name, ImportTarget::ModuleRoot { path: path.clone() }));
+                        fx.import_edges.push(ImportEdgeCandidate {
+                            line: node.start_position().row + 1,
+                            target: ImportTarget::Module { path },
+                        });
                     }
                 }
             }
@@ -794,6 +970,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             let qualname = format!("{parent_qn}.{name}");
             let start = node.start_position().row + 1;
             let sym_idx = fx.symbols.len();
+            let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang);
             fx.symbols.push(NewSymbol {
                 kind,
                 name: name.clone(),
@@ -802,6 +979,11 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 signature: signature_of(node, src),
                 line_start: start,
                 line_end: node.end_position().row + 1,
+                cyclomatic: cyc,
+                branches: br,
+                nesting: nest,
+                effective_loc: loc,
+                ..Default::default()
             });
             if let Some(params) = node.child_by_field_name("parameters") {
                 collect_param_types(params, src, fx, &qualname);
@@ -846,6 +1028,8 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 signature: signature_of(node, src),
                 line_start: start,
                 line_end: node.end_position().row + 1,
+
+                ..Default::default()
             });
             if let Some(bases) = node.child_by_field_name("superclasses") {
                 let mut cursor = bases.walk();
@@ -1034,6 +1218,15 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                         let root = path.split('.').next().unwrap_or(&path).to_string();
                         fx.aliases
                             .push((root.clone(), ImportTarget::ModuleRoot { path: root }));
+                        let parts: Vec<&str> = path.split('.').collect();
+                        for i in 1..=parts.len() {
+                            fx.import_edges.push(ImportEdgeCandidate {
+                                line,
+                                target: ImportTarget::Module {
+                                    path: parts[..i].join("."),
+                                },
+                            });
+                        }
                     }
                     // `import a.b as c` wraps in aliased_import; a bare
                     // "alias" node appears in some grammar versions.
@@ -1044,12 +1237,22 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                         let Some(alias) = child.child_by_field_name("alias") else {
                             continue;
                         };
+                        let target_path = text(target, src);
                         fx.aliases.push((
                             text(alias, src),
                             ImportTarget::ModuleRoot {
-                                path: text(target, src),
+                                path: target_path.clone(),
                             },
                         ));
+                        let parts: Vec<&str> = target_path.split('.').collect();
+                        for i in 1..=parts.len() {
+                            fx.import_edges.push(ImportEdgeCandidate {
+                                line,
+                                target: ImportTarget::Module {
+                                    path: parts[..i].join("."),
+                                },
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -1060,6 +1263,10 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
             let module_abs =
                 module_node.map(|m| resolve_from_module(m, src, &fx.module, fx.is_package));
             let Some(m) = module_abs else { return };
+            fx.import_edges.push(ImportEdgeCandidate {
+                line,
+                target: ImportTarget::Module { path: m.clone() },
+            });
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if Some(child) == module_node {
@@ -1082,6 +1289,12 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                                 name: name.clone(),
                             },
                         ));
+                        fx.import_edges.push(ImportEdgeCandidate {
+                            line,
+                            target: ImportTarget::Module {
+                                path: format!("{m}.{name}"),
+                            },
+                        });
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::Symbol {
@@ -1107,6 +1320,12 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                                 name: name.clone(),
                             },
                         ));
+                        fx.import_edges.push(ImportEdgeCandidate {
+                            line,
+                            target: ImportTarget::Module {
+                                path: format!("{m}.{name}"),
+                            },
+                        });
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::Symbol {
@@ -1161,7 +1380,197 @@ fn resolve_from_module(
 // TypeScript/TSX/JSX definitions (P2)
 // ---------------------------------------------------------------------------
 
+fn branch_kinds(lang: Lang) -> &'static [&'static str] {
+    match lang {
+        Lang::Python => &[
+            "if_statement",
+            "for_statement",
+            "while_statement",
+            "elif_clause",
+            "except_clause",
+            "case_clause",
+        ],
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &[
+            "if_statement",
+            "for_statement",
+            "for_in_statement",
+            "while_statement",
+            "do_statement",
+            "switch_case",
+        ],
+        Lang::Rust => &[
+            "if_expression",
+            "for_expression",
+            "while_expression",
+            "loop_expression",
+            "match_arm",
+        ],
+    }
+}
+
+fn is_nested_callable(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_definition"
+            | "function_declaration"
+            | "method_definition"
+            | "generator_function_declaration"
+            | "function_expression"
+            | "arrow_function"
+            | "lambda"
+            | "closure_expression"
+            | "function_item"
+    )
+}
+
+/// Per-symbol metrics (Amendment 19). Walks the callable subtree, skipping
+/// nested callable bodies; branch depth starts at 1 for the body.
+fn callable_metrics(node: Node<'_>, src: &[u8], lang: Lang) -> (usize, usize, usize, usize) {
+    let decisions: Vec<&str> = crate::parse::decision_kinds(lang)
+        .iter()
+        .copied()
+        .filter(|k| {
+            !matches!(
+                *k,
+                "match_statement" | "if_let_expression" | "while_let_expression"
+            )
+        })
+        .collect();
+    let branches = branch_kinds(lang);
+    let mut cyclomatic = 1usize;
+    let mut branch_count = 0usize;
+    let mut max_nest = 0usize;
+    let mut stack: Vec<(Node<'_>, usize)> = node
+        .children(&mut node.walk())
+        .map(|c| (c, 0usize))
+        .collect();
+    while let Some((n, depth)) = stack.pop() {
+        if n.id() != node.id() && is_nested_callable(n.kind()) {
+            continue;
+        }
+        if decisions.iter().any(|k| *k == n.kind()) {
+            cyclomatic += 1;
+        }
+        let is_branch = branches.contains(&n.kind());
+        if is_branch {
+            branch_count += 1;
+            max_nest = max_nest.max(depth + 1);
+        }
+        let child_depth = if is_branch { depth + 1 } else { depth };
+        let mut cursor = n.walk();
+        for child in n.children(&mut cursor) {
+            stack.push((child, child_depth));
+        }
+    }
+    let mut effective_loc = 0usize;
+    let mut in_block = false;
+    let mut in_doc = false;
+    let slice = &src[node.start_byte()..node.end_byte()];
+    for line in slice.split(|b| *b == b'\n') {
+        let trimmed: Vec<u8> = line
+            .iter()
+            .copied()
+            .skip_while(|b| b.is_ascii_whitespace())
+            .collect();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let has = |needle: &[u8]| trimmed.windows(needle.len()).any(|w| w == needle);
+        if in_block {
+            if has(b"*/") {
+                in_block = false;
+            }
+            continue;
+        }
+        if in_doc {
+            if has(b"\"\"\"") || has(b"'''") {
+                in_doc = false;
+            }
+            continue;
+        }
+        if trimmed.starts_with(b"/*") {
+            if !has(b"*/") {
+                in_block = true;
+            }
+            continue;
+        }
+        if trimmed.starts_with(b"\"\"\"") || trimmed.starts_with(b"'''") {
+            let closed = trimmed.len() > 6
+                && ((trimmed.starts_with(b"\"\"\"") && has(b"\"\"\""))
+                    || (trimmed.starts_with(b"'''") && has(b"'''")));
+            if !closed {
+                in_doc = true;
+            }
+            continue;
+        }
+        if trimmed.starts_with(b"#") || trimmed.starts_with(b"//") {
+            continue;
+        }
+        effective_loc += 1;
+    }
+    (cyclomatic, branch_count, max_nest, effective_loc)
+}
+
 fn define_function(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    ctx: &mut WalkCtx,
+    kind: &'static str,
+) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, src);
+    let parent_qn = ctx
+        .class_stack
+        .last()
+        .or_else(|| ctx.func_stack.last())
+        .cloned()
+        .unwrap_or_else(|| fx.module.clone());
+    let qualname = format!("{parent_qn}.{name}");
+    let start = node.start_position().row + 1;
+    let sym_idx = fx.symbols.len();
+    let (cyc, br, nest, loc) = if node.child_by_field_name("body").is_some() {
+        callable_metrics(node, src, fx.lang)
+    } else {
+        (0, 0, 0, 0)
+    };
+    fx.symbols.push(NewSymbol {
+        kind,
+        name: name.clone(),
+        qualname: qualname.clone(),
+        file_idx: fx.file_idx,
+        signature: signature_of(node, src),
+        line_start: start,
+        line_end: node.end_position().row + 1,
+        cyclomatic: cyc,
+        branches: br,
+        nesting: nest,
+        effective_loc: loc,
+        ..Default::default()
+    });
+    if let Some(params) = node.child_by_field_name("parameters") {
+        collect_param_types(params, src, fx, &qualname);
+    }
+    if let Some(pidx) = parent_symbol_idx(fx, ctx) {
+        fx.edges.push(NewEdge {
+            src_idx: pidx,
+            dst_idx: Some(sym_idx),
+            dst_name: qualname.clone(),
+            kind: "contains",
+            confidence: "EXTRACTED",
+            site_line: start,
+        });
+    }
+    ctx.func_stack.push(qualname);
+    if let Some(body) = node.child_by_field_name("body") {
+        walk_children(body, src, fx, ctx);
+    }
+    ctx.func_stack.pop();
+}
+
+fn define_class_ts(
     node: Node<'_>,
     src: &[u8],
     fx: &mut FileExtraction,
@@ -1189,56 +1598,21 @@ fn define_function(
         signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
-    });
-    if let Some(params) = node.child_by_field_name("parameters") {
-        collect_param_types(params, src, fx, &qualname);
-    }
-    if let Some(pidx) = parent_symbol_idx(fx, ctx) {
-        fx.edges.push(NewEdge {
-            src_idx: pidx,
-            dst_idx: Some(sym_idx),
-            dst_name: qualname.clone(),
-            kind: "contains",
-            confidence: "EXTRACTED",
-            site_line: start,
-        });
-    }
-    ctx.func_stack.push(qualname);
-    if let Some(body) = node.child_by_field_name("body") {
-        walk_children(body, src, fx, ctx);
-    }
-    ctx.func_stack.pop();
-}
 
-fn define_class_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
-    let Some(name_node) = node.child_by_field_name("name") else {
-        return;
-    };
-    let name = text(name_node, src);
-    let parent_qn = ctx
-        .class_stack
-        .last()
-        .or_else(|| ctx.func_stack.last())
-        .cloned()
-        .unwrap_or_else(|| fx.module.clone());
-    let qualname = format!("{parent_qn}.{name}");
-    let start = node.start_position().row + 1;
-    let sym_idx = fx.symbols.len();
-    fx.symbols.push(NewSymbol {
-        kind: "class",
-        name: name.clone(),
-        qualname: qualname.clone(),
-        file_idx: fx.file_idx,
-        signature: signature_of(node, src),
-        line_start: start,
-        line_end: node.end_position().row + 1,
+        ..Default::default()
     });
-    // Heritage: extends X / implements Y — inherit edges from extends targets.
+    // Heritage: extends X / implements Y / trait bounds.
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "class_heritage" {
-            collect_heritage(child, src, fx, sym_idx);
+        match child.kind() {
+            "class_heritage" | "implements_clause" | "extends_type_clause" => {
+                collect_heritage(child, src, fx, sym_idx);
+            }
+            _ => {}
         }
+    }
+    if let Some(bounds) = node.child_by_field_name("bounds") {
+        collect_heritage(bounds, src, fx, sym_idx);
     }
     if let Some(pidx) = parent_symbol_idx(fx, ctx) {
         fx.edges.push(NewEdge {
@@ -1258,26 +1632,61 @@ fn define_class_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
 }
 
 fn collect_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_idx: usize) {
-    // Collect identifier chains for extends/implements targets.
+    // Only outer type nodes are bases. Descending into every identifier turns
+    // `Base<Arg>` into a base `Arg` and `std::error::Error` into `std`/`error`.
     let mut stack = vec![node];
     while let Some(n) = stack.pop() {
         match n.kind() {
-            "type_identifier" | "identifier" => {
-                if let Some(chain) = dotted_chain(n, src) {
-                    fx.inherits.push((class_idx, chain));
-                }
-            }
-            "nested_type_identifier" | "attribute" | "member_expression" => {
-                if let Some(chain) = dotted_chain(n, src) {
-                    fx.inherits.push((class_idx, chain));
-                }
-            }
-            _ => {
+            "type" => {
                 let mut c = n.walk();
-                for child in n.children(&mut c) {
+                if let Some(inner) = n.named_children(&mut c).next() {
+                    stack.push(inner);
+                };
+            }
+            "class_heritage"
+            | "extends_clause"
+            | "implements_clause"
+            | "extends_type_clause"
+            | "bounds"
+            | "argument_list" => {
+                let mut c = n.walk();
+                for child in n.named_children(&mut c) {
                     stack.push(child);
                 }
             }
+            "call_expression" => {
+                // `extends mixin(Base, Other)`: only the first identifier argument.
+                if let Some(args) = n.child_by_field_name("arguments") {
+                    let mut c = args.walk();
+                    for arg in args.named_children(&mut c) {
+                        if matches!(
+                            arg.kind(),
+                            "identifier"
+                                | "type_identifier"
+                                | "member_expression"
+                                | "scoped_type_identifier"
+                        ) {
+                            if let Some(chain) = dotted_chain(arg, src) {
+                                fx.inherits.push((class_idx, chain));
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            "generic_type"
+            | "type_identifier"
+            | "identifier"
+            | "member_expression"
+            | "nested_type_identifier"
+            | "scoped_type_identifier"
+            | "attribute"
+            | "subscript" => {
+                if let Some(chain) = dotted_chain(n, src) {
+                    fx.inherits.push((class_idx, chain));
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1294,6 +1703,7 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
     let qualname = format!("{class_qn}.{name}");
     let start = node.start_position().row + 1;
     let sym_idx = fx.symbols.len();
+    let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang);
     fx.symbols.push(NewSymbol {
         kind: "method",
         name: name.clone(),
@@ -1302,6 +1712,11 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
         signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
+        cyclomatic: cyc,
+        branches: br,
+        nesting: nest,
+        effective_loc: loc,
+        ..Default::default()
     });
     if let Some(params) = node.child_by_field_name("parameters") {
         collect_param_types(params, src, fx, &qualname);
@@ -1350,6 +1765,7 @@ fn record_ts_arrow_function(
     let qualname = format!("{}.{}", fx.module, name);
     let start = node.start_position().row + 1;
     let sym_idx = fx.symbols.len();
+    let (cyc, br, nest, loc) = callable_metrics(value, src, fx.lang);
     fx.symbols.push(NewSymbol {
         kind: "function",
         name: name.clone(),
@@ -1358,6 +1774,11 @@ fn record_ts_arrow_function(
         signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
+        cyclomatic: cyc,
+        branches: br,
+        nesting: nest,
+        effective_loc: loc,
+        ..Default::default()
     });
     // Module symbol contains it.
     fx.edges.push(NewEdge {
@@ -1384,6 +1805,12 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
     let raw = text(source_node, src);
     let source = raw.trim_matches(|c| c == '\'' || c == '"');
     let module = resolve_ts_module(source, &fx.dir);
+    fx.import_edges.push(ImportEdgeCandidate {
+        line,
+        target: ImportTarget::Module {
+            path: module.clone(),
+        },
+    });
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() != "import_clause" {
@@ -1559,6 +1986,12 @@ fn record_use_decl(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                 ));
                 fx.import_edges.push(ImportEdgeCandidate {
                     line,
+                    target: ImportTarget::Module {
+                        path: module.clone(),
+                    },
+                });
+                fx.import_edges.push(ImportEdgeCandidate {
+                    line,
                     target: ImportTarget::Symbol { module, name },
                 });
             }
@@ -1592,6 +2025,8 @@ struct FileCtx {
     import_edges: Vec<ImportEdgeCandidate>,
     /// (src idx global, base chain)
     inherits: Vec<(usize, Vec<String>)>,
+    /// (src idx global, base chain, impl line) — edge-only, no class_bases.
+    impl_inherits: Vec<(usize, Vec<String>, usize)>,
 }
 
 struct Tables {
@@ -1675,6 +2110,11 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             .into_iter()
             .map(|(src, chain)| (src + base, chain))
             .collect();
+        let impl_inherits = fx
+            .impl_inherits
+            .into_iter()
+            .map(|(src, chain, line)| (src + base, chain, line))
+            .collect();
         let mut aliases = HashMap::new();
         for (alias, target) in fx.aliases {
             aliases.insert(alias, target); // later rebinding wins
@@ -1704,6 +2144,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             calls: fx.calls,
             import_edges: fx.import_edges,
             inherits,
+            impl_inherits,
         });
     }
 
@@ -1724,6 +2165,8 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             line_start: 0,
             line_end: 0,
             signature: String::new(),
+
+            ..Default::default()
         });
         t.existing_ids.push(Some(c.row_id));
         t.by_qualname
@@ -1758,43 +2201,132 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
         t.class_bases.entry(sub_qn).or_default().push(base_qn);
     }
 
+    let mut unresolved_calls: Vec<UnresolvedSite> = Vec::new();
+
     // Resolve fresh base chains now that alias tables exist; emit inherits
     // edges for fresh classes (carried inherits edges were carried as rows).
     for fctx in &t.file_ctx {
         for (src_idx, chain) in &fctx.inherits {
             let class_file = t.symbols[*src_idx].file_idx;
-            if let Some(base_qn) = resolve_class_of_chain(&t, class_file, chain) {
-                t.class_bases
-                    .entry(t.symbols[*src_idx].qualname.clone())
-                    .or_default()
-                    .push(base_qn.clone());
-                if let Some(dsts) = t.by_qualname.get(&base_qn) {
-                    if let Some(&dst) = dsts.first() {
-                        t.edges.push(NewEdge {
-                            src_idx: *src_idx,
-                            dst_idx: Some(dst),
-                            dst_name: base_qn,
-                            kind: "inherits",
-                            confidence: "EXTRACTED",
-                            site_line: t.symbols[*src_idx].line_start,
-                        });
-                    }
-                }
+            let src_qn = t.symbols[*src_idx].qualname.clone();
+            let site = t.symbols[*src_idx].line_start;
+            let base_qn = resolve_base_chain(&t, class_file, chain, &src_qn);
+            let dsts = base_qn
+                .as_ref()
+                .and_then(|qn| t.by_qualname.get(qn))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let class_dsts: Vec<usize> = dsts
+                .iter()
+                .copied()
+                .filter(|i| matches!(t.symbols[*i].kind, "class" | "trait" | "interface"))
+                .collect();
+            if class_dsts.len() > 1 {
+                t.edges.push(NewEdge {
+                    src_idx: *src_idx,
+                    dst_idx: None,
+                    dst_name: base_qn.clone().unwrap_or_else(|| chain.join(".")),
+                    kind: "inherits",
+                    confidence: "AMBIGUOUS",
+                    site_line: site,
+                });
+                unresolved_calls.push(UnresolvedSite {
+                    file_idx: class_file,
+                    name: base_qn.unwrap_or_else(|| chain.join(".")),
+                    kind: "inherit",
+                    site_line: site,
+                });
+            } else if let Some(&dst) = class_dsts.first() {
+                let qn = t.symbols[dst].qualname.clone();
+                t.class_bases.entry(src_qn).or_default().push(qn.clone());
+                t.edges.push(NewEdge {
+                    src_idx: *src_idx,
+                    dst_idx: Some(dst),
+                    dst_name: qn,
+                    kind: "inherits",
+                    confidence: "EXTRACTED",
+                    site_line: site,
+                });
+            } else {
+                unresolved_calls.push(UnresolvedSite {
+                    file_idx: class_file,
+                    name: base_qn.unwrap_or_else(|| chain.join(".")),
+                    kind: "inherit",
+                    site_line: site,
+                });
+            }
+        }
+        for (src_idx, chain, line) in &fctx.impl_inherits {
+            let class_file = t.symbols[*src_idx].file_idx;
+            let src_qn = t.symbols[*src_idx].qualname.clone();
+            let base_qn = resolve_base_chain(&t, class_file, chain, &src_qn);
+            let dsts = base_qn
+                .as_ref()
+                .and_then(|qn| t.by_qualname.get(qn))
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let class_dsts: Vec<usize> = dsts
+                .iter()
+                .copied()
+                .filter(|i| matches!(t.symbols[*i].kind, "class" | "trait" | "interface"))
+                .collect();
+            if class_dsts.len() > 1 {
+                t.edges.push(NewEdge {
+                    src_idx: *src_idx,
+                    dst_idx: None,
+                    dst_name: base_qn.clone().unwrap_or_else(|| chain.join(".")),
+                    kind: "inherits",
+                    confidence: "AMBIGUOUS",
+                    site_line: *line,
+                });
+                unresolved_calls.push(UnresolvedSite {
+                    file_idx: class_file,
+                    name: base_qn.unwrap_or_else(|| chain.join(".")),
+                    kind: "inherit",
+                    site_line: *line,
+                });
+            } else if let Some(&dst) = class_dsts.first() {
+                t.edges.push(NewEdge {
+                    src_idx: *src_idx,
+                    dst_idx: Some(dst),
+                    dst_name: t.symbols[dst].qualname.clone(),
+                    kind: "inherits",
+                    confidence: "EXTRACTED",
+                    site_line: *line,
+                });
+            } else {
+                unresolved_calls.push(UnresolvedSite {
+                    file_idx: class_file,
+                    name: base_qn.unwrap_or_else(|| chain.join(".")),
+                    kind: "inherit",
+                    site_line: *line,
+                });
             }
         }
     }
 
     let mut stats = ExtractStats::default();
     let mut unresolved_per_file = vec![0usize; t.file_ctx.len()];
-    let mut unresolved_calls: Vec<(usize, String)> = Vec::new();
 
     // Import edges.
-    for fctx in &t.file_ctx {
+    for (fi, fctx) in t.file_ctx.iter().enumerate() {
         for cand in &fctx.import_edges {
             match &cand.target {
                 ImportTarget::Symbol { module, name } => {
                     if let Some(dsts) = t.by_mod_name.get(&(module.clone(), name.clone())) {
-                        if let Some(&dst) = dsts.first() {
+                        if dsts.len() > 1 {
+                            t.edges.push(NewEdge {
+                                src_idx: fctx.module_sym_idx,
+                                dst_idx: None,
+                                dst_name: format!("{module}.{name}"),
+                                kind: "imports",
+                                confidence: "AMBIGUOUS",
+                                site_line: cand.line,
+                            });
+                        } else if let Some(&dst) = dsts.first() {
+                            if dst == fctx.module_sym_idx {
+                                continue;
+                            }
                             t.edges.push(NewEdge {
                                 src_idx: fctx.module_sym_idx,
                                 dst_idx: Some(dst),
@@ -1804,6 +2336,40 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                                 site_line: cand.line,
                             });
                         }
+                    } else {
+                        unresolved_calls.push(UnresolvedSite {
+                            file_idx: fi,
+                            name: format!("{module}.{name}"),
+                            kind: "import",
+                            site_line: cand.line,
+                        });
+                    }
+                }
+                ImportTarget::Module { path } => {
+                    if fctx.stars.iter().any(|m| m == path) {
+                        continue; // the star edge below is the canonical one
+                    }
+                    if let Some(dsts) = t.by_qualname.get(path) {
+                        let dst = dsts.iter().find(|&&i| t.symbols[i].kind == "module");
+                        if let Some(&dst) = dst {
+                            if dst != fctx.module_sym_idx {
+                                t.edges.push(NewEdge {
+                                    src_idx: fctx.module_sym_idx,
+                                    dst_idx: Some(dst),
+                                    dst_name: path.clone(),
+                                    kind: "imports",
+                                    confidence: "EXTRACTED",
+                                    site_line: cand.line,
+                                });
+                            }
+                        }
+                    } else {
+                        unresolved_calls.push(UnresolvedSite {
+                            file_idx: fi,
+                            name: path.clone(),
+                            kind: "import",
+                            site_line: cand.line,
+                        });
                     }
                 }
                 ImportTarget::ModuleRoot { path } => {
@@ -1828,6 +2394,29 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                 }
             }
         }
+    }
+
+    // Deduplicate import edges and reconcile unresolved import candidates:
+    // a statement that resolved by any candidate is not unresolved.
+    {
+        let mut seen_edges: HashSet<(usize, Option<usize>, String, usize)> = HashSet::new();
+        t.edges.retain(|e| {
+            e.kind != "imports"
+                || seen_edges.insert((e.src_idx, e.dst_idx, e.dst_name.clone(), e.site_line))
+        });
+        let mut resolved: HashSet<(usize, usize, String)> = HashSet::new();
+        for e in &t.edges {
+            if e.kind == "imports" {
+                let fi = t.symbols[e.src_idx].file_idx;
+                resolved.insert((fi, e.site_line, e.dst_name.clone()));
+            }
+        }
+        unresolved_calls.retain(|u| {
+            u.kind != "import" || !resolved.contains(&(u.file_idx, u.site_line, u.name.clone()))
+        });
+        let mut seen_unresolved: HashSet<(usize, String, &'static str, usize)> = HashSet::new();
+        unresolved_calls
+            .retain(|u| seen_unresolved.insert((u.file_idx, u.name.clone(), u.kind, u.site_line)));
     }
 
     // Call sites.
@@ -1887,7 +2476,12 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                         Callee::Name(n) => n.clone(),
                         Callee::Attr(parts) => parts.join("."),
                     };
-                    unresolved_calls.push((fi, name));
+                    unresolved_calls.push(UnresolvedSite {
+                        file_idx: fi,
+                        name,
+                        kind: "call",
+                        site_line: site.line,
+                    });
                 }
             }
         }
@@ -1945,7 +2539,7 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                         return Outcome::Dropped;
                     }
                 }
-                Some(ImportTarget::ModuleRoot { .. }) => {
+                Some(ImportTarget::ModuleRoot { .. }) | Some(ImportTarget::Module { .. }) => {
                     // Calling a bare module alias is invalid Python; fall through.
                 }
                 None => {}
@@ -2085,7 +2679,7 @@ fn root_chain(root: &str, chain: &[String]) -> Vec<String> {
 fn chain_is_module_start(t: &Tables, fi: usize, first: &str) -> bool {
     let fctx = &t.file_ctx[fi];
     match fctx.aliases.get(first) {
-        Some(ImportTarget::ModuleRoot { .. }) => true,
+        Some(ImportTarget::ModuleRoot { .. }) | Some(ImportTarget::Module { .. }) => true,
         Some(ImportTarget::Symbol { module, name }) => {
             t.module_paths.contains(&format!("{module}.{name}"))
         }
@@ -2188,6 +2782,33 @@ fn resolve_var_class(t: &Tables, fi: usize, var: &str, scope: &str) -> Option<St
 
 /// Resolve a dotted chain to a class qualname via: local module -> alias map ->
 /// absolute qualname.
+fn resolve_base_chain(
+    t: &Tables,
+    fi: usize,
+    chain: &[String],
+    inheriting_qn: &str,
+) -> Option<String> {
+    let mut parent = inheriting_qn
+        .rsplit_once('.')
+        .map(|(p, _)| p.to_string())
+        .unwrap_or_default();
+    loop {
+        let candidate = if parent.is_empty() {
+            chain.join(".")
+        } else {
+            format!("{parent}.{}", chain.join("."))
+        };
+        if class_exists(t, &candidate) {
+            return Some(candidate);
+        }
+        match parent.rsplit_once('.') {
+            Some((p, _)) => parent = p.to_string(),
+            None => break,
+        }
+    }
+    resolve_class_of_chain(t, fi, chain)
+}
+
 fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<String> {
     if chain.is_empty() {
         return None;
@@ -2238,6 +2859,7 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
                     }
                 }
             }
+            ImportTarget::Module { .. } => {}
         }
     }
     // 3. Absolute qualname.
@@ -2249,9 +2871,10 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
 }
 
 fn class_exists(t: &Tables, qualname: &str) -> bool {
-    t.by_qualname
-        .get(qualname)
-        .is_some_and(|v| v.iter().any(|&i| t.symbols[i].kind == "class"))
+    t.by_qualname.get(qualname).is_some_and(|v| {
+        v.iter()
+            .any(|&i| matches!(t.symbols[i].kind, "class" | "trait" | "interface"))
+    })
 }
 
 /// Walk the module tree: consume chain segments while the prefix names an
@@ -2295,6 +2918,7 @@ fn module_chain_outcome(t: &Tables, fi: usize, chain: &[String]) -> Outcome {
     let fctx = &t.file_ctx[fi];
     let start: Option<String> = match fctx.aliases.get(&chain[0]) {
         Some(ImportTarget::ModuleRoot { path }) => Some(path.clone()),
+        Some(ImportTarget::Module { .. }) => None,
         Some(ImportTarget::Symbol { module, name }) => {
             let qn = format!("{module}.{name}");
             if t.module_paths.contains(&qn) {
@@ -2428,8 +3052,8 @@ mod alias_repro {
         );
         assert_eq!(
             fx.import_edges.len(),
-            1,
-            "import_edges: {}",
+            3,
+            "import_edges: {} (module, child module, symbol)",
             fx.import_edges.len()
         );
         assert_eq!(fx.calls.len(), 1, "calls: {}", fx.calls.len());

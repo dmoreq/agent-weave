@@ -47,14 +47,24 @@ kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg path Widget.render parse_fragment  # shortest call route (resolved edges; depth cap 10)
 kg context Widget.render       # definition + callers + callees in one call
-kg impact app.py              # files that call into app.py
-kg search parser fragment     # BM25 symbol search (identifier/path/signature tokens); qualified input matches the exact phrase; hits carry the signature
+kg implementers Base          # classes/interfaces/traits that inherit or implement Base
+kg imports app.py             # outbound resolved imports
+kg tests Widget.render       # test candidates that reach the symbol/file (static)
+kg impact app.py              # files that call into app.py (one row per file)
+kg impact app.py --edges calls,imports,inherits --depth 3  # dependency closure
+kg search parser fragment     # BM25 symbol search (identifier/path/signature tokens); --kind/--path/--exact filters
 kg clones                     # duplicate-block candidates with enclosing symbol per side (caveat: not proof)
-kg dead                       # dead-code candidates (caveat: not proof)
+kg dead --exclude-tests       # dead-code candidates (caveat: not proof)
 kg unresolved                 # per-file counts + top unresolved names; [internal] = resolver gap
+kg unresolved --names         # unresolved edge sites: path:line kind name
 kg symbols app.py             # one file's symbols, ordered by line
-kg symbols app.py --outline   # + one-line signatures (no bodies)
-kg stats                      # index totals
+kg symbols src/ --outline     # directory inventory with one-line signatures
+kg symbols app.py --metrics   # per-symbol cyclomatic/branches/nesting/effective LOC
+kg complexity --min-cyc 11    # functions over the complexity ceiling
+kg api src/                   # public/exported symbol inventory
+kg files --path src           # indexed file inventory (symbols, bytes, generated)
+kg resolve < names.txt        # batch name resolution: found/ambiguous/missing
+kg stats                      # index totals (includes generated count)
 kg usage                      # usage-journal summary: calls, latency, rates
 kg usage --verify             # replay-verify sampled payload pointers: OK/CHANGED/FAIL
 kg mcp                        # MCP stdio server, JSON-RPC 2.0
@@ -80,9 +90,9 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 ## Agent integration
 
-- **MCP**: `kg mcp` serves 14 of 16 subcommands as JSON-RPC tools over stdio
-  (`doctor` is CLI-only);
-  tool results are byte-identical to CLI stdout (conformance-tested).
+- **MCP**: `kg mcp` serves every query subcommand except `doctor` as
+  JSON-RPC tools over stdio; tool results are byte-identical to CLI stdout
+  (conformance-tested).
 - **Skill**: [`skills/kg-first/SKILL.md`](skills/kg-first/SKILL.md) is the
   measured routing policy for code agents — when to query kg first, how to
   handle ambiguous names and result caps, and when to fall back to grep.

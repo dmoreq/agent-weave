@@ -19,11 +19,17 @@ source:
 | what does this call (transitive) | `kg callees <name> --depth N` |
 | does A reach B, via which call sites | `kg path <from> <to>` — one shortest route; reverse question = swap the arguments |
 | what surrounds this symbol (callers + callees + signature) | `kg context <name>` — one call replaces composing callers/callees/symbols |
-| which files call into a file | `kg impact <file>` |
+| who inherits/implements a type | `kg implementers <name>` — resolved `inherits` edges only; cross-file impls omitted |
+| which tests reach this symbol/file | `kg tests <name|file>` — static call-edge candidates only |
+| what does this file import | `kg imports <file>` — outbound resolved imports |
+| which files depend on a file | `kg impact <file>`; add `--edges calls,imports,inherits --depth N` for the dependency closure |
+| what is the public surface | `kg api <file|dir>` — static export heuristics |
+| which functions exceed complexity/length | `kg complexity --min-cyc 11` — cyclomatic/branches/nesting/effective LOC, not cognitive complexity |
+| what is in this directory | `kg symbols <dir> --outline`; `kg files --path <dir>` for the file inventory |
 | find a symbol by (partial) name, qualified path, or signature vocabulary | `kg search <terms>` — qualified input matches the exact phrase; exact names rank first; plurals fall back to stems |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |
 | is this logic duplicated elsewhere | `kg clones [--min-lines N]` — candidates only, never proof; spans name the enclosing symbol per side |
-| what is risky / dead / unresolved | `kg hotspots`, `kg dead`, `kg unresolved` — `[internal]` marks names that exist in the index (a resolver gap), other names are external/library calls |
+| what is risky / dead / unresolved | `kg hotspots`, `kg dead --exclude-tests`, `kg unresolved`; `kg unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
 
 Use grep/rg **only** for what kg cannot answer or to verify one specific line.
 Do not re-derive with grep what kg has already answered — that doubles the
@@ -50,6 +56,10 @@ context you carry for zero information gain.
    edge is unresolved, so repeated no-path results likely reflect the
    52-90% unresolved call-site share (10-48% resolution coverage), not a missing connection — fall back to
    composing `callees`/`callers` or grep instead of re-querying `path`.
+4. **Static-surface caveats**: `implementers`, `imports`, `tests`, `api`, and
+   `complexity` are static. Import/inherit coverage is unmeasured; a negative
+   is not proof. `tests` misses Rust `#[test]` names outside `test_*` and TS
+   `describe`/`it` callbacks. `dead` is a candidate list, not proof.
 
 ## Staleness discipline
 

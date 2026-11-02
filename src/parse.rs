@@ -130,7 +130,10 @@ pub fn non_comment_loc(bytes: &[u8], root: Node<'_>) -> i64 {
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
-        if node.kind() == "comment" {
+        if matches!(
+            node.kind(),
+            "comment" | "line_comment" | "block_comment" | "doc_comment"
+        ) {
             ranges.push((node.start_byte(), node.end_byte()));
         }
         let mut cursor = node.walk();

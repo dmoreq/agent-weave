@@ -7,6 +7,67 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added — P8 structural graph (Amendment 19, schema v6)
+
+- `kg implementers <name>`: resolved inbound `inherits` edges; Rust
+  `trait_item`/`function_signature_item` and TS `interface_declaration`
+  extraction; same-file Rust `impl Trait for Type`; cross-file impls are a
+  documented limit.
+- `kg imports <file>`: outbound resolved imports for Python plain/dotted/
+  relative/star, TS relative/side-effect/require, and Rust `use`/`mod`;
+  unresolved imports are stored as `unresolved_calls(kind='import')`.
+- `kg tests <name|file>`: reverse call-edge test candidates with explicit
+  static-resolution caveats and depth/truncation reporting.
+- `kg impact` gains `--edges calls,imports,inherits,all`, `--depth N`,
+  `--context`, and `--explain`; the default grouped output is unchanged.
+- `kg symbols <dir> --outline`, `kg files`, `kg complexity`, `kg api`, and
+  `kg resolve --stdin`.
+- `kg unresolved --names`: `path:line kind name` sites with the `kind`
+  column and real site lines.
+- `kg dead` now treats inbound imports/inherits as usage, excludes
+  trait/interface signature methods, and supports `--exclude-generated`;
+  test exclusion uses `tests`/`test`/`__tests__` segments and filename globs.
+- Schema v6 additive: per-symbol `cyclomatic`/`branches`/`nesting`/
+  `effective_loc`/`exported`, `files.generated`, and
+  `unresolved_calls.kind`/`site_line`; the fast-path probe verifies every
+  new column and the complexity index, and `metrics_version` invalidates
+  formula changes.
+- Generated-file tagging (path suffix or first-five-line marker) surfaces
+  `generated=N` in `kg stats`.
+- MCP tools added for `implementers`, `imports`, `tests`, `complexity`,
+  `api`, `files`, and `resolve`; `impact`, `dead`, `symbols`, `search`,
+  `unresolved`, `clones`, `hotspots`, and `report` gained their new flags.
+
+### Fixed — P8 implementation review (R9)
+
+- `dead` trait/interface parent exclusion is materialized and indexable:
+  2,025-file corpus 15.57 s -> 0.14 s; 1M-symbol COUNT no longer scans
+  symbols².
+- Import edges are deduplicated and reconciled: one edge per
+  `(source, destination, site)`, parent-package edges for dotted imports,
+  no unresolved row when any candidate resolved, star/self duplicates
+  removed.
+- Inheritance ignores generic arguments and scoped-path leaves; lexical
+  namespace/inline-mod bases resolve; AMBIGUOUS and unresolved `inherit`
+  rows are written; Rust impl-trait edges no longer enter `class_bases`;
+  Rust impl targets resolve by full qualname and reject tuple/pointer types.
+- `kg tests` requires `function|method`, skips seed tests, normalizes `./`,
+  and chunks BFS frontiers at 500 ids.
+- `kg report --path/--exclude-generated` no longer crashes on the section-4
+  alias; `complexity`, `api`, `files`, `unresolved --names`, and
+  `symbols <dir>` use SQL LIMIT + COUNT; `symbols <dir>` is one query.
+- `kg api` now reads the populated `exported` flag, includes signatures,
+  supports repo-root `.`, and follows Python `__all__`, Rust `pub`, and TS
+  `export` rules.
+- `kg resolve` requires `--stdin`, enforces 1,000 names / 4,096-byte lines /
+  1 MiB, journals count/candidate_limit, and MCP sets `isError`.
+- `search --exact` uses the untokenized input (case-sensitive); `--path`
+  inputs are validated (exit 2); empty results carry their caveats.
+- `effective_loc` handles docstrings and block comments; Rust
+  `non_comment_loc` recognizes `line_comment`/`block_comment`; Python
+  `match_statement` is no longer double-counted; trait signature methods
+  store zero metrics; generated marker scan no longer caps at 4 KB.
+
 ## [0.2.1] - 2026-11-02
 
 ### Fixed — R7 accuracy, utility, and latency hardening (Amendment 18)

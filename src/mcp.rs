@@ -39,25 +39,39 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"from": {"type": "string"}, "to": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum hops (default 10)"}}), &["from", "to"])},
         {"name": "context", "description": "One-call symbol context: definition + signature, direct callers, direct callees over resolved edges",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Callers/callees shown per section (default 10)"}}), &["name"])},
-        {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; sites=true lists every call site",
-         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "sites": {"type": "boolean"}, "limit": limit}), &["file"])},
-        {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof; exclude_tests drops tests/ and test_* symbols",
-         "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "limit": limit}), &[])},
-        {"name": "unresolved", "description": "Per-file unresolved-callee counts — where kg could not resolve",
-         "inputSchema": schema_obj(json!({"limit": limit}), &[])},
-        {"name": "symbols", "description": "Symbols of one indexed file, ordered by line; optional outline adds the one-line signature column",
-         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "outline": {"type": "boolean"}, "limit": limit}), &["file"])},
-        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms",
-         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "limit": limit}), &["terms"])},
+        {"name": "implementers", "description": "Who inherits from or implements this symbol — resolved inherits edges only; cross-file impls omitted",
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": limit}), &["name"])},
+        {"name": "imports", "description": "What does this file import — outbound resolved imports; external/unresolved omitted",
+         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "limit": limit}), &["file"])},
+        {"name": "tests", "description": "Which tests reach this symbol or file — static call-edge candidates only",
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
+        {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; sites=true lists every call site; edges/depth extend the dependency set",
+         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "sites": {"type": "boolean"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "edges": {"type": "string"}, "context": {"type": "boolean"}, "explain": {"type": "boolean"}, "limit": limit}), &["file"])},
+        {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof; exclude_tests/generated and path scope filters",
+         "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "exclude_generated": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
+        {"name": "unresolved", "description": "Per-file unresolved-callee counts, or names=true for path:line kind name sites",
+         "inputSchema": schema_obj(json!({"names": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
+        {"name": "symbols", "description": "Symbols of one indexed file or directory, ordered by line; outline adds signatures, metrics adds per-symbol metrics",
+         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "outline": {"type": "boolean"}, "metrics": {"type": "boolean"}, "limit": limit}), &["file"])},
+        {"name": "complexity", "description": "Per-symbol complexity ranking: cyclomatic, branches, nesting, effective LOC",
+         "inputSchema": schema_obj(json!({"min_cyc": {"type": "integer", "minimum": 0}, "min_loc": {"type": "integer", "minimum": 0}, "min_branches": {"type": "integer", "minimum": 0}, "min_nest": {"type": "integer", "minimum": 0}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &[])},
+        {"name": "api", "description": "Public/exported symbol inventory for a file or directory",
+         "inputSchema": schema_obj(json!({"path": {"type": "string"}, "include_private": {"type": "boolean"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &["path"])},
+        {"name": "files", "description": "Indexed file inventory with symbol/byte counts and generated tag",
+         "inputSchema": schema_obj(json!({"path": {"type": "string"}, "limit": limit}), &[])},
+        {"name": "resolve", "description": "Batch-resolve names: found/ambiguous/missing per name",
+         "inputSchema": schema_obj(json!({"names": {"type": "array", "items": {"type": "string"}, "maxItems": 1000}}), &["names"])},
+        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms; kind/path/exact filters",
+         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "kind": {"type": "string"}, "path": {"type": "string"}, "exact": {"type": "boolean"}, "limit": limit}), &["terms"])},
         {"name": "clones", "description": "Duplicate-block candidates: merged 5-line shingle windows, paired",
-         "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "limit": limit}), &[])},
+         "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &[])},
 
         {"name": "stats", "description": "Index totals: files, symbols, edges, parse errors, sizes",
          "inputSchema": schema_obj(json!({}), &[])},
         {"name": "hotspots", "description": "Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density",
-         "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}}), &[])},
+         "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}}), &[])},
         {"name": "report", "description": "Four-section architecture report",
-         "inputSchema": schema_obj(json!({}), &[])},
+         "inputSchema": schema_obj(json!({"path": {"type": "string"}, "exclude_generated": {"type": "boolean"}}), &[])},
         {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates; verify=true replays sampled payload pointers (Amendment 10)",
          "inputSchema": schema_obj(json!({"verify": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10000}}), &[])},
     ])
@@ -241,15 +255,25 @@ fn write_error(
 /// Required string arguments per tool, mirroring inputSchema `required`.
 fn required_args(tool: &str) -> &'static [&'static str] {
     match tool {
-        "callers" | "callees" | "context" => &["name"],
+        "callers" | "callees" | "context" | "implementers" | "tests" => &["name"],
         "path" => &["from", "to"],
-        "impact" | "symbols" => &["file"],
+        "impact" | "symbols" | "imports" => &["file"],
+        "api" => &["path"],
+        "resolve" => &["names"],
         "search" => &["terms"],
         _ => &[],
     }
 }
 
 fn missing_required_arg(tool: &str, args: &Value) -> Option<String> {
+    if tool == "resolve" {
+        let absent = args
+            .get("names")
+            .and_then(|v| v.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(true);
+        return absent.then(|| "missing required argument 'names' for tool 'resolve'".to_string());
+    }
     required_args(tool).iter().find_map(|key| {
         let absent = arg_str(args, key)
             .map(|v| v.trim().is_empty())
@@ -278,6 +302,7 @@ fn call_tool(root: &Path, tool: &str, args: &Value) -> (String, bool, i32) {
     let outcome: crate::error::Result<String> = dispatch_tool(root, tool, args);
     match outcome {
         Ok(text) => (text, false, 0),
+        Err(KgError::BatchOutput { text, code }) => (text, true, code),
         Err(e) => {
             let mut text = String::new();
             if let KgError::NoResultsCaveated { caveat, .. } = &e {
@@ -342,6 +367,40 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 arg_usize(args, "limit", 10),
             )?))
         }
+        "implementers" => {
+            let conn = crate::db::open_for_query(root)?;
+            let out = crate::query::implementers(
+                &conn,
+                root,
+                &arg_str(args, "name").unwrap_or_default(),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?;
+            record(&out);
+            Ok(crate::query::render_output(&out))
+        }
+        "imports" => {
+            let conn = crate::db::open_for_query(root)?;
+            let out = crate::query::imports(
+                &conn,
+                root,
+                &arg_str(args, "file").unwrap_or_default(),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?;
+            record(&out);
+            Ok(crate::query::render_output(&out))
+        }
+        "tests" => {
+            let conn = crate::db::open_for_query(root)?;
+            let out = crate::query::test_impact(
+                &conn,
+                root,
+                &arg_str(args, "name").unwrap_or_default(),
+                arg_usize(args, "depth", 10),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?;
+            record(&out);
+            Ok(crate::query::render_output(&out))
+        }
         "path" => {
             let conn = crate::db::open_for_query(root)?;
             Ok(join_lines(&crate::query::path(
@@ -360,6 +419,10 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &arg_str(args, "file").unwrap_or_default(),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
                 arg_bool(args, "sites"),
+                arg_usize(args, "depth", 1),
+                &arg_str(args, "edges").unwrap_or_else(|| "calls".to_string()),
+                arg_bool(args, "context"),
+                arg_bool(args, "explain"),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
@@ -371,16 +434,28 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
                 arg_bool(args, "exclude_tests"),
+                arg_bool(args, "exclude_generated"),
+                arg_str(args, "path").as_deref(),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
         }
         "unresolved" => {
             let conn = crate::db::open_for_query(root)?;
-            Ok(join_lines(&crate::query::unresolved(
-                &conn,
-                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
-            )?))
+            if arg_bool(args, "names") {
+                Ok(join_lines(&crate::query::unresolved_names(
+                    &conn,
+                    root,
+                    arg_str(args, "path").as_deref(),
+                    arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+                )?))
+            } else {
+                Ok(join_lines(&crate::query::unresolved(
+                    &conn,
+                    arg_str(args, "path").as_deref(),
+                    arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+                )?))
+            }
         }
         "symbols" => {
             let conn = crate::db::open_for_query(root)?;
@@ -393,8 +468,59 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 &arg_str(args, "file").unwrap_or_default(),
                 outline,
+                arg_bool(args, "metrics"),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
+        }
+        "complexity" => {
+            let conn = crate::db::open_for_query(root)?;
+            Ok(join_lines(&crate::query::complexity(
+                &conn,
+                arg_usize(args, "min_cyc", 1),
+                arg_usize(args, "min_loc", 0),
+                arg_usize(args, "min_branches", 0),
+                arg_usize(args, "min_nest", 0),
+                arg_str(args, "path").as_deref(),
+                arg_bool(args, "exclude_generated"),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
+        }
+        "api" => {
+            let conn = crate::db::open_for_query(root)?;
+            Ok(join_lines(&crate::query::api(
+                &conn,
+                root,
+                &arg_str(args, "path").unwrap_or_default(),
+                arg_bool(args, "include_private"),
+                arg_bool(args, "exclude_generated"),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
+        }
+        "files" => {
+            let conn = crate::db::open_for_query(root)?;
+            Ok(join_lines(&crate::query::files(
+                &conn,
+                arg_str(args, "path").as_deref(),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
+        }
+        "resolve" => {
+            let conn = crate::db::open_for_query(root)?;
+            let names: Vec<String> = args
+                .get("names")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let (lines, exit) = crate::query::resolve_names(&conn, &names)?;
+            let text = join_lines(&lines);
+            if exit != 0 {
+                return Err(crate::error::KgError::BatchOutput { text, code: exit });
+            }
+            Ok(text)
         }
         "search" => {
             let conn = crate::db::open_for_query(root)?;
@@ -402,6 +528,9 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &conn,
                 root,
                 &arg_str(args, "terms").unwrap_or_default(),
+                arg_str(args, "kind").as_deref(),
+                arg_str(args, "path").as_deref(),
+                arg_bool(args, "exact"),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
@@ -416,6 +545,8 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &conn,
                 root,
                 min_lines,
+                arg_str(args, "path").as_deref(),
+                arg_bool(args, "exclude_generated"),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
@@ -427,10 +558,14 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             &crate::db::open_for_query(root)?,
             root,
             arg_usize(args, "limit", 10),
+            arg_str(args, "path").as_deref(),
+            arg_bool(args, "exclude_generated"),
         )?)),
         "report" => Ok(join_lines(&crate::insights::report(
             &crate::db::open_for_query(root)?,
             root,
+            arg_str(args, "path").as_deref(),
+            arg_bool(args, "exclude_generated"),
         )?)),
         "usage" => {
             if args
@@ -513,6 +648,13 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 out.push(("file", file));
             }
             out.push(("sites", arg_bool(args, "sites").to_string()));
+            out.push(("depth", arg_usize(args, "depth", 1).to_string()));
+            out.push((
+                "edges",
+                arg_str(args, "edges").unwrap_or_else(|| "calls".to_string()),
+            ));
+            out.push(("context", arg_bool(args, "context").to_string()));
+            out.push(("explain", arg_bool(args, "explain").to_string()));
             out.push((
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
@@ -527,6 +669,7 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             out.push(("outline", outline.to_string()));
+            out.push(("metrics", arg_bool(args, "metrics").to_string()));
             out.push((
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
@@ -534,21 +677,104 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "dead" => {
             out.push(("exclude_tests", arg_bool(args, "exclude_tests").to_string()));
+            out.push((
+                "exclude_generated",
+                arg_bool(args, "exclude_generated").to_string(),
+            ));
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
         }
-        "unresolved" | "hotspots" => {
+        "unresolved" => {
+            out.push(("names", arg_bool(args, "names").to_string()));
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "hotspots" => {
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push((
+                "exclude_generated",
+                arg_bool(args, "exclude_generated").to_string(),
+            ));
+            out.push(("limit", arg_usize(args, "limit", 10).to_string()));
+        }
+        "implementers" => {
+            out.push(("name", arg_str(args, "name").unwrap_or_default()));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "imports" => {
+            out.push(("file", arg_str(args, "file").unwrap_or_default()));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "tests" => {
+            out.push(("name", arg_str(args, "name").unwrap_or_default()));
+            out.push(("depth", arg_usize(args, "depth", 10).to_string()));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "complexity" => {
+            out.push(("min_cyc", arg_usize(args, "min_cyc", 1).to_string()));
+            out.push(("min_loc", arg_usize(args, "min_loc", 0).to_string()));
+            out.push((
+                "min_branches",
+                arg_usize(args, "min_branches", 0).to_string(),
+            ));
+            out.push(("min_nest", arg_usize(args, "min_nest", 0).to_string()));
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push((
+                "exclude_generated",
+                arg_bool(args, "exclude_generated").to_string(),
+            ));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "api" => {
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push((
+                "include_private",
+                arg_bool(args, "include_private").to_string(),
+            ));
+            out.push((
+                "exclude_generated",
+                arg_bool(args, "exclude_generated").to_string(),
+            ));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "files" => {
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "report" => {
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push((
+                "exclude_generated",
+                arg_bool(args, "exclude_generated").to_string(),
+            ));
+        }
+        "resolve" => {
+            let n = args
+                .get("names")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            out.push(("count", n.to_string()));
+            out.push(("candidate_limit", "50".to_string()));
         }
         "search" => {
             if let Some(terms) = arg_str(args, "terms") {
                 out.push(("terms", terms));
             }
+            out.push(("kind", arg_str(args, "kind").unwrap_or_default()));
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push(("exact", arg_bool(args, "exact").to_string()));
             out.push((
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
             ));
         }
         "clones" => {
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+            out.push((
+                "exclude_generated",
+                arg_bool(args, "exclude_generated").to_string(),
+            ));
             out.push((
                 "min_lines",
                 args.get("min_lines")

@@ -2,8 +2,9 @@
 //! snapshot invariant, exercised against a throwaway fixture repo.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn temp_repo(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("kg-it-{}-{}", name, std::process::id()));
@@ -206,7 +207,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v5 — run kg build"),
+        stderr.contains("schema v99, binary expects v6 — run kg build"),
         "{stderr}"
     );
 }
@@ -535,6 +536,450 @@ fn dead_lists_uncalled_and_excludes_called() {
         !stdout.contains("widget.py:2"),
         "render is called: {stdout}"
     );
+}
+
+#[test]
+fn implementers_lists_subclasses_and_dead_keeps_inherited_base() {
+    let repo = temp_repo("implementers");
+    write(
+        &repo,
+        "hier.py",
+        "class Base:\n    def run(self):\n        pass\n\nclass Child(Base):\n    pass\n\nclass Uses(Base):\n    pass\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["implementers", "Base"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.starts_with("kg: implementers — resolved static inherits edges only"),
+        "caveat first: {stdout}"
+    );
+    assert!(stdout.contains("hier.py:5 hier.Child"), "{stdout}");
+    assert!(stdout.contains("hier.py:8 hier.Uses"), "{stdout}");
+
+    let out = kg(&repo).args(["dead"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("hier.py:1"),
+        "Base has inheritors and is not dead: {stdout}"
+    );
+}
+
+#[test]
+fn implementers_resolves_rust_trait_impl_same_file() {
+    let repo = temp_repo("rust-trait");
+    write(
+        &repo,
+        "lib.rs",
+        "pub trait Greet {\n    fn hello(&self);\n}\n\npub struct English;\n\nimpl Greet for English {\n    fn hello(&self) {}\n}\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["symbols", "lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("trait lib.Greet"), "{stdout}");
+    assert!(stdout.contains("class lib.English"), "{stdout}");
+
+    let out = kg(&repo).args(["implementers", "Greet"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("lib.rs:5 lib.English"), "{stdout}");
+}
+
+#[test]
+fn impact_edges_include_importers_and_inheritors() {
+    let repo = temp_repo("impact-edges");
+    write(
+        &repo,
+        "hier.py",
+        "class Base:\n    pass\n\nclass Child(Base):\n    pass\n",
+    );
+    write(&repo, "imports.py", "from hier import Base\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "hier.py", "--edges", "imports"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("imports.py:1"), "{stdout}");
+    assert!(
+        stdout.starts_with("kg: impact — resolved static edges only"),
+        "caveat first: {stdout}"
+    );
+
+    let out = kg(&repo)
+        .args(["impact", "hier.py", "--edges", "inherits"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("hier.py:4"), "{stdout}");
+}
+
+#[test]
+fn impact_depth_two_reaches_transitive_callers() {
+    let repo = temp_repo("impact-depth");
+    write(&repo, "c.py", "def h():\n    pass\n");
+    write(&repo, "b.py", "from c import h\n\ndef g():\n    h()\n");
+    write(&repo, "a.py", "from b import g\n\ndef f():\n    g()\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "c.py", "--depth", "2", "--edges", "calls"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("b.py"), "{stdout}");
+    assert!(stdout.contains("a.py"), "{stdout}");
+}
+
+#[test]
+fn symbols_directory_groups_files_and_counts_symbols() {
+    let repo = temp_repo("symbols-dir");
+    write(&repo, "pkg/a.py", "def a():\n    pass\n");
+    write(&repo, "pkg/b.py", "def b():\n    pass\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["symbols", "pkg", "--outline"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("kg: dir pkg — 2 files"), "{stdout}");
+    assert!(stdout.contains("pkg/a.py"), "{stdout}");
+    assert!(stdout.contains("pkg/b.py"), "{stdout}");
+    assert!(stdout.contains("function pkg.a.a"), "{stdout}");
+}
+
+#[test]
+fn import_edges_cover_plain_and_from_imports() {
+    let repo = temp_repo("import-edges");
+    write(&repo, "a.py", "def only():\n    pass\n");
+    write(
+        &repo,
+        "b.py",
+        "from a import only\n\ndef use():\n    only()\n",
+    );
+    write(&repo, "c.py", "import a\n");
+    write(&repo, "d.py", "from a import only\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--edges", "imports"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("b.py:1"), "{stdout}");
+    assert!(stdout.contains("c.py:1"), "plain import edge: {stdout}");
+    assert!(stdout.contains("d.py:1"), "{stdout}");
+}
+
+#[test]
+fn imports_lists_outbound_resolved_edges() {
+    let repo = temp_repo("imports-cmd");
+    write(&repo, "a.py", "def only():\n    pass\n");
+    write(
+        &repo,
+        "b.py",
+        "from a import only\n\ndef use():\n    only()\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "b.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.starts_with("kg: imports —"), "{stdout}");
+    assert!(stdout.contains("b.py:1 a.only"), "{stdout}");
+}
+
+#[test]
+fn tests_command_finds_direct_and_indirect_tests() {
+    let repo = temp_repo("tests-cmd");
+    write(&repo, "src/core.py", "def f():\n    pass\n");
+    write(
+        &repo,
+        "tests/test_core.py",
+        "from src.core import f\n\ndef test_direct():\n    f()\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["tests", "f"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.starts_with("kg: test candidates —"), "{stdout}");
+    assert!(stdout.contains("tests/test_core.py:3"), "{stdout}");
+}
+
+#[test]
+fn unresolved_names_lists_sites_with_kind() {
+    let repo = temp_repo("unresolved-names");
+    write(&repo, "app.py", "def f():\n    missing_thing()\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("kg: unresolved=1 rows"), "{stdout}");
+    assert!(stdout.contains("app.py:2 call missing_thing"), "{stdout}");
+}
+
+#[test]
+fn complexity_ranks_symbols_and_symbols_metrics_append() {
+    let repo = temp_repo("complexity");
+    write(
+        &repo,
+        "app.py",
+        "def f(x):\n    if x:\n        return 1\n    elif x == 2:\n        return 2\n    return 0\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["symbols", "app.py", "--metrics"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("cyc=3"), "{stdout}");
+    assert!(stdout.contains("branches=2"), "{stdout}");
+
+    let out = kg(&repo)
+        .args(["complexity", "--min-cyc", "2"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.starts_with("kg: complexity —"), "{stdout}");
+    assert!(stdout.contains("app.py:1 cyc=3"), "{stdout}");
+}
+
+#[test]
+fn api_lists_public_symbols_and_include_private() {
+    let repo = temp_repo("api");
+    write(
+        &repo,
+        "app.py",
+        "def public():\n    pass\n\ndef _private():\n    pass\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["api", "app.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("function app.public"), "{stdout}");
+    assert!(!stdout.contains("_private"), "{stdout}");
+
+    let out = kg(&repo)
+        .args(["api", "app.py", "--include-private"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("function app._private"), "{stdout}");
+}
+
+#[test]
+fn files_lists_indexed_inventory_and_generated_tag() {
+    let repo = temp_repo("files-cmd");
+    write(&repo, "src/a.py", "def a():\n    pass\n");
+    write(
+        &repo,
+        "src/gen.pb.py",
+        "# Code generated by tool. DO NOT EDIT.\ndef g():\n    pass\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["files", "--path", "src"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("src/a.py symbols="), "{stdout}");
+    assert!(stdout.contains("generated=1"), "{stdout}");
+}
+
+#[test]
+fn resolve_batch_reports_found_and_missing_with_exit1() {
+    let repo = temp_repo("resolve");
+    write(&repo, "app.py", "def public():\n    pass\n");
+    build(&repo);
+
+    let mut child = kg(&repo)
+        .args(["resolve", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"public\nmissing_thing\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains("found public app.py:1 app.public"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("missing missing_thing"), "{stdout}");
+}
+
+#[test]
+fn search_filters_kind_path_and_exact() {
+    let repo = temp_repo("search-filters");
+    write(
+        &repo,
+        "app.py",
+        "def public():\n    pass\n\nclass Public:\n    pass\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["search", "public", "--kind", "function", "--path", "app.py"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("app.public"), "{stdout}");
+    assert!(!stdout.contains("app.Public"), "{stdout}");
+
+    let out = kg(&repo)
+        .args(["search", "app.Public", "--exact"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("app.Public"), "{stdout}");
+}
+
+#[test]
+fn import_edges_dedup_and_resolved_imports_are_not_unresolved() {
+    let repo = temp_repo("import-dedup");
+    write(&repo, "pkg/__init__.py", "");
+    write(&repo, "pkg/mod.py", "def b():\n    pass\n");
+    write(&repo, "c.py", "from pkg.mod import b\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "c.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert_eq!(stdout.matches("c.py:1 pkg.mod.b").count(), 1, "{stdout}");
+    assert!(stdout.contains("c.py:1 pkg.mod"), "{stdout}");
+
+    let out = kg(&repo).args(["unresolved", "--names"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn inheritance_ignores_generic_arguments_and_external_paths() {
+    let repo = temp_repo("inherit-false-edges");
+    write(
+        &repo,
+        "a.ts",
+        "class T {}\nclass Base<X> {}\nclass C extends Base<T> {}\n",
+    );
+    write(
+        &repo,
+        "lib.rs",
+        "trait AppError: std::error::Error {}\nstruct std;\nstruct error;\nstruct Error;\n",
+    );
+    build(&repo);
+
+    for name in ["T", "std", "error", "Error"] {
+        let out = kg(&repo).args(["implementers", name]).output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+}
+
+#[test]
+fn api_respects_python_all_and_rust_visibility() {
+    let repo = temp_repo("api-visibility");
+    write(
+        &repo,
+        "all_mod.py",
+        "__all__ = [\"kept\"]\ndef kept():\n    pass\ndef dropped():\n    pass\n",
+    );
+    write(
+        &repo,
+        "lib.rs",
+        "pub fn public_fn() {}\npub(crate) fn crate_only() {}\nfn private_fn() {}\n",
+    );
+    write(
+        &repo,
+        "a.ts",
+        "export function exported() {}\nfunction local() {}\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["api", "all_mod.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("all_mod.kept"), "{stdout}");
+    assert!(!stdout.contains("all_mod.dropped"), "{stdout}");
+
+    let out = kg(&repo).args(["api", "lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("rust_api.public_fn") || stdout.contains("lib.public_fn"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("crate_only"), "{stdout}");
+    assert!(!stdout.contains("private_fn"), "{stdout}");
+
+    let out = kg(&repo).args(["api", "a.ts"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("a.exported"), "{stdout}");
+    assert!(!stdout.contains("a.local"), "{stdout}");
+}
+
+#[test]
+fn tests_ignores_module_symbols_named_like_tests() {
+    let repo = temp_repo("tests-kind");
+    write(&repo, "src/core.py", "def f():\n    pass\n");
+    write(
+        &repo,
+        "pkg/test_service.py",
+        "from src.core import f\nf()\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["tests", "f"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn search_exact_is_case_sensitive() {
+    let repo = temp_repo("search-exact-case");
+    write(&repo, "base.py", "class Base:\n    pass\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["search", "Base", "--exact"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("base.Base"), "{stdout}");
+    assert!(!stdout.contains("module base"), "{stdout}");
 }
 
 #[test]
@@ -1245,6 +1690,43 @@ fn g5_no_child_processes_survive() {
 }
 
 #[test]
+fn report_path_and_exclude_generated_do_not_crash() {
+    let repo = temp_repo("report-flags");
+    write(&repo, "pkg/a.py", "def a():\n    pass\n");
+    write(
+        &repo,
+        "pkg/gen.py",
+        "# Code generated by tool. DO NOT EDIT.\ndef g():\n    pass\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["report", "--path", "pkg"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("scoped files="), "{stdout}");
+
+    let out = kg(&repo)
+        .args(["report", "--path", "pkg", "--exclude-generated"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn p15_stats_hotspots_report() {
     let repo = fixture("p15");
     build(&repo);
@@ -1285,6 +1767,31 @@ fn p15_stats_hotspots_report() {
     ] {
         assert!(stdout.contains(section), "missing {section}: {stdout}");
     }
+}
+
+#[test]
+fn partial_v6_index_rebuilds_fresh() {
+    // Amendment 19: a v6-stamped index missing a required index must disable
+    // the fast path and rebuild, not fail carry-forward.
+    let repo = fixture("partial-v6");
+    build(&repo);
+    let idx = repo.join(".kg/index.db");
+    let status = std::process::Command::new("sqlite3")
+        .args([
+            idx.to_string_lossy().as_ref(),
+            "DROP INDEX symbols_complexity_idx;",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "sqlite3 demotion failed (fixture-only tool)"
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(
+        code, 0,
+        "rebuild over partial v6 index failed: {stdout}{stderr}"
+    );
 }
 
 #[test]
