@@ -228,9 +228,12 @@ pub fn old_error_count(old: &Connection, rels: &[String]) -> Result<usize> {
 /// id — and any file calling into a re-extracted file needs the same treatment.
 /// Returns changed + closure; the caller moves the carried members to `fresh`.
 pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<String>> {
+    // Work-queue (R6f Blocker 4): each round queries only the NEWLY dirtied
+    // paths, not the whole accumulated set. The old fixed-point re-queried
+    // everything each round — O(N^2) on long dependency chains.
     let mut dirty: HashSet<String> = changed.iter().cloned().collect();
-    loop {
-        let mut frontier: Vec<String> = dirty.iter().cloned().collect();
+    let mut frontier: Vec<String> = changed.to_vec();
+    while !frontier.is_empty() {
         frontier.sort();
         let mut new_paths: HashSet<String> = HashSet::new();
         for chunk in frontier.chunks(500) {
@@ -252,10 +255,9 @@ pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<Str
                 }
             }
         }
-        if new_paths.is_empty() {
-            break;
-        }
-        dirty.extend(new_paths);
+        let next: Vec<String> = new_paths.into_iter().collect();
+        dirty.extend(next.iter().cloned());
+        frontier = next;
     }
     Ok(dirty)
 }

@@ -68,13 +68,15 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     // Dirty closure (fast-path correctness): a carried file with any edge into
     // a changed file must be re-extracted, or its copied edge dies with the old
     // destination id (transitive: callers of re-extracted files too).
+    let by_rel: std::collections::HashMap<&str, &crate::walk::WalkedFile> =
+        stats.files.iter().map(|f| (f.rel.as_str(), f)).collect();
     if let Some(c) = &old {
         let changed: Vec<String> = fresh.iter().map(|f| f.rel.clone()).collect();
         if !changed.is_empty() {
             let dirty = crate::db::dirty_closure(c, &changed)?;
             for rel in dirty {
                 if carried.remove(&rel) {
-                    if let Some(f) = stats.files.iter().find(|f| f.rel == rel) {
+                    if let Some(f) = by_rel.get(rel.as_str()) {
                         fresh.push(crate::walk::WalkedFile {
                             abs: f.abs.clone(),
                             rel: f.rel.clone(),
@@ -121,7 +123,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
             let mut second: Vec<crate::walk::WalkedFile> = Vec::new();
             for rel in gap {
                 if carried.remove(&rel) {
-                    if let Some(f) = stats.files.iter().find(|f| f.rel == rel) {
+                    if let Some(f) = by_rel.get(rel.as_str()) {
                         second.push(crate::walk::WalkedFile {
                             abs: f.abs.clone(),
                             rel: f.rel.clone(),

@@ -12,6 +12,9 @@ use crate::error::{KgError, Result};
 use crate::hash::fnv1a64;
 
 pub const DEFAULT_LIMIT: usize = 50;
+/// Cap on rendered ambiguous-name candidates (R6f: common method names could
+/// print megabytes; the total count still travels in the error).
+pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
 
 /// Permanent honesty caveat for `kg dead` (Amendment 5): candidates, not proof.
@@ -84,13 +87,19 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>
     })?;
     let mut ids = Vec::new();
     let mut cands = Vec::new();
+    let mut seen_ids: std::collections::HashSet<i64> = Default::default();
     for row in rows {
         let (id, qualname, sname, path, line) = row?;
         // Dedupe by id: a symbol whose bare name equals its qualname matches
-        // both WHERE branches and must not create a false ambiguity.
-        if !ids.contains(&id) {
+        // both WHERE branches and must not create a false ambiguity. O(1)
+        // membership (R6f: a Vec::contains scan was quadratic).
+        if seen_ids.insert(id) {
             ids.push(id);
-            cands.push((path, line, qualname));
+            // Render cap only (R6f): the error carries `total` separately and
+            // the caller prints at most MAX_AMBIGUOUS_CANDIDATES lines.
+            if cands.len() < MAX_AMBIGUOUS_CANDIDATES {
+                cands.push((path, line, qualname));
+            }
         }
         let _ = sname;
     }
@@ -108,18 +117,29 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         // candidate list travels IN the error so non-CLI surfaces render it.
         return Err(KgError::Ambiguous {
             name: name.to_string(),
+            total: ids.len(),
             candidates: cands,
             role: None,
         });
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM edges e WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
+    );
+    let count_params: Vec<rusqlite::types::Value> =
+        ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+    let total: usize = conn.query_row(
+        &count_sql,
+        rusqlite::params_from_iter(count_params.iter()),
+        |r| r.get::<_, i64>(0),
+    )? as usize;
     let sql = format!(
         "SELECT e.site_line, e.confidence, f.path
          FROM edges e
          JOIN symbols s ON s.id = e.src_id
          JOIN files f ON f.id = s.file_id
          WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
-         ORDER BY f.path, e.site_line"
+         ORDER BY f.path, e.site_line LIMIT {limit}"
     );
     let mut stmt = conn.prepare(&sql)?;
     let params: Vec<rusqlite::types::Value> = ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
@@ -141,6 +161,7 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         rows,
         limit,
         "0 callers found (dynamic dispatch possible — grep fallback recommended)",
+        Some(total),
     )
 }
 
@@ -160,6 +181,7 @@ pub fn callees(
     if cands.len() > 1 {
         return Err(KgError::Ambiguous {
             name: name.to_string(),
+            total: ids.len(),
             candidates: cands,
             role: None,
         });
@@ -167,8 +189,19 @@ pub fn callees(
     // Callee pointer: the callee's definition line. AMBIGUOUS edges have no
     // dst symbol; they surface as the call site itself with the ambiguous tag.
     // depth > 1: recursive closure over call edges from the reached set.
+    let mut total_opt: Option<usize> = None;
     let (sql, params): (String, Vec<rusqlite::types::Value>) = if depth == 1 {
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM edges e WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
+        );
+        let count_params: Vec<rusqlite::types::Value> =
+            ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+        total_opt = Some(conn.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(count_params.iter()),
+            |r| r.get::<_, i64>(0),
+        )? as usize);
         (
             format!(
                 "SELECT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
@@ -178,7 +211,7 @@ pub fn callees(
          LEFT JOIN symbols ds ON ds.id = e.dst_id
          LEFT JOIN files df ON df.id = ds.file_id
          WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'
-         ORDER BY path, line"
+         ORDER BY path, line LIMIT {limit}"
             ),
             ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect(),
         )
@@ -228,7 +261,7 @@ pub fn callees(
             detail: String::new(),
         })
     })?;
-    collect_output(conn, root, name, rows, limit, "0 callees found")
+    collect_output(conn, root, name, rows, limit, "0 callees found", total_opt)
 }
 
 /// Shortest call path (Amendment 13): does `from` reach `to` through resolved
@@ -250,6 +283,7 @@ pub fn path(conn: &Connection, root: &Path, from: &str, to: &str, depth: usize) 
     if from_cands.len() > 1 {
         return Err(KgError::Ambiguous {
             name: from.to_string(),
+            total: from_ids.len(),
             candidates: from_cands,
             role: Some("from"),
         });
@@ -261,6 +295,7 @@ pub fn path(conn: &Connection, root: &Path, from: &str, to: &str, depth: usize) 
     if to_cands.len() > 1 {
         return Err(KgError::Ambiguous {
             name: to.to_string(),
+            total: to_ids.len(),
             candidates: to_cands,
             role: Some("to"),
         });
@@ -491,13 +526,22 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
     // Direction semantics (CLI help): files that call INTO <file>.
-    let sql = "SELECT e.site_line, e.confidence, sf.path
+    let total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM edges e
+         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+         WHERE df.path = ?1 AND e.kind = 'calls'",
+        [&rel],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    let sql = format!(
+        "SELECT e.site_line, e.confidence, sf.path
          FROM edges e
          JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
          JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
          WHERE df.path = ?1 AND e.kind = 'calls'
-         ORDER BY sf.path, e.site_line";
-    let mut stmt = conn.prepare(sql)?;
+         ORDER BY sf.path, e.site_line LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([&rel], |r| {
         let site: i64 = r.get(0)?;
         let conf: String = r.get(1)?;
@@ -509,7 +553,7 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
             detail: String::new(),
         })
     })?;
-    collect_output(conn, root, &rel, rows, limit, "0 impacting files found")
+    collect_output(conn, root, &rel, rows, limit, "0 impacting files found", Some(total))
 }
 
 /// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
@@ -517,23 +561,33 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
 /// the caveat header is unconditional.
 pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
-    let sql = "SELECT s.qualname, f.path, s.line_start
-         FROM symbols s JOIN files f ON f.id = s.file_id
-         WHERE s.kind IN ('function', 'method', 'class')
+    let predicate = "s.kind IN ('function', 'method', 'class')
            AND s.id NOT IN (
                SELECT dst_id FROM edges WHERE kind = 'calls' AND dst_id IS NOT NULL)
            AND s.qualname NOT IN (
                SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')
            AND s.name NOT IN (
-               SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')
-         ORDER BY f.path, s.line_start";
-    let mut stmt = conn.prepare(sql)?;
+               SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')";
+    let total: usize = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {predicate}"
+        ),
+        [],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    let sql = format!(
+        "SELECT s.qualname, f.path, s.line_start
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE {predicate}
+         ORDER BY f.path, s.line_start LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], |r| {
         let path: String = r.get(1)?;
         let line: i64 = r.get(2)?;
         Ok(Pointer { file: path, line, tag: "", detail: String::new() })
     })?;
-    let mut out = collect_output(conn, root, "", rows, limit, "0 dead-code candidates found")?;
+    let mut out = collect_output(conn, root, "", rows, limit, "0 dead-code candidates found", Some(total))?;
     out.header = Some(match out.header.take() {
         Some(stale) => format!("{DEAD_CAVEAT}\n{stale}"),
         None => DEAD_CAVEAT.to_string(),
@@ -665,8 +719,19 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
     // and rarer tokens rank higher — natural-language fit without brittle
     // all-token AND requirements.
-    let expr = crate::extract::split_ident(terms)
+    let mut toks: Vec<String> = crate::extract::split_ident(terms)
         .split_whitespace()
+        .map(|t| t.to_string())
+        .collect();
+    // Bound the OR expression (R6f Important 7): FTS5 cost is quadratic in
+    // the number of prefix terms under OR.
+    const MAX_TERMS: usize = 32;
+    if toks.len() > MAX_TERMS {
+        toks.truncate(MAX_TERMS);
+        eprintln!("[kg] search terms capped at {MAX_TERMS}");
+    }
+    let expr = toks
+        .iter()
         .map(|tok| format!("\"{}\"*", tok.replace('"', "")))
         .collect::<Vec<_>>()
         .join(" OR ");
@@ -676,7 +741,12 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     // Amendment 14b: hits carry the stored one-line signature after the
     // qualname — the agent no longer needs a follow-up `symbols` call to
     // learn what the hit is. Empty signature keeps the 12b byte shape.
-    let mut stmt = conn.prepare(
+    let total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM symbols_fts WHERE symbols_fts MATCH ?1",
+        [&expr],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    let mut stmt = conn.prepare(&format!(
         "SELECT f.path, s.line_start, s.qualname, s.signature
          FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid
@@ -684,8 +754,8 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
          WHERE symbols_fts MATCH ?1
          -- Tie-break on stable columns: rowids differ between fresh and
          -- carried builds, so bm25 alone is not deterministic (R6d A9).
-         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start",
-    )?;
+         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
+    ))?;
     let rows = stmt.query_map([&expr], |r| {
         let qualname: String = r.get(2)?;
         let signature: String = r.get(3)?;
@@ -707,6 +777,7 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
         rows,
         limit,
         &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
+        Some(total),
     )?;
     crate::journal::record_result(out.pointers.len(), out.shown, out.total, out.stale, 0);
     let mut lines = Vec::with_capacity(out.pointers.len() + 2);
@@ -866,12 +937,16 @@ fn collect_output(
     rows: impl Iterator<Item = std::result::Result<Pointer, rusqlite::Error>>,
     limit: usize,
     empty_reason: &str,
+    known_total: Option<usize>,
 ) -> Result<QueryOutput> {
+    // Bounded materialization (R6f Important 5): callers pass a SQL LIMIT
+    // plus a separate COUNT, so memory stays proportional to the displayed
+    // set instead of the total hit count.
     let mut all: Vec<Pointer> = Vec::new();
     for r in rows {
         all.push(r?);
     }
-    let total = all.len();
+    let total = known_total.unwrap_or(all.len());
     if total == 0 {
         return Err(KgError::NoResults(empty_reason.to_string()));
     }

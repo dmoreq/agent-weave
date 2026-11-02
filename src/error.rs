@@ -35,7 +35,11 @@ pub enum KgError {
     /// unchanged.
     Ambiguous {
         name: String,
+        /// Candidates rendered to the caller, capped for bounded output
+        /// (R6f: a common method name could print megabytes on stdout).
         candidates: Vec<(String, i64, String)>,
+        /// Total matches before the render cap.
+        total: usize,
         role: Option<&'static str>,
     },
     CorruptIndex(String),
@@ -78,11 +82,10 @@ impl fmt::Display for KgError {
         match self {
             KgError::NoResults(detail) => write!(f, "kg: {}: {}", self.class(), detail),
             KgError::Usage(detail) => write!(f, "kg: {}: {}", self.class(), detail),
-            KgError::Ambiguous { name, candidates, role } => write!(
+            KgError::Ambiguous { name, total, role, .. } => write!(
                 f,
-                "kg: {}: ambiguous name '{name}' — {} candidates{}; use the Class.method qualname form",
+                "kg: {}: ambiguous name '{name}' — {total} candidates{}; use the Class.method qualname form",
                 self.class(),
-                candidates.len(),
                 match role {
                     Some(r) => format!(" as the {r} endpoint"),
                     None => String::new(),
