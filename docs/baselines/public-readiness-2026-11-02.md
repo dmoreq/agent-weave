@@ -80,3 +80,36 @@ metadata (`quy-doan/kg`).
 
 **Daily-use recommendation (unchanged)**: host LSP + Serena + ast-grep + rg as
 the primary stack; keep kg for `path`/file-impact on repos <= ~3k files.
+
+## Round-2 remediation (2026-11-02, commit dcc8b5a + Stage 4)
+
+The R6 round-2 review found 2 export blockers and several partials; all code
+and export findings are now closed and verified:
+
+| round-2 finding | fix | evidence |
+|---|---|---|
+| Export test suite red | scrub now also rewrites expected strings; export runs `cargo test` as a gate | export tests PASS (57 files) |
+| Export leaked `marshal_io`/`default_artifacts_dir` | replacement list + gate vocabulary extended | export gate counts 0 |
+| 19 dead `baselines/...` refs + mangled spec commands | doc-only path flattening; spec G18 command matches the script; G15 marked external | export gate PASS; spec updated |
+| Write-path gate blind to `walk.rs` | python line-scanner: `walk.rs` allowed only after `#[cfg(test)]`; two negative controls | gate PASS with controls |
+| `callees --depth>1` unbounded | COUNT + LIMIT on the closure query | 20k distinct callees at limit 50 bounded |
+| Vacuous forward-import test | positive two-file resolution assertion | test `import_x_as_y_binds_module_root` |
+| G12 parallel claim untested | table-hash identity test (fresh, fast-path, force) | `parallel_builds_produce_identical_tables` |
+| Missing contract tests | `doctor --invalidate`, truncated index exit 3, MCP malformed JSON (-32700) | tests added |
+| MSRV unverified | rust 1.90 installed; `cargo +1.90.0 build --locked` | PASS |
+| Self-index numbers stale | re-measured at the final commit | 37/380/1171 |
+
+Deferred with reasons (non-blocking): SHA-pinned GitHub Actions (supply-chain
+hardening; tag pins currently), dependabot/SPDX headers, PEP 420 namespace
+packages, empty-`dead`/`clones` caveat, MCP protocol negotiation, exit-6
+panic-path contract test.
+
+## Value evidence at scale (Stage 4, 2026-11-02)
+
+`kg path` at 2,201 files / 4,401 symbols: 24/24 correct; Grok Build tool
+calls −59% and kg calls −87%; OpenCode tool calls −61% and kg calls −77%.
+The call bar clears on BOTH hosts, and the effect grows with corpus size
+(Stage 1: −38..−91% on 25-70-file repos). This is the largest measured
+value result in the evidence set and the basis for the narrow positioning:
+route/reachability questions on small-to-medium repos are where kg is
+strongest; search/clones remain host-dependent.
