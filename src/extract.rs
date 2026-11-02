@@ -458,42 +458,57 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
     let mut ctx = WalkCtx::default();
     let root = parsed.tree.root_node();
     walk_children(root, src, &mut fx, &mut ctx);
-    finalize_exports(&mut fx, src);
+    finalize_exports(&mut fx, src, root);
     finalize_rust_impls(&mut fx);
     fx
 }
 
-fn python_all_names(src: &[u8]) -> Option<std::collections::HashSet<String>> {
-    let text = String::from_utf8_lossy(src);
-    let start = text.find("__all__")?;
-    let rest = &text[start..];
-    let end = rest.find(']').unwrap_or(rest.len().min(4096));
-    let mut out = std::collections::HashSet::new();
-    let mut chars = rest[..end].chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '"' || c == '\'' {
-            let quote = c;
-            let mut name = String::new();
-            while let Some(&n) = chars.peek() {
-                chars.next();
-                if n == quote {
-                    break;
+fn python_all_names(root: Node<'_>, src: &[u8]) -> Option<std::collections::HashSet<String>> {
+    let mut cursor = root.walk();
+    for stmt in root.named_children(&mut cursor) {
+        if stmt.kind() != "expression_statement" {
+            continue;
+        }
+        let mut c = stmt.walk();
+        let Some(assign) = stmt
+            .named_children(&mut c)
+            .find(|n| n.kind() == "assignment")
+        else {
+            continue;
+        };
+        let Some(left) = assign.child_by_field_name("left") else {
+            continue;
+        };
+        if text(left, src) != "__all__" {
+            continue;
+        }
+        let right = assign.child_by_field_name("right")?;
+        if !matches!(right.kind(), "list" | "tuple") {
+            return None;
+        }
+        let mut out = std::collections::HashSet::new();
+        let mut rc = right.walk();
+        for item in right.named_children(&mut rc) {
+            if item.kind() == "string" {
+                let raw = text(item, src);
+                let name = raw.trim_matches(|c| c == '"' || c == '\'').to_string();
+                if !name.is_empty() {
+                    out.insert(name);
                 }
-                name.push(n);
-            }
-            if !name.is_empty() {
-                out.insert(name);
+            } else {
+                return None;
             }
         }
+        return Some(out);
     }
-    Some(out)
+    None
 }
 
 /// Populate the exported/public flag from language rules (Amendment 19).
-fn finalize_exports(fx: &mut FileExtraction, src: &[u8]) {
+fn finalize_exports(fx: &mut FileExtraction, src: &[u8], root: Node<'_>) {
     let lines: Vec<&[u8]> = src.split(|b| *b == b'\n').collect();
     let all_names = if fx.lang == Lang::Python {
-        python_all_names(src)
+        python_all_names(root, src)
     } else {
         None
     };
@@ -504,11 +519,11 @@ fn finalize_exports(fx: &mut FileExtraction, src: &[u8]) {
         let signature = fx.symbols[i].signature.clone();
         let line = fx.symbols[i].line_start.saturating_sub(1);
         let parent_qn = qualname.rsplit_once('.').map(|(p, _)| p.to_string());
-        let parent_exported = parent_qn
+        let parent = parent_qn
             .as_ref()
-            .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p))
-            .map(|s| s.exported)
-            .unwrap_or(false);
+            .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p));
+        let parent_exported = parent.map(|s| s.exported).unwrap_or(false);
+        let parent_is_module = parent.map(|s| s.kind == "module").unwrap_or(false);
         let exported = match fx.lang {
             Lang::Python => {
                 if kind == "module" {
@@ -524,17 +539,19 @@ fn finalize_exports(fx: &mut FileExtraction, src: &[u8]) {
             Lang::Rust => {
                 let sig = signature.trim_start();
                 let is_pub = sig.starts_with("pub ");
-                is_pub && (kind != "method" || parent_exported)
+                is_pub && (kind != "method" || parent_exported || parent_is_module)
             }
             Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
                 let source_line = lines
                     .get(line)
                     .map(|l| String::from_utf8_lossy(l).to_string())
                     .unwrap_or_default();
-                if source_line.contains("export ") || source_line.starts_with("export") {
-                    true
+                if matches!(kind, "class" | "function") {
+                    fx.symbols[i].exported
+                } else if kind == "method" && parent_exported {
+                    !name.starts_with('#') && !source_line.contains("private ")
                 } else {
-                    kind == "method" && parent_exported
+                    false
                 }
             }
         };
@@ -901,6 +918,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
         "import_statement" if fx.lang != Lang::Python => {
             record_import_ts(node, src, fx);
         }
+        "export_statement" if fx.lang != Lang::Python => {
+            record_export_ts(node, src, fx);
+            walk_children(node, src, fx, ctx);
+        }
         "mod_item" if fx.lang == Lang::Rust => {
             // `mod db;` declares a module sibling: bind db -> crate_root.db.
             if let Some(name_node) = node.child_by_field_name("name") {
@@ -1192,6 +1213,26 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
         .child_by_field_name("function")
         .or_else(|| node.child_by_field_name("constructor"));
     let Some(f) = f else { return };
+    if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+        let callee = text(f, src);
+        if callee == "require" || callee == "import" {
+            if let Some(args) = node.child_by_field_name("arguments") {
+                let mut c = args.walk();
+                if let Some(arg) = args.named_children(&mut c).next() {
+                    if arg.kind() == "string" {
+                        let raw = text(arg, src);
+                        let source = raw.trim_matches(|ch| ch == '\'' || ch == '"');
+                        let module = resolve_ts_module(source, &fx.dir);
+                        fx.import_edges.push(ImportEdgeCandidate {
+                            line: node.start_position().row + 1,
+                            target: ImportTarget::Module { path: module },
+                        });
+                        return;
+                    }
+                };
+            }
+        }
+    }
     let _ = fx.lang;
     let callee = match dotted_chain(f, src) {
         Some(chain) if chain.len() == 1 => Callee::Name(chain.into_iter().next().unwrap()),
@@ -1464,9 +1505,32 @@ fn callable_metrics(node: Node<'_>, src: &[u8], lang: Lang) -> (usize, usize, us
     }
     let mut effective_loc = 0usize;
     let mut in_block = false;
-    let mut in_doc = false;
+    let base_row = node.start_position().row;
+    let doc_rows = if lang == Lang::Python {
+        if let Some(body) = node.child_by_field_name("body") {
+            let mut c = body.walk();
+            let first = body.named_children(&mut c).next();
+            if let Some(stmt) = first.filter(|s| s.kind() == "expression_statement") {
+                let mut c2 = stmt.walk();
+                let inner = stmt.named_children(&mut c2).next();
+                inner
+                    .filter(|s| s.kind() == "string")
+                    .map(|s| (s.start_position().row, s.end_position().row))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let slice = &src[node.start_byte()..node.end_byte()];
-    for line in slice.split(|b| *b == b'\n') {
+    for (offset, line) in slice.split(|b| *b == b'\n').enumerate() {
+        let row = base_row + offset;
+        if doc_rows.is_some_and(|(s, e)| row >= s && row <= e) {
+            continue;
+        }
         let trimmed: Vec<u8> = line
             .iter()
             .copied()
@@ -1482,28 +1546,13 @@ fn callable_metrics(node: Node<'_>, src: &[u8], lang: Lang) -> (usize, usize, us
             }
             continue;
         }
-        if in_doc {
-            if has(b"\"\"\"") || has(b"'''") {
-                in_doc = false;
-            }
-            continue;
-        }
         if trimmed.starts_with(b"/*") {
             if !has(b"*/") {
                 in_block = true;
             }
             continue;
         }
-        if trimmed.starts_with(b"\"\"\"") || trimmed.starts_with(b"'''") {
-            let closed = trimmed.len() > 6
-                && ((trimmed.starts_with(b"\"\"\"") && has(b"\"\"\""))
-                    || (trimmed.starts_with(b"'''") && has(b"'''")));
-            if !closed {
-                in_doc = true;
-            }
-            continue;
-        }
-        if trimmed.starts_with(b"#") || trimmed.starts_with(b"//") {
+        if (lang == Lang::Python && trimmed.starts_with(b"#")) || trimmed.starts_with(b"//") {
             continue;
         }
         effective_loc += 1;
@@ -1548,7 +1597,10 @@ fn define_function(
         branches: br,
         nesting: nest,
         effective_loc: loc,
-        ..Default::default()
+        exported: matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+            && node
+                .parent()
+                .is_some_and(|p| p.kind() == "export_statement"),
     });
     if let Some(params) = node.child_by_field_name("parameters") {
         collect_param_types(params, src, fx, &qualname);
@@ -1598,7 +1650,10 @@ fn define_class_ts(
         signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
-
+        exported: matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+            && node
+                .parent()
+                .is_some_and(|p| p.kind() == "export_statement"),
         ..Default::default()
     });
     // Heritage: extends X / implements Y / trait bounds.
@@ -1647,6 +1702,7 @@ fn collect_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_i
             | "extends_clause"
             | "implements_clause"
             | "extends_type_clause"
+            | "trait_bounds"
             | "bounds"
             | "argument_list" => {
                 let mut c = n.walk();
@@ -1797,6 +1853,18 @@ fn record_ts_arrow_function(
 /// TS/TSX/JSX static ESM imports. Relative sources resolve by module path;
 /// bare/aliased sources bind as EXTERNAL (calls into them drop with the
 /// builtin counter, not the unresolved counter).
+fn record_export_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
+    if let Some(source_node) = node.child_by_field_name("source") {
+        let raw = text(source_node, src);
+        let source = raw.trim_matches(|c| c == '\'' || c == '"');
+        let module = resolve_ts_module(source, &fx.dir);
+        fx.import_edges.push(ImportEdgeCandidate {
+            line: node.start_position().row + 1,
+            target: ImportTarget::Module { path: module },
+        });
+    }
+}
+
 fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
     let line = node.start_position().row + 1;
     let Some(source_node) = node.child_by_field_name("source") else {
@@ -1829,13 +1897,6 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                             name: "default".to_string(),
                         },
                     ));
-                    fx.import_edges.push(ImportEdgeCandidate {
-                        line,
-                        target: ImportTarget::Symbol {
-                            module: module.clone(),
-                            name,
-                        },
-                    });
                 }
                 "namespace_import" => {
                     // * as ns — bind ns to the module itself
@@ -1923,30 +1984,27 @@ fn resolve_ts_module(source: &str, dir: &str) -> String {
 }
 
 fn impl_type_name(node: Node<'_>, src: &[u8]) -> String {
-    // The implementing type is the grammar's `type` field. For
-    // `impl Trait for Type` that field is `Type` (the `trait` field holds the
-    // trait). R6d A5: the previous first-type_identifier DFS returned a
-    // parameter/return type from the body, scoping methods under the wrong
-    // type.
-    if let Some(t) = node.child_by_field_name("type") {
-        if t.kind() == "type_identifier" {
-            return text(t, src);
-        }
-        // Push children reversed so the stack pops them in source order:
-        // `impl<T> Foo<T>` must yield Foo, not the type parameter T.
-        let mut stack = vec![t];
-        while let Some(n) = stack.pop() {
-            if n.kind() == "type_identifier" {
-                return text(n, src);
+    fn nominal(t: Node<'_>, src: &[u8]) -> Option<String> {
+        match t.kind() {
+            "type_identifier" => Some(text(t, src)),
+            "generic_type" => {
+                let mut c = t.walk();
+                for ch in t.named_children(&mut c) {
+                    if ch.kind() == "type_identifier" {
+                        return Some(text(ch, src));
+                    }
+                }
+                None
             }
-            let mut c = n.walk();
-            let children: Vec<_> = n.children(&mut c).collect();
-            for child in children.into_iter().rev() {
-                stack.push(child);
-            }
+            "reference_type" => t
+                .child_by_field_name("type")
+                .and_then(|inner| nominal(inner, src)),
+            _ => None,
         }
     }
-    "UnknownImpl".to_string()
+    node.child_by_field_name("type")
+        .and_then(|t| nominal(t, src))
+        .unwrap_or_else(|| "UnknownImpl".to_string())
 }
 
 /// Rust use declarations: `use crate::error::Result;` binds the last segment.

@@ -515,6 +515,14 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                         .collect()
                 })
                 .unwrap_or_default();
+            if names.len() > 1000
+                || names.iter().any(|n| n.len() > 4096)
+                || names.iter().map(|n| n.len()).sum::<usize>() > 1024 * 1024
+            {
+                return Err(crate::error::KgError::Usage(
+                    "resolve accepts at most 1000 names, 4096 bytes each, 1 MiB total".to_string(),
+                ));
+            }
             let (lines, exit) = crate::query::resolve_names(&conn, &names)?;
             let text = join_lines(&lines);
             if exit != 0 {

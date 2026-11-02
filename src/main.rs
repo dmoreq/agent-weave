@@ -538,7 +538,9 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             let mut input = String::new();
-            std::io::stdin().read_to_string(&mut input)?;
+            std::io::stdin()
+                .take(1024 * 1024 + 1)
+                .read_to_string(&mut input)?;
             if input.len() > 1024 * 1024 {
                 return Err(crate::error::KgError::Usage(
                     "resolve input exceeds 1 MiB".to_string(),

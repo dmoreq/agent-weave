@@ -1164,7 +1164,7 @@ pub fn impact(
     if !exists {
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
-    let extended = depth > 1 || kinds.iter().any(|k| *k != "calls");
+    let extended = depth > 1 || context || kinds.iter().any(|k| *k != "calls");
     let caveat = if extended {
         if kinds.iter().any(|k| *k != "calls") {
             IMPACT_EDGES_CAVEAT
@@ -1323,14 +1323,17 @@ pub fn impact(
     }
     let mut records: HashMap<String, (usize, i64, String, String)> = HashMap::new();
     let (mut frontier, mut visited) = direct_impact_level(conn, &rel, &kind_sql, &mut records, 1)?;
+    let mut truncated = false;
     for d in 2..=depth {
         let next = level_impact(conn, &frontier, &mut visited, &kind_sql, &mut records, d)?;
         if next.is_empty() {
             break;
         }
+        if d == depth {
+            truncated = true;
+        }
         frontier = next;
     }
-    let truncated = depth > 1 && !frontier.is_empty();
     let total = records.len();
     if total == 0 {
         return Err(KgError::NoResultsCaveated {
@@ -1714,6 +1717,13 @@ pub fn resolve_names(conn: &Connection, names: &[String]) -> Result<(Vec<String>
             for (path, line, qualname) in cands.iter().take(MAX_AMBIGUOUS_CANDIDATES) {
                 out.push(format!("ambiguous {name} {path}:{line} {qualname}"));
             }
+            if ids.len() > cands.len() {
+                out.push(format!(
+                    "showing {} of {} candidates",
+                    cands.len(),
+                    ids.len()
+                ));
+            }
             exit = 2;
         } else if let Some((path, line, qualname)) = cands.first() {
             out.push(format!("found {name} {path}:{line} {qualname}"));
@@ -1796,6 +1806,7 @@ pub fn api(
         .trim_start_matches("./")
         .trim_end_matches('/')
         .to_string();
+    validate_path_scope(&rel, true)?;
     let root_scope = rel.is_empty() || rel == ".";
     let mut where_sql = String::from("s.kind IN ('function','method','class','trait','interface')");
     if !root_scope {
@@ -2264,6 +2275,9 @@ pub fn search(
     limit: usize,
 ) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
+    if let Some(p) = path {
+        validate_path_scope(p, false)?;
+    }
     // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
     // and rarer tokens rank higher — natural-language fit without brittle
     // all-token AND requirements.
@@ -2400,12 +2414,17 @@ pub fn search(
             [exact_name.as_str()],
             |r| r.get::<_, i64>(0),
         )? as usize;
+        if exact_total == 0 && exact {
+            return Err(KgError::NoResults(format!(
+                "0 symbols matched '{terms}' exactly"
+            )));
+        }
         if exact_total > 0 {
             let mut stmt = conn.prepare(&format!(
                 "SELECT f.path, s.line_start, s.qualname, s.signature
                  FROM symbols s JOIN files f ON f.id = s.file_id
                  WHERE (s.name = ?1 OR s.qualname = ?1) {filter}
-                 ORDER BY s.qualname, f.path LIMIT {limit}"
+                 ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
             ))?;
             let rows = stmt.query_map([exact_name.as_str()], |r| {
                 let qualname: String = r.get(2)?;

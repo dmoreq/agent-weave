@@ -100,3 +100,39 @@
 No fix was applied during this evaluation. All findings above are OPEN.
 R10 is the baseline for the next fix cycle; re-run the four agents after the
 fixes, with the same independence rules.
+
+## 7. Fix cycle 1 (2026-11-02)
+
+Fixed from R10:
+
+| Finding | Fix | Probe |
+|---|---|---|
+| Rust supertraits | `trait_bounds` added to heritage containers | `trait Derived: Root`; `kg implementers Root` -> `Derived` |
+| Tuple/pointer impl false edges | `impl_type_name` accepts only nominal type/generic name/reference | `impl Root for (u8,u8)`; `implementers u8` -> not in index |
+| TS export-from/require/dynamic | `export_statement` source -> import edge; literal `require()`/`import()` -> one edge, no call row | `imports re.ts` -> 4 `util` rows; unresolved empty |
+| TS default import false unresolved | default binding no longer emits local-name symbol candidate | default import probe |
+| Python `__all__` | AST literal list/tuple only; non-literal/comment falls back | tuple `__all__` -> only alpha; comment fallback -> gamma |
+| Rust inline-mod exports | `pub` function in module scope exported regardless of module parent | `kg api lib.rs` includes `lib.inner.inner_exported` |
+| TS export/private | AST export flag; private members excluded | `"export"` string and `private helper` controls |
+| Python docstring LOC | AST first body string range replaces text heuristic | multi-line docstring `loc=5` pinned |
+| Generator leak | `generator_function` added to nested callables | generator branch no longer counted |
+| `search --exact` | exact mode skips FTS; exact rows or exit 1; path/line order | exact-miss probe |
+| Depth footer | set only when final level discovers nodes | exhausted BFS probe |
+| `--context` caveat | context forces extended caveat | calls-only context probe |
+| Resolve caps | bounded stdin read; MCP 1000/4096/1 MiB; candidate cap line | 60-duplicate and 5000-byte MCP probes |
+| Path validation | `search --path` and `api` reject `..`/absolute | probes |
+
+Remaining open from R10:
+
+- Rust `use_list`/`scoped_use_list`/`use_as_clause`/`use_wildcard`/`self`/`super`
+  and `mod.rs`/`lib.rs` module mapping.
+- Star suppression is file-wide, not per import statement.
+- TS relative resolution still uses module strings, not pinned extension order.
+- Deleting a destination still drops carried edges without an unresolved row.
+- `finalize_exports` is single-pass: `impl Type` before `pub struct Type`
+  can miss exported methods.
+- `complexity` ties on `file_id` (index-supported) rather than `path`.
+- Build best 2.94 s vs 2.91 s budget.
+- Gate harness/GT sets; docs/skills drift.
+
+Verification after cycle 1: `cargo fmt --check` clean, `cargo clippy --all-targets -D warnings` clean, `cargo test --locked` 23 unit + 75 CLI + 26 fixture + 6 MCP pass.
