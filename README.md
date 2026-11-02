@@ -9,6 +9,7 @@ per session:
 - **who calls this** — `kg callers <symbol>`
 - **what does this call** — `kg callees <symbol>` (`--depth N` transitive closure)
 - **how A reaches B** — `kg path <from> <to>` (shortest call route: hop call sites + chain line)
+- **what surrounds this symbol** — `kg context <symbol>` (definition + signature, direct callers, direct callees in one call)
 - **what is impacted by this file** — `kg impact <file>`
 - **find a symbol by name** — `kg search <terms>` (BM25 over identifier, path, and signature tokens)
 - **file structure** — `kg symbols <file> --outline` (one-line signatures)
@@ -45,6 +46,7 @@ kg build --force              # re-extract everything (skip the fast path)
 kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg path Widget.render parse_fragment  # shortest call route (resolved edges; depth cap 10)
+kg context Widget.render       # definition + callers + callees in one call
 kg impact app.py              # files that call into app.py
 kg search parser fragment     # BM25 symbol search (identifiers + path + signature tokens); hits carry the signature
 kg clones                     # duplicate-block candidates (caveat: not proof)

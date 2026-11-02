@@ -66,6 +66,11 @@ fn main() {
             if journaled {
                 journal::finalize(root.as_deref(), e.exit_code(), latency_us);
             }
+            // Contract: dead/clones always carry their caveat on stdout,
+            // even for an empty result.
+            if let error::KgError::NoResultsCaveated { caveat, .. } = &e {
+                println!("{caveat}");
+            }
             // CUJ4: ambiguous-name candidates belong on stdout, message on stderr.
             if let error::KgError::Ambiguous { candidates, .. } = &e {
                 for (path, line, qualname) in candidates {
@@ -103,6 +108,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Build { .. } => "build",
         cli::Cmd::Callers { .. } => "callers",
         cli::Cmd::Callees { .. } => "callees",
+        cli::Cmd::Context { .. } => "context",
         cli::Cmd::Path { .. } => "path",
         cli::Cmd::Impact { .. } => "impact",
         cli::Cmd::Dead { .. } => "dead",
@@ -141,6 +147,9 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             ("to", to.clone()),
             ("depth", depth.to_string()),
         ],
+        cli::Cmd::Context { name, limit } => {
+            vec![("name", name.clone()), ("limit", limit.to_string())]
+        }
         cli::Cmd::Impact { file, limit } => {
             vec![("file", file.clone()), ("limit", limit.to_string())]
         }
@@ -212,6 +221,14 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
                 out.pointers.iter().filter(|p| !p.tag.is_empty()).count(),
             );
             query::print_output(&out);
+            Ok(())
+        }
+        cli::Cmd::Context { name, limit } => {
+            let root = walk::discover_root(root_arg)?;
+            let conn = db::open_for_query(&root)?;
+            for line in query::context(&conn, &root, &name, limit)? {
+                println!("{line}");
+            }
             Ok(())
         }
         cli::Cmd::Path { from, to, depth } => {

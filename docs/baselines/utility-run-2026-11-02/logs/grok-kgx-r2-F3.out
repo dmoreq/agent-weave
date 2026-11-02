@@ -1,0 +1,9 @@
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgx-r2-F3.json`.
+
+`vihap.cleaners.unicode._ascii_diacritic_trans` is defined at `vihap/cleaners/unicode.py:23`. It has four direct call sites and no direct callees.
+
+| Field | Value |
+|---|---|
+| qualname | `vihap.cleaners.unicode._ascii_diacritic_trans` |
+| callers | `vihap/cleaners/unicode.py:55`, `vihap/grammar/entity.py:53`, `vihap/grammar/entity.py:98`, `vihap/grammar/entity.py:254` |
+| callees | `[]` |

@@ -26,6 +26,12 @@ fn is_index_corruption(e: &rusqlite::Error) -> bool {
 #[derive(Debug)]
 pub enum KgError {
     NoResults(String),
+    /// Empty result for a tool whose contract requires a first-line caveat
+    /// on stdout even when nothing is found (dead, clones).
+    NoResultsCaveated {
+        caveat: &'static str,
+        detail: String,
+    },
     Usage(String),
     /// Ambiguous bare name: candidates print on stdout (CUJ4), message on
     /// stderr; exit 2. Carries the candidate list so non-CLI surfaces (MCP)
@@ -59,7 +65,7 @@ pub enum KgError {
 impl KgError {
     pub fn exit_code(&self) -> i32 {
         match self {
-            KgError::NoResults(_) => 1,
+            KgError::NoResults(_) | KgError::NoResultsCaveated { .. } => 1,
             KgError::Usage(_) => 2,
             KgError::Ambiguous { .. } => 2,
             KgError::CorruptIndex(_) => 3,
@@ -72,7 +78,7 @@ impl KgError {
 
     fn class(&self) -> &'static str {
         match self {
-            KgError::NoResults(_) => "no-results",
+            KgError::NoResults(_) | KgError::NoResultsCaveated { .. } => "no-results",
             KgError::Usage(_) => "usage",
             KgError::Ambiguous { .. } => "usage",
             KgError::CorruptIndex(_) => "corrupt-index",
@@ -88,6 +94,9 @@ impl fmt::Display for KgError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             KgError::NoResults(detail) => write!(f, "kg: {}: {}", self.class(), detail),
+            KgError::NoResultsCaveated { detail, .. } => {
+                write!(f, "kg: {}: {}", self.class(), detail)
+            }
             KgError::Usage(detail) => write!(f, "kg: {}: {}", self.class(), detail),
             KgError::Ambiguous { name, total, role, .. } => write!(
                 f,

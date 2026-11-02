@@ -44,6 +44,23 @@ changes bump the minor while 0.x is unstable.
   `path:line qualname signature` (contract bump; empty signature keeps the
   12b byte shape). Payload/G10 parity unchanged.
 
+### Added — `kg context <symbol>` (Amendment 17, P8)
+
+- One call returns the definition line with signature, direct callers, and
+  direct callees (resolved `calls` edges only), with per-section showing
+  counts and a first-line caveat. `--limit N` per section (default 10).
+- Journal `args` gains `name` + `limit`; payload carries the displayed
+  pointer lines; MCP tool `context` with G10 byte parity; contract-bump
+  entry recorded in the spec.
+
+### Changed — R6 residual closures (2026-11-02)
+
+- PEP 420 namespace-package imports resolve (longest indexed prefix).
+- Empty `dead`/`clones` results now print the mandatory caveat on stdout.
+- MCP `initialize` negotiates the protocol version with the client.
+- Serial-vs-parallel build determinism tested via `KG_WORKERS`.
+- GitHub Actions pinned by SHA in both workflows.
+
 ### Reverted — `kg search` docstring indexing (attempted Amendment 16)
 
 - Attempted schema v6 `symbols.docstring` + FTS widening. Retrieval improved

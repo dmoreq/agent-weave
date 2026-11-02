@@ -31,13 +31,15 @@ REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT, "S1": KG_ROOT, "S2": KG
          "D1": Path("/tmp/utility-corpus-2026-11-02/scale"), "D2": Path("/tmp/utility-corpus-2026-11-02/scale"),
          "D3": Path("/tmp/utility-corpus-2026-11-02/scale"),
          "E1": Path("/tmp/prose-new"), "E2": Path("/tmp/prosev-new"), "E3": Path("/tmp/prosev-new"),
+         "F1": Path("/tmp/prosev-new"), "F2": Path("/tmp/prosev-new"), "F3": Path("/tmp/prosev-new"),
          "B1": VIHAP_ROOT, "B2": VIHAP_ROOT}
 FEATURE_TOOL = {"P1": "path", "P2": "path", "P3": "path",  # Stage 1
                  "S1": "search", "S2": "search", "S3": "search",  # Stage 2
                  "C1": "clones", "C2": "clones",  # Stage 3
                  "B1": "search", "B2": "search",  # Stage 2b
                  "D1": "path", "D2": "path", "D3": "path",  # Stage 4 (scale)
-                 "E1": "search", "E2": "search", "E3": "search"}  # Stage 2c (prose)
+                 "E1": "search", "E2": "search", "E3": "search",  # Stage 2c (prose)
+                 "F1": "context", "F2": "context", "F3": "context"}  # Stage 5
 OC_DB = Path.home() / ".local/share/opencode/opencode.db"
 
 

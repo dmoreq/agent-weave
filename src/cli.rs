@@ -54,6 +54,15 @@ pub enum Cmd {
         #[arg(long, default_value_t = 1)]
         depth: usize,
     },
+    /// One-call symbol context: definition + signature, direct callers, and
+    /// direct callees over resolved edges. Resolved static edges only.
+    Context {
+        /// Symbol name or dotted qualname
+        name: String,
+        /// Maximum callers and callees shown per section (default 10, max 50)
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
     /// Shortest call path between two symbols via resolved call edges.
     /// Resolved static edges only — dynamic dispatch may hide paths.
     /// A reverse question is the same query with swapped arguments.

@@ -151,6 +151,7 @@ fn g10_initialize_tools_list_and_parity() {
             "callers",
             "callees",
             "path",
+            "context",
             "impact",
             "dead",
             "unresolved",
@@ -255,10 +256,13 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "clones", "arguments": {"min_lines": 100}}),
     );
     assert_eq!(clones_hi["result"]["isError"], true);
-    assert_eq!(
-        result_text(&clones_hi).trim_end(),
+    // R6 round-2: the empty path carries the mandatory caveat on stdout, so
+    // the MCP text is caveat + the stderr reason line.
+    let expected = format!(
+        "kg: clone candidates — normalized-text equality, not proof of semantic duplication\n{}",
         String::from_utf8_lossy(&cli_clones_hi.stderr).trim_end()
     );
+    assert_eq!(result_text(&clones_hi).trim_end(), expected);
 
     // R6e: parity covers every pointer/report tool that does not depend on
     // wall-clock timings or journal state.
@@ -325,6 +329,25 @@ fn g10_initialize_tools_list_and_parity() {
             String::from_utf8_lossy(&cli_unres.stderr).trim_end()
         );
     }
+
+    // G10 parity extends to context (Amendment 17).
+    let cli_context = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["context", "normalize"])
+        .output()
+        .unwrap();
+    assert_eq!(cli_context.status.code(), Some(0));
+    let context_call = rpc(
+        &mut srv,
+        15,
+        "tools/call",
+        json!({"name": "context", "arguments": {"name": "normalize"}}),
+    );
+    assert_eq!(
+        result_text(&context_call),
+        String::from_utf8_lossy(&cli_context.stdout).into_owned()
+    );
 
     // G10 parity extends to path (Amendment 13): hop pointers + chain line
     // byte-equal between the surfaces.
@@ -401,7 +424,7 @@ fn g10_initialize_tools_list_and_parity() {
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 14, "{log}");
+    assert_eq!(mcp_lines, 15, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -412,8 +435,8 @@ fn g10_initialize_tools_list_and_parity() {
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
     assert_eq!(
-        mcp_payload, 8,
-        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact, not stats: {payload}"
+        mcp_payload, 9,
+        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context, not stats: {payload}"
     );
     let callers_line = payload
         .lines()

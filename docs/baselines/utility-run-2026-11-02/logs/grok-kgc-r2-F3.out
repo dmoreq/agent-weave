@@ -1,0 +1,5 @@
+I'll list pending handoffs for this project, then resolve the symbol with the code index.The pending handoff is a prior run of the same question with a different output path. I'll query callers and callees for `_ascii_diacritic_trans` and write this run's JSON.Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-F3.json`.
+
+- **qualname:** `vihap.cleaners.unicode._ascii_diacritic_trans`
+- **callers:** `vihap/cleaners/unicode.py:55`, `vihap/grammar/entity.py:53`, `vihap/grammar/entity.py:98`, `vihap/grammar/entity.py:254`
+- **callees:** `[]` (`kg callees` reported 0)

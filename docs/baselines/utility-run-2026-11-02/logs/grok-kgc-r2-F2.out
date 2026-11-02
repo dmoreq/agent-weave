@@ -1,0 +1,9 @@
+Qualname is `vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street`. Writing the caller and callee pointers from the kg output.Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-F2.json`.
+
+`vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street` has 4 direct call sites and 5 direct callee definitions.
+
+| Section | Pointers |
+|---|---|
+| qualname | `vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street` (definition `vihap/cleaners/abbreviation_engine.py:436`) |
+| callers | `tests/test_abbreviation_engine.py:26`, `:48`, `:53`; `tests/test_street_validator.py:156` |
+| callees | `vihap/cleaners/abbreviation_engine.py:58`, `:347`, `:361`, `:413`; `vihap/cleaners/unicode.py:47` |

@@ -1,0 +1,1 @@
+{"ts":1793606814,"surface":"cli","tool":"context","args":{"name":"vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street","limit":"10"},"result_count":9,"shown":9,"total":9,"ambiguous":0,"exit_code":0,"latency_us":846,"stale":false,"kg_version":"0.1.0","session":"grok-kgx-r2-F2","arm":"grok-kgx-r2-F2"}

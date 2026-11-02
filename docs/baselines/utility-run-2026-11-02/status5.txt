@@ -1,0 +1,52 @@
+[start] grok-kgx-r1-F1 host=grok repo=/tmp/prosev-new 14:57:37
+[done] grok-kgx-r1-F1 exit=0 14:59:05
+[start] grok-kgc-r1-F2 host=grok repo=/tmp/prosev-new 14:59:14
+[done] grok-kgc-r1-F2 exit=0 15:00:01
+[start] grok-kgc-r2-F2 host=grok repo=/tmp/prosev-new 15:00:02
+[done] grok-kgc-r2-F2 exit=0 15:01:04
+[start] grok-kgc-r1-F1 host=grok repo=/tmp/prosev-new 15:01:04
+[done] grok-kgc-r1-F1 exit=0 15:02:40
+[start] grok-kgc-r2-F1 host=grok repo=/tmp/prosev-new 15:02:41
+[done] grok-kgc-r2-F1 exit=0 15:03:46
+[start] grok-kgc-r1-F3 host=grok repo=/tmp/prosev-new 15:03:48
+[done] grok-kgc-r1-F3 exit=0 15:04:54
+[start] grok-kgc-r2-F3 host=grok repo=/tmp/prosev-new 15:04:56
+[done] grok-kgc-r2-F3 exit=0 15:05:52
+[start] oc-kgc-r1-F2 host=opencode repo=/tmp/prosev-new 15:05:52
+[start] grok-kgx-r1-F2 host=grok repo=/tmp/prosev-new 15:05:52
+[done] grok-kgx-r1-F2 exit=0 15:06:41
+[start] grok-kgx-r2-F2 host=grok repo=/tmp/prosev-new 15:06:41
+[done] oc-kgc-r1-F2 exit=0 15:07:03
+[start] oc-kgc-r2-F2 host=opencode repo=/tmp/prosev-new 15:07:03
+[done] grok-kgx-r2-F2 exit=0 15:07:15
+[start] grok-kgx-r2-F1 host=grok repo=/tmp/prosev-new 15:07:15
+[done] oc-kgc-r2-F2 exit=0 15:07:54
+[start] oc-kgc-r1-F1 host=opencode repo=/tmp/prosev-new 15:07:55
+[done] grok-kgx-r2-F1 exit=0 15:08:16
+[start] grok-kgx-r1-F3 host=grok repo=/tmp/prosev-new 15:08:16
+[done] oc-kgc-r1-F1 exit=0 15:08:43
+[start] oc-kgc-r2-F1 host=opencode repo=/tmp/prosev-new 15:08:44
+[done] grok-kgx-r1-F3 exit=0 15:09:03
+[start] grok-kgx-r2-F3 host=grok repo=/tmp/prosev-new 15:09:03
+[done] oc-kgc-r2-F1 exit=0 15:09:36
+[start] oc-kgc-r1-F3 host=opencode repo=/tmp/prosev-new 15:09:36
+[done] grok-kgx-r2-F3 exit=0 15:09:36
+[start] oc-kgx-r1-F2 host=opencode repo=/tmp/prosev-new 15:09:36
+[done] oc-kgx-r1-F2 exit=0 15:10:09
+[start] oc-kgx-r2-F2 host=opencode repo=/tmp/prosev-new 15:10:09
+[done] oc-kgc-r1-F3 exit=0 15:10:18
+[start] oc-kgc-r2-F3 host=opencode repo=/tmp/prosev-new 15:10:18
+[done] oc-kgx-r2-F2 exit=0 15:10:48
+[start] oc-kgx-r1-F1 host=opencode repo=/tmp/prosev-new 15:10:48
+[done] oc-kgc-r2-F3 exit=0 15:11:06
+[done] oc-kgx-r1-F1 exit=0 15:11:28
+[start] oc-kgx-r2-F1 host=opencode repo=/tmp/prosev-new 15:11:28
+[done] oc-kgx-r2-F1 exit=0 15:12:20
+[start] oc-kgx-r1-F3 host=opencode repo=/tmp/prosev-new 15:12:20
+[start] oc-kgx-r1-F3 host=opencode repo=/tmp/prosev-new 15:13:04
+[done] oc-kgx-r1-F3 exit=0 15:13:11
+[done] oc-kgx-r1-F3 exit=0 15:13:11
+[start] oc-kgx-r2-F3 host=opencode repo=/tmp/prosev-new 15:13:11
+[start] oc-kgx-r2-F3 host=opencode repo=/tmp/prosev-new 15:13:11
+[done] oc-kgx-r2-F3 exit=0 15:14:00
+[done] oc-kgx-r2-F3 exit=0 15:14:00

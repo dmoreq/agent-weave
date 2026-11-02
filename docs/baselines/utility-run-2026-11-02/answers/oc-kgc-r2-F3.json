@@ -1,0 +1,1 @@
+{"qualname": "vihap.cleaners.unicode._ascii_diacritic_trans", "callers": ["vihap/cleaners/unicode.py:55", "vihap/grammar/entity.py:53", "vihap/grammar/entity.py:98", "vihap/grammar/entity.py:254"], "callees": [], "answer": "The function has four direct call sites and no indexed direct callee definitions."}

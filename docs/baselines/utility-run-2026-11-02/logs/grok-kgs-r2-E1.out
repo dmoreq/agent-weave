@@ -1,3 +1,0 @@
-`src.journal.finalize` at `src/journal.rs:142` serializes and appends the usage line, then the payload line when pointers were captured.
-
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r2-E1.json`.

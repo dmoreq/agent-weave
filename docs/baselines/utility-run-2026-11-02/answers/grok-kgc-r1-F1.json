@@ -1,0 +1,15 @@
+{
+  "qualname": "vihap.matching.similarity.pairwise_address_similarity",
+  "callers": [
+    "tests/test_scoring_sklearn_api.py:120",
+    "tests/test_scoring_sklearn_api.py:128",
+    "tests/test_scoring_sklearn_api.py:137",
+    "tests/test_scoring_sklearn_api.py:142",
+    "vihap/matching/similarity.py:356"
+  ],
+  "callees": [
+    "vihap/cleaners/unicode.py:47",
+    "vihap/matching/similarity.py:158"
+  ],
+  "answer": "vihap.matching.similarity.pairwise_address_similarity has five direct call sites and two direct callees, normalize_ascii and evaluate_street_similarity."
+}

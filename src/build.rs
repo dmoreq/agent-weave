@@ -367,9 +367,14 @@ fn extract_units(
     let mut shingles_out: Vec<Vec<crate::clones::Shingle>> = Vec::with_capacity(files.len());
     let mut error_files = 0usize;
     let mut extract_secs_sum = 0f64;
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+    let workers = std::env::var("KG_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        })
         .clamp(1, 8);
     let chunk_len = (files.len().div_ceil(workers)).max(1);
     std::thread::scope(|scope| -> Result<()> {

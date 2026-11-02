@@ -29,6 +29,10 @@ const CLONES_CAVEAT: &str =
 /// edges only; dynamic dispatch may hide paths.
 const PATH_CAVEAT: &str = "kg: path — resolved static edges only; dynamic dispatch may hide paths";
 
+/// Permanent honesty caveat for `kg context` (Amendment 17).
+const CONTEXT_CAVEAT: &str =
+    "kg: context — resolved static edges only; dynamic dispatch may hide callers or callees";
+
 /// One resolved candidate: (path, line, qualname).
 pub type Candidate = (String, i64, String);
 
@@ -557,6 +561,128 @@ fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result
     Ok(PathSearch::Exhausted)
 }
 
+/// One-call symbol context (Amendment 17): definition line with signature,
+/// direct callers, and direct callees — replaces composing callers/callees/
+/// symbols for "what does this symbol do and who uses it" questions.
+pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    let (ids, cands) = target_ids(conn, name)?;
+    if ids.is_empty() {
+        return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
+    }
+    if cands.len() > 1 {
+        return Err(KgError::Ambiguous {
+            name: name.to_string(),
+            total: ids.len(),
+            candidates: cands,
+            role: None,
+        });
+    }
+    let id = ids[0];
+    let def_sql = "SELECT f.path, s.line_start, s.kind, s.qualname, s.signature
+                   FROM symbols s JOIN files f ON f.id = s.file_id WHERE s.id = ?1";
+    let (def_path, def_line, kind, qualname, signature): (String, i64, String, String, String) =
+        conn.query_row(def_sql, [id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+    let callers_total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM edges e WHERE e.dst_id = ?1 AND e.kind = 'calls'",
+        [id],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    let mut stmt = conn.prepare(
+        "SELECT e.site_line, f.path
+         FROM edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+         WHERE e.dst_id = ?1 AND e.kind = 'calls'
+         ORDER BY f.path, e.site_line LIMIT ?2",
+    )?;
+    let callers: Vec<(String, i64)> = stmt
+        .query_map(rusqlite::params![id, limit as i64], |r| {
+            Ok((r.get::<_, String>(1)?, r.get::<_, i64>(0)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let callees_total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM edges e WHERE e.src_id = ?1 AND e.kind = 'calls'",
+        [id],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(ds.line_start, e.site_line) AS line, COALESCE(df.path, sf.path) AS path
+         FROM edges e
+         JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
+         LEFT JOIN symbols ds ON ds.id = e.dst_id
+         LEFT JOIN files df ON df.id = ds.file_id
+         WHERE e.src_id = ?1 AND e.kind = 'calls'
+         ORDER BY path, line LIMIT ?2",
+    )?;
+    let callees: Vec<(String, i64)> = stmt
+        .query_map(rusqlite::params![id, limit as i64], |r| {
+            Ok((r.get::<_, String>(1)?, r.get::<_, i64>(0)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    // Staleness over the displayed set (definition + shown callers/callees).
+    let mut files: BTreeSet<&String> = BTreeSet::new();
+    files.insert(&def_path);
+    for (p, _) in &callers {
+        files.insert(p);
+    }
+    for (p, _) in &callees {
+        files.insert(p);
+    }
+    let n_files = files.len();
+    let mut changed = 0usize;
+    for f in &files {
+        if file_changed(conn, root, f) {
+            changed += 1;
+        }
+    }
+    let stale = changed > 0;
+    let mut pointers: Vec<String> = Vec::new();
+    for (p, l) in &callers {
+        pointers.push(format!("{p}:{l}"));
+    }
+    for (p, l) in &callees {
+        pointers.push(format!("{p}:{l}"));
+    }
+    let total = callers_total + callees_total;
+    let shown = pointers.len();
+    let built_at = db::meta_get(conn, "built_at")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
+    crate::journal::record_payload(name, &pointers, stale, shown, total, built_at, &source_rev);
+    crate::journal::record_result(shown, shown, total, stale, 0);
+    let mut out = vec![CONTEXT_CAVEAT.to_string()];
+    if stale {
+        out.push(format!(
+            "kg: {changed} of {n_files} result files changed since build — run kg build"
+        ));
+    }
+    let sig = if signature.is_empty() {
+        String::new()
+    } else {
+        format!(" {signature}")
+    };
+    out.push(format!("{def_path}:{def_line} {kind} {qualname}{sig}"));
+    out.push(format!(
+        "callers (showing {} of {}):",
+        callers.len(),
+        callers_total
+    ));
+    for (p, l) in &callers {
+        out.push(format!("{p}:{l}"));
+    }
+    out.push(format!(
+        "callees (showing {} of {}):",
+        callees.len(),
+        callees_total
+    ));
+    for (p, l) in &callees {
+        out.push(format!("{p}:{l}"));
+    }
+    Ok(out)
+}
+
 pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
     let rel = file.trim_start_matches("./").to_string();
@@ -647,6 +773,12 @@ pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput>
             detail: String::new(),
         })
     })?;
+    if total == 0 {
+        return Err(KgError::NoResultsCaveated {
+            caveat: DEAD_CAVEAT,
+            detail: "0 dead-code candidates found".to_string(),
+        });
+    }
     let mut out = collect_output(
         conn,
         root,
@@ -963,7 +1095,10 @@ pub fn clones(
     }
     let pairs = merged_pairs;
     if pairs.is_empty() {
-        return Err(KgError::NoResults("0 clone candidates found".to_string()));
+        return Err(KgError::NoResultsCaveated {
+            caveat: CLONES_CAVEAT,
+            detail: "0 clone candidates found".to_string(),
+        });
     }
     if capped {
         eprintln!("[kg] clone pair generation capped — result is a lower bound");

@@ -18,6 +18,7 @@ source:
 | who calls this symbol | `kg callers <name>` |
 | what does this call (transitive) | `kg callees <name> --depth N` |
 | does A reach B, via which call sites | `kg path <from> <to>` — one shortest route; reverse question = swap the arguments |
+| what surrounds this symbol (callers + callees + signature) | `kg context <name>` — one call replaces composing callers/callees/symbols |
 | which files call into a file | `kg impact <file>` |
 | find a symbol by (partial) name | `kg search <terms>` |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |

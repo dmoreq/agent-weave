@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["vihap/cleaners/unicode.py:23"],
-  "answer": "vihap.cleaners.unicode._ascii_diacritic_trans builds a C-accelerated translate table mirroring NFD + Mn-stripping + đ→d."
-}

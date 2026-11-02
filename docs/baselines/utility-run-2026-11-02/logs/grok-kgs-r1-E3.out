@@ -1,3 +1,0 @@
-I'll look up the pending handoff and search the code index for the `ParserConfig` method that serializes configuration to a dictionary.Search points at `ParserConfig.to_dict`. I'll read that definition so the answer sentence matches the signature and docstring.The definition is `vihap.models.ParserConfig.to_dict` at `vihap/models.py:127`. I'll write that pointer into the answer file.`vihap.models.ParserConfig.to_dict` at `vihap/models.py:127` serializes configuration to a dictionary. Its docstring is "Serialize configuration to a dictionary." and its signature returns `dict[str, Any]`.
-
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r1-E3.json`.

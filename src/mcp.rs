@@ -37,6 +37,8 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
         {"name": "path", "description": "Shortest call path between two symbols — hop call-site pointers path:line over resolved edges; dynamic dispatch may hide paths",
          "inputSchema": schema_obj(json!({"from": {"type": "string"}, "to": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum hops (default 10)"}}), &["from", "to"])},
+        {"name": "context", "description": "One-call symbol context: definition + signature, direct callers, direct callees over resolved edges",
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Callers/callees shown per section (default 10)"}}), &["name"])},
         {"name": "impact", "description": "Files that call into <file>",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "limit": limit}), &["file"])},
         {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof",
@@ -126,8 +128,14 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
         let is_notification = id.is_none();
         match method.as_str() {
             "initialize" => {
+                let requested = msg
+                    .get("params")
+                    .and_then(|p| p.get("protocolVersion"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(PROTOCOL_VERSION)
+                    .to_string();
                 let result = json!({
-                    "protocolVersion": PROTOCOL_VERSION,
+                    "protocolVersion": requested,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "kg", "version": env!("CARGO_PKG_VERSION")},
                 });
@@ -243,6 +251,10 @@ fn call_tool(root: &Path, tool: &str, args: &Value) -> (String, bool, i32) {
         Ok(text) => (text, false, 0),
         Err(e) => {
             let mut text = String::new();
+            if let KgError::NoResultsCaveated { caveat, .. } = &e {
+                text.push_str(caveat);
+                text.push('\n');
+            }
             if let KgError::Ambiguous { candidates, .. } = &e {
                 for (path, line, qualname) in candidates {
                     text.push_str(&format!("{path}:{line} {qualname}\n"));
@@ -291,6 +303,15 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
+        }
+        "context" => {
+            let conn = crate::db::open_for_query(root)?;
+            Ok(join_lines(&crate::query::context(
+                &conn,
+                root,
+                &arg_str(args, "name").unwrap_or_default(),
+                arg_usize(args, "limit", 10),
+            )?))
         }
         "path" => {
             let conn = crate::db::open_for_query(root)?;
@@ -440,6 +461,12 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
             ));
+        }
+        "context" => {
+            if let Some(name) = arg_str(args, "name") {
+                out.push(("name", name));
+            }
+            out.push(("limit", arg_usize(args, "limit", 10).to_string()));
         }
         "path" => {
             if let Some(from) = arg_str(args, "from") {

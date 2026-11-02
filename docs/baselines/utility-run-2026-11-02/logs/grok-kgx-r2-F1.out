@@ -1,0 +1,5 @@
+I'll list pending handoffs for this project, then query the code index for `pairwise_address_similarity`.The pending handoff is a different symbol. I'll query `pairwise_address_similarity` with `kg context`.`kg context` returned the qualname, five call sites, and two callee definitions. I'll write that JSON now.Wrote `/tmp/utility-answers-2026-11-02/grok-kgx-r2-F1.json`.
+
+- **qualname:** `vihap.matching.similarity.pairwise_address_similarity`
+- **callers:** `tests/test_scoring_sklearn_api.py:120`, `:128`, `:137`, `:142`, and `vihap/matching/similarity.py:356`
+- **callees:** `vihap/cleaners/unicode.py:47` (`normalize_ascii`), `vihap/matching/similarity.py:158` (`evaluate_street_similarity`)

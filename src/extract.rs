@@ -2111,7 +2111,19 @@ fn longest_module_prefix(
     rest: &[String],
 ) -> Option<(String, Vec<String>)> {
     if !t.module_paths.contains(start) {
-        return None;
+        // PEP 420 namespace root (R6d I13): the package itself has no
+        // __init__.py module symbol, but a deeper module may be indexed
+        // (pkg -> pkg.mod). Resolve against the longest indexed prefix.
+        let mut probe = start.to_string();
+        let mut best: Option<(String, usize)> = None;
+        for (i, seg) in rest.iter().enumerate() {
+            probe = format!("{probe}.{seg}");
+            if t.module_paths.contains(&probe) {
+                best = Some((probe.clone(), i + 1));
+            }
+        }
+        let (m, k) = best?;
+        return Some((m, rest[k..].to_vec()));
     }
     let mut cur = start.to_string();
     let mut consumed = 0usize;

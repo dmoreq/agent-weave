@@ -1,5 +1,0 @@
-I'll look up the function that writes the usage line and then the payload line, starting with the code index.The previous handoff is a different output path. I'll search with one quoted term string.`src.journal.finalize` is the match. I'll write the answer file from that definition pointer.Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r1-E1.json`.
-
-- **Symbol:** `src.journal.finalize`
-- **Pointer:** `src/journal.rs:142` (`kg symbols`)
-- **Match:** the docstring says it serializes and appends the usage line, then the payload line when pointers were captured.

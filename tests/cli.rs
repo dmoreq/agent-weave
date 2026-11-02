@@ -1728,3 +1728,124 @@ fn truncated_index_exits_3() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("corrupt-index"), "{stderr}");
 }
+
+#[test]
+fn context_shows_definition_callers_and_callees() {
+    // Amendment 17: one call returns the definition + signature, direct
+    // callers, and direct callees with exact section headers.
+    let repo = temp_repo("context");
+    write(&repo, "a.py", "def target():\n    return 1\n");
+    write(
+        &repo,
+        "b.py",
+        "from a import target\n\ndef caller():\n    return target()\n",
+    );
+    write(
+        &repo,
+        "c.py",
+        "from b import caller\n\ndef top():\n    return caller()\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["context", "caller"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let expected =
+        "kg: context — resolved static edges only; dynamic dispatch may hide callers or callees\n\
+b.py:3 function b.caller def caller():\n\
+callers (showing 1 of 1):\n\
+c.py:4\n\
+callees (showing 1 of 1):\n\
+a.py:1\n";
+    assert_eq!(stdout, expected, "exact bytes");
+
+    // Cap per section: two callers, --limit 1.
+    write(
+        &repo,
+        "d.py",
+        "from b import caller\n\ndef other():\n    return caller()\n",
+    );
+    build(&repo);
+    let out = kg(&repo)
+        .args(["context", "caller", "--limit", "1"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("callers (showing 1 of 2):"), "{stdout}");
+
+    // Missing symbol: exit 1.
+    let out = kg(&repo).args(["context", "nope_xyz"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("not in index"), "{stderr}");
+
+    // Ambiguous name: exit 2 with candidates.
+    write(&repo, "e.py", "class A1:\n    def dup(self):\n        return 1\n\nclass B1:\n    def dup(self):\n        return 2\n");
+    build(&repo);
+    let out = kg(&repo).args(["context", "dup"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+}
+
+#[test]
+fn empty_dead_and_clones_carry_their_caveat_on_stdout() {
+    // Amendment 5/12d + R6 round-2: the caveat is the first stdout line even
+    // for an empty result (exit 1 reason stays on stderr).
+    let repo = temp_repo("empty-caveat");
+    // No indexable symbols => dead has zero candidates (module-only file).
+    write(&repo, "only.py", "x = 1\n");
+    build(&repo);
+    let out = kg(&repo).args(["dead"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("kg: dead-code candidates —"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("0 dead-code candidates"), "{stderr}");
+
+    let out = kg(&repo).args(["clones"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("kg: clone candidates —"), "{stdout}");
+}
+
+#[test]
+fn serial_and_parallel_builds_are_identical() {
+    // G12: the worker count must not change the resulting tables.
+    let mk = |name: &str| {
+        let repo = temp_repo(name);
+        for i in 0..30 {
+            write(
+                &repo,
+                &format!("f{i:02}.py"),
+                &format!("def a{i}():\n    return b{i}()\n\ndef b{i}():\n    return {i}\n"),
+            );
+        }
+        repo
+    };
+    let serial = mk("serial");
+    let parallel = mk("parallel");
+    for (repo, workers) in [(&serial, "1"), (&parallel, "4")] {
+        let out = Command::new(env!("CARGO_BIN_EXE_kg"))
+            .arg("--root")
+            .arg(repo)
+            .arg("build")
+            .env("KG_WORKERS", workers)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    }
+    let dump = |repo: &std::path::Path| -> String {
+        let out = Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\nrows=[]\nfor q in ['SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic FROM files ORDER BY path','SELECT qualname,kind,line_start,line_end,signature FROM symbols ORDER BY qualname,line_start','SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line']:\n rows += [tuple(str(x) for x in r) for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
+                repo.join(".kg/index.db").display()
+            ))
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(
+        dump(&serial),
+        dump(&parallel),
+        "serial vs parallel tables differ"
+    );
+}

@@ -1,0 +1,17 @@
+{
+  "qualname": "vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street",
+  "callers": [
+    "tests/test_abbreviation_engine.py:26",
+    "tests/test_abbreviation_engine.py:48",
+    "tests/test_abbreviation_engine.py:53",
+    "tests/test_street_validator.py:156"
+  ],
+  "callees": [
+    "vihap/cleaners/abbreviation_engine.py:58",
+    "vihap/cleaners/abbreviation_engine.py:347",
+    "vihap/cleaners/abbreviation_engine.py:361",
+    "vihap/cleaners/abbreviation_engine.py:413",
+    "vihap/cleaners/unicode.py:47"
+  ],
+  "answer": "AbbreviationEngine.resolve_street is defined at vihap/cleaners/abbreviation_engine.py:436 with four direct caller call sites and five direct callee definitions."
+}
