@@ -74,7 +74,7 @@ fn fixture(name: &str) -> PathBuf {
     fs::write(
         dir.join("app.py"),
         format!(
-            "from utils import normalize\n\ndef run():\n    return normalize('x')\n{}",
+            "from utils import normalize\n\ndef run():\n    return normalize('x')\n{}\ndef test_run():\n    return run()\n",
             tail
         ),
     )
@@ -290,6 +290,7 @@ fn g10_initialize_tools_list_and_parity() {
             json!({"file": "app.py"}),
             vec!["imports", "app.py"],
         ),
+        ("tests", json!({"name": "run"}), vec!["tests", "run"]),
         (
             "complexity",
             json!({"min_cyc": 1}),
@@ -465,7 +466,7 @@ fn g10_initialize_tools_list_and_parity() {
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 19, "{log}");
+    assert_eq!(mcp_lines, 20, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -476,8 +477,8 @@ fn g10_initialize_tools_list_and_parity() {
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
     assert_eq!(
-        mcp_payload, 12,
-        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+complexity+api, not stats: {payload}"
+        mcp_payload, 13,
+        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+tests+complexity+api, not stats: {payload}"
     );
     let callers_line = payload
         .lines()

@@ -12,7 +12,7 @@ without being labeled as such.
 |----------|-------------------|
 | Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets; P8 real-corpus GT 71/71 at 1.000 (imports 40, tests 20, inheritance 11) |
 | Is the query loop fast? | 5-11 ms best-of-7 end-to-end per invocation (spawn floor ~6 ms); < 10 ms on a 382 MB index (11k-file tree); query memory is bounded by the display cap since schema v5 — `docs/baselines/perf-v5-2026-11-02.md` |
-| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.10-0.16 s on the self-index (~18 MB RSS); 2.82 s best-of-7 at the 2,025-file synthetic corpus (1.25x budget 2.91 s) — `baselines/perf-v5-2026-11-02.md`, `tests/scripts/timing_assert.sh` |
+| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.38 s best-of-7 on the self-index (~18 MB RSS); 2.70-2.79 s best-of-7 at the 2,025-file synthetic corpus (1.25x budget 2.91 s) — `baselines/perf-v5-2026-11-02.md`, `tests/scripts/timing_assert.sh` |
 | Does it make a coding agent better? | navigation recall 98.6% vs 81.9% grep-only, at flat token cost |
 | Does it make an agent cheaper? | only when routed: query-first policy cut input tokens **-27.3%** (1,058,613 → 769,306 per run) at unchanged recall |
 | Does it answer semantic questions? | No — static resolution only. Out of scope by design. |
@@ -283,28 +283,30 @@ oracle is unchanged.
 
 Four independent Goldfish lenses evaluated F1-F12 at `c39e21f`; the R10
 record (`baselines/reviews/R10-P8-evaluation.md`) found F5/F8/F11/schema v6 at
-ceiling and the rest below. The fix cycle below closes every Critical and
-Important finding.
+ceiling and the rest below. The R10 fix cycle closed that batch. The R11
+record (`baselines/reviews/R11-P8-evaluation.md`) re-ran the same four-lens
+protocol at `1fd4d37`; its six Critical findings are closed and its remaining
+Important findings are either fixed or recorded as owner decisions.
 
 | surface | measured | command |
 |---------|----------|---------|
-| schema v7 fresh build, 2,025-file synthetic corpus | **2.82 s** best-of-7 wall (budget 2.91 s; 1.25x frozen 2.33 s) | `target/release/kg build --force` x7 |
+| schema v7 fresh build, 2,025-file synthetic corpus | **2.70-2.79 s** best-of-7 wall (budget 2.91 s; 1.25x frozen 2.33 s) | `target/release/kg build --force` x7 |
 | `kg dead --limit 50`, 85,050 symbols | **147.5 ms** best-of-7 (budget 200 ms) | `tests/scripts/timing_assert.sh` |
-| `kg complexity --limit 1` | **19.3 ms** best-of-7 (budget 50 ms) | same |
-| `kg complexity --path synth` | **26.2 ms** best-of-7 (budget 100 ms) | same |
+| `kg complexity --limit 1` | **19.3 ms** best-of-7 on 85k symbols; **6.9 ms** on the 987k-symbol corpus (budget 50 ms) | `timing_assert.sh` |
+| `kg complexity --path synth` | **26.2 ms** on 85k symbols; **201 ms** on 987k symbols (R11 amendment: budget 250 ms) | same |
 | `kg symbols synth --limit 50` | **21.9 ms** best-of-7 (budget 50 ms) | same |
 | `kg tests <no-hit>` | **5.4 ms** best-of-5 | same |
 | `kg impact <file> --depth 10` | **5.1 ms** best-of-5 | same |
 | Flutter corpus build smoke | 124 indexed files, 735 symbols, 0 parse errors, 3.46 s | `kg build --root <flutter>` |
-| test suite | 175 tests (25 lib + 25 bin + 93 CLI + 26 fixture + 6 MCP) | `cargo test --locked` |
+| test suite | 186 tests (25 lib + 25 bin + 104 CLI + 26 fixture + 6 MCP) | `cargo test --locked` |
 
 Real-corpus gates are local-only and frozen at kg `342ebc3`, vihap `efcd310`,
 finguard `dddfe07`, Flutter `20f82749394`:
 
 | gate | GT rows | result | harness |
 |------|---------|--------|---------|
-| F7 imports | 40 (25 vihap + 15 kg self) | **40/40 = 1.000**, Wilson 95% 0.912-1.000 | `tests/scripts/import_recall.py` |
-| F8 tests | 20 vihap symbols across 20 test files | **20/20 = 1.000**, Wilson 95% 0.839-1.000 | `tests/scripts/tests_recall.py` |
+| F7 imports | 40 (25 vihap + 15 kg self) | **recall 40/40 = 1.000, precision 183/183 = 1.000**, Wilson 95% 0.912-1.000 | `tests/scripts/import_recall.py` |
+| F8 tests | 20 vihap symbols across 20 test files | **recall 20/20 = 1.000, precision 2679/2679 = 1.000**, Wilson 95% 0.839-1.000 | `tests/scripts/tests_recall.py` |
 | F1 inheritance | 10 vihap Python + 1 finguard TS | **11/11 = 1.000**, Wilson 95% 0.741-1.000 | `tests/scripts/inheritance_recall.py` |
 
 GT was derived from source ASTs (Python `ast`, tree-sitter Rust/TS) before

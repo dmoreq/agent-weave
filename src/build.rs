@@ -349,6 +349,11 @@ pub fn run_build(
     crate::db::set_meta(&conn, "source_rev", &crate::db::source_rev(&root))?;
     let sql_count = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
     let sym_total = sql_count("SELECT COUNT(*) FROM symbols")?;
+    let callable_total = sql_count(
+        "SELECT COUNT(*) FROM symbols
+         WHERE kind IN ('function','method') AND cyclomatic > 0",
+    )?;
+    crate::db::set_meta(&conn, "callable_count", &callable_total.to_string())?;
     let edge_total = sql_count("SELECT COUNT(*) FROM edges")?;
     let file_total = sql_count("SELECT COUNT(*) FROM files")?;
     let perr_total = sql_count("SELECT COALESCE(SUM(parse_status != 'ok'), 0) FROM files")?;

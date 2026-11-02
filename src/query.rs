@@ -1124,8 +1124,11 @@ fn path_in_scope(path: &str, scope: &str) -> bool {
 
 pub fn validate_path_scope(path: &str, allow_root: bool) -> Result<()> {
     let p = path.trim().trim_start_matches("./").trim_end_matches('/');
+    let bad_component = !p.is_empty()
+        && p.split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == "..");
     if (!allow_root && (p.is_empty() || p == "."))
-        || p == ".."
+        || bad_component
         || p.starts_with('/')
         || p.contains('\\')
     {
@@ -1150,6 +1153,21 @@ fn path_scope_sql(alias: &str, path: Option<&str>) -> String {
                 .replace('\'', "''");
             format!(
                 " AND ({alias}.path = '{escaped}' OR substr({alias}.path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
+            )
+        }
+    }
+}
+
+fn file_path_scope_sql(alias: &str, path: Option<&str>) -> String {
+    match path {
+        None => String::new(),
+        Some(path) => {
+            let escaped = path
+                .trim_start_matches("./")
+                .trim_end_matches('/')
+                .replace('\'', "''");
+            format!(
+                " AND ({alias}.file_path = '{escaped}' OR substr({alias}.file_path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
             )
         }
     }
@@ -1324,7 +1342,7 @@ pub fn impact(
             if extended {
                 return Err(KgError::NoResultsCaveated {
                     caveat,
-                    detail: "0 impacting files found".to_string(),
+                    detail: impact_empty_detail(&kinds),
                 });
             }
             return Err(KgError::NoResults("0 impacting files found".to_string()));
@@ -1639,6 +1657,7 @@ pub fn dead(
               AND f.path NOT LIKE 'test/%' AND f.path NOT LIKE '%/test/%'
               AND f.path NOT LIKE '__tests__/%' AND f.path NOT LIKE '%/__tests__/%'
               AND f.path NOT LIKE 'test\\_%.py' ESCAPE '\\'
+              AND f.path NOT LIKE '%/test\\_%.py' ESCAPE '\\'
               AND f.path NOT LIKE '%\\_test.py' ESCAPE '\\'
               AND f.path NOT LIKE '%.test.%'
               AND f.path NOT LIKE '%.spec.%'
@@ -1723,25 +1742,38 @@ pub fn complexity(
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
-    let mut gen_filter = path_scope_sql("f", path);
+    let mut gen_filter = file_path_scope_sql("s", path);
     if exclude_generated {
         gen_filter.push_str(" AND s.file_id NOT IN (SELECT id FROM files WHERE generated = 1)");
     }
-    let total: i64 = conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
-         WHERE s.kind IN ('function','method')
-           AND s.cyclomatic > 0 AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
-           AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}"
-        ),
-        rusqlite::params![
-            min_cyc as i64,
-            min_loc as i64,
-            min_branches as i64,
-            min_nest as i64
-        ],
-        |r| r.get(0),
-    )?;
+    let default_filters = min_cyc <= 1
+        && min_loc == 0
+        && min_branches == 0
+        && min_nest == 0
+        && path.is_none()
+        && !exclude_generated;
+    let total: i64 = if default_filters {
+        db::meta_get(conn, "callable_count")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    } else {
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM symbols s
+                 WHERE s.kind IN ('function','method')
+                   AND s.cyclomatic > 0 AND s.cyclomatic >= ?1
+                   AND s.effective_loc >= ?2 AND s.branches >= ?3
+                   AND s.nesting >= ?4 {gen_filter}"
+            ),
+            rusqlite::params![
+                min_cyc as i64,
+                min_loc as i64,
+                min_branches as i64,
+                min_nest as i64
+            ],
+            |r| r.get(0),
+        )?
+    };
     if total == 0 {
         return Err(KgError::NoResultsCaveated {
             caveat: "kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic",
@@ -1749,9 +1781,9 @@ pub fn complexity(
         });
     }
     let mut stmt = conn.prepare(&format!(
-        "SELECT f.path, s.line_start, s.cyclomatic, s.branches, s.nesting,
+        "SELECT s.file_path, s.line_start, s.cyclomatic, s.branches, s.nesting,
                 s.effective_loc, s.qualname
-         FROM symbols s JOIN files f ON f.id = s.file_id
+         FROM symbols s INDEXED BY symbols_complexity_idx
          WHERE s.kind IN ('function','method')
            AND s.cyclomatic > 0 AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
            AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}
@@ -1933,8 +1965,8 @@ pub fn api(
         .trim_start_matches("./")
         .trim_end_matches('/')
         .to_string();
-    validate_path_scope(&rel, true)?;
-    let root_scope = rel.is_empty() || rel == ".";
+    validate_path_scope(&rel, false)?;
+    let root_scope = false;
     let mut where_sql = String::from("s.kind IN ('function','method','class','trait','interface')");
     if !root_scope {
         where_sql.push_str(" AND (f.path = ?1 OR substr(f.path, 1, length(?1) + 1) = ?1 || '/')");
@@ -2074,14 +2106,35 @@ pub fn unresolved_names(
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<std::result::Result<_, _>>()?;
     let shown = rows.len().min(limit);
-    let stale = rows
+    let displayed: BTreeSet<&str> = rows
         .iter()
-        .any(|(path, _, _, _)| file_changed(conn, root, path));
+        .take(shown)
+        .map(|(p, _, _, _)| p.as_str())
+        .collect();
+    let changed = displayed
+        .iter()
+        .filter(|p| file_changed(conn, root, p))
+        .count();
+    let stale = changed > 0;
+    let unlocated: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM unresolved_calls u JOIN files f ON f.id = u.file_id
+             WHERE u.site_line = 0 {scope}"
+        ),
+        [],
+        |r| r.get(0),
+    )?;
+    if unlocated > 0 {
+        eprintln!("[kg] {unlocated} unresolved row(s) have site_line=0 and are omitted");
+    }
     let mut out = vec![format!(
         "kg: unresolved={total} rows in {files} files (call/import/inherit)"
     )];
     if stale {
-        out.push("kg: result files changed since build — run kg build".to_string());
+        out.push(format!(
+            "kg: {changed} of {} result files changed since build — run kg build",
+            displayed.len()
+        ));
     }
     out.extend(
         rows.into_iter()
@@ -2433,6 +2486,59 @@ pub fn search(
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
+    // Exact identity is a separate lookup: it must not depend on FTS
+    // tokenization (`_`, `$`) or write a fuzzy payload on a miss.
+    if exact {
+        let mut filter = path_scope_sql("f", path);
+        if let Some(kind) = kind {
+            let escaped = kind.replace('\'', "''");
+            filter.push_str(&format!(" AND s.kind = '{escaped}'"));
+        }
+        let exact_name = terms.trim();
+        let exact_total: usize = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+                 WHERE (s.name = ?1 OR s.qualname = ?1) {filter}"
+            ),
+            [exact_name],
+            |r| r.get::<_, i64>(0),
+        )? as usize;
+        if exact_total == 0 {
+            return Err(KgError::NoResults(format!(
+                "0 symbols matched '{terms}' exactly"
+            )));
+        }
+        let mut stmt = conn.prepare(&format!(
+            "SELECT f.path, s.line_start, s.qualname, s.signature
+             FROM symbols s JOIN files f ON f.id = s.file_id
+             WHERE (s.name = ?1 OR s.qualname = ?1) {filter}
+             ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
+        ))?;
+        let rows = stmt.query_map([exact_name], |r| {
+            let qualname: String = r.get(2)?;
+            let signature: String = r.get(3)?;
+            Ok(Pointer {
+                file: r.get::<_, String>(0)?,
+                line: r.get::<_, i64>(1)?,
+                tag: "",
+                detail: if signature.is_empty() {
+                    qualname
+                } else {
+                    format!("{qualname} {signature}")
+                },
+            })
+        })?;
+        let out = collect_output(
+            conn,
+            root,
+            terms,
+            rows,
+            limit,
+            &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
+            Some(exact_total),
+        )?;
+        return search_lines(out);
+    }
     // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
     // and rarer tokens rank higher — natural-language fit without brittle
     // all-token AND requirements.
@@ -2555,12 +2661,8 @@ pub fn search(
     // Exact-identity path (R7): a single token that is an exact symbol name
     // or qualname returns those identities directly (top-1 measured 90-92%
     // through bm25; ~100% here). Fuzzy FTS order stays for other queries.
-    if toks.len() == 1 || exact {
-        let exact_name = if exact {
-            terms.trim().to_string()
-        } else {
-            toks.join(" ")
-        };
+    if toks.len() == 1 {
+        let exact_name = toks.join(" ");
         let exact_total: usize = conn.query_row(
             &format!(
                 "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
@@ -2569,11 +2671,6 @@ pub fn search(
             [exact_name.as_str()],
             |r| r.get::<_, i64>(0),
         )? as usize;
-        if exact_total == 0 && exact {
-            return Err(KgError::NoResults(format!(
-                "0 symbols matched '{terms}' exactly"
-            )));
-        }
         if exact_total > 0 {
             let mut stmt = conn.prepare(&format!(
                 "SELECT f.path, s.line_start, s.qualname, s.signature

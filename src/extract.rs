@@ -360,6 +360,9 @@ struct ImportEdgeCandidate {
 pub struct FileExtraction {
     pub file_idx: usize,
     pub module: String,
+    /// Rust crate root: a directory segment such as "src", or "" for a
+    /// repo-root lib.rs/main.rs.
+    pub crate_root: Option<String>,
     /// Dot-joined DIRECTORY of the file (no file stem) — relative TS imports
     /// resolve against this, because stems may contain dots (x.test.ts).
     pub dir: String,
@@ -382,6 +385,12 @@ pub struct FileExtraction {
     /// Modules appearing in `from m import *`.
     /// Star-imported modules with the statement line (per-statement scope).
     stars: Vec<(String, usize)>,
+    /// Python `from pkg import ...` parent module edges: (line, module).
+    from_import_parents: HashSet<(usize, String)>,
+    /// Unresolvable inheritance sites: (base name, line).
+    unresolved_inherits: Vec<(String, usize)>,
+    /// Per-line code flag (comment nodes excluded), computed once per file.
+    pub code_lines: Vec<bool>,
     calls: Vec<CallSite>,
     import_edges: Vec<ImportEdgeCandidate>,
 }
@@ -400,7 +409,7 @@ pub fn module_path_for(rel: &str) -> (String, bool) {
         || file_name == "index.cts"
         || file_name == "index.mjs"
         || file_name == "index.cjs";
-    let is_rust_root = file_name == "mod.rs" || file_name == "lib.rs";
+    let is_rust_root = file_name == "mod.rs" || file_name == "lib.rs" || file_name == "main.rs";
     if is_py_pkg || is_ts_pkg || is_rust_root {
         let dir = rel
             .strip_suffix(file_name)
@@ -434,8 +443,30 @@ pub fn module_path_for(rel: &str) -> (String, bool) {
     (stem.replace('/', "."), false)
 }
 
+/// Rust crate root for `crate::` paths: the top directory, or the empty
+/// string for a repo-root `lib.rs`/`main.rs`. Nested module files keep the
+/// same top directory; plain root modules have no crate root.
+fn rust_crate_root(rel: &str) -> Option<String> {
+    let file_name = rel.rsplit('/').next().unwrap_or(rel);
+    match rel.rfind('/') {
+        Some(i) => rel[..i]
+            .replace('/', ".")
+            .split('.')
+            .next()
+            .map(str::to_string),
+        None if file_name == "lib.rs" || file_name == "main.rs" => Some(String::new()),
+        None => None,
+    }
+}
+
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {
     let (module, is_package) = module_path_for(rel);
+    let lang = Lang::from_rel(rel);
+    let crate_root = if lang == Lang::Rust {
+        rust_crate_root(rel)
+    } else {
+        None
+    };
     let mod_name = module.rsplit('.').next().unwrap_or(&module).to_string();
     let dir = match rel.rfind('/') {
         Some(i) => rel[..i].replace('/', "."),
@@ -444,9 +475,10 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
     let mut fx = FileExtraction {
         file_idx,
         module: module.clone(),
+        crate_root,
         dir,
         is_package,
-        lang: Lang::from_rel(rel),
+        lang,
         symbols: vec![NewSymbol {
             kind: "module",
             name: mod_name,
@@ -467,14 +499,18 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
         self_fields: Vec::new(),
         aliases: Vec::new(),
         stars: Vec::new(),
+        from_import_parents: HashSet::new(),
+        unresolved_inherits: Vec::new(),
+        code_lines: Vec::new(),
         calls: Vec::new(),
         import_edges: Vec::new(),
     };
     let mut ctx = WalkCtx::default();
     let root = parsed.tree.root_node();
+    fx.code_lines = file_code_lines(root, src);
     walk_children(root, src, &mut fx, &mut ctx);
-    finalize_exports(&mut fx, src, root);
     finalize_rust_impls(&mut fx);
+    finalize_exports(&mut fx, src, root);
     fx
 }
 
@@ -562,7 +598,7 @@ fn export_base(
             Some(all) => all.contains(&sym.name),
             None => top_level && !sym.name.starts_with('_'),
         },
-        Lang::Rust => sym.signature.trim_start().starts_with("pub "),
+        Lang::Rust => rust_is_pub(&sym.signature),
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
             if !matches!(sym.kind, "class" | "function" | "interface" | "trait") {
                 return false;
@@ -580,19 +616,49 @@ fn export_method(fx: &FileExtraction, i: usize, lines: &[&[u8]]) -> bool {
         .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p));
     let parent_exported = parent.map(|s| s.exported).unwrap_or(false);
     let parent_is_module = parent.map(|s| s.kind == "module").unwrap_or(false);
+    let parent_is_trait = parent
+        .map(|s| matches!(s.kind, "trait" | "interface"))
+        .unwrap_or(false);
+    let trait_impl = parent_qn.as_ref().is_some_and(|pq| {
+        fx.impl_inherits
+            .iter()
+            .any(|(idx, _, _)| &fx.symbols[*idx].qualname == pq)
+    });
     match fx.lang {
         Lang::Python => parent_exported && !sym.name.starts_with('_'),
         Lang::Rust => {
-            sym.signature.trim_start().starts_with("pub ") && (parent_exported || parent_is_module)
+            parent_exported
+                && (rust_is_pub(&sym.signature)
+                    || parent_is_trait
+                    || trait_impl
+                    || parent_is_module)
         }
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
             let source_line = lines
                 .get(sym.line_start.saturating_sub(1))
                 .map(|l| String::from_utf8_lossy(l).to_string())
                 .unwrap_or_default();
-            parent_exported && !sym.name.starts_with('#') && !source_line.contains("private ")
+            parent_exported
+                && !sym.name.starts_with('#')
+                && !source_line.contains("private ")
+                && !source_line.contains("protected ")
         }
     }
+}
+
+/// `pub fn` is public; `pub(crate)`/`pub(super)`/`pub(in ...)` are not.
+/// Signatures may be just `pub` when the rest of the header wraps.
+fn rust_is_pub(signature: &str) -> bool {
+    let sig = signature.trim();
+    if sig == "pub" {
+        return true;
+    }
+    sig.strip_prefix("pub")
+        .map(|rest| {
+            let rest = rest.trim_start();
+            !rest.is_empty() && !rest.starts_with('(')
+        })
+        .unwrap_or(false)
 }
 
 /// Names listed by a local `export { X }` (no source specifier). This is a
@@ -632,6 +698,8 @@ fn finalize_rust_impls(fx: &mut FileExtraction) {
             .position(|s| s.kind == "class" && s.qualname == target_qn)
         {
             fx.impl_inherits.push((idx, trait_chain, line));
+        } else if let Some(base) = trait_chain.last() {
+            fx.unresolved_inherits.push((base.clone(), line));
         }
     }
 }
@@ -995,7 +1063,12 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                         .last()
                         .cloned()
                         .unwrap_or_else(|| fx.module.clone());
-                    let path = format!("{scope}.{name}");
+                    let path = if ctx.class_stack.is_empty() && fx.crate_root.as_deref() == Some("")
+                    {
+                        name.clone()
+                    } else {
+                        format!("{scope}.{name}")
+                    };
                     fx.aliases
                         .push((name, ImportTarget::ModuleRoot { path: path.clone() }));
                     fx.import_edges.push(ImportEdgeCandidate {
@@ -1062,7 +1135,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             let qualname = format!("{parent_qn}.{name}");
             let start = node.start_position().row + 1;
             let sym_idx = fx.symbols.len();
-            let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang);
+            let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang, &fx.code_lines);
             fx.symbols.push(NewSymbol {
                 kind,
                 name: name.clone(),
@@ -1379,6 +1452,7 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                 line,
                 target: ImportTarget::Module { path: m.clone() },
             });
+            fx.from_import_parents.insert((line, m.clone()));
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if Some(child) == module_node {
@@ -1537,7 +1611,12 @@ fn is_nested_callable(kind: &str) -> bool {
 
 /// Per-symbol metrics (Amendment 19). Walks the callable subtree, skipping
 /// nested callable bodies; branch depth starts at 1 for the body.
-fn callable_metrics(node: Node<'_>, src: &[u8], lang: Lang) -> (usize, usize, usize, usize) {
+fn callable_metrics(
+    node: Node<'_>,
+    src: &[u8],
+    lang: Lang,
+    code_lines: &[bool],
+) -> (usize, usize, usize, usize) {
     let decisions: Vec<&str> = crate::parse::decision_kinds(lang)
         .iter()
         .copied()
@@ -1574,61 +1653,142 @@ fn callable_metrics(node: Node<'_>, src: &[u8], lang: Lang) -> (usize, usize, us
             stack.push((child, child_depth));
         }
     }
-    let mut effective_loc = 0usize;
-    let mut in_block = false;
+    (
+        cyclomatic,
+        branch_count,
+        max_nest,
+        callable_effective_loc(node, src, lang, code_lines),
+    )
+}
+
+fn is_comment_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "comment" | "line_comment" | "block_comment" | "doc_comment"
+    )
+}
+
+/// Effective LOC from the file-wide comment mask plus the Python docstring.
+/// A line counts when it has a non-whitespace byte outside every comment node;
+/// docstring bytes are excluded only when the whole line is inside the string.
+fn callable_effective_loc(node: Node<'_>, src: &[u8], lang: Lang, code_lines: &[bool]) -> usize {
     let base_row = node.start_position().row;
-    let doc_rows = if lang == Lang::Python {
-        if let Some(body) = node.child_by_field_name("body") {
-            let mut c = body.walk();
-            let first = body.named_children(&mut c).next();
-            if let Some(stmt) = first.filter(|s| s.kind() == "expression_statement") {
-                let mut c2 = stmt.walk();
-                let inner = stmt.named_children(&mut c2).next();
-                inner
-                    .filter(|s| s.kind() == "string")
-                    .map(|s| (s.start_position().row, s.end_position().row))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let slice = &src[node.start_byte()..node.end_byte()];
-    for (offset, line) in slice.split(|b| *b == b'\n').enumerate() {
-        let row = base_row + offset;
-        if doc_rows.is_some_and(|(s, e)| row >= s && row <= e) {
-            continue;
-        }
-        let trimmed: Vec<u8> = line
-            .iter()
-            .copied()
-            .skip_while(|b| b.is_ascii_whitespace())
-            .collect();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let has = |needle: &[u8]| trimmed.windows(needle.len()).any(|w| w == needle);
-        if in_block {
-            if has(b"*/") {
-                in_block = false;
-            }
-            continue;
-        }
-        if trimmed.starts_with(b"/*") {
-            if !has(b"*/") {
-                in_block = true;
-            }
-            continue;
-        }
-        if (lang == Lang::Python && trimmed.starts_with(b"#")) || trimmed.starts_with(b"//") {
-            continue;
-        }
-        effective_loc += 1;
+    let end_row = node.end_position().row;
+    let mut effective = (base_row..=end_row)
+        .filter(|row| code_lines.get(*row).copied().unwrap_or(true))
+        .count();
+    if lang != Lang::Python {
+        return effective;
     }
-    (cyclomatic, branch_count, max_nest, effective_loc)
+    let Some(body) = node.child_by_field_name("body") else {
+        return effective;
+    };
+    let mut c = body.walk();
+    let first = body.named_children(&mut c).next();
+    let Some(stmt) = first.filter(|s| s.kind() == "expression_statement") else {
+        return effective;
+    };
+    let mut c2 = stmt.walk();
+    let inner = stmt.named_children(&mut c2).next();
+    let Some(doc) = inner.filter(|s| s.kind() == "string") else {
+        return effective;
+    };
+    let doc_start = doc.start_byte();
+    let doc_end = doc.end_byte();
+    let line_bounds = line_byte_bounds(src);
+    for row in doc.start_position().row..=doc.end_position().row {
+        let Some(&(start, end)) = line_bounds.get(row) else {
+            continue;
+        };
+        let has_code_outside_doc = src[start..end].iter().enumerate().any(|(i, byte)| {
+            if byte.is_ascii_whitespace() {
+                return false;
+            }
+            let pos = start + i;
+            !(doc_start <= pos && pos < doc_end)
+        });
+        if !has_code_outside_doc && code_lines.get(row).copied().unwrap_or(true) {
+            effective = effective.saturating_sub(1);
+        }
+    }
+    effective
+}
+
+/// Per-line `(start, end)` byte bounds, excluding the newline.
+fn line_byte_bounds(src: &[u8]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    for (i, byte) in src.iter().enumerate() {
+        if *byte == b'\n' {
+            out.push((start, i));
+            start = i + 1;
+        }
+    }
+    out.push((start, src.len()));
+    out
+}
+
+/// Blank-only LOC flags: a line is code when it has any non-whitespace byte.
+fn blank_code_lines(src: &[u8]) -> Vec<bool> {
+    let mut flags = Vec::new();
+    let mut code = false;
+    for byte in src {
+        if *byte == b'\n' {
+            flags.push(code);
+            code = false;
+        } else if !byte.is_ascii_whitespace() {
+            code = true;
+        }
+    }
+    flags.push(code);
+    flags
+}
+
+/// File-wide per-line code flag from tree-sitter comment nodes.
+fn file_code_lines(root: Node<'_>, src: &[u8]) -> Vec<bool> {
+    // Fast path: no comment marker bytes means no comment nodes, so only
+    // blank lines are excluded.
+    let has_marker = src.windows(2).any(|w| w == b"//")
+        || src.windows(2).any(|w| w == b"/*")
+        || src.contains(&b'#');
+    if !has_marker {
+        return blank_code_lines(src);
+    }
+    let mut covered: Vec<(usize, usize)> = Vec::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        if is_comment_kind(n.kind()) {
+            covered.push((n.start_byte(), n.end_byte()));
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+    covered.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in covered {
+        match merged.last_mut() {
+            Some((_, last_end)) if start <= *last_end => *last_end = (*last_end).max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let bounds = line_byte_bounds(src);
+    let mut flags = Vec::with_capacity(bounds.len());
+    for (start, end) in bounds {
+        let mut code = false;
+        for (i, byte) in src[start..end].iter().enumerate() {
+            if !byte.is_ascii_whitespace() {
+                let pos = start + i;
+                if !merged.iter().any(|(s, e)| pos >= *s && pos < *e) {
+                    code = true;
+                    break;
+                }
+            }
+        }
+        flags.push(code);
+    }
+    flags
 }
 
 fn define_function(
@@ -1652,7 +1812,7 @@ fn define_function(
     let start = node.start_position().row + 1;
     let sym_idx = fx.symbols.len();
     let (cyc, br, nest, loc) = if node.child_by_field_name("body").is_some() {
-        callable_metrics(node, src, fx.lang)
+        callable_metrics(node, src, fx.lang, &fx.code_lines)
     } else {
         (0, 0, 0, 0)
     };
@@ -1782,7 +1942,9 @@ fn collect_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_i
                 }
             }
             "call_expression" => {
-                // `extends mixin(Base, Other)`: only the first identifier argument.
+                // `extends mixin(Base, Other)`: only the first identifier
+                // argument; a call with no identifier argument is unresolved.
+                let mut resolved = false;
                 if let Some(args) = n.child_by_field_name("arguments") {
                     let mut c = args.walk();
                     for arg in args.named_children(&mut c) {
@@ -1796,9 +1958,18 @@ fn collect_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_i
                             if let Some(chain) = dotted_chain(arg, src) {
                                 fx.inherits.push((class_idx, chain));
                             }
+                            resolved = true;
                             break;
                         }
                     }
+                }
+                if !resolved && matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+                    let name = n
+                        .child_by_field_name("function")
+                        .map(|f| text(f, src))
+                        .unwrap_or_else(|| text(n, src));
+                    fx.unresolved_inherits
+                        .push((name, n.start_position().row + 1));
                 }
             }
             "generic_type"
@@ -1830,7 +2001,7 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
     let qualname = format!("{class_qn}.{name}");
     let start = node.start_position().row + 1;
     let sym_idx = fx.symbols.len();
-    let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang);
+    let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang, &fx.code_lines);
     fx.symbols.push(NewSymbol {
         kind: "method",
         name: name.clone(),
@@ -1908,7 +2079,7 @@ fn record_ts_arrow_function(
     let qualname = format!("{}.{}", fx.module, name);
     let start = value.start_position().row + 1;
     let sym_idx = fx.symbols.len();
-    let (cyc, br, nest, loc) = callable_metrics(value, src, fx.lang);
+    let (cyc, br, nest, loc) = callable_metrics(value, src, fx.lang, &fx.code_lines);
     fx.symbols.push(NewSymbol {
         kind: "function",
         name: name.clone(),
@@ -2126,12 +2297,7 @@ fn record_use_decl(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &
     let Some(arg) = node.child_by_field_name("argument") else {
         return;
     };
-    let crate_root = fx
-        .dir
-        .split('.')
-        .next()
-        .filter(|p| !p.is_empty())
-        .map(str::to_string);
+    let crate_root = fx.crate_root.clone();
     let ctx = UseTreeCtx {
         src,
         prefix: &[],
@@ -2184,7 +2350,13 @@ fn walk_use_tree(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileExtraction) {
             emit_use_leaf(path, ctx, alias, fx);
         }
         "use_wildcard" => {
-            let full = match node.child_by_field_name("path") {
+            // tree-sitter-rust has no `path` field here: `crate::a::*` puts the
+            // path in a named child, while a grouped `{ * }` has none.
+            let mut c = node.walk();
+            let path = node
+                .child_by_field_name("path")
+                .or_else(|| node.named_children(&mut c).next());
+            let full = match path {
                 Some(path) => resolve_use_path(path, ctx),
                 None => Some(ctx.prefix.to_vec()),
             };
@@ -2232,8 +2404,20 @@ fn emit_use_leaf(
             }
         });
         if let Some(binding) = binding {
-            fx.aliases
-                .push((binding, ImportTarget::ModuleRoot { path: qn }));
+            if let Some((name, parent)) = full.split_last() {
+                if parent.is_empty() {
+                    fx.aliases
+                        .push((binding, ImportTarget::ModuleRoot { path: qn }));
+                } else {
+                    fx.aliases.push((
+                        binding,
+                        ImportTarget::Symbol {
+                            module: parent.join("."),
+                            name: name.clone(),
+                        },
+                    ));
+                }
+            }
         }
         return;
     }
@@ -2281,7 +2465,11 @@ fn resolve_use_path(node: Node<'_>, ctx: UseTreeCtx<'_>) -> Option<Vec<String>> 
     let mut out: Vec<String> = match first.as_str() {
         "crate" => {
             plain = false;
-            vec![ctx.crate_root?.to_string()]
+            ctx.crate_root?
+                .split('.')
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect()
         }
         "self" if !ctx.prefix.is_empty() => {
             plain = false;
@@ -2329,6 +2517,8 @@ struct FileCtx {
     module_sym_idx: usize,
     aliases: HashMap<String, ImportTarget>,
     stars: Vec<(String, usize)>,
+    from_import_parents: HashSet<(usize, String)>,
+    unresolved_inherits: Vec<(String, usize)>,
     /// (scope_func, var) -> constructor target chain; later assignment wins.
     assignments: HashMap<(String, String), Vec<String>>,
     /// (scope_func, var) -> annotation chain.
@@ -2448,7 +2638,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
         for sf in fx.self_fields {
             self_fields.insert((sf.class_qn, sf.field), sf.target_dotted);
         }
-        let crate_root = fx.dir.split('.').next().map(|p| p.to_string());
+        let crate_root = fx.crate_root.clone();
         t.file_ctx.push(FileCtx {
             module,
             lang: fx.lang,
@@ -2456,6 +2646,8 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             module_sym_idx: base,
             aliases,
             stars: fx.stars,
+            from_import_parents: fx.from_import_parents,
+            unresolved_inherits: fx.unresolved_inherits,
             assignments,
             params,
             self_fields,
@@ -2523,6 +2715,16 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
     }
 
     let mut unresolved_calls: Vec<UnresolvedSite> = Vec::new();
+    for (fi, fctx) in t.file_ctx.iter().enumerate() {
+        for (name, site_line) in &fctx.unresolved_inherits {
+            unresolved_calls.push(UnresolvedSite {
+                file_idx: fi,
+                name: name.clone(),
+                kind: "inherit",
+                site_line: *site_line,
+            });
+        }
+    }
 
     // Resolve fresh base chains now that alias tables exist; emit inherits
     // edges for fresh classes (carried inherits edges were carried as rows).
@@ -2697,8 +2899,15 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                         continue; // the star edge below is the canonical one
                     }
                     if let Some(dsts) = t.by_qualname.get(path) {
-                        let dst = dsts.iter().find(|&&i| t.symbols[i].kind == "module");
-                        if let Some(&dst) = dst {
+                        let module = dsts
+                            .iter()
+                            .copied()
+                            .find(|&i| t.symbols[i].kind == "module");
+                        let fallback = dsts
+                            .iter()
+                            .copied()
+                            .find(|&i| t.symbols[i].kind != "module");
+                        if let Some(dst) = module.or(fallback) {
                             if dst != fctx.module_sym_idx {
                                 t.edges.push(NewEdge {
                                     src_idx: fctx.module_sym_idx,
@@ -2728,21 +2937,29 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                         .iter()
                         .any(|(m, line)| m == path && *line == cand.line);
                     if is_star {
-                        if let Some(dsts) = t.by_qualname.get(path) {
-                            if let Some(&dst) =
-                                dsts.iter().find(|&&i| t.symbols[i].kind == "module")
-                            {
-                                if dst != fctx.module_sym_idx {
-                                    t.edges.push(NewEdge {
-                                        src_idx: fctx.module_sym_idx,
-                                        dst_idx: Some(dst),
-                                        dst_name: path.clone(),
-                                        kind: "imports",
-                                        confidence: "AMBIGUOUS",
-                                        site_line: cand.line,
-                                    });
-                                }
+                        let dst = t.by_qualname.get(path).and_then(|dsts| {
+                            dsts.iter()
+                                .copied()
+                                .find(|&i| t.symbols[i].kind == "module")
+                        });
+                        match dst {
+                            Some(dst) if dst != fctx.module_sym_idx => {
+                                t.edges.push(NewEdge {
+                                    src_idx: fctx.module_sym_idx,
+                                    dst_idx: Some(dst),
+                                    dst_name: path.clone(),
+                                    kind: "imports",
+                                    confidence: "AMBIGUOUS",
+                                    site_line: cand.line,
+                                });
                             }
+                            None => unresolved_calls.push(UnresolvedSite {
+                                file_idx: fi,
+                                name: path.clone(),
+                                kind: "import",
+                                site_line: cand.line,
+                            }),
+                            _ => {}
                         }
                     }
                 }
@@ -2811,8 +3028,12 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             if t.symbols[dst].kind != "module" {
                 return true;
             }
+            let fctx = &t.file_ctx[fi];
             let key = (fi, e.site_line, e.dst_name.clone());
-            !module_children.contains(&key) || symbol_children.contains(&key)
+            let parent_candidate = fctx
+                .from_import_parents
+                .contains(&(e.site_line, e.dst_name.clone()));
+            !parent_candidate || !module_children.contains(&key) || symbol_children.contains(&key)
         });
     }
 

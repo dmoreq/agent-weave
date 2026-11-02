@@ -409,6 +409,67 @@ fn timing_assert_measures_semantic_exit_codes() {
 }
 
 #[test]
+fn search_exact_bypasses_fts_tokenization() {
+    let repo = temp_repo("search-exact-symbols");
+    write(&repo, "app.ts", "function $() {}\nfunction __() {}\n");
+    build(&repo);
+    for name in ["$", "__"] {
+        let out = kg(&repo)
+            .args(["search", name, "--exact"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(out.status.code(), Some(0), "{name}: {stdout}");
+        assert!(stdout.contains(&format!("app.{name}")), "{name}: {stdout}");
+    }
+}
+
+#[test]
+fn path_scope_rejects_embedded_dotdot_and_api_root() {
+    let repo = fixture("path-invalid");
+    build(&repo);
+    for args in [
+        vec!["files", "--path", "../x"],
+        vec!["files", "--path", "a/../b"],
+        vec!["api", ""],
+        vec!["api", "."],
+    ] {
+        let out = kg(&repo).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+    }
+}
+
+#[test]
+fn impact_sites_empty_reason_keeps_edge_suffix() {
+    let repo = temp_repo("impact-empty-sites");
+    write(&repo, "a.py", "def f():\n    pass\n");
+    build(&repo);
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--edges", "imports", "--sites"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr.contains("0 impacting files found (unresolved imports are omitted)"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn dead_exclude_tests_matches_nested_test_filename() {
+    let repo = temp_repo("dead-nested-test");
+    write(&repo, "pkg/test_helpers.py", "def helper():\n    pass\n");
+    build(&repo);
+    let out = kg(&repo)
+        .args(["dead", "--exclude-tests"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("pkg/test_helpers.py"), "{stdout}");
+}
+
+#[test]
 fn response_contract_limit_clamps() {
     let repo = fixture("limit");
     build(&repo);
@@ -655,7 +716,7 @@ fn dead_lists_uncalled_and_excludes_called() {
 }
 
 #[test]
-fn implementers_lists_subclasses_and_dead_keeps_inherited_base() {
+fn p8a_implementers_lists_subclasses_and_dead_keeps_inherited_base() {
     let repo = temp_repo("implementers");
     write(
         &repo,
@@ -683,7 +744,7 @@ fn implementers_lists_subclasses_and_dead_keeps_inherited_base() {
 }
 
 #[test]
-fn implementers_resolves_rust_trait_impl_same_file() {
+fn p8a_implementers_resolves_rust_trait_impl_same_file() {
     let repo = temp_repo("rust-trait");
     write(
         &repo,
@@ -705,7 +766,7 @@ fn implementers_resolves_rust_trait_impl_same_file() {
 }
 
 #[test]
-fn impact_edges_include_importers_and_inheritors() {
+fn p8a_impact_edges_include_importers_and_inheritors() {
     let repo = temp_repo("impact-edges");
     write(
         &repo,
@@ -734,6 +795,131 @@ fn impact_edges_include_importers_and_inheritors() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("hier.py:4"), "{stdout}");
+}
+
+#[test]
+fn import_python_dotted_import_keeps_parent_module_edges() {
+    let repo = temp_repo("py-dotted-parents");
+    write(&repo, "pkg/__init__.py", "");
+    write(&repo, "pkg/sub/__init__.py", "");
+    write(&repo, "pkg/sub/b.py", "def f():\n    pass\n");
+    write(&repo, "app.py", "import pkg.sub.b\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "app.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for row in ["app.py:1 pkg", "app.py:1 pkg.sub", "app.py:1 pkg.sub.b"] {
+        assert!(stdout.contains(row), "missing {row}: {stdout}");
+    }
+}
+
+#[test]
+fn import_rust_root_modules_wildcard_and_single_segment_resolve() {
+    let repo = temp_repo("rust-roots");
+    write(
+        &repo,
+        "src/main.rs",
+        "mod a;\nuse crate::rootfn;\nfn main() {\n    rootfn();\n}\n",
+    );
+    write(&repo, "src/lib.rs", "pub fn rootfn() {}\n");
+    write(&repo, "src/a.rs", "pub fn f() {}\n");
+    write(&repo, "lib.rs", "mod a;\nuse crate::a::f;\n");
+    write(&repo, "a.rs", "pub fn f() {}\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "src/main.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("src/main.rs:1 src.a"), "{stdout}");
+    assert!(stdout.contains("src/main.rs:2 src.rootfn"), "{stdout}");
+
+    let out = kg(&repo).args(["imports", "lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("lib.rs:1 a"), "root mod mapping: {stdout}");
+    assert!(stdout.contains("lib.rs:2 a.f"), "root crate use: {stdout}");
+
+    let out = kg(&repo).args(["unresolved", "--names"]).output().unwrap();
+    assert!(
+        out.status.code() == Some(1),
+        "root/wildcard/single-segment left unresolved: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn import_rust_wildcard_import_emits_ambiguous_module_edge() {
+    let repo = temp_repo("rust-star");
+    write(&repo, "src/lib.rs", "mod a;\nmod b;\n");
+    write(&repo, "src/a.rs", "pub fn shared() {}\n");
+    write(
+        &repo,
+        "src/b.rs",
+        "use crate::a::*;\n\nfn use_it() {\n    shared();\n}\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "src/b.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("src/b.rs:1 src.a"), "star edge: {stdout}");
+    let out = kg(&repo).args(["callers", "shared"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("src/b.rs:4"),
+        "star call resolution: {stdout}"
+    );
+}
+
+#[test]
+fn import_python_star_import_heals_after_restore() {
+    let repo = temp_repo("py-star-heal");
+    write(&repo, "pkg/__init__.py", "");
+    write(&repo, "pkg/later.py", "def gone():\n    pass\n");
+    write(&repo, "app.py", "from pkg.later import *\n");
+    build(&repo);
+    fs::remove_file(repo.join("pkg/later.py")).unwrap();
+    build(&repo);
+    let out = kg(&repo).args(["unresolved", "--names"]).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("app.py:1 import pkg.later"),
+        "star deletion must leave an unresolved site: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    write(&repo, "pkg/later.py", "def gone():\n    pass\n");
+    build(&repo);
+    let out = kg(&repo).args(["imports", "app.py"]).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("app.py:1 pkg.later"),
+        "star restore must heal: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn unresolved_inherit_reports_cross_file_and_mixin_calls() {
+    let repo = temp_repo("unresolved-inherit");
+    write(
+        &repo,
+        "src/traits.rs",
+        "pub trait Shape {\n    fn area(&self);\n}\n",
+    );
+    write(&repo, "src/cross.rs", "pub struct Cross;\n");
+    write(
+        &repo,
+        "src/use.rs",
+        "use crate::traits::Shape;\nuse crate::cross::Cross;\n\nimpl Shape for Cross {}\n",
+    );
+    write(&repo, "web/a.ts", "class Bad extends mixin(1) {}\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("src/use.rs:4 inherit Shape"),
+        "cross-file impl unresolved row: {stdout}"
+    );
+    assert!(
+        stdout.contains("web/a.ts:1 inherit mixin"),
+        "mixin unresolved row: {stdout}"
+    );
 }
 
 #[test]
@@ -827,7 +1013,7 @@ fn impact_depth_footer_only_when_frontier_extended() {
 }
 
 #[test]
-fn impact_depth_two_reaches_transitive_callers() {
+fn p8a_impact_depth_two_reaches_transitive_callers() {
     let repo = temp_repo("impact-depth");
     write(&repo, "c.py", "def h():\n    pass\n");
     write(&repo, "b.py", "from c import h\n\ndef g():\n    h()\n");
@@ -845,7 +1031,7 @@ fn impact_depth_two_reaches_transitive_callers() {
 }
 
 #[test]
-fn symbols_directory_groups_files_and_counts_symbols() {
+fn p8a_symbols_directory_groups_files_and_counts_symbols() {
     let repo = temp_repo("symbols-dir");
     write(&repo, "pkg/a.py", "def a():\n    pass\n");
     write(&repo, "pkg/b.py", "def b():\n    pass\n");
@@ -906,7 +1092,7 @@ fn imports_lists_outbound_resolved_edges() {
 }
 
 #[test]
-fn api_exports_impl_before_type_and_ts_arrows() {
+fn p8c_api_exports_impl_before_type_and_ts_arrows() {
     let repo = temp_repo("api-two-pass");
     write(
         &repo,
@@ -960,7 +1146,57 @@ fn ts_arrow_metrics_use_the_arrow_range() {
 }
 
 #[test]
-fn complexity_excludes_zero_metric_trait_signatures() {
+fn p8c_api_exports_trait_methods_and_rejects_protected() {
+    let repo = temp_repo("api-trait-protected");
+    write(
+        &repo,
+        "lib.rs",
+        "pub trait Shape {\n    fn area(&self);\n}\npub struct Circle;\nimpl Shape for Circle {\n    fn area(&self) {}\n}\n",
+    );
+    write(
+        &repo,
+        "app.ts",
+        "export class C {\n    protected prot() {}\n    private priv() {}\n    ok() {}\n}\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["api", "lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for row in ["lib.Shape.area", "lib.Circle.area"] {
+        assert!(stdout.contains(row), "missing {row}: {stdout}");
+    }
+    let out = kg(&repo).args(["api", "app.ts"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("app.C.ok"), "{stdout}");
+    assert!(!stdout.contains("prot"), "protected exported: {stdout}");
+    assert!(!stdout.contains("priv"), "private exported: {stdout}");
+}
+
+#[test]
+fn effective_loc_uses_comment_node_coverage() {
+    let repo = temp_repo("effective-loc");
+    write(
+        &repo,
+        "rs.rs",
+        "fn block_tail() {\n    let x = 1;\n    let y = 1; /* start\n    comment\n    comment */\n    x + y\n}\n\nfn raw_str() {\n    let s = r#\"line\n// literal\nline\"#;\n    s.len()\n}\n",
+    );
+    build(&repo);
+    let out = kg(&repo)
+        .args(["symbols", "rs.rs", "--metrics"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("rs.block_tail") && stdout.contains("loc=5"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("rs.raw_str") && stdout.contains("loc=6"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn p8c_complexity_excludes_zero_metric_trait_signatures() {
     let repo = temp_repo("complexity-signatures");
     write(
         &repo,
@@ -990,7 +1226,7 @@ fn complexity_excludes_zero_metric_trait_signatures() {
 }
 
 #[test]
-fn ts_relative_imports_collapse_extensions_and_index() {
+fn import_ts_relative_imports_collapse_extensions_and_index() {
     let repo = temp_repo("ts-extensions");
     write(
         &repo,
@@ -1034,7 +1270,7 @@ fn ts_relative_imports_collapse_extensions_and_index() {
 }
 
 #[test]
-fn python_from_import_module_suppresses_redundant_parent_edge() {
+fn import_python_from_import_module_suppresses_redundant_parent_edge() {
     let repo = temp_repo("from-import-module");
     write(&repo, "pkg/__init__.py", "def b():\n    pass\n");
     write(&repo, "pkg/mod.py", "def inner():\n    pass\n");
@@ -1065,7 +1301,7 @@ fn python_from_import_module_suppresses_redundant_parent_edge() {
 }
 
 #[test]
-fn rust_use_tree_and_module_mapping_resolve() {
+fn import_rust_use_tree_and_module_mapping_resolve() {
     let repo = temp_repo("rust-use-tree");
     write(&repo, "src/lib.rs", "pub mod a;\npub mod util;\n");
     write(&repo, "src/util.rs", "pub fn u() {}\n");
@@ -1123,7 +1359,7 @@ fn rust_use_tree_and_module_mapping_resolve() {
 }
 
 #[test]
-fn star_suppression_is_per_import_statement() {
+fn import_star_suppression_is_per_import_statement() {
     let repo = temp_repo("star-per-statement");
     write(&repo, "pkg/__init__.py", "def f():\n    pass\n");
     write(&repo, "pkg/mod.py", "def f():\n    pass\n");
@@ -1150,7 +1386,7 @@ fn star_suppression_is_per_import_statement() {
 }
 
 #[test]
-fn deleted_destination_heals_unresolved_and_restore() {
+fn import_deleted_destination_heals_unresolved_and_restore() {
     let repo = temp_repo("deletion-heal");
     write(&repo, "pkg/__init__.py", "");
     write(&repo, "pkg/later.py", "def gone():\n    pass\n");
@@ -1190,13 +1426,23 @@ fn deleted_destination_heals_unresolved_and_restore() {
 }
 
 #[test]
-fn tests_command_finds_direct_and_indirect_tests() {
+fn tests_impact_seed_covers_direct_indirect_depth_and_file_seed() {
     let repo = temp_repo("tests-cmd");
     write(&repo, "src/core.py", "def f():\n    pass\n");
     write(
         &repo,
+        "src/mid.py",
+        "from src.core import f\n\ndef g():\n    return f()\n",
+    );
+    write(
+        &repo,
         "tests/test_core.py",
         "from src.core import f\n\ndef test_direct():\n    f()\n",
+    );
+    write(
+        &repo,
+        "tests/test_mid.py",
+        "from src.mid import g\n\ndef test_indirect():\n    g()\n",
     );
     build(&repo);
 
@@ -1205,10 +1451,29 @@ fn tests_command_finds_direct_and_indirect_tests() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.starts_with("kg: test candidates —"), "{stdout}");
     assert!(stdout.contains("tests/test_core.py:3"), "{stdout}");
+
+    // Depth 1 finds only the direct test; depth 2 adds the indirect route.
+    let out = kg(&repo)
+        .args(["tests", "f", "--depth", "1"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("test_indirect"), "depth 1: {stdout}");
+    let out = kg(&repo)
+        .args(["tests", "f", "--depth", "2"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("test_indirect"), "depth 2: {stdout}");
+
+    // A file seed uses every symbol in that file.
+    let out = kg(&repo).args(["tests", "src/mid.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("test_indirect"), "file seed: {stdout}");
 }
 
 #[test]
-fn unresolved_names_lists_sites_with_kind() {
+fn p8c_unresolved_names_lists_sites_with_kind() {
     let repo = temp_repo("unresolved-names");
     write(&repo, "app.py", "def f():\n    missing_thing()\n");
     build(&repo);
@@ -1221,7 +1486,7 @@ fn unresolved_names_lists_sites_with_kind() {
 }
 
 #[test]
-fn complexity_ranks_symbols_and_symbols_metrics_append() {
+fn p8c_complexity_ranks_symbols_and_symbols_metrics_append() {
     let repo = temp_repo("complexity");
     write(
         &repo,
@@ -1250,7 +1515,7 @@ fn complexity_ranks_symbols_and_symbols_metrics_append() {
 }
 
 #[test]
-fn api_lists_public_symbols_and_include_private() {
+fn p8c_api_lists_public_symbols_and_include_private() {
     let repo = temp_repo("api");
     write(
         &repo,
@@ -1274,7 +1539,7 @@ fn api_lists_public_symbols_and_include_private() {
 }
 
 #[test]
-fn files_lists_indexed_inventory_and_generated_tag() {
+fn p8c_files_lists_indexed_inventory_and_generated_tag() {
     let repo = temp_repo("files-cmd");
     write(&repo, "src/a.py", "def a():\n    pass\n");
     write(
@@ -1397,7 +1662,7 @@ fn inheritance_ignores_generic_arguments_and_external_paths() {
 }
 
 #[test]
-fn api_respects_python_all_and_rust_visibility() {
+fn p8c_api_respects_python_all_and_rust_visibility() {
     let repo = temp_repo("api-visibility");
     write(
         &repo,
@@ -2351,7 +2616,7 @@ fn v6_database_rebuilds_to_v7() {
 }
 
 #[test]
-fn complexity_path_tiebreak_is_stable_fresh_and_carried() {
+fn p8c_complexity_path_tiebreak_is_stable_fresh_and_carried() {
     // Amendment 20: pkg.f exists in pkg.py and pkg/__init__.py with equal
     // metrics. Ordering must use file_path, so a carried index whose file_id
     // order differs from a fresh one still prints byte-identical output.
@@ -3101,7 +3366,7 @@ fn clones_show_the_enclosing_symbol() {
 }
 
 #[test]
-fn impact_defaults_to_files_with_site_counts() {
+fn p8a_impact_defaults_to_files_with_site_counts() {
     let repo = temp_repo("impact-sites");
     write(&repo, "a.py", "def target():\n    return 1\n");
     write(

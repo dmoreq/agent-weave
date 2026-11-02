@@ -16,6 +16,23 @@ changes bump the minor while 0.x is unstable.
   Fresh inserts and carry-forward both populate the column; `probe_old`
   rejects a v7-stamped index that lacks it.
 
+### Fixed — P8 review cycle 2 (R11, Amendment 21)
+
+- Python dotted imports keep every ancestor module edge; Rust crate roots,
+  wildcard use trees, and single-segment module/symbol imports resolve; star
+  imports heal after destination restore.
+- Cross-file Rust impls and non-identifier TS mixin calls store unresolved
+  `inherit` rows; `--context` per-site behavior is normative.
+- `search --exact` bypasses FTS and journals no fuzzy miss; path scopes
+  reject embedded `..` and root `api`; per-site empty reasons keep their
+  suffix; nested `test_*.py` files are excluded from `dead`; `unresolved
+  --names` has the standard staleness header and unlocated-row count.
+- `effective_loc` uses comment-node byte coverage; TS `protected` is private;
+  Rust trait and trait-impl methods of an exported type are exported.
+- P8 gate commands select real tests; GT harnesses report Wilson precision.
+- 1M-symbol `complexity` default is 6.9 ms via `meta.callable_count`;
+  path scope is amended to a 250 ms budget (201 ms measured).
+
 ### Fixed — P8 review cycle (R10)
 
 - Rust imports: structural `use` trees (grouped, alias, `self`/`super`,

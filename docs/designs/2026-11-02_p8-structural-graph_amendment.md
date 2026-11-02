@@ -382,6 +382,9 @@ base and records it as the P8a contract.
   `--depth > 1` exits 2. In per-site mode, one line per edge site, ordered by
   `path, site_line, dst.qualname, edge.id`; in default mode, one line per
   dependent file, keeping the smallest `site_line` and adding `(N sites)`.
+  At depth 1, `--context` implies per-site rows exactly like `--explain`;
+  `shown`/`total` are then site counts. Grouped output without `--sites`,
+  `--context`, or `--explain` stays byte-identical.
 - Transitive mode (depth > 1): one line per file at its minimum depth,
   first-hop site, sorted by `path`; ties by `site_line`, then source
   qualname. With `--explain`, append ` [kind depth=N]`; with `--context`,

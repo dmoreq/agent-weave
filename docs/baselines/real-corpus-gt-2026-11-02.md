@@ -81,11 +81,16 @@ target/release/kg --root /Users/quy.doan/Workspace/personal/finguard build --for
 
 ## 4. Results at freeze
 
-| gate | hits | recall | Wilson 95% | gate |
-|------|------|--------|------------|------|
-| imports | 40/40 | 1.000 | 0.912-1.000 | >= 0.90 |
-| tests | 20/20 | 1.000 | 0.839-1.000 | >= 0.90 |
-| inheritance | 11/11 | 1.000 | 0.741-1.000 | 1.00 |
+| gate | recall | precision | Wilson 95% (recall) | gate |
+|------|--------|-----------|---------------------|------|
+| imports | 40/40 = 1.000 | 183/183 = 1.000 | 0.912-1.000 | recall/precision >= 0.90 |
+| tests | 20/20 = 1.000 | 2679/2679 = 1.000 | 0.839-1.000 | recall/precision >= 0.90 |
+| inheritance | 11/11 = 1.000 | not applicable | 0.741-1.000 | recall 1.00 |
+
+Precision is measured over every emitted row for the GT files. An import row
+is positive when its source line (or its multi-line import block) is
+import-shaped and names the target leaf. A test row is positive when its
+qualname matches the pinned `test_*`/`test[A-Z]` rule.
 
 ## 5. Flutter corpus
 

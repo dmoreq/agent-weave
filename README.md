@@ -23,7 +23,7 @@ reproduction commands, and threats to validity):
 | question | measured |
 |----------|----------|
 | Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall 100% on two GT sets plus the refreshed self set; call-site precision 662/664 (99.7%; two known checker/GT failures listed); P8 real-corpus GT 71/71 (imports 40/40, tests 20/20, inheritance 11/11) |
-| Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.82 s best-of-7 on the 2,025-file synthetic corpus (1.25x budget: 2.91 s) |
+| Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.70-2.79 s best-of-7 on the 2,025-file synthetic corpus (1.25x budget: 2.91 s) |
 | Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
 | Structure and duplication lookups? | `kg search` recall 0.775 (22/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
 | Does everything help every host? | **No.** Route queries (`path`) cut tool calls 57-59% on Grok and 61-86% on OpenCode (Stage 1 and Stage 4); `search` showed no economics gain in its 24-run battery; `clones` transferred on Grok (−59% calls) but not OpenCode (−17%). Utility is host-dependent — see EVALUATION §5. |
@@ -41,7 +41,7 @@ macOS arm64/x86_64 and Linux x86_64/aarch64 (CI-built).
 ## Usage
 
 ```
-kg build                      # index the repo into .kg/index.db (atomic swap; no-op runs write nothing)
+kg build                      # index the repo into .kg/index.db (atomic swap; unchanged trees leave index.db byte-identical)
 kg build --force              # re-extract everything (skip the fast path)
 kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
@@ -75,8 +75,9 @@ kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 
 `--root <path>` overrides repo discovery (default: nearest git root ancestor).
 `--no-journal` (or env `KG_NO_JOURNAL=1`) disables the usage journal
-(`.kg/usage.log`, local-only JSONL). Every successful pointer query also
-appends one self-contained payload line to `.kg/usage-results.jsonl`:
+(`.kg/usage.log`, local-only JSONL). Every successful query that displays pointers also
+appends one self-contained payload line to `.kg/usage-results.jsonl`
+(`files`, `resolve`, and `unresolved` are journal-only by contract):
 displayed pointers byte-identical to stdout, plus index `built_at`/`source_rev`
 and `KG_SESSION`/`KG_ARM` attribution. `kg usage --verify` replays a
 deterministic sample of those pointers against current source.

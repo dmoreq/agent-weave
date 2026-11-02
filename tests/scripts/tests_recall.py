@@ -28,6 +28,7 @@ def main() -> int:
     ap.add_argument("--pairs", required=True)
     ap.add_argument("--vihap-root", required=True)
     ap.add_argument("--min-recall", type=float, default=0.90)
+    ap.add_argument("--min-precision", type=float, default=0.90)
     ap.add_argument("binary")
     args = ap.parse_args()
     rows = [
@@ -37,6 +38,8 @@ def main() -> int:
     ]
     hits = 0
     missed: set[tuple[str, int]] = set()
+    emitted = 0
+    test_shaped = 0
     for row in rows:
         proc = subprocess.run(
             [
@@ -63,7 +66,25 @@ def main() -> int:
             hits += 1
         else:
             missed.add((row["test_file"], row["test_line"]))
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                if line.startswith("kg:") or line.startswith("showing "):
+                    continue
+                parts = line.split(" ", 1)
+                if len(parts) != 2 or ":" not in parts[0]:
+                    continue
+                qualname = parts[1].split(" ", 1)[-1]
+                leaf = qualname.rsplit(".", 1)[-1]
+                emitted += 1
+                if leaf.startswith("test_") or (
+                    leaf.startswith("test")
+                    and len(leaf) > 4
+                    and leaf[4].isascii()
+                    and leaf[4].isupper()
+                ):
+                    test_shaped += 1
 
+    precision, plo, phi = wilson(test_shaped, emitted) if emitted else (0.0, 0.0, 0.0)
     recall, lo, hi = wilson(hits, len(rows))
     print("| target | test file:line | ok |")
     print("|--------|----------------|----|")
@@ -74,7 +95,9 @@ def main() -> int:
         print(f"MISS: {path}:{line}", file=sys.stderr)
     print(f"\nrecall: {hits}/{len(rows)} = {recall:.3f} "
           f"(Wilson 95% {lo:.3f}-{hi:.3f}; gate >= {args.min_recall:.2f})")
-    return 0 if recall >= args.min_recall else 1
+    print(f"precision: {test_shaped}/{emitted} = {precision:.3f} "
+          f"(Wilson 95% {plo:.3f}-{phi:.3f}; gate >= {args.min_precision:.2f})")
+    return 0 if recall >= args.min_recall and precision >= args.min_precision else 1
 
 
 if __name__ == "__main__":
