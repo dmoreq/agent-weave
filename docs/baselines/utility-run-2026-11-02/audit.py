@@ -26,9 +26,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 KG_ROOT = Path("/tmp/utility-corpus-2026-11-02/kg")
 VIHAP_ROOT = Path("/tmp/utility-corpus-2026-11-02/vihap")
-REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT, "S1": KG_ROOT, "S2": KG_ROOT, "S3": VIHAP_ROOT}
+REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT, "S1": KG_ROOT, "S2": KG_ROOT, "S3": VIHAP_ROOT,
+         "C1": Path("/tmp/utility-corpus-2026-11-02/clones"), "C2": Path("/tmp/utility-corpus-2026-11-02/clones")}
 FEATURE_TOOL = {"P1": "path", "P2": "path", "P3": "path",  # Stage 1
-                 "S1": "search", "S2": "search", "S3": "search"}  # Stage 2
+                 "S1": "search", "S2": "search", "S3": "search",  # Stage 2
+                 "C1": "clones", "C2": "clones"}  # Stage 3
 OC_DB = Path.home() / ".local/share/opencode/opencode.db"
 
 
@@ -144,6 +146,21 @@ def main() -> int:
             rec["violations"].append(
                 f"control arm called {FEATURE_TOOL[meta['task']]} {rec['feature_calls']}x")
         rec["answered"] = (ROOT / "answers" / f"{runid}.json").exists()
+        if rec.get("tools") == 0:
+            rec["violations"].append("zero tool calls: answer not tool-derived")
+        log = ROOT / "logs" / f"{runid}.out"
+        probe = ""
+        if log.exists():
+            probe += log.read_text(errors="replace")
+        if rec["host"] == "grok":
+            for d in Path.home().glob(f".grok/sessions/*/{meta['sid']}/chat_history.jsonl"):
+                probe += d.read_text(errors="replace")
+        low = probe.lower()
+        if "sqlite3" in low or any(
+            marker in low
+            for marker in (".tables", "from clone_groups", "from edges")
+        ):
+            rec["violations"].append("direct sqlite query in transcript")
         audit.append(rec)
     (ROOT / out_name).write_text(json.dumps(audit, indent=1) + "\n")
     print(f"{out_name}: {len(audit)} cells")

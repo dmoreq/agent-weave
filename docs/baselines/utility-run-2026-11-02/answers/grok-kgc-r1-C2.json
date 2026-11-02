@@ -1,0 +1,7 @@
+{
+  "exists": false,
+  "hops": 0,
+  "route": [],
+  "pairs": [],
+  "answer": "No. After blank lines are dropped, the longest identical contiguous run between near.py and any other file is 1 line (near.py:6, `for item in items:`)."
+}

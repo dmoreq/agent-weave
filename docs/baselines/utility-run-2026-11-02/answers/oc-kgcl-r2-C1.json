@@ -1,0 +1,12 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": [],
+  "pairs": [
+    "pair01_a.py:3-11 pair01_b.py:3-11",
+    "pair02_a.py:3-11 pair02_b.py:3-11",
+    "pair03_a.py:3-11 pair03_b.py:3-11",
+    "pair04_a.py:3-11 pair04_b.py:3-11"
+  ],
+  "answer": "Four pairs have identical normalized-text blocks on lines 3-11. near.py is similar but not an identical normalized-text block match."
+}

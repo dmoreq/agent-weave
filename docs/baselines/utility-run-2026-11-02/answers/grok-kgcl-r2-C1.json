@@ -1,0 +1,12 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": [],
+  "pairs": [
+    "pair01_a.py:3-11 pair01_b.py:3-11",
+    "pair02_a.py:3-11 pair02_b.py:3-11",
+    "pair03_a.py:3-11 pair03_b.py:3-11",
+    "pair04_a.py:3-11 pair04_b.py:3-11"
+  ],
+  "answer": "kg clones found four identical normalized-text blocks, each spanning lines 3-11 of pair01 through pair04. near.py and the unique*.py files are not identical block matches."
+}

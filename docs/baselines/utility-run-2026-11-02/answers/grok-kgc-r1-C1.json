@@ -1,0 +1,12 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": [],
+  "pairs": [
+    "pair01_a.py:3-11 pair01_b.py:3-11",
+    "pair02_a.py:3-11 pair02_b.py:3-11",
+    "pair03_a.py:3-11 pair03_b.py:3-11",
+    "pair04_a.py:3-11 pair04_b.py:3-11"
+  ],
+  "answer": "Four duplicated blocks match after trailing-whitespace trim and blank-line removal: pair01_a.py:3-11 with pair01_b.py:3-11, pair02_a.py:3-11 with pair02_b.py:3-11, pair03_a.py:3-11 with pair03_b.py:3-11, and pair04_a.py:3-11 with pair04_b.py:3-11. Each block is nine kept lines."
+}

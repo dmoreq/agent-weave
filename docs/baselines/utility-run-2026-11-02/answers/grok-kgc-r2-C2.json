@@ -1,0 +1,7 @@
+{
+  "exists": false,
+  "hops": 0,
+  "route": [],
+  "pairs": [],
+  "answer": "No. After dropping blank lines, near.py (11 non-blank lines) shares no contiguous block of 5 or more identical lines with any other file; the longest match is 1 line against each pair0*.py file."
+}

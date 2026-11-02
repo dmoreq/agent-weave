@@ -1,0 +1,10 @@
+Four duplicated normalized-text blocks, each lines 3–11 (nine kept lines). Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-C1.json`.
+
+| Pair |
+| --- |
+| `pair01_a.py:3-11` `pair01_b.py:3-11` |
+| `pair02_a.py:3-11` `pair02_b.py:3-11` |
+| `pair03_a.py:3-11` `pair03_b.py:3-11` |
+| `pair04_a.py:3-11` `pair04_b.py:3-11` |
+
+`exists` is true. `near.py`, `unique1.py`, `unique2.py`, and `unique3.py` share no block of 5 or more kept lines with any file.

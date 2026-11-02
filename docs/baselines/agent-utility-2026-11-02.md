@@ -155,3 +155,59 @@ shape, not a re-run of this battery.
 
 Contamination guard: all 12 control cells feature calls = 0; all 12
 treatment cells `search` calls >= 1. No cell excluded.
+
+## Stage 3 — `kg clones` (F4, Amendment 12d)
+
+Protocol as Stages 1-2; 16 cells = C1 (list every duplicated block pair)
++ C2 (near-duplicate rejection) × 2 arms × 2 hosts × 2 runs. Fixture
+generated deterministically (`make_clone_fixture.py`): 4 seeded pairs with
+an identical 9-line block at exactly 3-11 in both files, one near-duplicate
+(all identifiers renamed), 3 unique decoys. Goldfish audit round 1 found
+1 Critical (C2 prompt pre-filled the answer), 3 Important (span ambiguity
+2-11 vs 3-11, C2 definition underspecified, "answer field" vs `pairs`),
+1 Suggestion (index.db readable by the control arm). All fixed before any
+cell: unique per-file header lines make raw and normalized maxima coincide
+at 3-11; prompts neutral (`"exists": <true or false>`); C2 defines duplicate
+as identical normalized text (5+ lines, blank lines ignored); the scorer
+reads `pairs`; audit flags zero-tool cells and direct sqlite queries.
+
+### Correctness: 16/16 both arms
+
+Every cell reported the 4 pairs with exact spans (C1) and rejected
+near.py (C2).
+
+### Economics (mean per run; host-recorded)
+
+| host | arm | kg calls | tool calls | input tokens |
+|------|-----|----------|------------|--------------|
+| Grok Build | kgc control | 0.0 | 12.25 | 248,806 |
+| Grok Build | kgcl treatment | 1.5 | **5.0 (−59%)** | **151,911 (−39%)** |
+| OpenCode gpt-6-sol | kgc control | 0.0 | 5.75 | 10,968 |
+| OpenCode gpt-6-sol | kgcl treatment | 1.0 | 4.75 (−17%) | 14,436 (+32%, cache-contaminated) |
+
+### Verdict: PARTIAL (host-dependent)
+
+On Grok the routed arm cuts tool calls 59% and input tokens 39% with
+correctness parity — the decision-rule bar is met on both tasks. On
+OpenCode the call reduction is 17% (below the 20% bar) and the token
+numbers are small and cache-contaminated, so no claim is made. This is
+the same host-dependence pattern as the P4 navigation battery
+(grok-a-b-2026-11-01.md finding 3): utility transfers only where the host
+agent actually follows the routing and avoids file-by-file verification.
+
+Scope limits: 12-file fixture with exact-duplicate seeding; the control
+arm had no kg call at all (pure file reading), so the comparison is
+tool-assisted audit vs manual audit, not `clones` vs another kg tool.
+
+## Overall
+
+| stage | feature | correctness | economics | verdict |
+|-------|---------|-------------|-----------|---------|
+| 1 | `path` | 24/24 both arms | kg calls −91%/−71%; tokens −57%/−36% | **PASS** (both hosts) |
+| 2 | `search` | 24/24 both arms | tools −18%/+3%; kg calls up | **FAIL** (utility unproven) |
+| 3 | `clones` | 16/16 both arms | tools −59%/−17%; tokens −39%/+32% | **PARTIAL** (Grok only) |
+
+All three features keep their quality gates (G14/G16/G17). The utility
+A/B adds a second axis: `path` is utility-proven on both tested hosts;
+`search` shows no economics gain at the tested task class; `clones`
+transfers on Grok, not on OpenCode at n=2.

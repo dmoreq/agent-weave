@@ -1,0 +1,10 @@
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgcl-r1-C1.json` with `exists: true` and four pairs from `kg clones`.
+
+| Pair | Span |
+|---|---|
+| pair01 | `pair01_a.py:3-11` `pair01_b.py:3-11` |
+| pair02 | `pair02_a.py:3-11` `pair02_b.py:3-11` |
+| pair03 | `pair03_a.py:3-11` `pair03_b.py:3-11` |
+| pair04 | `pair04_a.py:3-11` `pair04_b.py:3-11` |
+
+Each pair is the same function body on lines 3-11. File reads match those spans. `near.py` uses different identifiers, so `kg clones` did not list it.

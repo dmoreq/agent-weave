@@ -1,0 +1,32 @@
+[start] grok-kgc-r1-C2 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:23:37
+[done] grok-kgc-r1-C2 exit=0 09:24:27
+[start] grok-kgcl-r1-C2 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:24:54
+[done] grok-kgcl-r1-C2 exit=0 09:25:46
+[start] grok-kgcl-r2-C2 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:25:46
+[done] grok-kgcl-r2-C2 exit=0 09:26:26
+[start] grok-kgc-r2-C2 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:26:26
+[done] grok-kgc-r2-C2 exit=0 09:27:28
+[start] grok-kgc-r1-C1 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:27:28
+[done] grok-kgc-r1-C1 exit=0 09:29:13
+[start] grok-kgcl-r1-C1 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:29:13
+[done] grok-kgcl-r1-C1 exit=0 09:30:01
+[start] grok-kgcl-r2-C1 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:30:01
+[done] grok-kgcl-r2-C1 exit=0 09:30:50
+[start] grok-kgc-r2-C1 host=grok repo=/tmp/utility-corpus-2026-11-02/clones 09:30:50
+[done] grok-kgc-r2-C1 exit=0 09:32:03
+[start] oc-kgc-r1-C2 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:32:03
+[done] oc-kgc-r1-C2 exit=0 09:32:36
+[start] oc-kgcl-r1-C2 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:32:36
+[done] oc-kgcl-r1-C2 exit=0 09:33:02
+[start] oc-kgcl-r2-C2 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:33:02
+[done] oc-kgcl-r2-C2 exit=0 09:33:29
+[start] oc-kgc-r2-C2 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:33:29
+[done] oc-kgc-r2-C2 exit=0 09:34:05
+[start] oc-kgc-r1-C1 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:34:05
+[done] oc-kgc-r1-C1 exit=0 09:34:33
+[start] oc-kgcl-r1-C1 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:34:34
+[done] oc-kgcl-r1-C1 exit=0 09:35:22
+[start] oc-kgcl-r2-C1 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:35:22
+[done] oc-kgcl-r2-C1 exit=0 09:35:51
+[start] oc-kgc-r2-C1 host=opencode repo=/tmp/utility-corpus-2026-11-02/clones 09:35:51
+[done] oc-kgc-r2-C1 exit=0 09:36:19

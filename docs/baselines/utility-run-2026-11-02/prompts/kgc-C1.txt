@@ -1,0 +1,30 @@
+You are a coding agent answering ONE question about the repository at /tmp/utility-corpus-2026-11-02/clones.
+
+Tools: you may run shell commands. The kg code index CLI is at:
+  /Users/quy.doan/Workspace/kg/target/release/kg
+Run kg with --root /tmp/utility-corpus-2026-11-02/clones
+
+This run does NOT include the `kg clones` command. Find duplicated code by reading files and using grep.
+
+Question: List every duplicated block pair in this repository with both file:line-range spans. Put the pairs in the `pairs` array.
+
+Deliverable: write EXACTLY this JSON object to this absolute path:
+  {ANSWER_PATH}
+
+{
+  "exists": <true or false>,
+  "hops": 0,
+  "route": [],
+  "pairs": ["<pathA>:<startA>-<endA> <pathB>:<startB>-<endB>", ...],
+  "answer": "<one or two sentences>"
+}
+
+Rules:
+- One string per duplicated pair, two spans separated by one space, spans
+  exactly `repo-relative-path:start-end` (1-based inclusive, blank-line
+  trimmed like the normalized-text definition).
+- C1: pairs = every duplicated pair you found.
+- C2: pairs=[] when near.py is NOT an identical normalized-text block match.
+- Do not invent spans; every span must come from tool output or file reads.
+- Budget: at most 25 tool calls. Do not modify any file. No network.
+- When the JSON file is written, stop.

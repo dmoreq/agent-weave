@@ -1,0 +1,3 @@
+No. `near.py` has no identical normalized-text block of 5 or more lines with any other file.
+
+After blank lines are dropped, `near.py` has 11 non-blank lines. The longest contiguous match with any other file is 1 line, against each `pair0*.py`. `pairs` is empty in `/tmp/utility-answers-2026-11-02/grok-kgc-r2-C2.json`.

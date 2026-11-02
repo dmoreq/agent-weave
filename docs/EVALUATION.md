@@ -112,7 +112,10 @@ gpt-6-sol. One `path` call answers most route questions; the control arm
 stays correct at high exploration cost. Stage 2 — `kg search`, same
 26+24-run protocol: correctness 24/24 in both arms, but no economics gain
 (−18% tool calls Grok, +3% OpenCode; kg calls up) — utility UNPROVEN for
-single-target lookups whose vocabulary matches identifiers. Record:
+single-target lookups whose vocabulary matches identifiers. Stage 3 —
+`kg clones`, 16 runs on a seeded fixture: correctness 16/16 both arms;
+tools −59% and tokens −39% on Grok, tools −17% and noisy tokens on
+OpenCode — PARTIAL (host-dependent, Grok only). Record:
 `baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
 
 ### 5.1 Correctness first

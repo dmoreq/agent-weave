@@ -115,3 +115,10 @@ file? Answer yes/no and justify from the tool output."
   that takes text). S2/S3 prompts now carry the same route-schema
   parenthetical as S1. Expected sets gain `qualname`, and the scorer
   checks it in the answer text (the questions ask for it).
+- 2026-11-02, C-stage GT audit (Goldfish, before any Stage-3 cell): fixture
+  regenerated with two UNIQUE header lines per file so the maximal raw
+  identical block equals the normalized block (3-11); C1/C2 prompts made
+  neutral (`"exists": <true or false>`, pairs go in the `pairs` array);
+  C2 question now defines duplicate as identical normalized text (5+ lines,
+  blank lines ignored); C2 answer contract adds `pairs=[]`; the scorer and
+  audit now flag zero-tool cells and direct sqlite/index.db reads.

@@ -1,0 +1,12 @@
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-C1.json`.
+
+`exists` is true. Four identical normalized-text blocks, each lines 3–11:
+
+| Pair | Span |
+|---|---|
+| pair01_a.py / pair01_b.py | 3-11 |
+| pair02_a.py / pair02_b.py | 3-11 |
+| pair03_a.py / pair03_b.py | 3-11 |
+| pair04_a.py / pair04_b.py | 3-11 |
+
+`near.py` renames every identifier, so it is not a match. `unique1.py`, `unique2.py`, and `unique3.py` share no block.

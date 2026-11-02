@@ -1,0 +1,12 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": [],
+  "pairs": [
+    "pair01_a.py:3-11 pair01_b.py:3-11",
+    "pair02_a.py:3-11 pair02_b.py:3-11",
+    "pair03_a.py:3-11 pair03_b.py:3-11",
+    "pair04_a.py:3-11 pair04_b.py:3-11"
+  ],
+  "answer": "kg clones found four identical normalized-text blocks, each on lines 3-11: pair01_a.py with pair01_b.py, pair02_a.py with pair02_b.py, pair03_a.py with pair03_b.py, and pair04_a.py with pair04_b.py."
+}
