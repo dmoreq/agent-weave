@@ -136,3 +136,28 @@ The round-3 verification's remaining findings are closed:
 **Status: publish-ready. Remaining work is owner-only** (right-to-publish
 confirmation, repository creation/push with a public identity, tag/release,
 vulnerability-reporting toggle, handle confirmation).
+
+## Redesign attempt (2026-11-02, owner-directed before publish)
+
+Attempted the strongest available redesign for the weak feature (search):
+schema v6 docstring indexing (one-line docs/comments in the FTS haystack).
+Results: G20(i) G14 recall unchanged 0.800; G20(ii) prose-gap retrieval
+5/6 improved; G20(iii) Stage 2c utility A/B FAILED — Grok tool calls +12%
+(treatment 6.17 vs control 5.5), OpenCode −9% (5.33 vs 5.83); kg calls and
+tokens up. Root cause stands: grep already matches docstrings as source text,
+so symbol-level lexical search adds a step without replacing one.
+
+Per gate G20's kill rule the feature was **reverted** (commit `28c346b`,
+schema back to v5); the negative result and GT stay as evidence
+(`stage2c-prose-2026-11-02.md`, `search-prose-gt.jsonl`).
+
+**Final value position (evidence-based):**
+- `kg path`: large, host-independent value at scale — 2,201-file corpus,
+  24/24 correct, tool calls −59%/−61%, kg calls −87%/−77% (Grok/OpenCode);
+  Stage 1 smaller repos −57%/−86% tool calls. This is the "large value" proof.
+- `callers/callees/impact`: correctness advantage where grep is blind
+  (98.6% vs 81.9% recall).
+- `search`/`clones`: host-dependent; search redesign attempted and reverted
+  for lack of economics; both remain quality-gated, honestly labeled.
+
+The repository is publish-ready pending the owner-only actions listed above.
