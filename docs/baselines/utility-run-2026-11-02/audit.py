@@ -27,10 +27,12 @@ ROOT = Path(__file__).resolve().parent
 KG_ROOT = Path("/tmp/utility-corpus-2026-11-02/kg")
 VIHAP_ROOT = Path("/tmp/utility-corpus-2026-11-02/vihap")
 REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT, "S1": KG_ROOT, "S2": KG_ROOT, "S3": VIHAP_ROOT,
-         "C1": Path("/tmp/utility-corpus-2026-11-02/clones"), "C2": Path("/tmp/utility-corpus-2026-11-02/clones")}
+         "C1": Path("/tmp/utility-corpus-2026-11-02/clones"), "C2": Path("/tmp/utility-corpus-2026-11-02/clones"),
+         "B1": VIHAP_ROOT, "B2": VIHAP_ROOT}
 FEATURE_TOOL = {"P1": "path", "P2": "path", "P3": "path",  # Stage 1
                  "S1": "search", "S2": "search", "S3": "search",  # Stage 2
-                 "C1": "clones", "C2": "clones"}  # Stage 3
+                 "C1": "clones", "C2": "clones",  # Stage 3
+                 "B1": "search", "B2": "search"}  # Stage 2b
 OC_DB = Path.home() / ".local/share/opencode/opencode.db"
 
 
