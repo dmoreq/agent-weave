@@ -1,0 +1,1 @@
+{"ts":1793585106,"surface":"cli","tool":"search","name":"split camel snake identifiers tokens","session":"oc-kgs-r1-S1","arm":"oc-kgs-r1-S1","built_at":1793585091744,"source_rev":"unknown","stale":false,"shown":2,"total":2,"pointers":["tests/fixtures.rs:315 tests.fixtures.split_ident_splits_camel_snake_and_dotted_idents","src/extract.rs:308 src.extract.split_ident"]}

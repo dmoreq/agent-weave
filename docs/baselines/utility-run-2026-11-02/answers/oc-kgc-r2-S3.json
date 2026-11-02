@@ -1,0 +1,1 @@
+{"exists":true,"hops":0,"route":["vihap/cleaners/unicode.py:47"],"answer":"vihap.cleaners.unicode.normalize_ascii lowercases and strips text, normalizes it with NFKC, then translates diacritics and đ/Đ to ASCII base letters."}

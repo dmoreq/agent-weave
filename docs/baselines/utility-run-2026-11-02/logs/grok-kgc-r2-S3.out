@@ -1,0 +1,1 @@
+The pending handoff is a prior run of a similar question. I will answer this run from the repository, using grep and `kg symbols`.`vihap.cleaners.unicode.normalize_ascii` at `vihap/cleaners/unicode.py:47` transliterates diacritics to ASCII. The pointer is recorded in `/tmp/utility-answers-2026-11-02/grok-kgc-r2-S3.json`.

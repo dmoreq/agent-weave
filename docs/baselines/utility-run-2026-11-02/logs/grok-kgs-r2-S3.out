@@ -1,0 +1,3 @@
+The pending handoff is an earlier copy of this same lookup. I will search the code index for the cleaner that transliterates diacritics.`vihap.cleaners.unicode.normalize_ascii` at `vihap/cleaners/unicode.py:47` transliterates diacritics to ASCII.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r2-S3.json`.

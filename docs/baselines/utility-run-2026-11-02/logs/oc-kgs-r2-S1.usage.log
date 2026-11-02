@@ -1,0 +1,2 @@
+{"ts":1793585127,"surface":"cli","tool":"search","args":{"terms":"camel snake tokens","limit":"50"},"result_count":1,"shown":1,"total":1,"ambiguous":0,"exit_code":0,"latency_us":940,"stale":false,"kg_version":"0.1.0","session":"oc-kgs-r2-S1","arm":"oc-kgs-r2-S1"}
+{"ts":1793585132,"surface":"cli","tool":"search","args":{"terms":"split_ident","limit":"50"},"result_count":3,"shown":3,"total":3,"ambiguous":0,"exit_code":0,"latency_us":915,"stale":false,"kg_version":"0.1.0","session":"oc-kgs-r2-S1","arm":"oc-kgs-r2-S1"}

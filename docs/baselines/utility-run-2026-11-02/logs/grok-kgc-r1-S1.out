@@ -1,0 +1,3 @@
+I'll list pending handoffs first, then locate the identifier-splitting function in this repository.The pending handoff is a different reachability question, so I am ignoring it and searching this tree for the identifier tokenizer.`src.extract.split_ident` is defined at `src/extract.rs:308`. Writing the answer file.`src.extract.split_ident` at `src/extract.rs:308` splits camelCase humps and snake_case underscores into lowercase tokens.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-S1.json`.

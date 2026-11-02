@@ -1,0 +1,5 @@
+I'll locate the function that replays sampled payload pointers and checks them against current source, using grep and the kg index.The verify path is in `src/journal.rs`. I'll read that function and confirm its definition line with `kg symbols`.`src.journal.verify` at `src/journal.rs:432` is the function. I'll write the answer JSON.Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-S2.json`.
+
+- **Symbol:** `src.journal.verify`
+- **Route:** `src/journal.rs:432`
+- The function samples payload-log pointers and checks each one against the current source file.

@@ -19,14 +19,16 @@ Usage: python3 audit.py            # writes audit.json next to this script
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 KG_ROOT = Path("/tmp/utility-corpus-2026-11-02/kg")
 VIHAP_ROOT = Path("/tmp/utility-corpus-2026-11-02/vihap")
-REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT}
-FEATURE_TOOL = {"P1": "path", "P2": "path", "P3": "path"}  # Stage 1 = path
+REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT, "S1": KG_ROOT, "S2": KG_ROOT, "S3": VIHAP_ROOT}
+FEATURE_TOOL = {"P1": "path", "P2": "path", "P3": "path",  # Stage 1
+                 "S1": "search", "S2": "search", "S3": "search"}  # Stage 2
 OC_DB = Path.home() / ".local/share/opencode/opencode.db"
 
 
@@ -114,14 +116,18 @@ def opencode_accounting(sid: str) -> dict:
 
 
 def main() -> int:
+    stage = os.environ.get("STAGE", "1")
+    status_name = "status.txt" if stage == "1" else f"status{stage}.txt"
+    manifest_name = "manifest.txt" if stage == "1" else f"manifest{stage}.txt"
+    out_name = "audit.json" if stage == "1" else f"audit{stage}.json"
     manifest = {}
-    for line in (ROOT / "manifest.txt").read_text().splitlines():
+    for line in (ROOT / manifest_name).read_text().splitlines():
         parts = line.split("|")
         if len(parts) >= 5:
             runid, host, arm, task, sid = parts[:5]
             manifest[runid] = {"host": host, "arm": arm, "task": task, "sid": sid}
     status = {}
-    for line in (ROOT / "status.txt").read_text().splitlines():
+    for line in (ROOT / status_name).read_text().splitlines():
         if line.startswith("[done] "):
             parts = line.split()
             status[parts[1]] = parts[2].replace("exit=", "")
@@ -139,8 +145,8 @@ def main() -> int:
                 f"control arm called {FEATURE_TOOL[meta['task']]} {rec['feature_calls']}x")
         rec["answered"] = (ROOT / "answers" / f"{runid}.json").exists()
         audit.append(rec)
-    (ROOT / "audit.json").write_text(json.dumps(audit, indent=1) + "\n")
-    print(f"audit.json: {len(audit)} cells")
+    (ROOT / out_name).write_text(json.dumps(audit, indent=1) + "\n")
+    print(f"{out_name}: {len(audit)} cells")
     for r in audit:
         print(f"{r['runid']:14s} host={r['host']:8s} exit={r['exit']} "
               f"kg_calls={r['kg_calls']} feature={r['feature_calls']} "

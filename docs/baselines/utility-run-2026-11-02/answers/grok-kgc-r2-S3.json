@@ -1,0 +1,6 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": ["vihap/cleaners/unicode.py:47"],
+  "answer": "vihap.cleaners.unicode.normalize_ascii lowercases the input, applies NFKC, and translates it with the diacritic table that maps NFD bases and đ/Đ onto ASCII while dropping combining marks."
+}

@@ -1,0 +1,3 @@
+I'll list pending handoffs first, then locate the cleaner that transliterates diacritics to ASCII.Pending handoffs are other navigation prompts, so they stay unused. Next I’ll locate the cleaner that maps diacritics to ASCII and record its definition pointer.`vihap.cleaners.unicode.normalize_ascii` at `vihap/cleaners/unicode.py:47` transliterates diacritics to ASCII.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-S3.json` with `exists` true, `hops` 0, and that definition pointer.

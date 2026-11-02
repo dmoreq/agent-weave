@@ -109,7 +109,10 @@ correctness 24/24 in BOTH arms, so no loss; routed arm cut kg calls
 44.8 -> 4.0 and input tokens 360K -> 156K per run on Grok Build, and
 5.2 -> 1.5 kg calls / 27.0K -> 17.4K input tokens on OpenCode
 gpt-6-sol. One `path` call answers most route questions; the control arm
-stays correct at high exploration cost. Record:
+stays correct at high exploration cost. Stage 2 — `kg search`, same
+26+24-run protocol: correctness 24/24 in both arms, but no economics gain
+(−18% tool calls Grok, +3% OpenCode; kg calls up) — utility UNPROVEN for
+single-target lookups whose vocabulary matches identifiers. Record:
 `baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
 
 ### 5.1 Correctness first

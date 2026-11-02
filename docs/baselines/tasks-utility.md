@@ -66,11 +66,13 @@ hops=0, route with the one definition pointer)."
 
 ### S2 — locate a replay verifier (kg repo)
 "Which function replays sampled payload pointers and verifies them against
-current source? Report its path:line and qualname."
+current source? Report its path:line and qualname in the answer field
+(exists=true, hops=0, route with the one definition pointer)."
 
 ### S3 — locate a cleaner (vihap)
 "Which cleaner function transliterates diacritics to ASCII? Report its
-path:line and qualname."
+path:line and qualname in the answer field (exists=true, hops=0, route
+with the one definition pointer)."
 
 ## Stage 3 prompts (frozen; seeded fixture + manifest at stage start)
 
@@ -105,3 +107,11 @@ file? Answer yes/no and justify from the tool output."
   in the first background pass. Fixed to `^"\[done\] $runid "`. Duplicated
   status lines are retained as process evidence; unique cells = 24 and all
   artifacts (answer/log/journal/manifest) come from the last execution.
+
+- 2026-11-02, S-stage GT audit (Goldfish, before any Stage-2 cell): S3
+  expected corrected from `vihap/cleaners/unicode.py:23`
+  (`_ascii_diacritic_trans`, a translate-table builder) to
+  `vihap/cleaners/unicode.py:47` (`normalize_ascii`, the exported cleaner
+  that takes text). S2/S3 prompts now carry the same route-schema
+  parenthetical as S1. Expected sets gain `qualname`, and the scorer
+  checks it in the answer text (the questions ask for it).

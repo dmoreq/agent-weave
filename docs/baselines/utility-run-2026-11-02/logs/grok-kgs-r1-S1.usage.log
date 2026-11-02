@@ -1,0 +1,2 @@
+{"ts":1793583276,"surface":"cli","tool":"search","args":{"terms":"split camelCase snake_case identifier tokens","limit":"50"},"result_count":2,"shown":2,"total":2,"ambiguous":0,"exit_code":0,"latency_us":2801,"stale":false,"kg_version":"0.1.0","session":"grok-kgs-r1-S1","arm":"grok-kgs-r1-S1"}
+{"ts":1793583280,"surface":"cli","tool":"symbols","args":{"file":"src/extract.rs","outline":"false","limit":"50"},"result_count":63,"shown":50,"total":63,"ambiguous":0,"exit_code":0,"latency_us":1788,"stale":false,"kg_version":"0.1.0","session":"grok-kgs-r1-S1","arm":"grok-kgs-r1-S1"}

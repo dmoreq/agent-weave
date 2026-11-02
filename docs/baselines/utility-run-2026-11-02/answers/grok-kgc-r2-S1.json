@@ -1,0 +1,6 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": ["src/extract.rs:308"],
+  "answer": "src.extract.split_ident lowercases an identifier and inserts a space at each camelCase hump and each snake_case underscore, so both forms become search tokens."
+}

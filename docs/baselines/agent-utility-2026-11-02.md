@@ -109,3 +109,49 @@ python3 docs/baselines/utility-run-2026-11-02/path_check.py $(cat runids)  # 24/
   then owner spot-check, per the agreed GT protocol. Runner/prompts are
   frozen in `tasks-utility.md`; prompts S1-S3 still to be generated.
 - Stage 3 `clones`: seeded fixture + manifest, same protocol.
+
+## Stage 2 — `kg search` (F2, Amendment 12b)
+
+Protocol as Stage 1 (frozen `tasks-utility.md` S1-S3; sanitized corpora;
+same hosts/arms; 24 cells). GT derived 2026-11-02 and Goldfish-audited
+before any cell: the audit rejected the first S3 pointer
+(`_ascii_diacritic_trans:23`, a translate-table builder) and the set was
+corrected to `normalize_ascii:47`; S2/S3 prompts gained the route-schema
+parenthetical; expected sets gained `qualname` and the scorer checks it.
+
+### Correctness: 24/24 both arms
+
+Every cell produced the exact expected pointer + qualname in both arms and
+both hosts.
+
+### Economics (mean per run; host-recorded)
+
+| host | arm | kg calls | tool calls | input tokens |
+|------|-----|----------|------------|--------------|
+| Grok Build | kgc control | 1.0 | 5.67 | 162,110 |
+| Grok Build | kgs treatment | 1.67 (+67%) | 4.67 (−18%) | 162,486 (+0.2%) |
+| OpenCode gpt-6-sol | kgc control | 1.0 | 5.0 | 17,722 |
+| OpenCode gpt-6-sol | kgs treatment | 1.33 (+33%) | 5.17 (+3%) | 11,415 (−36%, cache-contaminated) |
+
+### Verdict: FAIL (utility unproven) — honest negative
+
+The decision rule requires correctness parity AND >= 20% calls/bytes
+reduction on >= 2/3 tasks on BOTH hosts. Measured: −18% tool calls on
+Grok, +3% on OpenCode; kg calls went UP in both arms; Grok tokens flat.
+No bar met on both hosts.
+
+Interpretation: for single-target symbol lookups whose vocabulary appears
+in the identifier itself (split identifiers -> `split_ident`, replay
+verify -> `verify`, diacritics -> `normalize_ascii`), `grep` already
+matches, and one `kg search` call is an extra query rather than a
+replacement. The G14 recall gate (0.850) remains valid as retrieval
+quality; this A/B does not demonstrate an agent-economics gain at this
+task class. `search` stays as-is: quality-gated, utility unproven.
+
+Scope limits (not tested): large corpora where grep output is noisy;
+queries whose vocabulary does NOT appear in identifiers (the case where
+lexical search should shine). Any future claim needs a task class of that
+shape, not a re-run of this battery.
+
+Contamination guard: all 12 control cells feature calls = 0; all 12
+treatment cells `search` calls >= 1. No cell excluded.
