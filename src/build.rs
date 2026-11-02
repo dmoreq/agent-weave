@@ -117,14 +117,11 @@ pub fn run_build(
     // mentions one of those names can now resolve — re-extract exactly those
     // files. Bounded by gap rows, not by corpus size.
     if let Some(c) = &old {
-        let mut old_names = crate::db::symbol_names(c)?;
+        let old_quals = crate::db::symbol_names(c)?;
         let mut new_names: std::collections::HashSet<String> = Default::default();
         for fx in &extractions {
             for sym in &fx.symbols {
-                if !old_names.contains(&sym.name) {
-                    new_names.insert(sym.name.clone());
-                }
-                if !old_names.contains(&sym.qualname) {
+                if !old_quals.contains(&sym.qualname) {
                     new_names.insert(sym.qualname.clone());
                 }
             }
@@ -155,7 +152,6 @@ pub fn run_build(
                 extract_secs_sum += sec2;
             }
         }
-        old_names.clear();
     }
     let parse_secs = t0.elapsed().as_secs_f64();
 

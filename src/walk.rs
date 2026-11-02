@@ -79,13 +79,14 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     // untracked-unignored). No git / probe failure -> keep the textual rules.
     let git_visible: Option<HashSet<String>> = (|| {
         let out = std::process::Command::new("git")
-            .args(["ls-files", "-co", "--exclude-standard"])
+            .args(["ls-files", "-co", "--exclude-standard", "-z"])
             .current_dir(root)
             .output()
             .ok()
             .filter(|o| o.status.success())?;
         let set: HashSet<String> = String::from_utf8_lossy(&out.stdout)
-            .lines()
+            .split('\0')
+            .filter(|l| !l.is_empty())
             .map(|l| l.replace('\\', "/"))
             .collect();
         Some(set)

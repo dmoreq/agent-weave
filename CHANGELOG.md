@@ -2,7 +2,7 @@
 
 All notable changes to kg are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
-[Calm SemVer](https://github.com/calver?ad=calver) 0.x — breaking contract
+[Calm SemVer](https://calver.org) 0.x — breaking contract
 changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]

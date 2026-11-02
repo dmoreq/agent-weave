@@ -516,7 +516,7 @@ fn unresolved_reports_counts_and_zero_is_exit1() {
     let out = kg(&clean).args(["unresolved"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("0 unresolved callees"), "{stderr}");
+    assert!(stderr.contains("0 unresolved in indexed scope"), "{stderr}");
 }
 
 #[test]

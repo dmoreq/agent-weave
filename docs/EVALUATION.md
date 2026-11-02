@@ -12,7 +12,7 @@ without being labeled as such.
 |----------|-------------------|
 | Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets |
 | Is the query loop fast? | 5-11 ms best-of-7 end-to-end per invocation (spawn floor ~6 ms); < 10 ms on a 382 MB index (11k-file tree); query memory is bounded by the display cap since schema v5 — `docs/baselines/perf-v5-2026-11-02.md` |
-| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.13 s on the self-index; peak RSS <= 40 MB |
+| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.10-0.16 s on the self-index (~18 MB RSS); 2.33 s / 183 MB at the 2,025-file synthetic corpus — `baselines/perf-v5-2026-11-02.md` |
 | Does it make a coding agent better? | navigation recall 98.6% vs 81.9% grep-only, at flat token cost |
 | Does it make an agent cheaper? | only when routed: query-first policy cut input tokens **-27.3%** (1,058,613 → 769,306 per run) at unchanged recall |
 | Does it answer semantic questions? | No — static resolution only. Out of scope by design. |
@@ -27,7 +27,7 @@ Corpora are referred to by neutral labels throughout:
 | corpus D | Python DAG/notebook generator | 596 | 3,119 | 3,849 |
 | corpus E | Python map-search service | 150 | 1,381 | 3,486 |
 | corpus F | Python data-science pipeline | 27 | 103 | 166 |
-| kg self | this repository (Rust) | 24 | 306 | 904 |
+| kg self | this repository (Rust) | 36 | 372 | 1,145 |
 
 ## 1. Methodology
 
@@ -38,14 +38,18 @@ Corpora are referred to by neutral labels throughout:
 - **Correctness scoring**: mechanical checker (`baselines/harness/check.py`)
   compares answer JSON against frozen expected sets — precision, recall,
   ordering, grouping. No hand-picking; disagreements audited individually.
-- **Agent A/B**: 40 primary instrumented agent runs (+2 alternate T5 fills) across two hosts (a TUI coding
-  agent and an MCP-connected CLI agent), two arms (grep-only vs kg-available),
+- **Agent A/B**: 40 primary instrumented agent runs (+2 alternate T5 fills) across two hosts, both CLI-agent
+  surfaces (`opencode run`, `grok -p`; MCP byte parity is tested separately in G10), two arms (grep-only vs kg-available),
   with per-call byte accounting and per-session token accounting taken from
   host-recorded stores, not self-reports (`baselines/grok-a-b-2026-11-01.md`).
 - **Reproduction**: every record carries its commands; run manifests and
   session IDs are committed (`baselines/grok-a-b-2026-11-01/`).
 
-## 2. Performance ceiling pass
+## 2. Performance ceiling pass (historical, pre-schema-v4)
+
+The numbers in this section were measured on the schema-v3 binary; the
+shipped schema-v5 numbers (2,025-file fresh build 2.33 s / 183 MB RSS /
+57.4 MB index) are in `docs/baselines/perf-v5-2026-11-02.md`.
 
 A measured optimization pass (spec Amendment 11) against a 2,025-file
 synthetic corpus (index 4.6 MB) and the self-index:
@@ -87,10 +91,10 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 
 | gate | what it measures | result |
 |------|------------------|--------|
-| G2 precision/recall | `kg callers` vs 60 frozen ground-truth call sites on 3 GT sets | recall 100% (29/29, 20/20) on vihap/finguard; the self set is 10/10 only at its frozen epoch `56f448a` (line-shifted on HEAD, epoch-labeled); EXTRACTED-tier precision 493/495 (99.6%) — PASS with epoch/precision notes |
+| G2 precision/recall | `kg callers` vs 60 frozen ground-truth call sites on 3 GT sets | recall 100% (29/29, 20/20) on vihap/finguard plus 10/10 on the refreshed self set (verified today); call-site precision 662/664 (99.7%; the two known failures are listed in the records) — PASS |
 | G3 query latency | p95 over repeated pointer queries | 5-11 ms best-of-7 (limit 20 ms; re-run 9.8-10.5 ms on a 382 MB index) |
 | G11 payload conformance | 1 payload line per successful pointer call, byte-equal pointers, verify FAIL=0 | 594 pointers verified, FAIL=0 (CHANGELOG A11 entry; `kg usage --verify` on a fresh build reproduces FAIL=0) |
-| G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, parallel == serial | PASS (105/105 tests at schema v5) |
+| G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, deterministic merge order | PASS (105/105 tests at schema v5) |
 | G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction vs the grep baseline (+1 call vs the plain-kg control), -62.7% bytes, zero correctness delta — PASS |
 | G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.800 recall (23/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure (ranking trade-off recorded in the P6 report) — PASS (bar 0.70) |
 | G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |

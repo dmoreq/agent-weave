@@ -674,7 +674,7 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
     })?;
     if total == 0 {
         return Err(KgError::NoResults(
-            "0 unresolved callees (full call-site coverage)".to_string(),
+            "0 unresolved in indexed scope (external/builtin calls are not counted)".to_string(),
         ));
     }
     let mut stmt = conn.prepare(

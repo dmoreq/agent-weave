@@ -88,6 +88,18 @@ def scrub(out: Path) -> None:
         for old, new in REPLACEMENTS:
             text = text.replace(old, new)
         path.write_text(text)
+    # The gate script itself carries the private-pattern vocabulary; it stays
+    # in the private repo (R6 review finding).
+    self_copy = out / "tests" / "scripts" / "public_export.py"
+    if self_copy.exists():
+        self_copy.unlink()
+    # No dead paths: evidence references become plain text in the export.
+    for path in out.rglob("*"):
+        if path.is_file() and path.suffix in TEXT_SUFFIXES:
+            t = path.read_text(errors="replace")
+            t = t.replace("evidence-vault/", "the private evidence vault ")
+            t = t.replace("(the private evidence vault )", "")
+            path.write_text(t)
     # Round the per-corpus table (exact counts are fingerprints).
     ev = out / "docs" / "EVALUATION.md"
     if ev.exists():
@@ -164,6 +176,9 @@ def main() -> int:
         ["git", "ls-files", "--cached"], cwd=out, capture_output=True, text=True
     ).stdout.splitlines())
     print(f"exported files: {files}")
+    if files < 40:
+        print(f"export too small ({files} files) — expected the full source tree")
+        rc = 1
     print("PUBLIC EXPORT: " + ("PASS" if rc == 0 else "FAIL"))
     return rc
 

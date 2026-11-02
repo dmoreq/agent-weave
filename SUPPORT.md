@@ -6,7 +6,7 @@
    coverage, staleness, orphans, and lock state. Most issues are visible there.
 2. Check the response contract in `README.md` (exit codes 0-7 and the
    stderr notes) — errors are typed, not stack traces.
-3. Consult `docs/baselines/the private evidence vault's transcripts/SUMMARY.md` for gate evidence and
+3. Consult `the private evidence vault's transcripts/SUMMARY.md` for gate evidence and
    known limitations (workspace aliases, JSX usage, untyped receivers).
 
 ## Common issues

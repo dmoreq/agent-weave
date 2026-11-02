@@ -87,12 +87,17 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
             return Ok(());
         }
         if read as u64 > MAX_FRAME_BYTES {
-            // Drain the rest of the oversized frame to resync, then reject.
-            let mut sink = Vec::new();
+            // Drain the rest of the oversized frame in fixed-size chunks so
+            // memory stays bounded regardless of frame size (R6 finding).
             loop {
-                sink.clear();
-                let n = reader.read_until(b'\n', &mut sink)?;
-                if n == 0 || sink.ends_with(b"\n") {
+                let buf = reader.fill_buf()?;
+                if buf.is_empty() {
+                    break;
+                }
+                let nl = buf.iter().position(|&b| b == b'\n');
+                let take = nl.map(|i| i + 1).unwrap_or(buf.len());
+                reader.consume(take);
+                if nl.is_some() {
                     break;
                 }
             }

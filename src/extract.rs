@@ -1381,13 +1381,16 @@ fn impl_type_name(node: Node<'_>, src: &[u8]) -> String {
         if t.kind() == "type_identifier" {
             return text(t, src);
         }
+        // Push children reversed so the stack pops them in source order:
+        // `impl<T> Foo<T>` must yield Foo, not the type parameter T.
         let mut stack = vec![t];
         while let Some(n) = stack.pop() {
             if n.kind() == "type_identifier" {
                 return text(n, src);
             }
             let mut c = n.walk();
-            for child in n.children(&mut c) {
+            let children: Vec<_> = n.children(&mut c).collect();
+            for child in children.into_iter().rev() {
                 stack.push(child);
             }
         }

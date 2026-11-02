@@ -10,7 +10,7 @@ homepage = "https://github.com/quy-doan/kg"
 readme = "README.md"
 keywords = ["code-search", "call-graph", "mcp", "tree-sitter", "sqlite"]
 categories = ["development-tools", "command-line-utilities"]
-rust-version = "1.89"
+rust-version = "1.90"
 exclude = ["docs/baselines/**", ".github/**", "skills/**"]
 
 [dependencies]

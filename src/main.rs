@@ -27,6 +27,20 @@ fn main() {
     // git read-only commands must not refresh/rewrite `.git/index` — the
     // safety invariant says no writes outside `.kg/` (R6d A8).
     std::env::set_var("GIT_OPTIONAL_LOCKS", "0");
+    // A downstream pipe close is not an internal error; keep stderr quiet
+    // and let the catch_unwind arm exit 0 (R6 finding).
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        if !msg.contains("Broken pipe") {
+            default_hook(info);
+        }
+    }));
     let cli = cli::Cli::parse();
     let root_arg = cli.root.clone();
     let no_journal = cli.no_journal;

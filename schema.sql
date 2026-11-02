@@ -47,6 +47,7 @@ CREATE TABLE edges(
 );
 CREATE INDEX edges_dst ON edges(dst_id, kind);
 CREATE INDEX edges_src ON edges(src_id, kind);
+CREATE INDEX symbols_file ON symbols(file_id);
 CREATE INDEX symbols_qualname ON symbols(qualname);
 -- Symbol search (Amendment 12b): standalone FTS5 over split identifier
 -- tokens; repopulated by one pass from symbols at the end of every build

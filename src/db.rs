@@ -275,12 +275,10 @@ pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<Str
 /// did not exist before the change.
 pub fn symbol_names(conn: &Connection) -> Result<HashSet<String>> {
     let mut out = HashSet::new();
-    let mut stmt = conn.prepare("SELECT name, qualname FROM symbols")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut stmt = conn.prepare("SELECT qualname FROM symbols")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     for r in rows {
-        let (name, qualname) = r?;
-        out.insert(name);
-        out.insert(qualname);
+        out.insert(r?);
     }
     Ok(out)
 }
@@ -292,15 +290,22 @@ pub fn symbol_names(conn: &Connection) -> Result<HashSet<String>> {
 /// rows, not by the corpus.
 pub fn gap_files_for_new_names(
     old: &Connection,
-    new_names: &HashSet<String>,
+    new_qualnames: &HashSet<String>,
 ) -> Result<HashSet<String>> {
-    if new_names.is_empty() {
+    if new_qualnames.is_empty() {
         return Ok(HashSet::new());
     }
     let mut out = HashSet::new();
+    // Match by last segment: an unresolved `b.foo` heals when any newly
+    // added qualname ends in `foo` (bare-name collisions in the old index
+    // must not hide the new symbol — R6 review finding).
+    let last_segments: HashSet<&str> = new_qualnames
+        .iter()
+        .map(|q| q.rsplit('.').next().unwrap_or(q))
+        .collect();
     let matches = |dst: &str| -> bool {
         let last = dst.rsplit('.').next().unwrap_or(dst);
-        new_names.contains(last)
+        last_segments.contains(last)
     };
     {
         let mut stmt = old.prepare(

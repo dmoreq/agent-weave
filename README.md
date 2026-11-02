@@ -21,7 +21,7 @@ reproduction commands, and threats to validity):
 
 | question | measured |
 |----------|----------|
-| Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall + precision 100% on 3 frozen GT sets |
+| Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall 100% on two GT sets plus the refreshed self set; call-site precision 662/664 (99.7%; two known checker/GT failures listed) |
 | Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.33 s on the committed 2,025-file corpus |
 | Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
 | Structure and duplication lookups? | `kg search` recall 0.800 (23/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
@@ -33,7 +33,7 @@ reproduction commands, and threats to validity):
 cargo install --path . --locked
 ```
 
-Requires a Rust stable toolchain and a C compiler (bundled SQLite and
+Requires Rust 1.90+ and a C compiler (bundled SQLite and
 tree-sitter grammars). Not yet on crates.io; install from a clone. Supported:
 macOS arm64/x86_64 and Linux x86_64/aarch64 (CI-built).
 
@@ -78,7 +78,7 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 ## Agent integration
 
-- **MCP**: `kg mcp` serves 15 of 16 subcommands as JSON-RPC tools over stdio
+- **MCP**: `kg mcp` serves 14 of 16 subcommands as JSON-RPC tools over stdio
   (`doctor` is CLI-only);
   tool results are byte-identical to CLI stdout (conformance-tested).
 - **Skill**: [`skills/kg-first/SKILL.md`](skills/kg-first/SKILL.md) is the
@@ -98,7 +98,7 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 ## Safety invariants (CI-enforced)
 
-1. Zero network (Seatbelt + seccomp CI jobs, Cargo.lock allowlist check).
+1. Zero network (Seatbelt (macOS) + network-namespace (Linux) CI jobs with negative controls, Cargo.lock allowlist check).
 2. No long-lived child processes.
 3. Read-only over source; writes confined to `.kg/` (tree-snapshot test).
 4. No behavior hijack: no hooks, settings, or agent-config writes.
