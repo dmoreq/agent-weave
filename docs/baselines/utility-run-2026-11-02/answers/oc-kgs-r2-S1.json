@@ -1,1 +1,0 @@
-{"exists": true, "hops": 0, "route": ["src/extract.rs:308"], "answer": "src.extract.split_ident replaces underscores with spaces and inserts spaces before uppercase letters following lowercase letters, then lowercases identifier characters."}

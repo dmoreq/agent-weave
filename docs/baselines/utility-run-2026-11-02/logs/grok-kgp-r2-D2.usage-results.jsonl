@@ -1,0 +1,3 @@
+{"ts":1793603209,"surface":"cli","tool":"callees","name":"pkg.m0.f0","session":"grok-kgp-r2-D2","arm":"grok-kgp-r2-D2","built_at":1793603174616,"source_rev":"unknown","stale":false,"shown":1,"total":1,"pointers":["pkg/m1.py:3"]}
+{"ts":1793603209,"surface":"cli","tool":"search","name":"g0","session":"grok-kgp-r2-D2","arm":"grok-kgp-r2-D2","built_at":1793603174616,"source_rev":"unknown","stale":false,"shown":2,"total":2,"pointers":["pkg/g0.py:3 pkg.g0.g0 def g0():","pkg/g0.py:1 pkg.g0"]}
+{"ts":1793603209,"surface":"cli","tool":"search","name":"f0","session":"grok-kgp-r2-D2","arm":"grok-kgp-r2-D2","built_at":1793603174616,"source_rev":"unknown","stale":false,"shown":1,"total":1,"pointers":["pkg/m0.py:3 pkg.m0.f0 def f0():"]}

@@ -246,3 +246,36 @@ set 6/6 improved) — recorded here, not silently taken.
 Scope: 2 tasks, n=2/arm/host; the upgrade demonstrably changes what
 search can retrieve, but the agent-economics gain remains host-dependent
 (the same pattern as Stages 2 and 3).
+
+## Stage 4 — `path` at 2,201-file scale (2026-11-02)
+
+Purpose: test the utility-proven feature at a corpus where grep/compose
+exploration is materially more expensive than in the 25-70-file repos.
+Corpus: 2,000 files in a cross-file call chain plus an independent 200-file
+chain (GT verified at freeze: 10-hop route, 5-hop route, one no-path pair).
+24 cells, same arms/hosts/runs as Stage 1.
+
+### Correctness: 24/24 both arms
+
+### Economics (mean per run; host-recorded)
+
+| host | arm | kg calls | tool calls | input tokens |
+|------|-----|----------|------------|--------------|
+| Grok Build | kgc control | 17.8 | 9.2 | 243,863 |
+| Grok Build | kgp treatment | **2.3 (−87%)** | **3.8 (−59%)** | **139,416 (−43%)** |
+| OpenCode gpt-6-sol | kgc control | 7.5 | 10.2 | 14,474 |
+| OpenCode gpt-6-sol | kgp treatment | **1.7 (−77%)** | **4.0 (−61%)** | 12,713 (−12%) |
+
+### Verdict: PASS on both hosts, and the effect grows with corpus size
+
+The Stage-1 result (−38..−91% calls on 25-70-file repos, one host below the
+20% call bar) now clears the bar on BOTH hosts at 2,201 files: tool calls
+−59%/−61%, kg calls −87%/−77%. Control arms needed 15-31 kg calls to compose
+routes; the routed arm needed 1 (10-hop) or 3-5 (negative case + confirmation).
+This is the strongest evidence that the routed `path` query delivers large,
+host-independent value at realistic repository sizes.
+
+Contamination guard: 12/12 control cells feature calls = 0; 12/12 treatment
+cells `path` calls >= 1. One runner defect (prompt arm name kgp vs order kgs)
+invalidated the first 12 treatment cells; they were re-run (status/manifest
+lines for the invalid cells removed; all 24 scored cells are from valid runs).

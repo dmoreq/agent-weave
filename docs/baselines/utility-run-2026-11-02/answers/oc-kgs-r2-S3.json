@@ -1,1 +1,0 @@
-{"exists": true, "hops": 0, "route": ["vihap/cleaners/unicode.py:47"], "answer": "vihap.cleaners.unicode.normalize_ascii lowercases text and uses a translation table to strip diacritics and map đ/Đ to d."}

@@ -1,0 +1,6 @@
+{
+  "exists": true,
+  "hops": 5,
+  "route": ["pkg/m500.py:4", "pkg/m501.py:4", "pkg/m502.py:4", "pkg/m503.py:4", "pkg/m504.py:4"],
+  "answer": "pkg.m500.f500 reaches pkg.m505.f505 through 5 resolved call edges: pkg.m500.f500 -> pkg.m501.f501 -> pkg.m502.f502 -> pkg.m503.f503 -> pkg.m504.f504 -> pkg.m505.f505."
+}

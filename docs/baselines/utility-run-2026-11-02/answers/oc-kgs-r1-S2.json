@@ -1,1 +1,0 @@
-{"exists":true,"hops":0,"route":["src/journal.rs:432"],"answer":"src.journal.verify samples logged payload pointers, replays each against current source, and classifies unchanged valid pointers as OK, source drift as CHANGED, and invalid pointers as FAIL."}

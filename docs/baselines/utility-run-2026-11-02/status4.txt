@@ -1,0 +1,48 @@
+[start] grok-kgc-r1-D2 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 13:50:23
+[done] grok-kgc-r1-D2 exit=0 13:51:30
+[start] grok-kgc-r2-D2 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 13:51:40
+[done] grok-kgc-r2-D2 exit=0 13:53:27
+[start] grok-kgc-r1-D1 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 13:53:27
+[done] grok-kgc-r1-D1 exit=0 13:54:40
+[start] grok-kgc-r2-D1 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 13:54:40
+[done] grok-kgc-r2-D1 exit=0 13:55:40
+[start] grok-kgc-r1-D3 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 13:55:40
+[done] grok-kgc-r1-D3 exit=0 13:56:40
+[start] grok-kgc-r2-D3 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 13:56:40
+[done] grok-kgc-r2-D3 exit=0 13:57:38
+[start] oc-kgc-r1-D2 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 13:57:38
+[done] oc-kgc-r1-D2 exit=0 13:58:33
+[start] oc-kgc-r2-D2 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 13:58:33
+[done] oc-kgc-r2-D2 exit=0 14:00:17
+[start] oc-kgc-r1-D1 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:00:17
+[done] oc-kgc-r1-D1 exit=0 14:01:04
+[start] oc-kgc-r2-D1 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:01:05
+[done] oc-kgc-r2-D1 exit=0 14:01:54
+[start] oc-kgc-r1-D3 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:01:54
+[done] oc-kgc-r1-D3 exit=0 14:02:38
+[start] oc-kgc-r2-D3 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:02:38
+[done] oc-kgc-r2-D3 exit=0 14:03:29
+[start] grok-kgp-r1-D2 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 14:05:18
+[done] grok-kgp-r1-D2 exit=0 14:06:14
+[start] grok-kgp-r2-D2 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 14:06:14
+[done] grok-kgp-r2-D2 exit=0 14:07:09
+[start] grok-kgp-r1-D1 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 14:07:09
+[done] grok-kgp-r1-D1 exit=0 14:07:40
+[start] grok-kgp-r2-D1 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 14:07:40
+[done] grok-kgp-r2-D1 exit=0 14:08:20
+[start] grok-kgp-r1-D3 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 14:08:20
+[done] grok-kgp-r1-D3 exit=0 14:08:47
+[start] grok-kgp-r2-D3 host=grok repo=/tmp/utility-corpus-2026-11-02/scale 14:08:47
+[done] grok-kgp-r2-D3 exit=0 14:09:20
+[start] oc-kgp-r1-D2 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:09:20
+[done] oc-kgp-r1-D2 exit=0 14:10:01
+[start] oc-kgp-r2-D2 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:10:02
+[done] oc-kgp-r2-D2 exit=0 14:10:35
+[start] oc-kgp-r1-D1 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:10:35
+[done] oc-kgp-r1-D1 exit=0 14:10:58
+[start] oc-kgp-r2-D1 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:10:59
+[done] oc-kgp-r2-D1 exit=0 14:11:23
+[start] oc-kgp-r1-D3 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:11:23
+[done] oc-kgp-r1-D3 exit=0 14:11:53
+[start] oc-kgp-r2-D3 host=opencode repo=/tmp/utility-corpus-2026-11-02/scale 14:11:53
+[done] oc-kgp-r2-D3 exit=0 14:12:12

@@ -1,0 +1,17 @@
+{
+  "exists": true,
+  "hops": 10,
+  "route": [
+    "pkg/m0.py:4",
+    "pkg/m1.py:4",
+    "pkg/m2.py:4",
+    "pkg/m3.py:4",
+    "pkg/m4.py:4",
+    "pkg/m5.py:4",
+    "pkg/m6.py:4",
+    "pkg/m7.py:4",
+    "pkg/m8.py:4",
+    "pkg/m9.py:4"
+  ],
+  "answer": "Yes. pkg.m0.f0 reaches pkg.m10.f10 in 10 resolved hops: f0 calls f1 at pkg/m0.py:4, then each fN calls f(N+1) at pkg/mN.py:4 through f9 calling f10 at pkg/m9.py:4."
+}

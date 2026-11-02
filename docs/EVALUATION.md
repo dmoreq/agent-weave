@@ -27,7 +27,7 @@ Corpora are referred to by neutral labels throughout:
 | corpus D | Python DAG/notebook generator | 596 | 3,119 | 3,849 |
 | corpus E | Python map-search service | 150 | 1,381 | 3,486 |
 | corpus F | Python data-science pipeline | 27 | 103 | 166 |
-| kg self | this repository (Rust) | 36 | 372 | 1,148 |
+| kg self | this repository (Rust) | 37 | 380 | 1171 |
 
 ## 1. Methodology
 
@@ -123,7 +123,10 @@ OpenCode — PARTIAL (host-dependent, Grok only). Search retest after the
 Amendment 14 upgrade (path+signature tokens, signature in hits; 16 runs):
 16/16 correct, Grok −38% calls / −28% tokens, OpenCode −17% calls —
 G18(iii) FAIL by the both-hosts bar, owner decision recorded in the
-baseline report. Record:
+baseline report. Stage 4 — `path` at 2,201-file scale (24 runs): correctness
+24/24; tool calls −59%/−61%, kg calls −87%/−77%, tokens −43%/−12% on
+Grok/OpenCode — the call bar clears on BOTH hosts and the effect grows with
+corpus size. Record:
 `baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
 
 ### 5.1 Correctness first

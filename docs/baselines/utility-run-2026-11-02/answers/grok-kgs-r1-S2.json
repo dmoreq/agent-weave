@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["src/journal.rs:432"],
-  "answer": "src.journal.verify takes a deterministic even-stride sample of payload-log pointers and verifies each one against current source: it reads the file, checks the line is in bounds, and for callers requires the line to mention the queried name."
-}

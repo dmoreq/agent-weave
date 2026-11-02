@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["vihap/cleaners/unicode.py:47"],
-  "answer": "vihap.cleaners.unicode.normalize_ascii transliterates diacritics to ASCII: after lowercasing and NFKC, it applies _ascii_diacritic_trans, which maps NFD bases and đ/Đ onto ASCII letters."
-}

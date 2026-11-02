@@ -1,5 +1,0 @@
-I'll list any pending handoff for this project, then locate the helper that `_raw_items_from_sklearn_input` calls.The pending handoff is an earlier copy of this question and does not change the current target. I'll search the code index for the helper next.`_to_list` matches the signature and the call sites. I'll write the answer file.Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r2-B1.json`.
-
-- **Symbol:** `vihap.adapters.sklearn._to_list`
-- **Route:** `vihap/adapters/sklearn.py:79`
-- **Proof:** `def _to_list(seq: Any) -> list[Any]` is called from `_raw_items_from_sklearn_input` as `_to_list(_tabular_address_column(X))` and `_to_list(X)`.

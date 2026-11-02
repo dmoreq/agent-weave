@@ -1,1 +1,0 @@
-{"exists": true, "hops": 0, "route": ["vihap/adapters/sklearn.py:79"], "answer": "vihap.adapters.sklearn._to_list has signature def _to_list(seq: Any) -> list[Any] and is called by _raw_items_from_sklearn_input at lines 113 and 114."}

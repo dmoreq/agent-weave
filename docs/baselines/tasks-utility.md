@@ -136,3 +136,19 @@ file? Answer yes/no and justify from the tool output."
   corrected: only the kg corpus strips docs/skills/tests/scripts; the
   vihap corpus keeps them (the vihap tasks target source behavior, and
   removing docs would not remove test-name competitors anyway).
+
+## Stage 4 — path at 2,201-file scale (frozen 2026-11-02)
+
+Purpose: test the utility-proven feature (`path`) at a corpus size where
+grep/compose exploration is materially more expensive than in the 25-70-file
+repos. Corpus: generated `/tmp/utility-corpus-2026-11-02/scale` — 2,000 files
+in a cross-file call chain (`pkg.m{i}.f{i} -> pkg.m{i+1}.f{i+1}`, import
+edges) plus an independent 200-file chain (`pkg.g*`) for the negative case.
+kg index: 2,201 files, 4,401 symbols, 4,398 edges. GT verified with the
+shipped binary at freeze (exact hop counts; negative verified structurally).
+
+- D1: `pkg.m0.f0 -> pkg.m10.f10` — exists, 10 hops.
+- D2: `pkg.m0.f0 -> pkg.g0.g0` — no path (independent chain).
+- D3: `pkg.m500.f500 -> pkg.m505.f505` — exists, 5 hops.
+- Arms/hosts/runs as Stage 1 (kgc control composes callers/callees or grep;
+  kgp routes to `kg path`). 24 cells.

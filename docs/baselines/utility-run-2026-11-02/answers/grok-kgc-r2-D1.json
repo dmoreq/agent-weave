@@ -1,0 +1,6 @@
+{
+  "exists": true,
+  "hops": 10,
+  "route": ["pkg/m0.py:4", "pkg/m1.py:4", "pkg/m2.py:4", "pkg/m3.py:4", "pkg/m4.py:4", "pkg/m5.py:4", "pkg/m6.py:4", "pkg/m7.py:4", "pkg/m8.py:4", "pkg/m9.py:4"],
+  "answer": "pkg.m0.f0 reaches pkg.m10.f10 through 10 resolved call edges. The call sites are line 4 of pkg/m0.py through pkg/m9.py, in that order."
+}

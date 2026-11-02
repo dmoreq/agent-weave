@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["src/journal.rs:432"],
-  "answer": "src.journal.verify samples payload-log entries with an even stride, parses each pointer, and checks the current source file for line bounds and callers-name presence unless query::file_changed reports the file differs from the index."
-}

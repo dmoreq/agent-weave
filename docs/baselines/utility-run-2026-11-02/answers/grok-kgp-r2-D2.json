@@ -1,0 +1,6 @@
+{
+  "exists": false,
+  "hops": 0,
+  "route": [],
+  "answer": "No route exists from pkg.m0.f0 to pkg.g0.g0 in the resolved call graph. kg path found no path within depth 10, and pkg.g0.g0 has zero resolved callers."
+}

@@ -1,3 +1,0 @@
-I'll check the pending handoff list first, then locate the identifier-splitting function in the kg index.The pending handoff is a prior similar prompt, not this run. I'll search the index for the identifier tokenizer.`src.extract.split_ident` is defined at `src/extract.rs:308`. It splits camelCase humps, snake_case underscores, and other separators into lowercased tokens.
-
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r2-S1.json`.
