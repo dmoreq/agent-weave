@@ -497,6 +497,7 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             let conn = db::open_for_query(&root)?;
             for line in query::complexity(
                 &conn,
+                &root,
                 min_cyc,
                 min_loc,
                 min_branches,

@@ -476,6 +476,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             let conn = crate::db::open_for_query(root)?;
             Ok(join_lines(&crate::query::complexity(
                 &conn,
+                root,
                 arg_usize(args, "min_cyc", 1),
                 arg_usize(args, "min_loc", 0),
                 arg_usize(args, "min_branches", 0),

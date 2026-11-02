@@ -293,6 +293,122 @@ fn g4_staleness_header_after_edit() {
 }
 
 #[test]
+fn complexity_and_api_emit_staleness_and_payloads() {
+    let repo = temp_repo("p8-payloads");
+    write(
+        &repo,
+        "app.py",
+        "def f(x):\n    if x:\n        return 1\n    return 0\n",
+    );
+    build(&repo);
+    write(
+        &repo,
+        "app.py",
+        "def f(x):\n    if x:\n        return 2\n    return 0\n",
+    );
+
+    let out = kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["complexity"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("kg: 1 of 1 result files changed since build"),
+        "complexity staleness missing: {stdout}"
+    );
+    let data_lines: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.starts_with("kg: ") && !l.starts_with("showing "))
+        .map(String::from)
+        .collect();
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    let line = payload.lines().last().unwrap();
+    assert!(line.contains("\"tool\":\"complexity\""), "{line}");
+    assert_eq!(payload_pointers(line), data_lines, "complexity payload");
+
+    let out = kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["api", "app.py"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("kg: result files changed since build"),
+        "api staleness missing: {stdout}"
+    );
+    let data_lines: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.starts_with("kg: ") && !l.starts_with("showing "))
+        .map(String::from)
+        .collect();
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    let line = payload.lines().last().unwrap();
+    assert!(line.contains("\"tool\":\"api\""), "{line}");
+    assert_eq!(payload_pointers(line), data_lines, "api payload");
+}
+
+#[test]
+fn symbols_directory_unknown_reports_zero_symbols() {
+    let repo = temp_repo("symbols-unknown-dir");
+    write(&repo, "pkg/a.py", "def a():\n    pass\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["symbols", "nosuchdir"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("0 symbols in 'nosuchdir' (indexed)"),
+        "{combined}"
+    );
+}
+
+#[test]
+fn context_limit_is_capped_at_50() {
+    let repo = temp_repo("context-cap");
+    write(&repo, "a.py", "def target():\n    pass\n");
+    let mut callers = String::from("from a import target\n");
+    for i in 0..60 {
+        callers.push_str(&format!("def c{i}():\n    target()\n"));
+    }
+    write(&repo, "b.py", &callers);
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["context", "target", "--limit", "10000"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("callers (showing 50 of 60):"),
+        "context limit not capped: {stdout}"
+    );
+}
+
+#[test]
+fn timing_assert_measures_semantic_exit_codes() {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/scripts/timing_assert.sh");
+    let out = std::process::Command::new("bash")
+        .arg(script)
+        .args(["2", "exit-one", "5000", "sh", "-c", "exit 1"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("best-of-2"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
 fn response_contract_limit_clamps() {
     let repo = fixture("limit");
     build(&repo);
@@ -618,6 +734,96 @@ fn impact_edges_include_importers_and_inheritors() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("hier.py:4"), "{stdout}");
+}
+
+#[test]
+fn impact_import_site_counts_one_per_statement() {
+    let repo = temp_repo("impact-import-sites");
+    write(&repo, "a.py", "def target():\n    return 1\n");
+    write(&repo, "b.py", "from a import target\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--edges", "imports"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("b.py:1 (1 sites)"),
+        "module+symbol edges counted twice: {stdout}"
+    );
+
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--edges", "imports", "--sites"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        stdout.matches("b.py:1").count(),
+        1,
+        "duplicate site rows: {stdout}"
+    );
+
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--edges", "imports", "--context"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("[in b]"),
+        "module-level site tagged as context: {stdout}"
+    );
+    assert!(
+        stdout.starts_with("kg: impact — resolved static edges only"),
+        "imports context caveat missing: {stdout}"
+    );
+}
+
+#[test]
+fn impact_context_tags_only_callable_sites() {
+    let repo = temp_repo("impact-context");
+    write(&repo, "a.py", "def target():\n    return 1\n");
+    write(
+        &repo,
+        "b.py",
+        "from a import target\n\ndef caller():\n    return target()\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--context", "--edges", "calls"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("b.py:4 [in b.caller]"),
+        "callable context tag missing: {stdout}"
+    );
+    assert!(
+        stdout.starts_with("kg: impact — resolved static call edges only"),
+        "calls-only context caveat missing: {stdout}"
+    );
+}
+
+#[test]
+fn impact_depth_footer_only_when_frontier_extended() {
+    let repo = temp_repo("impact-depth-footer");
+    write(&repo, "c.py", "def h():\n    pass\n");
+    write(&repo, "b.py", "from c import h\n\ndef g():\n    h()\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "c.py", "--depth", "5", "--edges", "calls"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        !stdout.contains("depth cap"),
+        "exhausted BFS reported a cap: {stdout}"
+    );
 }
 
 #[test]
