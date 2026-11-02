@@ -1,5 +1,5 @@
 {"repo": "kg", "from": "src.extract.walk_children", "to": "src.extract.record_ts_arrow_function", "expect_hops": 2}
-{"repo": "kg", "from": "src.main.main", "to": "src.extract.walk_node", "expect_hops": 5}
+{"repo": "kg", "from": "src.main.main", "to": "src.extract.walk_node", "expect_hops": 6}
 {"repo": "kg", "from": "src.parse", "to": "src.extract.record_ts_arrow_function", "expect": "no_path"}
 {"repo": "kg", "from": "src.query.target_ids", "to": "src.insights.hotspots", "expect": "no_path"}
 {"repo": "vihap", "from": "vihap.cleaners.unicode.normalize_ascii", "to": "vihap.cleaners.unicode._ascii_diacritic_trans", "expect_hops": 1}
