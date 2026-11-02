@@ -19,7 +19,7 @@
 | # | caller file:line | callee qualname | invocation kind | verified |
 |---|------------------|-----------------|-----------------|----------|
 | G01 | src/doctor.rs:92 | src.query.file_changed | import-call via crate:: path (doctor.rs:8 `use crate::query` module path call, stale_ratio) | [x] |
-| G02 | src/query.rs:399 | src.query.file_changed | same-file local call (collect_output staleness loop) | [x] |
+| G02 | src/query.rs:397 | src.query.file_changed | same-file local call (collect_output staleness loop) | [x] |
 | G03 | src/main.rs:191 | src.db.open_for_query | import-call (use crate::db; Callers dispatch) | [x] |
 | G04 | src/main.rs:205 | src.db.open_for_query | import-call (Callees dispatch) | [x] |
 | G05 | src/main.rs:219 | src.db.open_for_query | import-call (Impact dispatch) | [x] |
@@ -27,4 +27,4 @@
 | G07 | src/main.rs:241 | src.db.open_for_query | import-call (Hotspots dispatch) | [x] |
 | G08 | src/query.rs:121 | src.query.clamp_limit | same-file local call (callers entry) | [x] |
 | G09 | src/query.rs:195 | src.query.clamp_limit | same-file local call (callees entry) | [x] |
-| G10 | src/query.rs:563 | src.query.clamp_limit | same-file local call (impact entry) | [x] |
+| G10 | src/query.rs:561 | src.query.clamp_limit | same-file local call (impact entry) | [x] |

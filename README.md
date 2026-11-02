@@ -25,7 +25,7 @@ reproduction commands, and threats to validity):
 | Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.33 s on the committed 2,025-file corpus |
 | Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
 | Structure and duplication lookups? | `kg search` recall 0.800 (23/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
-| Does everything help every host? | **No.** Route queries (`path`) cut tool calls 38-91% on Grok and 71% on OpenCode; `search` showed no economics gain in its 24-run battery; `clones` transferred on Grok (−59% calls) but not OpenCode (−17%). Utility is host-dependent — see EVALUATION §5. |
+| Does everything help every host? | **No.** Route queries (`path`) cut tool calls 57-59% on Grok and 61-86% on OpenCode (Stage 1 and Stage 4); `search` showed no economics gain in its 24-run battery; `clones` transferred on Grok (−59% calls) but not OpenCode (−17%). Utility is host-dependent — see EVALUATION §5. |
 
 ## Install
 

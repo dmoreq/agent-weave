@@ -268,12 +268,14 @@ chain (GT verified at freeze: 10-hop route, 5-hop route, one no-path pair).
 
 ### Verdict: PASS on both hosts, and the effect grows with corpus size
 
-The Stage-1 result (−38..−91% calls on 25-70-file repos, one host below the
-20% call bar) now clears the bar on BOTH hosts at 2,201 files: tool calls
-−59%/−61%, kg calls −87%/−77%. Control arms needed 15-31 kg calls to compose
+The Stage-1 result already cleared the 20% call bar on both hosts (tool
+calls −57%/−86%, kg calls −91%/−71%); Stage 4 confirms the effect at
+2,201 files: tool calls −59%/−61%, kg calls −87%/−77%. Control arms needed 15-31 kg calls to compose
 routes; the routed arm needed 1 (10-hop) or 3-5 (negative case + confirmation).
 This is the strongest evidence that the routed `path` query delivers large,
-host-independent value at realistic repository sizes.
+host-independent value at realistic repository sizes (the ~25-point OpenCode
+tool-call cut in Stage 1 is not reproduced at scale; the effect is stable,
+not monotonically growing).
 
 Contamination guard: 12/12 control cells feature calls = 0; 12/12 treatment
 cells `path` calls >= 1. One runner defect (prompt arm name kgp vs order kgs)

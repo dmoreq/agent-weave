@@ -125,8 +125,7 @@ Amendment 14 upgrade (path+signature tokens, signature in hits; 16 runs):
 G18(iii) FAIL by the both-hosts bar, owner decision recorded in the
 baseline report. Stage 4 — `path` at 2,201-file scale (24 runs): correctness
 24/24; tool calls −59%/−61%, kg calls −87%/−77%, tokens −43%/−12% on
-Grok/OpenCode — the call bar clears on BOTH hosts and the effect grows with
-corpus size. Record:
+Grok/OpenCode — the call bar clears on BOTH hosts at this scale. Record:
 `baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
 
 ### 5.1 Correctness first

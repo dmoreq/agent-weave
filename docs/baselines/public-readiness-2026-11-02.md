@@ -108,8 +108,8 @@ panic-path contract test.
 
 `kg path` at 2,201 files / 4,401 symbols: 24/24 correct; Grok Build tool
 calls −59% and kg calls −87%; OpenCode tool calls −61% and kg calls −77%.
-The call bar clears on BOTH hosts, and the effect grows with corpus size
-(Stage 1: −38..−91% on 25-70-file repos). This is the largest measured
+The call bar clears on BOTH hosts at this scale (Stage 1 path also cleared
+it: −57%/−86%; the effect is stable across scales, not monotonically growing). This is the largest measured
 value result in the evidence set and the basis for the narrow positioning:
 route/reachability questions on small-to-medium repos are where kg is
 strongest; search/clones remain host-dependent.

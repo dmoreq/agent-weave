@@ -34,6 +34,9 @@ REPLACEMENTS = [
     ("be-mercury", "service-f"),
     ("food-dispatch", "service-g"),
     ("agent-skills", "companion-skills"),
+    ("the private evidence vault's transcripts/SUMMARY.md", "the internal evidence records"),
+    ("the private evidence vault's", "the internal evidence records'"),
+    ("the private evidence vault", "the internal evidence records"),
     ("HierarchicalAddressParser", "WidgetParser"),
     ("get_knowledge_base", "get_widget_base"),
     ("normalize_ascii", "normalize_text"),
@@ -59,7 +62,6 @@ REPLACEMENTS = [
     ("~/", "<home>/"),
     ("quy.doan@be.com.vn", "noreply@example.invalid"),
     ("be.com.vn", "example.invalid"),
-    ("docs/baselines/", "evidence-vault/"),
     ("f7ca48c", "<frozen-rev>"),
     ("56f448a", "<frozen-rev>"),
     ("80761de", "<frozen-rev>"),
@@ -95,25 +97,19 @@ def scrub(out: Path) -> None:
         for old, new in REPLACEMENTS:
             text = text.replace(old, new)
         path.write_text(text)
-    # Doc-only path references: keep Cargo.toml excludes valid.
+    # Doc-only path references: flatten links, then leave a single readable
+    # token. Never apply this to .yml/.toml/.py (it broke the CI guard and
+    # the Cargo exclude in round 2).
     for path in out.rglob("*.md"):
         t = path.read_text(errors="replace")
-        t = t.replace("docs/baselines/", "").replace("baselines/", "")
-        t = re.sub(r"\[([^\]]+)\]\([^)]*evidence-vault[^)]*\)", r"\1", t)
-        t = re.sub(r"\[([^\]]+)\]\([^)]*baselines[^)]*\)", r"\1", t)
+        t = re.sub(r"\[([^\]]+)\]\([^)]*(?:docs/)?baselines[^)]*\)", r"\1", t)
+        t = t.replace("docs/baselines/", "evidence/").replace("baselines/", "evidence/")
         path.write_text(t)
     # The gate script itself carries the private-pattern vocabulary; it stays
     # in the private repo (R6 review finding).
     self_copy = out / "tests" / "scripts" / "public_export.py"
     if self_copy.exists():
         self_copy.unlink()
-    # No dead paths: evidence references become plain text in the export.
-    for path in out.rglob("*"):
-        if path.is_file() and path.suffix in TEXT_SUFFIXES:
-            t = path.read_text(errors="replace")
-            t = t.replace("evidence-vault/", "the private evidence vault ")
-            t = t.replace("(the private evidence vault )", "")
-            path.write_text(t)
     # Round the per-corpus table (exact counts are fingerprints).
     ev = out / "docs" / "EVALUATION.md"
     if ev.exists():
@@ -127,8 +123,7 @@ def scrub(out: Path) -> None:
         )
         text = text.replace(
             "Corpora are referred to by neutral labels throughout:",
-            "Corpora are referred to by neutral labels; per-corpus detail lives "
-            "in the private evidence vault.",
+            "Corpora are referred to by neutral labels; per-corpus detail is withheld.",
         )
         ev.write_text(text)
 
@@ -169,6 +164,21 @@ def gate(out: Path) -> int:
         if n:
             print(res.stdout[:2000])
             rc = 1
+    for label, pat in {
+        "vault_prose": "the private evidence vault",
+        "empty_link": "\\]\\(\\)",
+    }.items():
+        res = subprocess.run(
+            ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
+            cwd=out, capture_output=True, text=True,
+        )
+        n = len([l for l in res.stdout.splitlines() if l.strip()])
+        print(f"{label:16s} {n}")
+        if n:
+            print(res.stdout[:2000]); rc = 1
+    cargo = (out / "Cargo.toml").read_text()
+    if 'exclude = ["docs/baselines/**"' not in cargo:
+        print("Cargo.toml exclude pattern was mangled"); rc = 1
     for bad in ("docs/baselines", ".kg", "target", ".zcode"):
         p = out / bad
         if p.exists():

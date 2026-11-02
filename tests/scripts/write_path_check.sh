@@ -13,21 +13,37 @@ check() { # dir -> prints violations
   python3 - "$1" <<'PY'
 import pathlib, re, sys
 src = pathlib.Path(sys.argv[1])
-prim = re.compile(r"fs::write|fs::rename|OpenOptions|File::create|fs::copy|remove_file|remove_dir|create_dir|create_dir_all")
+prim = re.compile(r"fs::write|fs::rename|OpenOptions|File::create|File::create_new|File::options|fs::copy|remove_file|remove_dir|create_dir|create_dir_all")
 allowed = {"db.rs", "doctor.rs", "journal.rs"}
 bad = []
+def strip_test_modules(text):
+    """Remove #[cfg(test)] mod blocks (brace-matched) before scanning."""
+    out, i = [], 0
+    while True:
+        j = text.find("#[cfg(test)]", i)
+        if j < 0:
+            out.append(text[i:]); break
+        out.append(text[i:j])
+        k = text.find("{", j)
+        if k < 0:
+            out.append(text[j:]); break
+        depth, m = 1, k + 1
+        while m < len(text) and depth:
+            if text[m] == "{": depth += 1
+            elif text[m] == "}": depth -= 1
+            m += 1
+        i = m
+    return "".join(out)
+
 for p in sorted(src.glob("*.rs")):
     if p.name in allowed:
         continue
-    in_test = False
-    for n, line in enumerate(p.read_text().splitlines(), 1):
-        if "#[cfg(test)]" in line:
-            in_test = True
+    text = p.read_text()
+    scanned = strip_test_modules(text) if p.name == "walk.rs" else text
+    for n, line in enumerate(scanned.splitlines(), 1):
         if not prim.search(line):
             continue
         if p.name == "build.rs" and "db_new_path" in line:
-            continue
-        if p.name == "walk.rs" and in_test:
             continue
         bad.append(f"{p}:{n}:{line.strip()}")
 print("\n".join(bad))
@@ -42,17 +58,16 @@ fi
 probe="$(mktemp -d)"; trap 'rm -rf "$probe"' EXIT
 cp -R "$SRC" "$probe/src"
 printf 'fn evil() { let _ = std::fs::File::create("/tmp/kg-write-probe"); }\n' > "$probe/src/evil.rs"
-printf 'mod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n' > "$probe/src/walk_pre.rs"
-if [ -z "$(check "$probe/src")" ]; then
-  echo "G5 write-path: negative control missed a planted write" >&2
-  exit 1
-fi
-# cfg(test) placement in walk.rs must NOT create a false positive.
-printf '#[cfg(test)]\nmod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n' > "$probe/src/walk_pre.rs"
+printf '#[cfg(test)]\nmod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n\npub fn leaky() { std::fs::write("/tmp/z", b"w").unwrap(); }\n' > "$probe/src/walk.rs"
+printf 'fn t() { std::fs::File::options().write(true).create(true).open("/tmp/y").unwrap(); }\n' >> "$probe/src/query.rs"
 probe_bad="$(check "$probe/src")"
-if echo "$probe_bad" | grep -q "src/evil.rs"; then
-  : # evil.rs must be caught
-else
+if ! echo "$probe_bad" | grep -q "src/walk.rs:.*write"; then
+  echo "G5 write-path: negative control missed a post-test write in walk.rs" >&2; exit 1
+fi
+if ! echo "$probe_bad" | grep -q "src/query.rs:.*File::options"; then
+  echo "G5 write-path: negative control missed File::options" >&2; exit 1
+fi
+if ! echo "$probe_bad" | grep -q "src/evil.rs"; then
   echo "G5 write-path: negative control missed evil.rs" >&2; exit 1
 fi
 echo "G5 write-path: writes confined to kg_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"
