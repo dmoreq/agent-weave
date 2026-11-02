@@ -700,6 +700,81 @@ fn imports_lists_outbound_resolved_edges() {
 }
 
 #[test]
+fn ts_relative_imports_collapse_extensions_and_index() {
+    let repo = temp_repo("ts-extensions");
+    write(
+        &repo,
+        "src/app.ts",
+        "import Widget from './widget';\nimport { helper } from './util.mjs';\nimport * as ns from './pkg/index';\nexport * from './reexport';\nconst dyn = import('./lazy.cjs');\nconst req = require('./legacy.mjs');\n",
+    );
+    write(&repo, "src/widget.ts", "export default class Widget {}\n");
+    write(&repo, "src/util.mts", "export function helper() {}\n");
+    write(&repo, "src/pkg/index.ts", "export function inner() {}\n");
+    write(&repo, "src/reexport.ts", "export function re() {}\n");
+    write(&repo, "src/lazy.cts", "export function lazy() {}\n");
+    write(&repo, "src/legacy.cts", "export function legacy() {}\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "src/app.ts"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    for row in [
+        "src/app.ts:1 src.widget",
+        "src/app.ts:2 src.util",
+        "src/app.ts:2 src.util.helper",
+        "src/app.ts:3 src.pkg",
+        "src/app.ts:4 src.reexport",
+        "src/app.ts:5 src.lazy",
+        "src/app.ts:6 src.legacy",
+    ] {
+        assert!(stdout.contains(row), "missing {row}: {stdout}");
+    }
+    assert!(
+        !stdout.contains("src.widget.default"),
+        "default import leaked a symbol edge: {stdout}"
+    );
+
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "TS imports left unresolved rows: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn python_from_import_module_suppresses_redundant_parent_edge() {
+    let repo = temp_repo("from-import-module");
+    write(&repo, "pkg/__init__.py", "def b():\n    pass\n");
+    write(&repo, "pkg/mod.py", "def inner():\n    pass\n");
+    write(&repo, "app.py", "from pkg import mod\n");
+    write(&repo, "app2.py", "from pkg import mod, b\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "app.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let rows: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.starts_with("app.py:"))
+        .collect();
+    assert_eq!(
+        rows,
+        vec!["app.py:1 pkg.mod"],
+        "module-only import keeps only the child edge: {stdout}"
+    );
+
+    let out = kg(&repo).args(["imports", "app2.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("app2.py:1 pkg"),
+        "symbol import must keep the parent module edge: {stdout}"
+    );
+    assert!(stdout.contains("app2.py:1 pkg.mod"), "{stdout}");
+    assert!(stdout.contains("app2.py:1 pkg.b"), "{stdout}");
+}
+
+#[test]
 fn rust_use_tree_and_module_mapping_resolve() {
     let repo = temp_repo("rust-use-tree");
     write(&repo, "src/lib.rs", "pub mod a;\npub mod util;\n");

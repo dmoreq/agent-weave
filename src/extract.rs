@@ -1972,18 +1972,24 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
     }
 }
 
+/// TS/JS source extensions in resolution order. `.mjs`/`.cjs` import
+/// specifiers resolve to `.mts`/`.cts` sources under the same stem.
+const TS_SOURCE_EXTENSIONS: &[&str] =
+    &[".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"];
+
 /// Resolve a TS import source to a module path, relative to the FILE'S
 /// DIRECTORY (stems may contain dots, so the directory — not the module
-/// string — is the only trustworthy base). Bare sources map to dotted
-/// external names; the resolver treats non-indexed modules as external.
+/// string — is the only trustworthy base). Module identities collapse the
+/// source extension and a trailing `index`, matching `module_path_for`, so
+/// `./x`, `./x.ts`, `./x.mjs`, and `./x/index.ts` all resolve to the same
+/// indexed module. Bare sources map to dotted external names.
 fn resolve_ts_module(source: &str, dir: &str) -> String {
-    let stripped = source
-        .trim_end_matches(".tsx")
-        .trim_end_matches(".ts")
-        .trim_end_matches(".jsx")
-        .trim_end_matches(".js");
-    if stripped.starts_with("./") || stripped.starts_with("../") {
-        let mut parts: Vec<&str> = if dir.is_empty() {
+    let stripped = TS_SOURCE_EXTENSIONS
+        .iter()
+        .find_map(|ext| source.strip_suffix(ext))
+        .unwrap_or(source);
+    let mut parts: Vec<&str> = if stripped.starts_with("./") || stripped.starts_with("../") {
+        let mut base: Vec<&str> = if dir.is_empty() {
             Vec::new()
         } else {
             dir.split('.').collect()
@@ -1991,20 +1997,26 @@ fn resolve_ts_module(source: &str, dir: &str) -> String {
         let mut segs: Vec<&str> = stripped.split('/').collect();
         while segs.first() == Some(&"..") {
             segs.remove(0);
-            parts.pop();
+            base.pop();
         }
         if segs.first() == Some(&".") {
             segs.remove(0);
         }
-        for seg in segs {
-            if !seg.is_empty() {
-                parts.push(seg);
-            }
-        }
-        parts.join(".")
+        base
     } else {
-        stripped.replace('/', ".")
+        Vec::new()
+    };
+    let segs: Vec<&str> = stripped.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in segs {
+        if seg == "." || seg == ".." {
+            continue;
+        }
+        parts.push(seg);
     }
+    if parts.last() == Some(&"index") {
+        parts.pop();
+    }
+    parts.join(".")
 }
 
 fn impl_type_name(node: Node<'_>, src: &[u8]) -> String {
@@ -2246,6 +2258,7 @@ fn resolve_use_path(node: Node<'_>, ctx: UseTreeCtx<'_>) -> Option<Vec<String>> 
 
 struct FileCtx {
     module: String,
+    lang: Lang,
     /// Crate-root dir segment for Rust files (e.g. "src") — maps crate:: paths.
     crate_root: Option<String>,
     module_sym_idx: usize,
@@ -2373,6 +2386,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
         let crate_root = fx.dir.split('.').next().map(|p| p.to_string());
         t.file_ctx.push(FileCtx {
             module,
+            lang: fx.lang,
             crate_root,
             module_sym_idx: base,
             aliases,
@@ -2692,6 +2706,49 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
         let mut seen_unresolved: HashSet<(usize, String, &'static str, usize)> = HashSet::new();
         unresolved_calls
             .retain(|u| seen_unresolved.insert((u.file_idx, u.name.clone(), u.kind, u.site_line)));
+    }
+
+    // Python `from pkg import mod`: when the imported name itself resolves as a
+    // module, the child edge `pkg.mod` is canonical and the parent `pkg` edge is
+    // redundant. Keep the parent when the same statement also imports a
+    // non-module symbol from it (`from pkg import mod, func`).
+    {
+        let mut module_children: HashSet<(usize, usize, String)> = HashSet::new();
+        let mut symbol_children: HashSet<(usize, usize, String)> = HashSet::new();
+        for e in &t.edges {
+            if e.kind != "imports" {
+                continue;
+            }
+            let fi = t.symbols[e.src_idx].file_idx;
+            if t.file_ctx.get(fi).is_none_or(|f| f.lang != Lang::Python) {
+                continue;
+            }
+            let Some(dst) = e.dst_idx else { continue };
+            let Some((parent, _)) = e.dst_name.rsplit_once('.') else {
+                continue;
+            };
+            let key = (fi, e.site_line, parent.to_string());
+            if t.symbols[dst].kind == "module" {
+                module_children.insert(key);
+            } else {
+                symbol_children.insert(key);
+            }
+        }
+        t.edges.retain(|e| {
+            if e.kind != "imports" {
+                return true;
+            }
+            let fi = t.symbols[e.src_idx].file_idx;
+            if t.file_ctx.get(fi).is_none_or(|f| f.lang != Lang::Python) {
+                return true;
+            }
+            let Some(dst) = e.dst_idx else { return true };
+            if t.symbols[dst].kind != "module" {
+                return true;
+            }
+            let key = (fi, e.site_line, e.dst_name.clone());
+            !module_children.contains(&key) || symbol_children.contains(&key)
+        });
     }
 
     // Call sites.
