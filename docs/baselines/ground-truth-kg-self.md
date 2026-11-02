@@ -1,5 +1,6 @@
 # Ground Truth — kg self-index (P2.5), 10 call sites (FILLED 2026-10-31)
 
+- Refreshed: 2026-11-02 at schema v5 (mechanical occurrence refresh; pointers re-verified 10/10);
 - Filled: 2026-10-31, agent verification; kg indexes its own repository (dogfooding per spec P2.5).
 - Rust module convention: file src/query.rs -> module src.query; use-decl crate::db::X resolves to src.db.X.
 - M3 re-verification (2026-11-01): rows G02-G10 refreshed again — the M3
@@ -17,13 +18,13 @@
 
 | # | caller file:line | callee qualname | invocation kind | verified |
 |---|------------------|-----------------|-----------------|----------|
-| G01 | src/doctor.rs:85 | src.query.file_changed | import-call via crate:: path (doctor.rs:8 `use crate::query` module path call, stale_ratio) | [x] |
-| G02 | src/query.rs:381 | src.query.file_changed | same-file local call (collect_output staleness loop) | [x] |
-| G03 | src/main.rs:127 | src.db.open_for_query | import-call (use crate::db; Callers dispatch) | [x] |
-| G04 | src/main.rs:141 | src.db.open_for_query | import-call (Callees dispatch) | [x] |
-| G05 | src/main.rs:155 | src.db.open_for_query | import-call (Impact dispatch) | [x] |
-| G06 | src/main.rs:169 | src.db.open_for_query | import-call (Dead dispatch) | [x] |
-| G07 | src/main.rs:220 | src.db.open_for_query | import-call (Hotspots dispatch) | [x] |
-| G08 | src/query.rs:80 | src.query.clamp_limit | same-file local call (callers entry) | [x] |
-| G09 | src/query.rs:131 | src.query.clamp_limit | same-file local call (callees entry) | [x] |
-| G10 | src/query.rs:204 | src.query.clamp_limit | same-file local call (impact entry) | [x] |
+| G01 | src/doctor.rs:92 | src.query.file_changed | import-call via crate:: path (doctor.rs:8 `use crate::query` module path call, stale_ratio) | [x] |
+| G02 | src/query.rs:399 | src.query.file_changed | same-file local call (collect_output staleness loop) | [x] |
+| G03 | src/main.rs:177 | src.db.open_for_query | import-call (use crate::db; Callers dispatch) | [x] |
+| G04 | src/main.rs:191 | src.db.open_for_query | import-call (Callees dispatch) | [x] |
+| G05 | src/main.rs:205 | src.db.open_for_query | import-call (Impact dispatch) | [x] |
+| G06 | src/main.rs:213 | src.db.open_for_query | import-call (Dead dispatch) | [x] |
+| G07 | src/main.rs:227 | src.db.open_for_query | import-call (Hotspots dispatch) | [x] |
+| G08 | src/query.rs:121 | src.query.clamp_limit | same-file local call (callers entry) | [x] |
+| G09 | src/query.rs:195 | src.query.clamp_limit | same-file local call (callees entry) | [x] |
+| G10 | src/query.rs:563 | src.query.clamp_limit | same-file local call (impact entry) | [x] |

@@ -1,57 +1,105 @@
-name: ci
-
+name: CI
 on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-test:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
-      - name: Build (locked)
-        run: cargo build --locked --release
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Tests
-        run: cargo test --locked
-      - name: Dependency allowlist (G5)
-        run: bash tests/scripts/allowlist_check.sh Cargo.lock
-      - name: Write-path check (G5 invariant 4)
-        run: bash tests/scripts/write_path_check.sh
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo build --locked --release
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: bash tests/scripts/allowlist_check.sh Cargo.lock
+      - run: bash tests/scripts/write_path_check.sh
+
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.89.0"
+      - run: cargo build --locked
+
+  install-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install --path . --locked --root "$RUNNER_TEMP/kg-install"
+      - run: "$RUNNER_TEMP/kg-install/bin/kg" --version
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
 
   network-deny-macos:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build binary
-        run: cargo build --locked --release
-      - name: Seatbelt network-deny build (G5)
-        run: |
-          mkdir -p /tmp/kg-fixture
-          printf 'def f():\n    return 1\n' > /tmp/kg-fixture/a.py
-          bash tests/scripts/seatbelt-build.sh target/release/kg /tmp/kg-fixture
+      - run: cargo build --locked --release
+      - run: |
+          mkdir -p "$RUNNER_TEMP/kg-fixture"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/kg-fixture/a.py"
+          bash tests/scripts/seatbelt-build.sh target/release/kg "$RUNNER_TEMP/kg-fixture"
 
   network-deny-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install seccomp wrapper
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - name: Build binary
-        run: cargo build --locked --release
-      - name: seccomp network-deny build (G5)
+      - run: cargo build --locked --release
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: network namespace denies egress (negative control first)
         run: |
-          mkdir -p /tmp/kg-fixture
-          printf 'def f():\n    return 1\n' > /tmp/kg-fixture/a.py
-          bwrap --unshare-net --dev-bind / / --ro-bind / / \
-            target/release/kg build --root /tmp/kg-fixture
+          mkdir -p "$RUNNER_TEMP/kg-fixture"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/kg-fixture/a.py"
+          if bwrap --unshare-net --dev-bind / / python3 -c \
+            "import socket; socket.create_connection(('1.1.1.1',443),2)"; then
+            echo "negative control reached the network — namespace not enforced" >&2
+            exit 1
+          fi
+          bwrap --unshare-net --dev-bind / / target/release/kg build --root "$RUNNER_TEMP/kg-fixture"
+          echo "G5 network-namespace: build ok, egress blocked — PASS"
+
+  self-gt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: self ground truth (evidence vault only)
+        run: |
+          if [ ! -f docs/baselines/ground-truth-kg-self.md ]; then
+            echo "no evidence vault in this tree — skipped"; exit 0
+          fi
+          cargo build --locked --release
+          target/release/kg build --force
+          python3 -I tests/scripts/precision_recall.py . target/release/kg docs/baselines/ground-truth-kg-self.md

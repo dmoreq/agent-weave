@@ -153,7 +153,7 @@ def main():
             print(f"  {b}")
     gate = recall >= 0.70 and precision >= 0.80
     print(f"G2 VERDICT: {'PASS' if gate else 'FAIL'}")
-    return 0
+    return 0 if gate else 1
 
 
 if __name__ == "__main__":

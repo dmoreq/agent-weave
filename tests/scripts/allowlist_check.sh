@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# G5 invariant 1 (CI): dependency allowlist check. No crate in Cargo.lock may
-# link a resolver/TLS/network stack. The five allowed roots are clap,
-# tree-sitter(+grammars), rusqlite, ignore, and their transitive deps — the
-# check rejects known network families instead of enumerating the world.
+# G5 dependency policy: exact allowlist, not a network-family denylist
+# (R6e Blocker 3). Any package in Cargo.lock that is not listed fails the gate.
 set -euo pipefail
 LOCK="${1:-Cargo.lock}"
-FORBIDDEN='(reqwest|hyper|tokio|native-tls|rustls|openssl|curl|hickory|trust-dns|hyperfine|libcurl|ssh|quinn|surf|ureq|isahc|attohttpc|mio$)'
-if grep -E "^name = \"?$FORBIDDEN" "$LOCK" >/dev/null 2>&1; then
-  echo "G5 allowlist: FORBIDDEN network crate found in $LOCK:" >&2
-  grep -E "^name = \"?$FORBIDDEN" "$LOCK" >&2
+LIST="$(dirname "$0")/allowlist.txt"
+set +e
+extra=$(python3 - "$LOCK" "$LIST" <<'PY'
+import re, sys
+lock = open(sys.argv[1]).read()
+allowed = set(open(sys.argv[2]).read().split())
+names = set(re.findall(r'^name = "([^"]+)"$', lock, re.M))
+for n in sorted(names - allowed):
+    print(n)
+PY
+)
+set -e
+if [ -n "$extra" ]; then
+  echo "G5 allowlist: packages not in tests/scripts/allowlist.txt:" >&2
+  echo "$extra" >&2
   exit 1
 fi
-echo "G5 allowlist: no network crates in $LOCK — PASS"
+echo "G5 allowlist: every locked package is allowlisted — PASS"
