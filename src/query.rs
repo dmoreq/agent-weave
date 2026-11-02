@@ -2,7 +2,7 @@
 //! result-set-scoped staleness, caps, tier tags, and empty-result reason lines
 //! (response contract; CUJ2/CUJ3/CUJ4/CUJ7).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, BinaryHeap, HashSet};
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -60,6 +60,48 @@ fn is_test_symbol_name(name: &str) -> bool {
         || (name.starts_with("test") && name.chars().nth(4).is_some_and(|c| c.is_ascii_uppercase()))
 }
 
+/// Bounded top-test collector: `seen` counts every distinct reachable test
+/// symbol, while `heap` keeps only the first `limit` rows in output order.
+struct TestTop {
+    limit: usize,
+    seen: HashSet<i64>,
+    heap: BinaryHeap<(String, i64, String)>,
+}
+
+impl TestTop {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            seen: HashSet::new(),
+            heap: BinaryHeap::new(),
+        }
+    }
+
+    fn insert(&mut self, id: i64, path: String, line: i64, qualname: String) {
+        if !self.seen.insert(id) {
+            return;
+        }
+        let record = (path, line, qualname);
+        if self.heap.len() < self.limit {
+            self.heap.push(record);
+        } else if self.heap.peek().is_some_and(|max| record < *max) {
+            self.heap.pop();
+            self.heap.push(record);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.seen.is_empty()
+    }
+
+    fn finish(mut self) -> (usize, Vec<(String, i64, String)>) {
+        let total = self.seen.len();
+        let mut records = std::mem::take(&mut self.heap).into_vec();
+        records.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        (total, records)
+    }
+}
+
 pub fn test_impact(
     conn: &Connection,
     root: &Path,
@@ -103,7 +145,7 @@ pub fn test_impact(
     let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
     let mut visited: HashSet<i64> = seed_set.clone();
     let mut current = seed_ids;
-    let mut tests: HashMap<i64, (String, i64, String)> = HashMap::new();
+    let mut tests = TestTop::new(limit);
     let mut truncated = false;
     for d in 1..=depth {
         if current.is_empty() {
@@ -139,7 +181,7 @@ pub fn test_impact(
                     && matches!(kind.as_str(), "function" | "method")
                     && is_test_symbol_name(&name)
                 {
-                    tests.entry(id).or_insert((path, line, qualname));
+                    tests.insert(id, path, line, qualname);
                 }
                 if visited.insert(id) {
                     next.push(id);
@@ -166,9 +208,7 @@ pub fn test_impact(
             }
         });
     }
-    let mut rows: Vec<_> = tests.into_values().collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-    let total = rows.len();
+    let (total, rows) = tests.finish();
     let pointers: Vec<Pointer> = rows
         .into_iter()
         .map(|(file, line, qualname)| Pointer {
@@ -1341,7 +1381,7 @@ pub fn impact(
     if total_impact_targets(conn, &rel)? == 0 {
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
-    let mut records: HashMap<String, ImpactRecord> = HashMap::new();
+    let mut records = ImpactTop::new(limit);
     let (mut frontier, mut visited) = direct_impact_level(conn, &rel, &kind_sql, &mut records, 1)?;
     let mut truncated = false;
     for d in 2..=depth {
@@ -1354,18 +1394,16 @@ pub fn impact(
         }
         frontier = next;
     }
-    let total = records.len();
+    let (total, paths) = records.finish();
     if total == 0 {
         return Err(KgError::NoResultsCaveated {
             caveat,
             detail: impact_empty_detail(&kinds),
         });
     }
-    let mut paths: Vec<_> = records.into_iter().collect();
-    paths.sort_by(|a, b| a.0.cmp(&b.0));
     let pointers: Vec<Pointer> = paths
         .into_iter()
-        .map(|(path, (d, line, kind, qn, src_kind))| Pointer {
+        .map(|(path, d, line, kind, qn, src_kind)| Pointer {
             file: path,
             line,
             tag: "",
@@ -1407,7 +1445,7 @@ fn direct_impact_level(
     conn: &Connection,
     rel: &str,
     kind_sql: &str,
-    records: &mut HashMap<String, ImpactRecord>,
+    records: &mut ImpactTop,
     depth: usize,
 ) -> Result<(Vec<i64>, HashSet<i64>)> {
     let sql = format!(
@@ -1443,7 +1481,7 @@ fn direct_impact_level(
     }
     for r in rows {
         let (src, line, kind, path, qn, src_kind) = r?;
-        record_first(records, path, depth, line, kind, qn, src_kind);
+        records.insert(path, depth, line, kind, qn, src_kind);
         if visited.insert(src) {
             frontier.push(src);
         }
@@ -1456,7 +1494,7 @@ fn level_impact(
     frontier: &[i64],
     visited: &mut HashSet<i64>,
     kind_sql: &str,
-    records: &mut HashMap<String, ImpactRecord>,
+    records: &mut ImpactTop,
     depth: usize,
 ) -> Result<Vec<i64>> {
     if frontier.is_empty() {
@@ -1489,7 +1527,7 @@ fn level_impact(
         })?;
         for r in rows {
             let (src, line, kind, path, qn, src_kind) = r?;
-            record_first(records, path, depth, line, kind, qn, src_kind);
+            records.insert(path, depth, line, kind, qn, src_kind);
             if visited.insert(src) {
                 next.push(src);
             }
@@ -1498,22 +1536,52 @@ fn level_impact(
     Ok(next)
 }
 
-type ImpactRecord = (usize, i64, String, String, String);
+type ImpactRecord = (String, usize, i64, String, String, String);
 
-fn record_first(
-    records: &mut HashMap<String, ImpactRecord>,
-    path: String,
-    depth: usize,
-    line: i64,
-    kind: String,
-    qualname: String,
-    src_kind: String,
-) {
-    match records.get(&path) {
-        Some((d, l, _, _, _)) if (*d, *l) <= (depth, line) => {}
-        _ => {
-            records.insert(path, (depth, line, kind, qualname, src_kind));
+/// Bounded top-path collector for depth>1 impact. `seen` supplies the exact
+/// distinct-file count; `heap` keeps only the lexicographically smallest
+/// `limit` records, so the query never sorts the full closure.
+struct ImpactTop {
+    limit: usize,
+    seen: HashSet<String>,
+    heap: BinaryHeap<ImpactRecord>,
+}
+
+impl ImpactTop {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            seen: HashSet::new(),
+            heap: BinaryHeap::new(),
         }
+    }
+
+    fn insert(
+        &mut self,
+        path: String,
+        depth: usize,
+        line: i64,
+        kind: String,
+        qualname: String,
+        src_kind: String,
+    ) {
+        if !self.seen.insert(path.clone()) {
+            return;
+        }
+        let record = (path, depth, line, kind, qualname, src_kind);
+        if self.heap.len() < self.limit {
+            self.heap.push(record);
+        } else if self.heap.peek().is_some_and(|max| record.0 < max.0) {
+            self.heap.pop();
+            self.heap.push(record);
+        }
+    }
+
+    fn finish(mut self) -> (usize, Vec<ImpactRecord>) {
+        let total = self.seen.len();
+        let mut records = std::mem::take(&mut self.heap).into_vec();
+        records.sort_by(|a, b| a.0.cmp(&b.0));
+        (total, records)
     }
 }
 
