@@ -360,6 +360,51 @@ fn fast_path_preserves_callers_of_changed_file() {
 }
 
 #[test]
+fn pre_signature_version_index_rebuilds_once() {
+    // Amendment 18: an index built before multi-line signature capture must
+    // re-extract once (meta marker absent), not carry truncated signatures.
+    let repo = fixture("signature-upgrade");
+    build(&repo);
+    let db = repo.join(".kg/index.db");
+    let out = Command::new("python3")
+        .arg("-c")
+        .arg(format!(
+            "import sqlite3; c=sqlite3.connect('{}'); c.execute(\"DELETE FROM meta WHERE key='signature_version'\"); c.commit()",
+            db.display()
+        ))
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let (_, out2, _) = build(&repo);
+    assert!(out2.contains("carried=0"), "full re-extract: {out2}");
+    let out = kg(&repo).args(["search", "normalize"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("def normalize(text)"));
+}
+
+#[test]
+fn noop_build_leaves_the_index_untouched() {
+    // R7 L4: a build with zero changed/deleted files must not rewrite the
+    // database (0.05-0.06 s of a 0.10 s build at 2.2k files).
+    let repo = fixture("noop-build");
+    let (_, out1, _) = build(&repo);
+    assert!(out1.contains("carried=0"), "{out1}");
+    let db = repo.join(".kg/index.db");
+    let stamp = |p: &Path| -> (u64, std::time::SystemTime) {
+        let m = fs::metadata(p).unwrap();
+        (m.len(), m.modified().unwrap())
+    };
+    let before = stamp(&db);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let (code, out2, err2) = build(&repo);
+    assert_eq!(code, 0, "{err2}");
+    assert!(out2.contains("carried=3"), "{out2}");
+    assert!(out2.contains("db=0.00s"), "no-op write skipped: {out2}");
+    let after = stamp(&db);
+    assert_eq!(before, after, "no-op build rewrote index.db: {out2}");
+}
+
+#[test]
 fn prebuilt_index_restore_carries_on_hash_match() {
     // Amendment 9: a restored index.db (CI cache) whose file mtimes differ
     // from the fresh checkout is carried on content-hash match — no re-parse,
@@ -591,8 +636,16 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     let repo = fixture("search");
     build(&repo);
     // Hit: bm25-ranked pointers, tier position empty (symbol identities).
+    let _ = fs::remove_file(repo.join(".kg/usage.log"));
     let out = kg(&repo).args(["search", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
+    // Every search exit path journals, including the exact-name fast path.
+    let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
+    let rec = log.lines().last().unwrap();
+    assert!(
+        rec.contains("\"tool\":\"search\"") && !rec.contains("\"result_count\":0"),
+        "exact-name search must not journal an empty call: {rec}"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("utils.py:1"), "{stdout}");
     assert!(
@@ -601,7 +654,7 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     );
     // Amendment 14b: the hit line carries the stored signature.
     assert!(
-        stdout.contains("def normalize(text):"),
+        stdout.contains("def normalize(text)"),
         "search hit carries the signature: {stdout}"
     );
     // Amendment 14a: signature-only vocabulary is searchable (no symbol
@@ -612,6 +665,20 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     assert!(
         stdout.contains("utils.py:1"),
         "signature tokens reach symbols: {stdout}"
+    );
+
+    // Morphology fallback (R7): plural asks match the singular stem.
+    let out = kg(&repo).args(["search", "normalizes"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("utils.py:1"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
     );
 
     // No match: exit 1 with the documented reason line.
@@ -1003,7 +1070,7 @@ fn usage_verify_reports_ok_changed_fail() {
     assert_eq!(out.status.code(), Some(0), "report-only");
     assert!(stdout.contains("fail=1"), "{stdout}");
     assert!(
-        stdout.contains("FAIL utils.py:9999 (line beyond"),
+        stdout.contains("FAIL utils.py:9999") && stdout.contains("(line beyond"),
         "{stdout}"
     );
 }
@@ -1197,9 +1264,19 @@ fn p15_stats_hotspots_report() {
         "{stdout}"
     );
 
+    // R7 L4: report is a build snapshot; an edit must surface a first-line
+    // freshness caveat before the sections.
+    write(
+        &repo,
+        "utils.py",
+        &format!("{UTILS}\n\ndef extra():\n    return 1\n"),
+    );
     let out = kg(&repo).args(["report"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        stdout.starts_with("kg: 1 of 3 sampled files changed since build"),
+        "freshness header: {stdout}"
+    );
     for section in [
         "## 1. index overview",
         "## 2. architecture map",
@@ -1751,12 +1828,19 @@ fn context_shows_definition_callers_and_callees() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let expected =
         "kg: context — resolved static edges only; dynamic dispatch may hide callers or callees\n\
-b.py:3 function b.caller def caller():\n\
+b.py:3-4 function b.caller def caller()\n\
 callers (showing 1 of 1):\n\
-c.py:4\n\
+c.py:4 c.top\n\
 callees (showing 1 of 1):\n\
-a.py:1\n";
+a.py:1 a.target\n";
     assert_eq!(stdout, expected, "exact bytes");
+    // G11: payload pointers are byte-identical to the stdout data lines.
+    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    let last = payload.lines().last().unwrap();
+    assert_eq!(
+        payload_pointers(last),
+        vec!["c.py:4 c.top".to_string(), "a.py:1 a.target".to_string()]
+    );
 
     // Cap per section: two callers, --limit 1.
     write(
@@ -1848,4 +1932,135 @@ fn serial_and_parallel_builds_are_identical() {
         dump(&parallel),
         "serial vs parallel tables differ"
     );
+}
+
+#[test]
+fn unresolved_names_flag_internal_misses() {
+    // R7 L4: an unresolved bare name that exists in the index is a resolver
+    // gap (actionable), distinct from external/builtin calls.
+    let repo = temp_repo("unresolved-internal");
+    write(&repo, "a.py", "def helper():\n    return 1\n");
+    write(&repo, "b.py", "def go():\n    return helper()\n");
+    build(&repo);
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("1 distinct names (internal=1)"), "{stdout}");
+    assert!(stdout.contains("helper n=1 [internal]"), "{stdout}");
+}
+
+#[test]
+fn clones_show_the_enclosing_symbol() {
+    // R7 L4: spans alone force a file read; the enclosing symbol names the
+    // duplicated unit.
+    let repo = temp_repo("clones-identity");
+    let body = "def process(items):\n    a = 1\n    b = 2\n    c = 3\n    d = 4\n    e = 5\n    return a + b + c + d + e\n";
+    write(
+        &repo,
+        "x.py",
+        &format!("def x_header():\n    return 0\n\n{body}"),
+    );
+    write(
+        &repo,
+        "y.py",
+        &format!("def y_header():\n    return 0\n\n{body}"),
+    );
+    build(&repo);
+    let out = kg(&repo).args(["clones"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.contains("x.py:") && l.contains("(x.process)")),
+        "enclosing symbol missing: {stdout}"
+    );
+    // --min-lines filters AFTER merging: the merged span (10 lines) survives
+    // 8 and disappears at 12 (R7 review: only 5 and 100 were tested).
+    let out = kg(&repo)
+        .args(["clones", "--min-lines", "8"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    let out = kg(&repo)
+        .args(["clones", "--min-lines", "12"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("0 clone candidates"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn impact_defaults_to_files_with_site_counts() {
+    let repo = temp_repo("impact-sites");
+    write(&repo, "a.py", "def target():\n    return 1\n");
+    write(
+        &repo,
+        "b.py",
+        "from a import target\n\ndef one():\n    return target()\n\ndef two():\n    return target()\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["impact", "a.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert_eq!(
+        stdout.lines().count(),
+        1,
+        "one row per caller file: {stdout}"
+    );
+    assert!(
+        stdout.contains("b.py") && stdout.contains("(2 sites)"),
+        "{stdout}"
+    );
+
+    let out = kg(&repo)
+        .args(["impact", "a.py", "--sites"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("b.py:4") && stdout.contains("b.py:7"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn dead_exclude_tests_drops_test_paths_and_names() {
+    let repo = temp_repo("dead-exclude");
+    write(&repo, "src.py", "def helper():\n    return 1\n");
+    write(
+        &repo,
+        "tests/test_x.py",
+        "def test_helper():\n    return 1\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["dead"]).output().unwrap();
+    let all = String::from_utf8_lossy(&out.stdout);
+    assert!(all.contains("tests/test_x.py"), "{all}");
+    let out = kg(&repo)
+        .args(["dead", "--exclude-tests"])
+        .output()
+        .unwrap();
+    let filtered = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{filtered}");
+    assert!(filtered.contains("src.py"), "{filtered}");
+    assert!(!filtered.contains("test_x.py"), "{filtered}");
+    assert!(!filtered.contains("test_helper"), "{filtered}");
+}
+
+#[test]
+fn search_stem_fallback_handles_ion_nouns() {
+    let repo = temp_repo("search-ion");
+    write(&repo, "a.py", "def rotate():\n    return 1\n");
+    build(&repo);
+    let out = kg(&repo).args(["search", "rotation"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("a.rotate"), "{stdout}");
 }

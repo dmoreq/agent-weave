@@ -79,6 +79,9 @@ pub enum Cmd {
     Impact {
         /// Repo-relative path of the indexed file
         file: String,
+        /// Show every call-site pointer instead of one row per caller file
+        #[arg(long)]
+        sites: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -86,6 +89,9 @@ pub enum Cmd {
     /// Dead-code candidates: indexed symbols with zero inbound call edges.
     /// Candidates only — dynamic dispatch and entry points are not proven absent.
     Dead {
+        /// Exclude tests/ paths and test_* symbols (policy filter)
+        #[arg(long)]
+        exclude_tests: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,

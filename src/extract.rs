@@ -454,16 +454,44 @@ fn text(node: Node<'_>, src: &[u8]) -> String {
 /// first newline, so the stored text is a header fragment by construction.
 fn signature_of(node: Node<'_>, src: &[u8]) -> String {
     let start = node.start_byte();
-    let stop = src.len().min(start + 512);
+    let stop = src.len().min(start + 4096);
+    let python = matches!(node.kind(), "function_definition" | "class_definition");
+    let mut depth = 0i32;
     let mut end = start;
-    while end < stop && src[end] != b'\n' {
+    let mut prev_non_space: u8 = 0;
+    while end < stop {
+        let b = src[end];
+        match b {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b'{' => {
+                if depth == 0 {
+                    break;
+                }
+                depth += 1;
+            }
+            b'}' => depth -= 1,
+            b';' if depth == 0 && !python => break,
+            b':' if depth == 0 && python => break,
+            b'\n' if depth == 0 => {
+                // Continue only when the line wraps inside an expression.
+                if !matches!(
+                    prev_non_space,
+                    b',' | b'(' | b'[' | b'{' | b'&' | b'|' | b'=' | b'>'
+                ) {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        if !b.is_ascii_whitespace() {
+            prev_non_space = b;
+        }
         end += 1;
     }
-    let mut sig = String::from_utf8_lossy(&src[start..end]).trim().to_string();
-    if sig.chars().count() > 160 {
-        sig = sig.chars().take(160).collect();
-    }
-    sig
+    let raw = String::from_utf8_lossy(&src[start..end]);
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.chars().take(160).collect()
 }
 
 /// Lowercased token split of an identifier path for symbol search
@@ -473,22 +501,23 @@ fn signature_of(node: Node<'_>, src: &[u8]) -> String {
 /// consecutive-capital runs are not split — `HTTPServer` stays one token —
 /// so acronym-led identifiers match by full prefix only.
 pub fn split_ident(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() + 8);
-    let mut prev_lower = false;
-    for ch in s.chars() {
-        if ch == '_' {
+    for (i, &ch) in chars.iter().enumerate() {
+        if ch == '_' || !ch.is_alphanumeric() {
             out.push(' ');
-            prev_lower = false;
-        } else if ch.is_alphanumeric() {
-            if ch.is_uppercase() && prev_lower {
+            continue;
+        }
+        if ch.is_uppercase() && i > 0 {
+            let prev = chars[i - 1];
+            let next_lower = chars.get(i + 1).is_some_and(|c| c.is_lowercase());
+            // Split lowerCase|UPPER and the last capital of an acronym
+            // before a lowercase run ("HTTPServer" -> http server) (R7).
+            if prev.is_lowercase() || prev.is_numeric() || (prev.is_uppercase() && next_lower) {
                 out.push(' ');
             }
-            out.push(ch.to_ascii_lowercase());
-            prev_lower = ch.is_lowercase();
-        } else {
-            out.push(' ');
-            prev_lower = false;
         }
+        out.push(ch.to_ascii_lowercase());
     }
     out
 }
@@ -536,6 +565,19 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             let inner = node.named_children(&mut cursor).next();
             inner.and_then(|ch| dotted_chain(ch, src))
         }
+        // Constructor-call receiver: `Base().m()` / `super().m()` /
+        // `super(C, self).m()` (Amendment 18). Non-uppercase factory calls
+        // are left unresolved to avoid manufacturing class edges.
+        "call" => {
+            let func = node.child_by_field_name("function")?;
+            let chain = dotted_chain(func, src)?;
+            let first = chain.first()?;
+            if first == "super" || first.chars().next().is_some_and(|c| c.is_uppercase()) {
+                Some(chain)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -576,6 +618,84 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
         }
         "struct_item" | "enum_item" => {
             define_class_ts(node, src, fx, ctx);
+        }
+        "mod_item" if node.child_by_field_name("body").is_some() => {
+            // Inline `mod name { ... }` is a scope, not just an alias (R7).
+            let name = node
+                .child_by_field_name("name")
+                .map(|n| text(n, src))
+                .unwrap_or_default();
+            let qualname = if ctx.class_stack.is_empty() {
+                format!("{}.{}", fx.module, name)
+            } else {
+                format!("{}.{}", ctx.class_stack.last().unwrap(), name)
+            };
+            let sym_idx = fx.symbols.len();
+            fx.symbols.push(NewSymbol {
+                kind: "module",
+                name,
+                qualname: qualname.clone(),
+                file_idx: fx.file_idx,
+                signature: String::new(),
+                line_start: node.start_position().row + 1,
+                line_end: node.end_position().row + 1,
+            });
+            if let Some(pidx) = parent_symbol_idx(fx, ctx) {
+                fx.edges.push(NewEdge {
+                    src_idx: pidx,
+                    dst_idx: Some(sym_idx),
+                    dst_name: qualname.clone(),
+                    kind: "contains",
+                    confidence: "EXTRACTED",
+                    site_line: node.start_position().row + 1,
+                });
+            }
+            ctx.class_stack.push(qualname);
+            if let Some(body) = node.child_by_field_name("body") {
+                walk_children(body, src, fx, ctx);
+            }
+            ctx.class_stack.pop();
+        }
+        "internal_module" | "module" => {
+            // TypeScript `namespace N { ... }` (R7).
+            let name = node
+                .child_by_field_name("name")
+                .map(|n| text(n, src))
+                .unwrap_or_default();
+            let qualname = if ctx.class_stack.is_empty() {
+                format!("{}.{}", fx.module, name)
+            } else {
+                format!("{}.{}", ctx.class_stack.last().unwrap(), name)
+            };
+            let sym_idx = fx.symbols.len();
+            fx.symbols.push(NewSymbol {
+                kind: "module",
+                name,
+                qualname: qualname.clone(),
+                file_idx: fx.file_idx,
+                signature: String::new(),
+                line_start: node.start_position().row + 1,
+                line_end: node.end_position().row + 1,
+            });
+            if let Some(pidx) = parent_symbol_idx(fx, ctx) {
+                fx.edges.push(NewEdge {
+                    src_idx: pidx,
+                    dst_idx: Some(sym_idx),
+                    dst_name: qualname.clone(),
+                    kind: "contains",
+                    confidence: "EXTRACTED",
+                    site_line: node.start_position().row + 1,
+                });
+            }
+            ctx.class_stack.push(qualname);
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.child_by_field_name("body").is_some() || child.kind() == "statement_block"
+                {
+                    walk_children(child, src, fx, ctx);
+                }
+            }
+            ctx.class_stack.pop();
         }
         "impl_item" => {
             // impl Type { ... } — scope methods under the type name.
@@ -663,10 +783,12 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             } else {
                 "method"
             };
+            // Innermost scope wins: a nested def belongs to its enclosing
+            // function; a method (no func scope) belongs to its class (R7).
             let parent_qn = ctx
-                .class_stack
+                .func_stack
                 .last()
-                .or_else(|| ctx.func_stack.last())
+                .or_else(|| ctx.class_stack.last())
                 .cloned()
                 .unwrap_or_else(|| fx.module.clone());
             let qualname = format!("{parent_qn}.{name}");
@@ -705,10 +827,12 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 return;
             };
             let name = text(name_node, src);
+            // Innermost scope wins: a nested def belongs to its enclosing
+            // function; a method (no func scope) belongs to its class (R7).
             let parent_qn = ctx
-                .class_stack
+                .func_stack
                 .last()
-                .or_else(|| ctx.func_stack.last())
+                .or_else(|| ctx.class_stack.last())
                 .cloned()
                 .unwrap_or_else(|| fx.module.clone());
             let qualname = format!("{parent_qn}.{name}");
@@ -1903,6 +2027,19 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                         }
                     }
                 }
+                // Constructor receiver: `Base().m()` arrives as ["Base", "m"]
+                // (Amendment 18). Resolve the single segment as a class, then
+                // the method through its MRO.
+                if chain.len() == 2 {
+                    if let Some(class_qn) =
+                        resolve_class_of_chain(t, fi, std::slice::from_ref(&chain[0]))
+                    {
+                        let out = mro_outcome(t, &class_qn, &method);
+                        if !matches!(out, Outcome::Unresolved) {
+                            return out;
+                        }
+                    }
+                }
                 // Receiver typed by constructor assignment or annotation.
                 if chain.len() == 2 {
                     if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
@@ -2066,12 +2203,26 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
         match target {
             ImportTarget::Symbol { module, name } => {
                 let qn = format!("{module}.{name}");
-                if chain.len() == 1 {
-                    if class_exists(t, &qn) {
-                        return Some(qn);
-                    }
+                // Direct hit first; then follow package re-export chains
+                // (`from pkg import Base` where pkg/__init__ re-exports it).
+                let mut base_qn: Option<String> = None;
+                if class_exists(t, &qn) {
+                    base_qn = Some(qn.clone());
                 } else {
-                    let nested = format!("{}.{}", qn, chain[1..].join("."));
+                    let mut seen: HashSet<(String, String)> = HashSet::new();
+                    if let Some(Outcome::Extracted(idx)) =
+                        follow_binding(t, module, name, 0, &mut seen, name)
+                    {
+                        if t.symbols[idx].kind == "class" {
+                            base_qn = Some(t.symbols[idx].qualname.clone());
+                        }
+                    }
+                }
+                if let Some(bq) = base_qn {
+                    if chain.len() == 1 {
+                        return Some(bq);
+                    }
+                    let nested = format!("{}.{}", bq, chain[1..].join("."));
                     if class_exists(t, &nested) {
                         return Some(nested);
                     }

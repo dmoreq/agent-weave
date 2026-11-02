@@ -86,7 +86,7 @@ pub fn clamp_limit(limit: usize) -> Result<usize> {
 /// exit 2 with a `path:line qualname` candidate list on stdout (CUJ4).
 fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>)> {
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.qualname, s.name, f.path, s.line_start
+        "SELECT s.id, s.qualname, s.name, f.path, s.line_start, s.kind
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE s.name = ?1 OR s.qualname = ?1
          ORDER BY s.qualname, f.path",
@@ -98,13 +98,22 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>
             r.get::<_, String>(2)?,
             r.get::<_, String>(3)?,
             r.get::<_, i64>(4)?,
+            r.get::<_, String>(5)?,
         ))
     })?;
+    let all: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
+    // A module shares the bare name of classes/functions (`button` vs
+    // `Button`); when a callable candidate exists, module symbols must not
+    // create a false ambiguity (R7 F1).
+    let has_callable = all.iter().any(|r| r.5 != "module");
     let mut ids = Vec::new();
     let mut cands = Vec::new();
     let mut seen_ids: std::collections::HashSet<i64> = Default::default();
-    for row in rows {
-        let (id, qualname, sname, path, line) = row?;
+    for row in all {
+        let (id, qualname, sname, path, line, kind) = row;
+        if has_callable && kind == "module" {
+            continue;
+        }
         // Dedupe by id: a symbol whose bare name equals its qualname matches
         // both WHERE branches and must not create a false ambiguity. O(1)
         // membership (R6f: a Vec::contains scan was quadratic).
@@ -151,7 +160,7 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         |r| r.get::<_, i64>(0),
     )? as usize;
     let sql = format!(
-        "SELECT e.site_line, e.confidence, f.path
+        "SELECT e.site_line, e.confidence, f.path, s.qualname
          FROM edges e
          JOIN symbols s ON s.id = e.src_id
          JOIN files f ON f.id = s.file_id
@@ -175,7 +184,7 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
             } else {
                 ""
             },
-            detail: String::new(),
+            detail: r.get::<_, String>(3)?,
         })
     })?;
     collect_output(
@@ -221,7 +230,9 @@ pub fn callees(
     let sql: String = if depth == 1 {
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let count_sql = format!(
-            "SELECT COUNT(*) FROM edges e WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
+            "SELECT COUNT(DISTINCT COALESCE(ds.id, -(1000000 + e.id)))
+             FROM edges e LEFT JOIN symbols ds ON ds.id = e.dst_id
+             WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
         );
         total_opt = Some(conn.query_row(
             &count_sql,
@@ -229,13 +240,16 @@ pub fn callees(
             |r| r.get::<_, i64>(0),
         )? as usize);
         format!(
-            "SELECT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
-                COALESCE(df.path, sf.path) AS path
+            "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
+                MAX(e.confidence) AS confidence,
+                MAX(COALESCE(df.path, sf.path)) AS path,
+                COALESCE(ds.qualname, '') AS qn
          FROM edges e
          JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
          LEFT JOIN files df ON df.id = ds.file_id
          WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'
+         GROUP BY COALESCE(ds.id, -(1000000 + e.id))
          ORDER BY path, line LIMIT {limit}"
         )
     } else {
@@ -251,12 +265,15 @@ pub fn callees(
         );
         let select = format!(
             "SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
-                COALESCE(df.path, sf.path) AS path
+                COALESCE(df.path, sf.path) AS path, COALESCE(ds.qualname, '') AS qn
          FROM reach r
-         JOIN edges e ON e.src_id = r.sym AND e.kind = 'calls' AND r.d < ?{d2}
+         -- CROSS JOIN + WHERE lets SQLite drive from the recursive set and
+         -- use edges_src, instead of scanning the whole edge table (R7).
+         CROSS JOIN edges e
          JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
-         LEFT JOIN files df ON df.id = ds.file_id",
+         LEFT JOIN files df ON df.id = ds.file_id
+         WHERE e.src_id = r.sym AND e.kind = 'calls' AND r.d < ?{d2}",
             d2 = 2 + ids.len()
         );
         params.push(rusqlite::types::Value::from(depth as i64));
@@ -284,7 +301,7 @@ pub fn callees(
             } else {
                 ""
             },
-            detail: String::new(),
+            detail: r.get::<_, String>(3)?,
         })
     })?;
     collect_output(conn, root, name, rows, limit, "0 callees found", total_opt)
@@ -579,54 +596,82 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         });
     }
     let id = ids[0];
-    let def_sql = "SELECT f.path, s.line_start, s.kind, s.qualname, s.signature
+    let def_sql = "SELECT f.path, s.line_start, s.line_end, s.kind, s.qualname, s.signature
                    FROM symbols s JOIN files f ON f.id = s.file_id WHERE s.id = ?1";
-    let (def_path, def_line, kind, qualname, signature): (String, i64, String, String, String) =
-        conn.query_row(def_sql, [id], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-        })?;
+    let (def_path, def_line, def_end, kind, qualname, signature): (
+        String,
+        i64,
+        i64,
+        String,
+        String,
+        String,
+    ) = conn.query_row(def_sql, [id], |r| {
+        Ok((
+            r.get(0)?,
+            r.get(1)?,
+            r.get(2)?,
+            r.get(3)?,
+            r.get(4)?,
+            r.get(5)?,
+        ))
+    })?;
     let callers_total: usize = conn.query_row(
         "SELECT COUNT(*) FROM edges e WHERE e.dst_id = ?1 AND e.kind = 'calls'",
         [id],
         |r| r.get::<_, i64>(0),
     )? as usize;
     let mut stmt = conn.prepare(
-        "SELECT e.site_line, f.path
+        "SELECT e.site_line, f.path, s.qualname
          FROM edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
          WHERE e.dst_id = ?1 AND e.kind = 'calls'
          ORDER BY f.path, e.site_line LIMIT ?2",
     )?;
-    let callers: Vec<(String, i64)> = stmt
+    let callers: Vec<(String, i64, String)> = stmt
         .query_map(rusqlite::params![id, limit as i64], |r| {
-            Ok((r.get::<_, String>(1)?, r.get::<_, i64>(0)?))
+            Ok((
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(2)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let callees_total: usize = conn.query_row(
-        "SELECT COUNT(*) FROM edges e WHERE e.src_id = ?1 AND e.kind = 'calls'",
+        "SELECT COUNT(DISTINCT COALESCE(ds.id, -(1000000 + e.id)))
+         FROM edges e LEFT JOIN symbols ds ON ds.id = e.dst_id
+         WHERE e.src_id = ?1 AND e.kind = 'calls'",
         [id],
         |r| r.get::<_, i64>(0),
     )? as usize;
     let mut stmt = conn.prepare(
-        "SELECT COALESCE(ds.line_start, e.site_line) AS line, COALESCE(df.path, sf.path) AS path
+        "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
+                MAX(COALESCE(df.path, sf.path)) AS path,
+                COALESCE(ds.qualname, e.dst_name) AS qn,
+                MAX(e.confidence) AS conf
          FROM edges e
          JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
          LEFT JOIN files df ON df.id = ds.file_id
          WHERE e.src_id = ?1 AND e.kind = 'calls'
+         GROUP BY COALESCE(ds.id, -(1000000 + e.id))
          ORDER BY path, line LIMIT ?2",
     )?;
-    let callees: Vec<(String, i64)> = stmt
+    let callees: Vec<(String, i64, String, String)> = stmt
         .query_map(rusqlite::params![id, limit as i64], |r| {
-            Ok((r.get::<_, String>(1)?, r.get::<_, i64>(0)?))
+            Ok((
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     // Staleness over the displayed set (definition + shown callers/callees).
     let mut files: BTreeSet<&String> = BTreeSet::new();
     files.insert(&def_path);
-    for (p, _) in &callers {
+    for (p, _, _) in &callers {
         files.insert(p);
     }
-    for (p, _) in &callees {
+    for (p, _, _, _) in &callees {
         files.insert(p);
     }
     let n_files = files.len();
@@ -637,13 +682,25 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         }
     }
     let stale = changed > 0;
-    let mut pointers: Vec<String> = Vec::new();
-    for (p, l) in &callers {
-        pointers.push(format!("{p}:{l}"));
-    }
-    for (p, l) in &callees {
-        pointers.push(format!("{p}:{l}"));
-    }
+    // Payload pointers must be byte-identical to the stdout data lines
+    // (Amendment 10/G11), including the identity suffix added in R7.
+    let caller_lines: Vec<String> = callers
+        .iter()
+        .map(|(p, l, qn)| format!("{p}:{l} {qn}"))
+        .collect();
+    let callee_lines: Vec<String> = callees
+        .iter()
+        .map(|(p, l, qn, conf)| {
+            let tag = if conf == "AMBIGUOUS" {
+                " [ambiguous]"
+            } else {
+                ""
+            };
+            format!("{p}:{l}{tag} {qn}")
+        })
+        .collect();
+    let mut pointers = caller_lines.clone();
+    pointers.extend(callee_lines.iter().cloned());
     let total = callers_total + callees_total;
     let shown = pointers.len();
     let built_at = db::meta_get(conn, "built_at")
@@ -663,27 +720,31 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     } else {
         format!(" {signature}")
     };
-    out.push(format!("{def_path}:{def_line} {kind} {qualname}{sig}"));
+    out.push(format!(
+        "{def_path}:{def_line}-{def_end} {kind} {qualname}{sig}"
+    ));
     out.push(format!(
         "callers (showing {} of {}):",
         callers.len(),
         callers_total
     ));
-    for (p, l) in &callers {
-        out.push(format!("{p}:{l}"));
-    }
+    out.extend(caller_lines);
     out.push(format!(
         "callees (showing {} of {}):",
         callees.len(),
         callees_total
     ));
-    for (p, l) in &callees {
-        out.push(format!("{p}:{l}"));
-    }
+    out.extend(callee_lines);
     Ok(out)
 }
 
-pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
+pub fn impact(
+    conn: &Connection,
+    root: &Path,
+    file: &str,
+    limit: usize,
+    sites: bool,
+) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
     let rel = file.trim_start_matches("./").to_string();
     let exists: bool = conn
@@ -695,6 +756,43 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
     // Direction semantics (CLI help): files that call INTO <file>.
+    // Default (Amendment 18): one row per caller FILE with a site count — the
+    // per-site list could not answer "which files" once capped.
+    if !sites {
+        let total_files: usize = conn.query_row(
+            "SELECT COUNT(DISTINCT sf.path) FROM edges e
+             JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+             JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+             WHERE df.path = ?1 AND e.kind = 'calls'",
+            [&rel],
+            |r| r.get::<_, i64>(0),
+        )? as usize;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT sf.path, MIN(e.site_line) AS line, COUNT(*) AS n
+             FROM edges e
+             JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+             JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+             WHERE df.path = ?1 AND e.kind = 'calls'
+             GROUP BY sf.path ORDER BY sf.path LIMIT {limit}"
+        ))?;
+        let rows = stmt.query_map([&rel], |r| {
+            Ok(Pointer {
+                file: r.get::<_, String>(0)?,
+                line: r.get::<_, i64>(1)?,
+                tag: "",
+                detail: format!("({} sites)", r.get::<_, i64>(2)?),
+            })
+        })?;
+        return collect_output(
+            conn,
+            root,
+            &rel,
+            rows,
+            limit,
+            "0 impacting files found",
+            Some(total_files),
+        );
+    }
     let total: usize = conn.query_row(
         "SELECT COUNT(*) FROM edges e
          JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
@@ -740,24 +838,50 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
 /// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
 /// AMBIGUOUS edge naming the symbol (qualname or bare name). Pointer contract;
 /// the caveat header is unconditional.
-pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput> {
+pub fn dead(
+    conn: &Connection,
+    root: &Path,
+    limit: usize,
+    exclude_tests: bool,
+) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
-    let predicate = "s.kind IN ('function', 'method', 'class')
-           AND s.id NOT IN (
-               SELECT dst_id FROM edges WHERE kind = 'calls' AND dst_id IS NOT NULL)
-           AND s.qualname NOT IN (
-               SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')
-           AND s.name NOT IN (
-               SELECT dst_name FROM edges WHERE kind = 'calls' AND confidence = 'AMBIGUOUS')";
+    // AMBIGUOUS suppression is per-symbol (R7): a bare-name ambiguous call
+    // suppresses only same-named symbols in the caller's own file; a symbol
+    // elsewhere with the same bare name is not presumed referenced.
+    // One materialized referenced-id set, shared by COUNT and the page query.
+    // The previous correlated NOT EXISTS re-scanned edges per candidate
+    // symbol (R7 review).
+    let referenced = "WITH referenced_ids(id) AS MATERIALIZED (
+           SELECT dst_id FROM edges WHERE kind = 'calls' AND dst_id IS NOT NULL
+           UNION
+           SELECT s2.id FROM edges e
+             JOIN symbols s2 ON s2.qualname = e.dst_name
+            WHERE e.kind = 'calls' AND e.confidence = 'AMBIGUOUS'
+           UNION
+           SELECT s2.id FROM edges e
+             JOIN symbols src ON src.id = e.src_id
+             JOIN symbols s2 ON s2.name = e.dst_name AND s2.file_id = src.file_id
+            WHERE e.kind = 'calls' AND e.confidence = 'AMBIGUOUS'
+       )";
+    let mut predicate = "s.kind IN ('function', 'method', 'class')
+           AND s.id NOT IN (SELECT id FROM referenced_ids)"
+        .to_string();
+    if exclude_tests {
+        predicate.push_str(
+            " AND f.path NOT LIKE 'tests/%' AND f.path NOT LIKE '%/tests/%'
+              AND s.name NOT LIKE 'test\\_%' ESCAPE '\\'",
+        );
+    }
+    let predicate = predicate.as_str();
     let total: usize = conn.query_row(
         &format!(
-            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {predicate}"
+            "{referenced} SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {predicate}"
         ),
         [],
         |r| r.get::<_, i64>(0),
     )? as usize;
     let sql = format!(
-        "SELECT s.qualname, f.path, s.line_start
+        "{referenced} SELECT s.qualname, f.path, s.line_start
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE {predicate}
          ORDER BY f.path, s.line_start LIMIT {limit}"
@@ -816,7 +940,54 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let n_files = rows.len();
     let shown = n_files.min(limit);
-    let mut out = vec![format!("kg: unresolved={total} callees in {n_files} files")];
+    // Name-level view (R7 L4): file counts alone say where resolution failed,
+    // not what it missed. `[internal]` marks names that exist in the index —
+    // an actionable resolver gap — versus external/builtin calls.
+    let mut name_stmt = conn.prepare(
+        "SELECT uc.dst_name, COUNT(*) AS n,
+                EXISTS(SELECT 1 FROM symbols s
+                       WHERE s.name = uc.dst_name OR s.qualname = uc.dst_name)
+         FROM unresolved_calls uc
+         GROUP BY uc.dst_name
+         ORDER BY n DESC, uc.dst_name
+         LIMIT 10",
+    )?;
+    let names = name_stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)? != 0,
+            ))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let internal: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM (
+            SELECT uc.dst_name FROM unresolved_calls uc
+            WHERE EXISTS(SELECT 1 FROM symbols s
+                         WHERE s.name = uc.dst_name OR s.qualname = uc.dst_name)
+            GROUP BY uc.dst_name)",
+        [],
+        |r| r.get(0),
+    )?;
+    let distinct: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT dst_name) FROM unresolved_calls",
+        [],
+        |r| r.get(0),
+    )?;
+    let mut out = vec![format!(
+        "kg: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})"
+    )];
+    if !names.is_empty() {
+        out.push("top unresolved names:".to_string());
+        out.extend(names.into_iter().map(|(name, n, internal)| {
+            if internal {
+                format!("  {name} n={n} [internal]")
+            } else {
+                format!("  {name} n={n}")
+            }
+        }));
+    }
     out.extend(
         rows.into_iter()
             .take(shown)
@@ -930,7 +1101,7 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
         toks.truncate(MAX_TERMS);
         eprintln!("[kg] search terms capped at {MAX_TERMS}");
     }
-    let expr = toks
+    let mut expr = toks
         .iter()
         .map(|tok| format!("\"{}\"*", tok.replace('"', "")))
         .collect::<Vec<_>>()
@@ -938,14 +1109,57 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     if expr.is_empty() {
         return Err(KgError::Usage("empty search terms".to_string()));
     }
+    // Identity fast path (R7): a qualified input (`.`, `/`, `::`) matched as
+    // an adjacent-token phrase preserves exact identity and avoids ranking
+    // the whole corpus (1M-symbol: ~500 ms -> <1 ms). Fall back to OR when
+    // the phrase has no hits, so recall does not regress.
+    if terms.contains('.') || terms.contains('/') || terms.contains("::") {
+        let phrase = format!("\"{}\"", toks.join(" ").replace('"', ""));
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM symbols_fts WHERE symbols_fts MATCH ?1",
+            [&phrase],
+            |r| r.get(0),
+        )?;
+        if n > 0 {
+            expr = phrase;
+        }
+    }
     // Amendment 14b: hits carry the stored one-line signature after the
     // qualname — the agent no longer needs a follow-up `symbols` call to
     // learn what the hit is. Empty signature keeps the 12b byte shape.
-    let total: usize = conn.query_row(
+    let mut total: usize = conn.query_row(
         "SELECT COUNT(*) FROM symbols_fts WHERE symbols_fts MATCH ?1",
         [&expr],
         |r| r.get::<_, i64>(0),
     )? as usize;
+    // Morphology fallback (R7): agents ask "handlers" or "rotation" while the
+    // index stores the stem. Retry once with bounded derived forms, only on
+    // zero hits, so recall improves without changing ranked results.
+    if total == 0 {
+        let mut variants: Vec<String> = Vec::new();
+        for tok in &toks {
+            derived_forms(tok, &mut variants);
+        }
+        variants.retain(|v| !v.is_empty() && v.len() >= 3);
+        variants.dedup();
+        variants.truncate(MAX_TERMS);
+        if !variants.is_empty() {
+            let alt = variants
+                .iter()
+                .map(|tok| format!("\"{}\"*", tok.replace('"', "")))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            let alt_total: usize = conn.query_row(
+                "SELECT COUNT(*) FROM symbols_fts WHERE symbols_fts MATCH ?1",
+                [&alt],
+                |r| r.get::<_, i64>(0),
+            )? as usize;
+            if alt_total > 0 {
+                expr = alt;
+                total = alt_total;
+            }
+        }
+    }
     let mut stmt = conn.prepare(&format!(
         "SELECT f.path, s.line_start, s.qualname, s.signature
          FROM symbols_fts ft
@@ -956,6 +1170,10 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
          -- carried builds, so bm25 alone is not deterministic (R6d A9).
          ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
     ))?;
+    // Rank a bounded candidate set in Rust (R7): bm25 sees one text column,
+    // so a full parameter list can outrank the symbol's own name. Re-rank by
+    // how many query tokens occur in the qualname (prefix either way), then
+    // keep bm25 order as the stable tie-break. The cap bounds the work.
     let rows = stmt.query_map([&expr], |r| {
         let qualname: String = r.get(2)?;
         let signature: String = r.get(3)?;
@@ -979,19 +1197,49 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
         &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
         Some(total),
     )?;
-    crate::journal::record_result(out.pointers.len(), out.shown, out.total, out.stale, 0);
-    let mut lines = Vec::with_capacity(out.pointers.len() + 2);
-    if let Some(h) = &out.header {
-        lines.push(h.clone());
+    // Exact-identity path (R7): a single token that is an exact symbol name
+    // or qualname returns those identities directly (top-1 measured 90-92%
+    // through bm25; ~100% here). Fuzzy FTS order stays for other queries.
+    if toks.len() == 1 {
+        let exact_total: usize = conn.query_row(
+            "SELECT COUNT(*) FROM symbols s WHERE s.name = ?1 OR s.qualname = ?1",
+            [toks[0].as_str()],
+            |r| r.get::<_, i64>(0),
+        )? as usize;
+        if exact_total > 0 {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT f.path, s.line_start, s.qualname, s.signature
+                 FROM symbols s JOIN files f ON f.id = s.file_id
+                 WHERE s.name = ?1 OR s.qualname = ?1
+                 ORDER BY s.qualname, f.path LIMIT {limit}"
+            ))?;
+            let rows = stmt.query_map([toks[0].as_str()], |r| {
+                let qualname: String = r.get(2)?;
+                let signature: String = r.get(3)?;
+                Ok(Pointer {
+                    file: r.get::<_, String>(0)?,
+                    line: r.get::<_, i64>(1)?,
+                    tag: "",
+                    detail: if signature.is_empty() {
+                        qualname
+                    } else {
+                        format!("{qualname} {signature}")
+                    },
+                })
+            })?;
+            let out = collect_output(
+                conn,
+                root,
+                terms,
+                rows,
+                limit,
+                &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
+                Some(exact_total),
+            )?;
+            return search_lines(out);
+        }
     }
-    for p in &out.pointers {
-        lines.push(p.render());
-    }
-    if out.total > out.shown {
-        lines.push(format!("showing {} of {}", out.shown, out.total));
-        eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
-    }
-    Ok(lines)
+    search_lines(out)
 }
 
 /// Clone candidates (Amendment 12d): merge adjacent matching shingle windows
@@ -1011,6 +1259,9 @@ pub fn clones(
     let mut stmt = conn.prepare(
         "SELECT cg.shingle_hash, f.path, cg.line_start, cg.line_end
          FROM clone_groups cg JOIN files f ON f.id = cg.file_id
+         WHERE cg.shingle_hash IN (
+             SELECT shingle_hash FROM clone_groups
+             GROUP BY shingle_hash HAVING COUNT(*) >= 2)
          ORDER BY cg.shingle_hash, f.path, cg.line_start",
     )?;
     let mut groups: std::collections::BTreeMap<i64, Vec<(String, i64, i64)>> = Default::default();
@@ -1062,9 +1313,6 @@ pub fn clones(
                 }
                 let (pa, sa, ea) = &merged[i];
                 let (pb, sb, eb) = &merged[j];
-                if (*ea - *sa + 1) < min_lines as i64 || (*eb - *sb + 1) < min_lines as i64 {
-                    continue;
-                }
                 let (fa, sta, ena, fb, stb, enb) =
                     if (pa.as_str(), *sa, *ea) <= (pb.as_str(), *sb, *eb) {
                         (pa, *sa, *ea, pb, *sb, *eb)
@@ -1078,21 +1326,51 @@ pub fn clones(
             }
         }
     }
-    // Post-merge: windows of one long clone live in different hash groups,
-    // so the same file pair re-emits per window. Merge same-file-pair rows
-    // whose spans overlap on BOTH sides into one region pair.
-    pairs.sort();
-    let mut merged_pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
+    // Pair-merge (R7): windows of one long clone live in different hash
+    // groups, so group every candidate by the unordered file pair and merge
+    // overlapping spans on BOTH sides into maximal regions. Apply the
+    // --min-lines filter AFTER merging (the old code filtered 5-line windows
+    // first, which made every min-lines > 5 return a false negative).
+    // Group by file pair first (R7 review): sorting globally interleaves
+    // different pairs, so merging only against the previous row left
+    // overlapping spans for the same pair unmerged.
+    type SpanPair = (i64, i64, i64, i64);
+    let mut by_pair: std::collections::BTreeMap<(String, String), Vec<SpanPair>> =
+        Default::default();
     for (fa, sa, ea, fb, sb, eb) in pairs {
-        if let Some(last) = merged_pairs.last_mut() {
-            if last.0 == fa && last.3 == fb && sa <= last.2 && sb <= last.5 {
-                last.2 = last.2.max(ea);
-                last.5 = last.5.max(eb);
-                continue;
+        by_pair.entry((fa, fb)).or_default().push((sa, ea, sb, eb));
+    }
+    let mut merged_pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
+    for ((fa, fb), mut spans) in by_pair {
+        spans.sort_unstable();
+        let mut cur: Option<(i64, i64, i64, i64)> = None;
+        for (sa, ea, sb, eb) in spans {
+            match cur {
+                Some((csa, cea, csb, ceb)) if sa <= cea && sb <= ceb => {
+                    cur = Some((csa, cea.max(ea), csb, ceb.max(eb)));
+                }
+                Some(done) => {
+                    merged_pairs.push((fa.clone(), done.0, done.1, fb.clone(), done.2, done.3));
+                    cur = Some((sa, ea, sb, eb));
+                }
+                None => cur = Some((sa, ea, sb, eb)),
             }
         }
-        merged_pairs.push((fa, sa, ea, fb, sb, eb));
+        if let Some((sa, ea, sb, eb)) = cur {
+            merged_pairs.push((fa, sa, ea, fb, sb, eb));
+        }
     }
+    merged_pairs.retain(|(_, sa, ea, _, sb, eb)| {
+        (*ea - *sa + 1) >= min_lines as i64 && (*eb - *sb + 1) >= min_lines as i64
+    });
+    // Longest merged spans first, deterministic tie-break by paths/spans.
+    merged_pairs.sort_by(|a, b| {
+        let la = (a.2 - a.1).max(a.5 - a.4);
+        let lb = (b.2 - b.1).max(b.5 - b.4);
+        lb.cmp(&la).then_with(|| {
+            (a.0.as_str(), a.1, a.3.as_str(), a.4).cmp(&(b.0.as_str(), b.1, b.3.as_str(), b.4))
+        })
+    });
     let pairs = merged_pairs;
     if pairs.is_empty() {
         return Err(KgError::NoResultsCaveated {
@@ -1124,8 +1402,31 @@ pub fn clones(
             "kg: {changed} of {n_files} result files changed since build — run kg build"
         ));
     }
+    // Identity (R7 L4): a bare span forces a file read to learn what the
+    // duplicated block is. Name the enclosing symbol per side, when any.
+    let enclosing = |path: &str, start: i64, end: i64| -> Option<String> {
+        // Largest overlap wins: a merged span can begin in the previous
+        // function's last line, and the shallowest containing symbol is
+        // rarely the duplicated unit.
+        conn.query_row(
+            "SELECT s.qualname FROM symbols s JOIN files f ON f.id = s.file_id
+             WHERE f.path = ?1 AND s.line_start <= ?3 AND s.line_end >= ?2
+             ORDER BY (MIN(s.line_end, ?3) - MAX(s.line_start, ?2)) DESC,
+                      s.line_start DESC
+             LIMIT 1",
+            rusqlite::params![path, start, end],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    };
     for (pa, sa, ea, pb, sb, eb) in displayed {
-        out.push(format!("{pa}:{sa}-{ea} {pb}:{sb}-{eb}"));
+        let ta = enclosing(pa, *sa, *ea)
+            .map(|q| format!(" ({q})"))
+            .unwrap_or_default();
+        let tb = enclosing(pb, *sb, *eb)
+            .map(|q| format!(" ({q})"))
+            .unwrap_or_default();
+        out.push(format!("{pa}:{sa}-{ea}{ta} {pb}:{sb}-{eb}{tb}"));
     }
     if pairs.len() > shown {
         out.push(format!("showing {} of {}", shown, pairs.len()));
@@ -1137,6 +1438,45 @@ pub fn clones(
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by
 /// the displayed count): stat short-circuits, FNV-1a re-hash on mismatch.
 /// `name` is the query target recorded in the payload journal (Amendment 10).
+/// Render a search QueryOutput (header, hits, cap footer) as stdout lines.
+fn search_lines(out: QueryOutput) -> Result<Vec<String>> {
+    // Every search exit path (exact, phrase, fuzzy) journals here, so an
+    // exact-name hit is not recorded as an empty call (R7 review).
+    crate::journal::record_result(out.pointers.len(), out.shown, out.total, out.stale, 0);
+    let mut lines = Vec::with_capacity(out.pointers.len() + 2);
+    if let Some(h) = &out.header {
+        lines.push(h.clone());
+    }
+    for p in &out.pointers {
+        lines.push(p.render());
+    }
+    if out.total > out.shown {
+        lines.push(format!("showing {} of {}", out.shown, out.total));
+        eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
+    }
+    Ok(lines)
+}
+
+/// Bounded English morphology variants for a zero-hit token (R7).
+fn derived_forms(tok: &str, out: &mut Vec<String>) {
+    if tok.len() <= 4 {
+        return;
+    }
+    if let Some(stem) = tok.strip_suffix("ies") {
+        out.push(format!("{stem}y"));
+        return;
+    }
+    for suffix in ["es", "s", "ed", "ing", "ion"] {
+        if let Some(stem) = tok.strip_suffix(suffix) {
+            if stem.len() >= 3 {
+                out.push(stem.to_string());
+                out.push(format!("{stem}e"));
+            }
+            return;
+        }
+    }
+}
+
 fn collect_output(
     conn: &Connection,
     root: &Path,

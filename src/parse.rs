@@ -94,8 +94,10 @@ pub fn decision_kinds(lang: Lang) -> &'static [&'static str] {
             "for_statement",
             "while_statement",
             "boolean_operator",
+            "elif_clause",
             "except_clause",
             "match_statement",
+            "case_clause",
             "conditional_expression",
         ],
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => &[
@@ -106,6 +108,7 @@ pub fn decision_kinds(lang: Lang) -> &'static [&'static str] {
             "do_statement",
             "switch_case",
             "conditional_expression",
+            "ternary_expression",
         ],
         Lang::Rust => &[
             "if_expression",
@@ -117,6 +120,49 @@ pub fn decision_kinds(lang: Lang) -> &'static [&'static str] {
             "match_arm",
         ],
     }
+}
+
+/// Lines of actual code: blank lines and comment-only lines are excluded.
+/// Hotspots' LOC term previously counted every physical line, so a
+/// comment-heavy file outranked dense logic (R7 L4). Comment nodes are
+/// language-uniform (`comment`) and already in the parse tree.
+pub fn non_comment_loc(bytes: &[u8], root: Node<'_>) -> i64 {
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "comment" {
+            ranges.push((node.start_byte(), node.end_byte()));
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            stack.push(child);
+        }
+    }
+    ranges.sort_unstable();
+    let mut ri = 0usize;
+    let mut offset = 0usize;
+    let mut loc = 0i64;
+    for line in bytes.split(|b| *b == b'\n') {
+        let first = line.iter().position(|b| !b.is_ascii_whitespace());
+        let Some(first) = first else {
+            offset += line.len() + 1;
+            continue;
+        };
+        let first = offset + first;
+        let line_end = offset + line.len();
+        // Advance past comments that ended before this line's first byte.
+        while ri < ranges.len() && ranges[ri].1 <= first {
+            ri += 1;
+        }
+        let comment_only = ranges
+            .get(ri)
+            .is_some_and(|(s, e)| first >= *s && line_end <= *e);
+        if !comment_only {
+            loc += 1;
+        }
+        offset += line.len() + 1;
+    }
+    loc
 }
 
 /// Count decision nodes of the given kinds in the subtree.
@@ -151,6 +197,23 @@ mod tests {
         let p = parse_source(src, Lang::Python).unwrap();
         assert_eq!(p.status, "partial");
         assert!(p.error_nodes >= 1);
+    }
+
+    #[test]
+    fn non_comment_loc_excludes_blank_and_comment_lines() {
+        let src = b"# lead\n\ndef f():\n    # inner\n    return 1\n\n# tail\n";
+        let p = parse_source(src, Lang::Python).unwrap();
+        assert_eq!(non_comment_loc(src, p.tree.root_node()), 2);
+    }
+
+    #[test]
+    fn python_elif_and_match_cases_are_decisions() {
+        // R7 L4: `elif` is a nested clause and each match case is a branch;
+        // counting only the outer if/match undercounted both.
+        let src = b"def f(x):\n    if x == 1:\n        return 1\n    elif x == 2:\n        return 2\n    else:\n        return 0\n\ndef g(y):\n    match y:\n        case 1:\n            return 1\n        case _:\n            return 0\n";
+        let p = parse_source(src, Lang::Python).unwrap();
+        let n = decision_nodes(p.tree.root_node(), decision_kinds(Lang::Python));
+        assert_eq!(n, 5, "if + elif + match + 2 cases");
     }
 
     #[test]

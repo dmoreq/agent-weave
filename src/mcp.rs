@@ -39,10 +39,10 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"from": {"type": "string"}, "to": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum hops (default 10)"}}), &["from", "to"])},
         {"name": "context", "description": "One-call symbol context: definition + signature, direct callers, direct callees over resolved edges",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Callers/callees shown per section (default 10)"}}), &["name"])},
-        {"name": "impact", "description": "Files that call into <file>",
-         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "limit": limit}), &["file"])},
-        {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof",
-         "inputSchema": schema_obj(json!({"limit": limit}), &[])},
+        {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; sites=true lists every call site",
+         "inputSchema": schema_obj(json!({"file": {"type": "string"}, "sites": {"type": "boolean"}, "limit": limit}), &["file"])},
+        {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof; exclude_tests drops tests/ and test_* symbols",
+         "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "limit": limit}), &[])},
         {"name": "unresolved", "description": "Per-file unresolved-callee counts — where kg could not resolve",
          "inputSchema": schema_obj(json!({"limit": limit}), &[])},
         {"name": "symbols", "description": "Symbols of one indexed file, ordered by line; optional outline adds the one-line signature column",
@@ -172,6 +172,15 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
                     continue;
                 }
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+                // Protocol-level invalid params (R7 L4): a missing required
+                // string must be -32602, not a downstream "symbol '' not in
+                // index" tool result that masks client bugs.
+                if let Some(reason) = missing_required_arg(&tool_name, &arguments) {
+                    if !is_notification {
+                        write_error(&mut out, id, -32602, &reason)?;
+                    }
+                    continue;
+                }
                 let started = Instant::now();
                 // Panic isolation (R6d A7): one tool must not kill the server.
                 let (text, is_error, exit_code) =
@@ -227,6 +236,26 @@ fn write_error(
         "error": {"code": code, "message": message},
     });
     writeln!(out, "{msg}")
+}
+
+/// Required string arguments per tool, mirroring inputSchema `required`.
+fn required_args(tool: &str) -> &'static [&'static str] {
+    match tool {
+        "callers" | "callees" | "context" => &["name"],
+        "path" => &["from", "to"],
+        "impact" | "symbols" => &["file"],
+        "search" => &["terms"],
+        _ => &[],
+    }
+}
+
+fn missing_required_arg(tool: &str, args: &Value) -> Option<String> {
+    required_args(tool).iter().find_map(|key| {
+        let absent = arg_str(args, key)
+            .map(|v| v.trim().is_empty())
+            .unwrap_or(true);
+        absent.then(|| format!("missing required argument '{key}' for tool '{tool}'"))
+    })
 }
 
 fn arg_str(args: &Value, key: &str) -> Option<String> {
@@ -330,6 +359,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 &arg_str(args, "file").unwrap_or_default(),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+                arg_bool(args, "sites"),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
@@ -340,6 +370,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &conn,
                 root,
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+                arg_bool(args, "exclude_tests"),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
@@ -481,6 +512,7 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(file) = arg_str(args, "file") {
                 out.push(("file", file));
             }
+            out.push(("sites", arg_bool(args, "sites").to_string()));
             out.push((
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
@@ -500,7 +532,11 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
             ));
         }
-        "dead" | "unresolved" | "hotspots" => {
+        "dead" => {
+            out.push(("exclude_tests", arg_bool(args, "exclude_tests").to_string()));
+            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
+        }
+        "unresolved" | "hotspots" => {
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
         }
         "search" => {

@@ -7,6 +7,34 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-02
+
+### Fixed — R7 accuracy, utility, and latency hardening (Amendment 18)
+
+- Signatures capture the full multi-line parameter list (collapsed, capped
+  160), stopping before the body; 500/3,039 truncated Python signatures on
+  corpus A drop to 0. A one-time `signature_version` marker re-extracts old
+  indexes without a schema bump.
+- Lexical scopes: Python nested defs belong to the enclosing function; Rust
+  inline `mod` and TypeScript `namespace` qualify members; module symbols no
+  longer create false ambiguity when a callable shares the bare name.
+- `super()`/constructor receivers and re-exported base classes resolve.
+- Caller/callee/context lines carry the call-site identity; context callees
+  dedupe by destination with `[ambiguous]`; `impact` defaults to one row per
+  file (`--sites` restores sites); `dead` suppresses per symbol and gains
+  `--exclude-tests`.
+- Clones: hash prefilter, merge-before-`--min-lines`, longest-first ordering,
+  and enclosing-symbol identity per span.
+- Search: qualified-phrase and exact-name fast paths, acronym splitting,
+  and a bounded stem fallback for zero-hit queries.
+- `unresolved` reports distinct names, `internal=` gaps, and top names;
+  hotspots count Python `elif`/`case` and TS ternaries and exclude
+  comment-only LOC; `report` warns when sampled files changed; `stats` reads
+  manifest counters in O(1).
+- A no-op `kg build` skips the database write (2,201 files: 0.09-0.11 s to
+  0.02-0.03 s, index byte-unchanged); MCP returns `-32602` for a missing
+  required argument.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added — `kg context <symbol>` (Amendment 17, P8)

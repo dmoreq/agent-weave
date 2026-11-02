@@ -25,7 +25,7 @@ reproduction commands, and threats to validity):
 | Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall 100% on two GT sets plus the refreshed self set; call-site precision 662/664 (99.7%; two known checker/GT failures listed) |
 | Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.33 s on the committed 2,025-file corpus |
 | Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
-| Structure and duplication lookups? | `kg search` recall 0.800 (23/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
+| Structure and duplication lookups? | `kg search` recall 0.775 (22/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
 | Does everything help every host? | **No.** Route queries (`path`) cut tool calls 57-59% on Grok and 61-86% on OpenCode (Stage 1 and Stage 4); `search` showed no economics gain in its 24-run battery; `clones` transferred on Grok (−59% calls) but not OpenCode (−17%). Utility is host-dependent — see EVALUATION §5. |
 
 ## Install
@@ -41,17 +41,17 @@ macOS arm64/x86_64 and Linux x86_64/aarch64 (CI-built).
 ## Usage
 
 ```
-kg build                      # index the repo into .kg/index.db (atomic swap)
+kg build                      # index the repo into .kg/index.db (atomic swap; no-op runs write nothing)
 kg build --force              # re-extract everything (skip the fast path)
 kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg path Widget.render parse_fragment  # shortest call route (resolved edges; depth cap 10)
 kg context Widget.render       # definition + callers + callees in one call
 kg impact app.py              # files that call into app.py
-kg search parser fragment     # BM25 symbol search (identifiers + path + signature tokens); hits carry the signature
-kg clones                     # duplicate-block candidates (caveat: not proof)
+kg search parser fragment     # BM25 symbol search (identifier/path/signature tokens); qualified input matches the exact phrase; hits carry the signature
+kg clones                     # duplicate-block candidates with enclosing symbol per side (caveat: not proof)
 kg dead                       # dead-code candidates (caveat: not proof)
-kg unresolved                 # per-file unresolved-callee counts
+kg unresolved                 # per-file counts + top unresolved names; [internal] = resolver gap
 kg symbols app.py             # one file's symbols, ordered by line
 kg symbols app.py --outline   # + one-line signatures (no bodies)
 kg stats                      # index totals
@@ -59,7 +59,7 @@ kg usage                      # usage-journal summary: calls, latency, rates
 kg usage --verify             # replay-verify sampled payload pointers: OK/CHANGED/FAIL
 kg mcp                        # MCP stdio server, JSON-RPC 2.0
 kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
-kg report                     # 4-section architecture report
+kg report                     # 4-section architecture report (freshness caveat when stale)
 kg doctor [--invalidate]      # integrity, versions, staleness, orphans
 ```
 
@@ -90,8 +90,11 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 ## Response contract
 
-- Pointers: `repo-relative/path:line [ambiguous]`, 1-based lines, capped at 50
-  (`--limit N`); final stdout line `showing N of M`; stderr cap note.
+- Pointers: `repo-relative/path:line`, 1-based lines, capped at 50
+  (`--limit N`); an optional `[ambiguous]` tag and, on callers/callees/context,
+  the call-site identity (`path:line qualname`). Final stdout line
+  `showing N of M`; stderr cap note. `impact` rows are per file with
+  `(N sites)` unless `--sites`; `clones` spans name the enclosing symbol.
 - Staleness: post-cap displayed set only; stat short-circuit then FNV-1a
   re-hash; header `kg: K of N result files changed since build — run kg build`.
   Never auto-rebuilds.
@@ -109,11 +112,15 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 
 - Resolution is static: static analysis covers 10-48% of raw call sites
   (unresolved 51.8-90.4% across six measured corpora; Django 71.7%, vscode
-  62.9%); dynamic dispatch and untyped attribute calls are unresolved by
-  design. The tool reports the gap per file and recommends grep.
+  62.9%). These are raw unresolved call names and include external/library
+  calls; `kg unresolved` marks names that exist in the index (`[internal]`)
+  as actionable resolver gaps. Dynamic dispatch and untyped attribute calls
+  are unresolved by design; the tool reports the gap per file and recommends
+  grep.
 - The index is per-repo and local; cross-repo questions are out of scope.
 - Staleness is detected, never auto-repaired: run `kg build` after edits
-  (0.06-0.46 s on 27-596-file repos; 1.65 s no-op at 2,025 files).
+  (0.06-0.46 s on 27-596-file repos; 0.02-0.03 s no-op at 2,201 files —
+  unchanged builds leave `.kg/index.db` byte-identical).
 
 ## Project docs
 

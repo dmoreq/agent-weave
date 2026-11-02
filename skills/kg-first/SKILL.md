@@ -15,15 +15,15 @@ source:
 
 | question | command |
 |----------|---------|
-| who calls this symbol | `kg callers <name>` |
+| who calls this symbol | `kg callers <name>` — lines are `path:line qualname` (the call-site identity) |
 | what does this call (transitive) | `kg callees <name> --depth N` |
 | does A reach B, via which call sites | `kg path <from> <to>` — one shortest route; reverse question = swap the arguments |
 | what surrounds this symbol (callers + callees + signature) | `kg context <name>` — one call replaces composing callers/callees/symbols |
 | which files call into a file | `kg impact <file>` |
-| find a symbol by (partial) name | `kg search <terms>` |
+| find a symbol by (partial) name, qualified path, or signature vocabulary | `kg search <terms>` — qualified input matches the exact phrase; exact names rank first; plurals fall back to stems |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |
-| is this logic duplicated elsewhere | `kg clones [--min-lines N]` — candidates only, never proof of semantic duplication |
-| what is risky / dead / unresolved | `kg hotspots`, `kg dead`, `kg unresolved` |
+| is this logic duplicated elsewhere | `kg clones [--min-lines N]` — candidates only, never proof; spans name the enclosing symbol per side |
+| what is risky / dead / unresolved | `kg hotspots`, `kg dead`, `kg unresolved` — `[internal]` marks names that exist in the index (a resolver gap), other names are external/library calls |
 
 Use grep/rg **only** for what kg cannot answer or to verify one specific line.
 Do not re-derive with grep what kg has already answered — that doubles the
@@ -54,7 +54,7 @@ context you carry for zero information gain.
 ## Staleness discipline
 
 After you edit code, run `kg build` before further navigation queries
-(0.1-0.5 s typical). If a query prints
+(0.1-0.5 s typical; an unchanged tree is 0.02-0.03 s at ~2k files). If a query prints
 `kg: K of N result files changed since build — run kg build`, rebuild before
 trusting those pointers.
 
@@ -63,14 +63,16 @@ trusting those pointers.
 - Semantic questions ("where is behavior X implemented") — kg resolves names,
   not meanings. Grep/read.
 - Dynamic dispatch, untyped attribute calls, external-library calls — kg
-  reports them as unresolved by design (static coverage 10-48% of raw call sites; unresolved 52-90% depending on
-  codebase) and says `grep fallback recommended`. Believe it.
+  reports them as unresolved by design (static coverage 10-48% of raw call
+  sites; unresolved 52-90% depending on codebase, external calls included)
+  and says `grep fallback recommended`. Believe it.
 - Questions about code in another repository — the index is per-repo.
 
 ## Cheap context hygiene
 
-- Pointers are `path:line` — open only the lines you need (`sed -n`), not
-  whole files, when the pointer answers the question.
+- Pointers lead with `path:line`; a trailing identity names the call site —
+  open only the lines you need (`sed -n`), not whole files, when the pointer
+  answers the question.
 - `kg symbols <file> --outline` replaces most "read the file to see its
   structure" reads.
 - `kg stats` / `kg report` answer repo-shape questions (totals, top packages,

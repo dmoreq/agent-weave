@@ -17,20 +17,40 @@ use crate::error::{KgError, Result};
 
 pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
     let q = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
-    let files = q("SELECT COUNT(*) FROM files")?;
-    let symbols = q("SELECT COUNT(*) FROM symbols")?;
-    let edges = q("SELECT COUNT(*) FROM edges")?;
-    let calls = q("SELECT COUNT(*) FROM edges WHERE kind = 'calls'")?;
-    let imports = q("SELECT COUNT(*) FROM edges WHERE kind = 'imports'")?;
-    let inherits = q("SELECT COUNT(*) FROM edges WHERE kind = 'inherits'")?;
-    let perr = q("SELECT COALESCE(SUM(parse_status != 'ok'), 0) FROM files")?;
-    let unresolved: i64 = conn
-        .query_row(
-            "SELECT COALESCE(CAST(value AS INTEGER), 0) FROM meta WHERE key = 'unresolved_callee_count'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
+    // Build-time counters first (R7 L4): every filtered COUNT scanned rows;
+    // the manifest already stores the authoritative totals (written from SQL
+    // at build end), so stats is O(1). Fallback keeps pre-counter indexes
+    // working.
+    let meta_int =
+        |key: &str| -> Option<i64> { db::meta_get(conn, key).and_then(|v| v.parse::<i64>().ok()) };
+    // `unwrap_or` would evaluate the COUNT eagerly, defeating O(1); resolve
+    // only when the manifest key is absent (R7 review).
+    let count_or_meta = |key: &str, sql: &str| -> Result<i64> {
+        match meta_int(key) {
+            Some(v) => Ok(v),
+            None => q(sql),
+        }
+    };
+    let files = count_or_meta("file_count", "SELECT COUNT(*) FROM files")?;
+    let symbols = count_or_meta("symbol_count", "SELECT COUNT(*) FROM symbols")?;
+    let edges = count_or_meta("edge_count", "SELECT COUNT(*) FROM edges")?;
+    let calls = count_or_meta(
+        "edge_calls",
+        "SELECT COUNT(*) FROM edges WHERE kind = 'calls'",
+    )?;
+    let imports = count_or_meta(
+        "edge_imports",
+        "SELECT COUNT(*) FROM edges WHERE kind = 'imports'",
+    )?;
+    let inherits = count_or_meta(
+        "edge_inherits",
+        "SELECT COUNT(*) FROM edges WHERE kind = 'inherits'",
+    )?;
+    let perr = count_or_meta(
+        "parse_error_count",
+        "SELECT COALESCE(SUM(parse_status != 'ok'), 0) FROM files",
+    )?;
+    let unresolved = meta_int("unresolved_callee_count").unwrap_or(0);
     let size = std::fs::metadata(db::db_path(root))
         .map(|m| m.len())
         .unwrap_or(0);
@@ -189,6 +209,22 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
 
 pub fn report(conn: &Connection, root: &Path) -> Result<Vec<String>> {
     let mut out = Vec::new();
+    // Freshness (R7 L4): the report is a build snapshot, but agents read it
+    // as current. Check a bounded sample of indexed files and say so.
+    let mut stmt = conn.prepare("SELECT path FROM files LIMIT 5000")?;
+    let paths = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let changed = paths
+        .iter()
+        .filter(|rel| crate::query::file_changed(conn, root, rel))
+        .count();
+    if changed > 0 {
+        out.push(format!(
+            "kg: {changed} of {} sampled files changed since build — run kg build",
+            paths.len()
+        ));
+    }
     // Section 1: index overview.
     out.push(format!("## 1. index overview\n{}", stats(conn, root)?));
     // Section 2: architecture map — top packages by symbol count.

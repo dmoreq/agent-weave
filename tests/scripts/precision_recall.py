@@ -60,9 +60,12 @@ def kg_callers(kg, root, qualname):
         for line in proc.stdout.splitlines():
             if line.startswith("kg:") or line.startswith("showing "):
                 continue
-            parts = line.strip().split(":")
-            if len(parts) >= 2:
-                pointers.add(f"{parts[0]}:{parts[1]}")
+            # R7 pointer lines may carry an identity detail after the
+            # pointer ("src/query.rs:1499 src.query.collect_output"); parse
+            # the leading path:line, not a colon split of the whole line.
+            m = re.match(r"^(\S+:\d+)\b", line.strip())
+            if m:
+                pointers.add(m.group(1))
         return pointers, None
     if proc.returncode == 2:
         candidates = set()

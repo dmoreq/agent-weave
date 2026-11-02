@@ -95,6 +95,46 @@ pub fn run_build(
         }
     }
 
+    // No-op fast path (R7 L4): when every walked file carried unchanged and no
+    // indexed path disappeared, rebuilding the database would reproduce the
+    // same rows (measured 0.05-0.06 s of a 0.10 s build at 2.2k files). Skip
+    // the write entirely so a repeated build leaves index.db untouched.
+    if let Some(c) = &old {
+        let deleted = old_map.keys().any(|rel| !by_rel.contains_key(rel.as_str()));
+        let carried_errors =
+            crate::db::old_error_count(c, &carried.iter().cloned().collect::<Vec<_>>())?;
+        let rate_ok = force
+            || stats.files.is_empty()
+            || carried_errors as f64 / stats.files.len() as f64 <= max_parse_error_rate;
+        if fresh.is_empty() && !deleted && mtime_updates.is_empty() && rate_ok {
+            let sql_count = |sql: &str| -> Result<i64> { Ok(c.query_row(sql, [], |r| r.get(0))?) };
+            let symbols = sql_count("SELECT COUNT(*) FROM symbols")?;
+            let edges = sql_count("SELECT COUNT(*) FROM edges")?;
+            let perr = sql_count("SELECT COALESCE(SUM(parse_status != 'ok'), 0) FROM files")?;
+            let unres = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
+            crate::journal::record_result(
+                stats.files.len(),
+                stats.files.len(),
+                stats.files.len(),
+                false,
+                0,
+            );
+            if stats.skipped_large > 0 {
+                eprintln!(
+                    "[kg] skipped {} file(s) over the 1MB size cap",
+                    stats.skipped_large
+                );
+            }
+            return Ok(format!(
+                "kg: built index: files={} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={} wall={wall:.2}s (walk={w:.2}s parse=0.00s extract=0.00s db=0.00s)",
+                stats.files.len(),
+                stats.files.len(),
+                wall = started.elapsed().as_secs_f64(),
+                w = walk_secs,
+            ));
+        }
+    }
+
     // Parse + extract fresh files only (streamed; no corpus accumulation).
     // Amendment 11c: CPU-bound tree-sitter work on scoped workers — no new
     // dependencies, no unsafe. Trees never cross threads (not Send); only
@@ -276,6 +316,7 @@ pub fn run_build(
     // Meta manifest; counts are authoritative SQL totals over the whole index.
     crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;
     crate::db::set_meta(&conn, "grammar_version", crate::db::GRAMMAR_VERSION)?;
+    crate::db::set_meta(&conn, "signature_version", crate::db::SIGNATURE_VERSION)?;
     crate::db::set_meta(
         &conn,
         "built_at",
@@ -299,6 +340,14 @@ pub fn run_build(
     crate::db::set_meta(&conn, "parse_error_count", &perr_total.to_string())?;
     // Unresolved total is the authoritative SQL sum of per-file counts, stable
     // across fast-path builds (carried rows keep their stored count).
+    for (key, kind) in [
+        ("edge_calls", "calls"),
+        ("edge_imports", "imports"),
+        ("edge_inherits", "inherits"),
+    ] {
+        let n = sql_count(&format!("SELECT COUNT(*) FROM edges WHERE kind = '{kind}'"))?;
+        crate::db::set_meta(&conn, key, &n.to_string())?;
+    }
     let unres_total = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
@@ -410,7 +459,10 @@ fn extract_units(
                                     parse_status: parsed.status,
                                     error_nodes: parsed.error_nodes,
                                     unresolved: 0,
-                                    loc: bytes.split(|b: &u8| *b == b'\n').count() as i64,
+                                    loc: crate::parse::non_comment_loc(
+                                        &bytes,
+                                        parsed.tree.root_node(),
+                                    ),
                                     cyclomatic,
                                 },
                                 fx,

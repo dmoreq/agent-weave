@@ -150,10 +150,18 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         cli::Cmd::Context { name, limit } => {
             vec![("name", name.clone()), ("limit", limit.to_string())]
         }
-        cli::Cmd::Impact { file, limit } => {
-            vec![("file", file.clone()), ("limit", limit.to_string())]
-        }
-        cli::Cmd::Dead { limit } => vec![("limit", limit.to_string())],
+        cli::Cmd::Impact { file, sites, limit } => vec![
+            ("file", file.clone()),
+            ("sites", sites.to_string()),
+            ("limit", limit.to_string()),
+        ],
+        cli::Cmd::Dead {
+            exclude_tests,
+            limit,
+        } => vec![
+            ("exclude_tests", exclude_tests.to_string()),
+            ("limit", limit.to_string()),
+        ],
         cli::Cmd::Unresolved { limit } => vec![("limit", limit.to_string())],
         cli::Cmd::Symbols {
             file,
@@ -239,10 +247,10 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Impact { file, limit } => {
+        cli::Cmd::Impact { file, sites, limit } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::impact(&conn, &root, &file, limit)?;
+            let out = query::impact(&conn, &root, &file, limit, sites)?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,
@@ -253,10 +261,13 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
-        cli::Cmd::Dead { limit } => {
+        cli::Cmd::Dead {
+            exclude_tests,
+            limit,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::dead(&conn, &root, limit)?;
+            let out = query::dead(&conn, &root, limit, exclude_tests)?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,

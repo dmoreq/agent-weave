@@ -235,7 +235,8 @@ fn g10_initialize_tools_list_and_parity() {
         String::from_utf8_lossy(&cli_clones.stdout).into_owned()
     );
     assert!(
-        result_text(&clones).contains("app.py:5-9 utils.py:6-10"),
+        result_text(&clones).contains("app.py:5-9")
+            && result_text(&clones).contains("utils.py:6-10"),
         "seeded clone pair line present: {}",
         result_text(&clones)
     );
@@ -574,4 +575,42 @@ fn malformed_json_frame_returns_parse_error() {
     srv.reader.read_line(&mut line).unwrap();
     let resp: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(resp["error"]["code"], -32700, "{resp}");
+}
+
+#[test]
+fn missing_required_argument_returns_invalid_params() {
+    // R7 L4: a schema-required string must fail at the protocol layer, not as
+    // a downstream "symbol '' not in index" tool result.
+    let repo = fixture("mcp-required");
+    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let mut srv = spawn(&repo);
+    let resp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "callers", "arguments": {}}),
+    );
+    assert_eq!(resp["error"]["code"], -32602, "{resp}");
+    assert!(
+        resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("'name'"),
+        "{resp}"
+    );
+    // A blank string is equally invalid.
+    let resp = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "search", "arguments": {"terms": "   "}}),
+    );
+    assert_eq!(resp["error"]["code"], -32602, "{resp}");
+    let _ = fs::remove_dir_all(&repo);
 }

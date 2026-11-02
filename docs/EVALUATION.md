@@ -96,7 +96,7 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 | G11 payload conformance | 1 payload line per successful pointer call, byte-equal pointers, verify FAIL=0 | 594 pointers verified, FAIL=0 (CHANGELOG A11 entry; `kg usage --verify` on a fresh build reproduces FAIL=0) |
 | G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, deterministic merge order | PASS (105/105 tests at schema v5) |
 | G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction vs the grep baseline (+1 call vs the plain-kg control), -62.7% bytes, zero correctness delta — PASS |
-| G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.800 recall (23/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure (ranking trade-off recorded in the P6 report) — PASS (bar 0.70) |
+| G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.775 recall (22/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure and 0.800 pre-R7 (ranking trade-offs recorded in the P6 and R7 reports) — PASS (bar 0.70) |
 | G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
 | G17 call-path traversal | `kg path` vs 10 exact-byte fixtures + 8 frozen GT pairs (hop edges verified EXTRACTED at freeze) + latency | 10/10 fixtures byte-exact; 8/8 GT agreement; 0.6-1.4 ms in-process best-of-7 across the 85k-symbol synth corpus and the self-index (budget 20 ms) — PASS. Routes are resolved-edge CANDIDATES: dynamic dispatch may hide paths |
 
@@ -219,3 +219,34 @@ raise model capability.
 
 Internal records use real corpus-repo names; this document intentionally does
 not.
+
+## 8. R7 ceiling-review hardening (2026-11-02, Amendment 18)
+
+Four Goldfish lenses (path/context, call-graph queries, retrieval,
+analysis/infrastructure) reviewed every feature for utility, accuracy, and
+latency. The batch below fixes the highest-value findings; schema stays v5.
+All numbers are measured with the shipped binary.
+
+| surface | before | after | evidence |
+|---------|--------|-------|----------|
+| Python signatures ending at `(` (corpus A, 3,039 non-module symbols) | 500 (16.5%) | **0** | old binary built from `HEAD` (v0.2.0) vs current, both `build --force`; SQL count `substr(signature,-1)='('` |
+| signature-only parameter query `kg search skip_prewarm` (corpus A) | target absent from top-50 | **rank 2** | same two indexes; the parameter lives on a wrapped line the old capture dropped |
+| qualified/exact search latency (2,201-file synthetic corpus, journal) | — | **0.74 ms mean**, 0.90 ms p95 (20 runs) | `.kg/usage.log` latency_us |
+| no-op `kg build` at 2,201 files | 0.09-0.11 s (rewrote the DB) | **0.02-0.03 s**, `index.db` byte-unchanged | `/usr/bin/time -p` + hash/mtime compare; regression test `noop_build_leaves_the_index_untouched` |
+| `kg stats` (2,201 files) | filtered COUNT scans | **0.98 ms mean**, manifest counters | journal latency; fallback to COUNT for old indexes |
+| self ground truth | 10/10 | **10/10, call-site precision 49/49** | `precision_recall.py` after the R7 line refresh |
+| path ground truth | 8/8 | **8/8** | `path_recall.py` |
+| search recall (G14) | 0.800 | **0.775** (22/28), bar 0.70 | `search_recall.py`; richer signature tokens shift bm25 ranking, while signature-only `skip_prewarm` moves from absent to rank 2 |
+| tests | 115 | **132** | `cargo test --locked --release` |
+
+Behavior changes recorded as contract bumps: full multi-line parameter lists
+in signatures (one-time re-extraction via `signature_version`, no schema
+bump); call-site identity after caller/callee/context pointers; per-file
+`impact` rows with `(N sites)` unless `--sites`; clone spans name the
+largest-overlap enclosing symbol; `unresolved` adds distinct-name,
+`internal=`, and top-name lines; `report` adds a first-line freshness
+caveat; MCP returns `-32602` for a missing required argument. Accuracy
+changes: Python nested defs scope to the enclosing function, Rust inline
+`mod` and TS namespaces qualify members, module symbols no longer create
+false ambiguity, hotspots count `elif`/`case`/ternary and exclude comment-only
+LOC, clones filter `--min-lines` after window merging.

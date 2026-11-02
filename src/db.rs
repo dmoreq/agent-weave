@@ -23,6 +23,10 @@ use crate::extract::{CarriedIndex, CarriedSymbol, NewSymbol, SCHEMA_VERSION};
 /// crate versions by build.rs (R6d A8: a hand-maintained string had already
 /// drifted from the lock). The identity gates the fast path.
 pub const GRAMMAR_VERSION: &str = env!("KG_GRAMMAR_VERSION");
+/// Signature-capture revision (R7/Amendment 18): indexes whose stored
+/// signatures predate the multi-line capture are fully re-extracted once.
+/// This is not a schema change — the table shape is unchanged.
+pub const SIGNATURE_VERSION: &str = "2";
 
 pub fn kg_dir(root: &Path) -> PathBuf {
     root.join(".kg")
@@ -190,6 +194,16 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
         Err(_) => return Ok(None),
     };
     if grammar != GRAMMAR_VERSION {
+        return Ok(None);
+    }
+    let sig_version = old
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'signature_version'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap_or_default();
+    if sig_version != SIGNATURE_VERSION {
         return Ok(None);
     }
     Ok(Some(old))
@@ -600,12 +614,15 @@ pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
     for (id, qualname, name, path, signature) in rows {
+        // Name/qualname tokens repeat so bm25 ranks identity matches above
+        // signature-only matches now that signatures carry full parameter
+        // lists (R7: richer signatures otherwise crowded out name hits).
         let text = format!(
-            "{} {} {} {}",
-            crate::extract::split_ident(&qualname),
-            crate::extract::split_ident(&name),
-            crate::extract::split_ident(&path),
-            crate::extract::split_ident(&signature)
+            "{q} {q} {n} {n} {p} {s}",
+            q = crate::extract::split_ident(&qualname),
+            n = crate::extract::split_ident(&name),
+            p = crate::extract::split_ident(&path),
+            s = crate::extract::split_ident(&signature)
         );
         ins.execute(rusqlite::params![id, text])?;
     }

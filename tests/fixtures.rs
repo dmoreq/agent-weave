@@ -387,3 +387,163 @@ fn pep420_namespace_package_import_resolves() {
         resolution.edges
     );
 }
+
+#[test]
+fn super_calls_resolve_to_base_methods() {
+    // Amendment 18: `super().m()`, `super(C, self).m()`, and `Base().m()`
+    // must resolve (previously dropped with no edge and no unresolved row).
+    let src = "class A:\n    def m(self):\n        return 1\n\nclass B(A):\n    def m(self):\n        return super().m()\n\nclass C(A):\n    def n(self):\n        return super(C, self).m()\n\ndef use():\n    return B().m()\n";
+    let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
+    let fx = extract_file(0, "s.py", src.as_bytes(), &parsed);
+    let res = resolve(vec![fx], Default::default());
+    let names: Vec<(&str, &str)> = res
+        .edges
+        .iter()
+        .filter(|e| e.kind == "calls")
+        .map(|e| (e.confidence, e.dst_name.as_str()))
+        .collect();
+    let sites: Vec<usize> = res
+        .edges
+        .iter()
+        .filter(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.ends_with("A.m"))
+        .map(|e| e.site_line)
+        .collect();
+    for line in [7, 11] {
+        assert!(
+            sites.contains(&line),
+            "super call at line {line} must reach A.m: {names:?}"
+        );
+    }
+    // B().m() lands on B's override, not the base method.
+    let b_sites: Vec<usize> = res
+        .edges
+        .iter()
+        .filter(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.ends_with("B.m"))
+        .map(|e| e.site_line)
+        .collect();
+    assert!(
+        b_sites.contains(&14),
+        "constructor receiver at line 14 must reach B.m: {names:?}"
+    );
+}
+
+#[test]
+fn class_re_export_base_resolves() {
+    // Amendment 18: `from pkg import Base` where pkg re-exports Base from
+    // pkg.base must produce the inherits edge and resolve self.helper().
+    let base = "class Base:\n    def helper(self):\n        return 1\n";
+    let init = "from .base import Base\n";
+    let app = "from pkg import Base\n\nclass Sub(Base):\n    def run(self):\n        return self.helper()\n";
+    let p1 = parse_source(base.as_bytes(), Lang::Python).unwrap();
+    let p2 = parse_source(init.as_bytes(), Lang::Python).unwrap();
+    let p3 = parse_source(app.as_bytes(), Lang::Python).unwrap();
+    let fx1 = extract_file(0, "pkg/base.py", base.as_bytes(), &p1);
+    let fx2 = extract_file(1, "pkg/__init__.py", init.as_bytes(), &p2);
+    let fx3 = extract_file(2, "app.py", app.as_bytes(), &p3);
+    let res = resolve(vec![fx1, fx2, fx3], Default::default());
+    assert!(
+        res.edges
+            .iter()
+            .any(|e| e.kind == "inherits" && e.dst_name == "pkg.base.Base"),
+        "inherits edge through re-export: {:?}",
+        res.edges
+            .iter()
+            .filter(|e| e.kind == "inherits")
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        res.edges.iter().any(|e| e.kind == "calls"
+            && e.confidence == "EXTRACTED"
+            && e.dst_name == "pkg.base.Base.helper"),
+        "self.helper() must resolve through the re-exported base: {:?}",
+        res.edges
+            .iter()
+            .filter(|e| e.kind == "calls")
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn python_nested_def_scopes_to_enclosing_function() {
+    // R7: a nested def belongs to its enclosing function, not the class
+    // (the old class-first parent order emitted `pkg.mod.outer.inner` as
+    // `pkg.mod.inner` when outer was a method).
+    let src = "class C:\n    def outer(self):\n        def inner():\n            return 1\n        return inner()\n";
+    let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
+    let fx = extract_file(0, "pkg/mod.py", src.as_bytes(), &parsed);
+    let qns: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
+    assert!(qns.contains(&"pkg.mod.C.outer.inner"), "{qns:?}");
+}
+
+#[test]
+fn rust_inline_mods_are_scopes() {
+    // R7 F1: inline `mod alpha { fn shared }` must qualify as
+    // `pkg.mod.alpha.shared`; two mods may hold same-named items.
+    let src = "mod alpha {\n    fn shared() {}\n}\nmod beta {\n    fn shared() {}\n}\n";
+    let parsed = parse_source(src.as_bytes(), Lang::Rust).unwrap();
+    let fx = extract_file(0, "pkg/mod.rs", src.as_bytes(), &parsed);
+    let qns: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
+    assert!(qns.iter().any(|q| q.ends_with(".alpha.shared")), "{qns:?}");
+    assert!(qns.iter().any(|q| q.ends_with(".beta.shared")), "{qns:?}");
+    assert!(
+        !qns.contains(&"pkg.mod.shared"),
+        "shared leaked to module scope: {qns:?}"
+    );
+    let mut uniq = qns.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    assert_eq!(uniq.len(), qns.len(), "duplicate qualnames: {qns:?}");
+}
+
+#[test]
+fn typescript_namespaces_are_scopes() {
+    let src = "namespace A { export function shared() {} }\nnamespace B { export function shared() {} }\n";
+    let parsed = parse_source(src.as_bytes(), Lang::TypeScript).unwrap();
+    let fx = extract_file(0, "pkg/mod.ts", src.as_bytes(), &parsed);
+    let qns: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
+    assert!(qns.iter().any(|q| q.ends_with(".A.shared")), "{qns:?}");
+    assert!(qns.iter().any(|q| q.ends_with(".B.shared")), "{qns:?}");
+}
+
+#[test]
+fn signatures_span_multiline_parameters_and_stop_before_body() {
+    // R7 L3: 16.5% of Python signatures ended at `(` because only the first
+    // line was stored; the whole parameter list must survive, without the
+    // body or a trailing colon/brace.
+    let py = "def render(\n    self,\n    item,\n    width=10,\n):\n    return item\n";
+    let parsed = parse_source(py.as_bytes(), Lang::Python).unwrap();
+    let fx = extract_file(0, "pkg/mod.py", py.as_bytes(), &parsed);
+    let sig = &fx
+        .symbols
+        .iter()
+        .find(|s| s.name == "render")
+        .unwrap()
+        .signature;
+    assert!(sig.contains("width=10"), "signature truncated: {sig:?}");
+    assert!(
+        !sig.contains("return"),
+        "body leaked into signature: {sig:?}"
+    );
+    assert!(!sig.ends_with(':'), "colon retained: {sig:?}");
+
+    let rust = "fn render(\n    item: Item,\n    width: usize,\n) -> String {\n    item.name\n}\n";
+    let parsed = parse_source(rust.as_bytes(), Lang::Rust).unwrap();
+    let fx = extract_file(0, "pkg/mod.rs", rust.as_bytes(), &parsed);
+    let sig = &fx
+        .symbols
+        .iter()
+        .find(|s| s.name == "render")
+        .unwrap()
+        .signature;
+    assert!(sig.contains("width: usize"), "signature truncated: {sig:?}");
+    assert!(sig.contains("-> String"), "return type lost: {sig:?}");
+    assert!(!sig.contains("item.name"), "body leaked: {sig:?}");
+}
+
+#[test]
+fn acronym_identifiers_split_at_the_case_boundary() {
+    use kg::extract::split_ident;
+    assert_eq!(split_ident("HTTPServer"), "http server");
+    assert_eq!(split_ident("getHTTPResponse"), "get http response");
+    assert_eq!(split_ident("parseS3Uploader"), "parse s3 uploader");
+}
