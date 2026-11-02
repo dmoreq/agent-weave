@@ -1,0 +1,11 @@
+{"base": "vihap.exceptions.VihapError", "child": "vihap.exceptions.VihapArtifactError", "repo": "vihap"}
+{"base": "vihap.exceptions.VihapError", "child": "vihap.exceptions.VihapConfigError", "repo": "vihap"}
+{"base": "vihap.exceptions.VihapError", "child": "vihap.exceptions.VihapParsingError", "repo": "vihap"}
+{"base": "vihap.exceptions.VihapError", "child": "vihap.exceptions.VihapScoringError", "repo": "vihap"}
+{"base": "vihap.exceptions.VihapParsingError", "child": "vihap.exceptions.AdminResolutionError", "repo": "vihap"}
+{"base": "vihap.exceptions.VihapParsingError", "child": "vihap.exceptions.InvalidAddressFormatError", "repo": "vihap"}
+{"base": "vihap.grammar.house.HouseNumberLexer", "child": "vihap.grammar.house.MiddleHouseNumberLexer", "repo": "vihap"}
+{"base": "vihap.grammar.house.SubunitLexer", "child": "vihap.grammar.house.FloorLexer", "repo": "vihap"}
+{"base": "vihap.grammar.house.SubunitLexer", "child": "vihap.grammar.house.PostalCodeLexer", "repo": "vihap"}
+{"base": "vihap.grammar.house.SubunitLexer", "child": "vihap.grammar.house.RoomLexer", "repo": "vihap"}
+{"base": "apps.web.src.providers.preferences-context.Preferences", "child": "apps.web.src.providers.preferences-context.PreferencesContextValue", "repo": "finguard"}

@@ -2860,9 +2860,10 @@ fn parallel_builds_produce_identical_tables() {
             .arg(format!(
                 "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\n\
                  rows=[tuple(str(x) for x in r) for q in [\
-                 'SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic FROM files ORDER BY path',\
-                 'SELECT qualname,kind,line_start,line_end,signature FROM symbols ORDER BY qualname,line_start',\
-                 'SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line']\
+                 'SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic,generated FROM files ORDER BY path',\
+                 'SELECT qualname,kind,line_start,line_end,signature,cyclomatic,branches,nesting,effective_loc,exported,file_path FROM symbols ORDER BY qualname,file_path,line_start',\
+                 'SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line',\
+                 'SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']\
                  for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
                 db.display()
             ))
@@ -3024,7 +3025,7 @@ fn serial_and_parallel_builds_are_identical() {
         let out = Command::new("python3")
             .arg("-c")
             .arg(format!(
-                "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\nrows=[]\nfor q in ['SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic FROM files ORDER BY path','SELECT qualname,kind,line_start,line_end,signature FROM symbols ORDER BY qualname,line_start','SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line']:\n rows += [tuple(str(x) for x in r) for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
+                "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\nrows=[]\nfor q in ['SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic,generated FROM files ORDER BY path','SELECT qualname,kind,line_start,line_end,signature,cyclomatic,branches,nesting,effective_loc,exported,file_path FROM symbols ORDER BY qualname,file_path,line_start','SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line','SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']:\n rows += [tuple(str(x) for x in r) for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
                 repo.join(".kg/index.db").display()
             ))
             .output()

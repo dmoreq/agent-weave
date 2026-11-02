@@ -286,6 +286,17 @@ fn g10_initialize_tools_list_and_parity() {
             vec!["impact", "utils.py"],
         ),
         (
+            "imports",
+            json!({"file": "app.py"}),
+            vec!["imports", "app.py"],
+        ),
+        (
+            "complexity",
+            json!({"min_cyc": 1}),
+            vec!["complexity", "--min-cyc", "1"],
+        ),
+        ("api", json!({"path": "app.py"}), vec!["api", "app.py"]),
+        (
             "hotspots",
             json!({"limit": 5}),
             vec!["hotspots", "--limit", "5"],
@@ -337,6 +348,26 @@ fn g10_initialize_tools_list_and_parity() {
             String::from_utf8_lossy(&cli_unres.stderr).trim_end()
         );
     }
+
+    // P8 no-result parity: imports on an unknown file (CLI stderr, MCP text).
+    let cli_imports_missing = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["imports", "nope.py"])
+        .output()
+        .unwrap();
+    assert_eq!(cli_imports_missing.status.code(), Some(1));
+    let imports_missing = rpc(
+        &mut srv,
+        15,
+        "tools/call",
+        json!({"name": "imports", "arguments": {"file": "nope.py"}}),
+    );
+    assert_eq!(imports_missing["result"]["isError"], true);
+    assert_eq!(
+        result_text(&imports_missing).trim_end(),
+        String::from_utf8_lossy(&cli_imports_missing.stderr).trim_end()
+    );
 
     // G10 parity extends to context (Amendment 17).
     let cli_context = Command::new(env!("CARGO_BIN_EXE_kg"))
@@ -424,7 +455,9 @@ fn g10_initialize_tools_list_and_parity() {
     // Every dispatched tool call journaled with the mcp surface: callers,
     // symbols (plain), symbols (outline), search, clones, clones (min_lines
     // failure), dead, stats, path, plus the R6e parity additions (callees,
-    // impact, hotspots, report, unresolved). The unknown tool is rejected
+    // impact, hotspots, report, unresolved, imports, complexity, api; imports
+    // no-result). The
+    // unknown tool is rejected
     // before dispatch and journals nothing; CLI reference commands above add
     // their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
@@ -432,7 +465,7 @@ fn g10_initialize_tools_list_and_parity() {
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 15, "{log}");
+    assert_eq!(mcp_lines, 19, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -443,8 +476,8 @@ fn g10_initialize_tools_list_and_parity() {
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
     assert_eq!(
-        mcp_payload, 9,
-        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context, not stats: {payload}"
+        mcp_payload, 12,
+        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+complexity+api, not stats: {payload}"
     );
     let callers_line = payload
         .lines()
