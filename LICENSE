@@ -1,8 +1,10 @@
-Copyright (c) 2026 Quy Doan. All rights reserved.
+kg is dual-licensed under either of
 
-This is a private, unpublished project. No license is granted to copy,
-modify, distribute, or use this software or its source code without the
-copyright holder's written permission.
+- Apache License, Version 2.0 (LICENSE-APACHE)
+- MIT license (LICENSE-MIT)
 
-If this repository is ever published, a proper open-source license will be
-added here first (see OQ1 in the design spec and CONTRIBUTING.md).
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this project by you, as defined in the Apache-2.0 license,
+shall be dual-licensed as above, without any additional terms or conditions.

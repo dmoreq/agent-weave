@@ -126,6 +126,6 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 | [SECURITY.md](SECURITY.md) | invariants, index safety, reporting |
 | [SUPPORT.md](SUPPORT.md) | troubleshooting table, scope boundaries |
 | [skills/](skills/README.md) | kg-first agent skill (in-repo; host installation is owner-decided) |
-| [LICENSE](LICENSE) | private / all rights reserved (swap before any publish) |
+| [LICENSE](LICENSE) | dual MIT / Apache-2.0 (LICENSE-MIT, LICENSE-APACHE) |
 | `.github/` | PR template, bug/feature issue templates, ci.yml |
 | `docs/baselines/` | evidence layer: frozen tasks, ground truth, transcripts, harness, review records (internal; uses real corpus-repo names) |

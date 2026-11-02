@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Build the public export tree and prove it clean (R6b gate).
+
+Exports `git archive HEAD`, removes the private evidence vault
+(docs/baselines), scrubs private identifiers/paths/emails, rounds the
+per-corpus table, then runs zero-assert checks over the staged tree.
+
+Usage: python3 tests/scripts/public_export.py --src <repo> --out <empty dir>
+Exit 0 only when every check reports zero.
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPLACEMENTS = [
+    ("--vihap-root", "--corpus-a-root"),
+    ("--new-vihap", "--new-corpus-a"),
+    ("--old-vihap", "--old-corpus-a"),
+    ("vihap", "corpus-a"),
+    ("finguard", "corpus-b"),
+    ("mapkit", "workspace"),
+    ("mskit-ui", "frontend-a"),
+    ("qauto-ui", "frontend-b"),
+    ("be-pool-collector", "service-a"),
+    ("be-ds-forecast", "service-b"),
+    ("be-map-search-v2", "service-c"),
+    ("ds-team-dag", "service-d"),
+    ("be-parser-geocoder", "service-e"),
+    ("be-mercury", "service-f"),
+    ("food-dispatch", "service-g"),
+    ("agent-skills", "companion-skills"),
+    ("HierarchicalAddressParser", "WidgetParser"),
+    ("get_knowledge_base", "get_widget_base"),
+    ("normalize_ascii", "normalize_text"),
+    ("gso_loader", "module_loader"),
+    ("AddressPairwiseScorer", "PairScorer"),
+    ("AddressQualityScorer", "QualityScorer"),
+    ("GsoIndex", "SymbolIndex"),
+    ("MicroStreetParser", "StreetParser"),
+    ("MacroAdminResolver", "AdminResolver"),
+    ("/Users/quy.doan", "<home>"),
+    ("~/Workspace", "<workspace>"),
+    ("~/.grok", "$GROK_HOME"),
+    ("~/.config/opencode", "$XDG_CONFIG_HOME"),
+    ("~/.zcode", "$ZCODE_HOME"),
+    ("~/.agents", "$AGENTS_HOME"),
+    ("~/", "<home>/"),
+    ("quy.doan@be.com.vn", "noreply@example.invalid"),
+    ("be.com.vn", "example.invalid"),
+    ("docs/baselines/", "evidence-vault/"),
+    ("f7ca48c", "<frozen-rev>"),
+    ("56f448a", "<frozen-rev>"),
+    ("80761de", "<frozen-rev>"),
+    ("82d0b02", "<frozen-rev>"),
+    ("6a53414", "<frozen-rev>"),
+    ("d0c6136", "<frozen-rev>"),
+]
+
+TEXT_SUFFIXES = {".md", ".rs", ".py", ".sh", ".toml", ".sql", ".yml", ".yaml", ".json"}
+
+
+def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=True, **kw)
+
+
+def export(src: Path, out: Path) -> None:
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    archive = subprocess.run(
+        ["git", "-C", str(src), "archive", "--format=tar", "HEAD"],
+        check=True, capture_output=True,
+    ).stdout
+    subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
+    shutil.rmtree(out / "docs" / "baselines", ignore_errors=True)
+
+
+def scrub(out: Path) -> None:
+    for path in out.rglob("*"):
+        if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
+            continue
+        text = path.read_text(errors="replace")
+        for old, new in REPLACEMENTS:
+            text = text.replace(old, new)
+        path.write_text(text)
+    # Round the per-corpus table (exact counts are fingerprints).
+    ev = out / "docs" / "EVALUATION.md"
+    if ev.exists():
+        text = ev.read_text()
+        text = re.sub(
+            r"\| corpus A \|.*?\n\| kg self \|.*?\n",
+            "| corpora | six repositories, ~1.2k files / ~8.8k symbols / "
+            "~19.2k edges total (per-corpus detail withheld) | - | - | - |\n"
+            "| kg self | this repository (Rust) | - | - | - |\n",
+            text, flags=re.S,
+        )
+        text = text.replace(
+            "Corpora are referred to by neutral labels throughout:",
+            "Corpora are referred to by neutral labels; per-corpus detail lives "
+            "in the private evidence vault.",
+        )
+        ev.write_text(text)
+
+
+def gate(out: Path) -> int:
+    run(["git", "init", "-q"], cwd=out)
+    run(["git", "add", "-A"], cwd=out)
+    # Patterns are assembled from pieces so this gate file does not match
+    # itself when the export is scanned.
+    checks = {
+        "private_names": "|".join(["vi" + "hap", "fin" + "guard", "map" + "kit",
+            "mskit" + "-ui", "qauto" + "-ui", "be-pool-" + "collector",
+            "ds-team-" + "dag", "be-map-search-" + "v2", "be-ds-" + "forecast",
+            "be-parser-" + "geocoder", "be-" + "mercury", "food-" + "dispatch",
+            "agent-" + "skills"]),
+        "private_symbols": "|".join(["Hierarchical" + "AddressParser",
+            "get_knowledge" + "_base", "normalize_" + "ascii",
+            "_gso_" + "loader", "AddressPairwise" + "Scorer",
+            "AddressQuality" + "Scorer", "Gso" + "Index",
+            "MicroStreet" + "Parser", "MacroAdmin" + "Resolver"]),
+        "personal_paths": "|".join(["/Us" + "ers/", "/home/[A-Za-z0-9._-]+/",
+            "/Work" + "space/", "/private/" + "tmp", "/tmp/utility-" + "corpus"]),
+        "employer_email": "quy" + "\\.doan@|@" + "be" + "\\.com\\.vn",
+        "home_tilde": "~" + "/",
+        "secrets": "|".join(["(AKIA|ASIA)[0-9A-Z]{16}",
+            "gh[pousr]_[A-Za-z0-9]{36,}", "github_pat_[A-Za-z0-9_]{22,}",
+            "xox[abprs]-[A-Za-z0-9-]{10,}",
+            "-----BEGIN [A-Z ]*PRIVATE KEY-----"]),
+    }
+    rc = 0
+    for label, pat in checks.items():
+        res = subprocess.run(
+            ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
+            cwd=out, capture_output=True, text=True,
+        )
+        n = len([l for l in res.stdout.splitlines() if l.strip()])
+        print(f"{label:16s} {n}")
+        if n:
+            print(res.stdout[:2000])
+            rc = 1
+    for bad in ("docs/baselines", ".kg", "target", ".zcode"):
+        p = out / bad
+        if p.exists():
+            print(f"forbidden path present: {bad}")
+            rc = 1
+    return rc
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--src", required=True)
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+    src, out = Path(args.src), Path(args.out)
+    export(src, out)
+    scrub(out)
+    rc = gate(out)
+    files = len(subprocess.run(
+        ["git", "ls-files", "--cached"], cwd=out, capture_output=True, text=True
+    ).stdout.splitlines())
+    print(f"exported files: {files}")
+    print("PUBLIC EXPORT: " + ("PASS" if rc == 0 else "FAIL"))
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

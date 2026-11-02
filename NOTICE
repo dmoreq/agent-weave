@@ -1,0 +1,18 @@
+kg
+Copyright 2026 Quy Doan
+
+This product includes software developed by third parties:
+
+- SQLite (via libsqlite3-sys, bundled): public domain.
+- tree-sitter and the tree-sitter grammar crates (python, typescript,
+  javascript, rust): MIT.
+- clap: MIT OR Apache-2.0.
+- rusqlite: MIT.
+- ignore: Unlicense OR MIT.
+- serde_json: MIT OR Apache-2.0.
+- unicode-ident: (MIT OR Apache-2.0) AND Unicode-3.0.
+- foldhash: Zlib.
+- Other transitive crates: see Cargo.lock for the exact versions; their
+  license texts are available from crates.io.
+
+Run `cargo tree -e normal` for the current dependency graph.
