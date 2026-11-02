@@ -77,7 +77,15 @@ pub fn run_build(
     let by_rel: std::collections::HashMap<&str, &crate::walk::WalkedFile> =
         stats.files.iter().map(|f| (f.rel.as_str(), f)).collect();
     if let Some(c) = &old {
-        let changed: Vec<String> = fresh.iter().map(|f| f.rel.clone()).collect();
+        let mut changed: Vec<String> = fresh.iter().map(|f| f.rel.clone()).collect();
+        // A deleted destination heals like a changed one: its old dependents
+        // must re-extract so their import/call/inherit edges become unresolved
+        // instead of being dropped silently by carry-forward.
+        for rel in old_map.keys() {
+            if !by_rel.contains_key(rel.as_str()) {
+                changed.push(rel.clone());
+            }
+        }
         if !changed.is_empty() {
             let dirty = crate::db::dirty_closure(c, &changed)?;
             for rel in dirty {

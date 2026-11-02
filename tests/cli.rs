@@ -700,6 +700,131 @@ fn imports_lists_outbound_resolved_edges() {
 }
 
 #[test]
+fn rust_use_tree_and_module_mapping_resolve() {
+    let repo = temp_repo("rust-use-tree");
+    write(&repo, "src/lib.rs", "pub mod a;\npub mod util;\n");
+    write(&repo, "src/util.rs", "pub fn u() {}\n");
+    write(
+        &repo,
+        "src/a/mod.rs",
+        "pub fn f() {}\npub struct S;\nmod inner;\n",
+    );
+    write(&repo, "src/a/inner.rs", "pub fn deep() {}\n");
+    write(&repo, "src/a/b.rs", "pub fn g() {}\n");
+    write(
+        &repo,
+        "src/use_tree.rs",
+        "use crate::a::{f, S as T, self};\nuse super::util::u;\nuse crate::a::b::g;\nuse crate::util;\nuse std::fmt::Debug;\n\nmod outer { use crate::util::u; }\nmod child;\n",
+    );
+    write(&repo, "src/use_tree/child.rs", "pub fn c() {}\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["imports", "src/use_tree.rs"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    for row in [
+        "src/use_tree.rs:1 src.a",
+        "src/use_tree.rs:1 src.a.S",
+        "src/use_tree.rs:1 src.a.f",
+        "src/use_tree.rs:2 src.util.u",
+        "src/use_tree.rs:3 src.a.b.g",
+        "src/use_tree.rs:4 src.util",
+        "src/use_tree.rs:7 src.util.u",
+        "src/use_tree.rs:8 src.use_tree.child",
+    ] {
+        assert!(stdout.contains(row), "missing {row}: {stdout}");
+    }
+    assert!(!stdout.contains("std"), "external crate leaked: {stdout}");
+
+    let out = kg(&repo)
+        .args(["imports", "src/a/mod.rs"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("src/a/mod.rs:3 src.a.inner"),
+        "mod.rs child mapping: {stdout}"
+    );
+
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "std/external use must not leave unresolved imports"
+    );
+}
+
+#[test]
+fn star_suppression_is_per_import_statement() {
+    let repo = temp_repo("star-per-statement");
+    write(&repo, "pkg/__init__.py", "def f():\n    pass\n");
+    write(&repo, "pkg/mod.py", "def f():\n    pass\n");
+    write(
+        &repo,
+        "app.py",
+        "import pkg\nfrom pkg import *\n\ndef use():\n    return pkg.mod.f()\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "app.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("app.py:1 pkg"),
+        "plain import suppressed by a later star: {stdout}"
+    );
+    assert!(
+        stdout.contains("app.py:2 pkg"),
+        "star edge missing: {stdout}"
+    );
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "star must resolve pkg.mod.f");
+}
+
+#[test]
+fn deleted_destination_heals_unresolved_and_restore() {
+    let repo = temp_repo("deletion-heal");
+    write(&repo, "pkg/__init__.py", "");
+    write(&repo, "pkg/later.py", "def gone():\n    pass\n");
+    write(&repo, "app.py", "from pkg.later import gone\n");
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "app.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("app.py:1 pkg.later.gone"),
+        "resolved import before deletion: {stdout}"
+    );
+
+    fs::remove_file(repo.join("pkg/later.py")).unwrap();
+    build(&repo);
+    let out = kg(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("app.py:1 import pkg.later"),
+        "deleted destination must leave an unresolved import: {stdout}"
+    );
+
+    write(&repo, "pkg/later.py", "def gone():\n    pass\n");
+    build(&repo);
+    let out = kg(&repo).args(["imports", "app.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("app.py:1 pkg.later.gone"),
+        "restored destination must heal: {stdout}"
+    );
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "restored destination left an unresolved row"
+    );
+}
+
+#[test]
 fn tests_command_finds_direct_and_indirect_tests() {
     let repo = temp_repo("tests-cmd");
     write(&repo, "src/core.py", "def f():\n    pass\n");

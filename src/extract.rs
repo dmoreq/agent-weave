@@ -380,28 +380,39 @@ pub struct FileExtraction {
     self_fields: Vec<SelfField>,
     aliases: Vec<(String, ImportTarget)>,
     /// Modules appearing in `from m import *`.
-    stars: Vec<String>,
+    /// Star-imported modules with the statement line (per-statement scope).
+    stars: Vec<(String, usize)>,
     calls: Vec<CallSite>,
     import_edges: Vec<ImportEdgeCandidate>,
 }
 
 /// Derive the dot-joined module path from the repo-relative file path.
-/// Package markers (`__init__.py`, `index.ts(x)`, `index.js(x)`) collapse
-/// into the package path.
+/// Package/root markers (`__init__.py`, `index.ts(x)`, `index.js(x)`,
+/// `mod.rs`, `lib.rs`) collapse into the containing module path.
 pub fn module_path_for(rel: &str) -> (String, bool) {
     let file_name = rel.rsplit('/').next().unwrap_or(rel);
     let is_py_pkg = file_name == "__init__.py";
     let is_ts_pkg = file_name == "index.ts"
         || file_name == "index.tsx"
         || file_name == "index.js"
-        || file_name == "index.jsx";
-    if is_py_pkg || is_ts_pkg {
+        || file_name == "index.jsx"
+        || file_name == "index.mts"
+        || file_name == "index.cts"
+        || file_name == "index.mjs"
+        || file_name == "index.cjs";
+    let is_rust_root = file_name == "mod.rs" || file_name == "lib.rs";
+    if is_py_pkg || is_ts_pkg || is_rust_root {
         let dir = rel
             .strip_suffix(file_name)
             .unwrap_or(rel)
             .trim_end_matches('/')
             .replace('/', ".");
         if dir.is_empty() {
+            // A root-level `lib.rs`/`mod.rs` has no containing directory;
+            // keep its stem instead of inventing a shared "root" module.
+            if is_rust_root {
+                return (file_name.trim_end_matches(".rs").to_string(), true);
+            }
             return ("root".to_string(), true);
         }
         return (dir, true);
@@ -411,6 +422,10 @@ pub fn module_path_for(rel: &str) -> (String, bool) {
         .trim_end_matches(".ts")
         .trim_end_matches(".jsx")
         .trim_end_matches(".js")
+        .trim_end_matches(".mts")
+        .trim_end_matches(".cts")
+        .trim_end_matches(".mjs")
+        .trim_end_matches(".cjs")
         .trim_end_matches(".rs")
         .trim_end_matches(".py");
     if stem.is_empty() {
@@ -923,25 +938,34 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             walk_children(node, src, fx, ctx);
         }
         "mod_item" if fx.lang == Lang::Rust => {
-            // `mod db;` declares a module sibling: bind db -> crate_root.db.
+            // `mod db;` declares a child of the current module (inline module
+            // or file module), not of the crate root.
             if let Some(name_node) = node.child_by_field_name("name") {
                 let name = text(name_node, src);
                 if node.child_by_field_name("body").is_none() {
-                    if let Some(root) = fx.dir.split('.').next().map(|p| p.to_string()) {
-                        let path = format!("{root}.{name}");
-                        fx.aliases
-                            .push((name, ImportTarget::ModuleRoot { path: path.clone() }));
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line: node.start_position().row + 1,
-                            target: ImportTarget::Module { path },
-                        });
-                    }
+                    let scope = ctx
+                        .class_stack
+                        .last()
+                        .cloned()
+                        .unwrap_or_else(|| fx.module.clone());
+                    let path = format!("{scope}.{name}");
+                    fx.aliases
+                        .push((name, ImportTarget::ModuleRoot { path: path.clone() }));
+                    fx.import_edges.push(ImportEdgeCandidate {
+                        line: node.start_position().row + 1,
+                        target: ImportTarget::Module { path },
+                    });
                 }
             }
             walk_children(node, src, fx, ctx);
         }
         "use_declaration" if fx.lang == Lang::Rust => {
-            record_use_decl(node, src, fx);
+            let scope = ctx
+                .class_stack
+                .last()
+                .cloned()
+                .unwrap_or_else(|| fx.module.clone());
+            record_use_decl(node, src, fx, &scope);
             walk_children(node, src, fx, ctx);
         }
         "decorated_definition" => {
@@ -1315,7 +1339,7 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                 }
                 match child.kind() {
                     "wildcard_import" => {
-                        fx.stars.push(m.clone());
+                        fx.stars.push((m.clone(), line));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::ModuleRoot { path: m.clone() },
@@ -2007,59 +2031,213 @@ fn impl_type_name(node: Node<'_>, src: &[u8]) -> String {
         .unwrap_or_else(|| "UnknownImpl".to_string())
 }
 
-/// Rust use declarations: `use crate::error::Result;` binds the last segment.
-/// crate:: maps to the file's top-level directory (the crate root dir);
-/// external crates (std, clap, ...) bind as external and drop at call time.
-fn record_use_decl(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
-    let line = node.start_position().row + 1;
-    let mut stack = vec![node];
-    let mut crate_root: Option<String> = None;
-    if let Some(first_seg) = fx.module.split('.').next() {
-        crate_root = Some(first_seg.to_string());
-    }
-    while let Some(n) = stack.pop() {
-        if n.kind() == "scoped_identifier" {
-            let full = text(n, src);
-            let parts: Vec<&str> = full.split("::").collect();
-            if parts.len() >= 2 {
-                let name = parts.last().unwrap().to_string();
-                let mut path_parts: Vec<String> = parts[..parts.len() - 1]
-                    .iter()
-                    .map(|p| p.to_string())
-                    .collect();
-                if path_parts.first().map(|p| p.as_str()) == Some("crate") {
-                    if let Some(root) = &crate_root {
-                        path_parts[0] = root.clone();
-                    } else {
-                        path_parts.remove(0);
-                    }
-                }
-                let module = path_parts.join(".");
-                fx.aliases.push((
-                    name.clone(),
-                    ImportTarget::Symbol {
-                        module: module.clone(),
-                        name: name.clone(),
-                    },
-                ));
+#[derive(Clone, Copy)]
+struct UseTreeCtx<'a> {
+    src: &'a [u8],
+    prefix: &'a [String],
+    scope: &'a str,
+    crate_root: Option<&'a str>,
+    line: usize,
+}
+
+/// Rust use declarations: resolve the structural use tree (`use_list`,
+/// `scoped_use_list`, `use_as_clause`, `use_wildcard`) to module/symbol
+/// candidates. `crate::` maps to the file's top-level directory, `self::` to
+/// the current module scope, and `super::` to its parent. Plain paths are
+/// external crates in the 2018 edition and emit no edge.
+fn record_use_decl(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+    let Some(arg) = node.child_by_field_name("argument") else {
+        return;
+    };
+    let crate_root = fx
+        .dir
+        .split('.')
+        .next()
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
+    let ctx = UseTreeCtx {
+        src,
+        prefix: &[],
+        scope,
+        crate_root: crate_root.as_deref(),
+        line: node.start_position().row + 1,
+    };
+    walk_use_tree(arg, ctx, fx);
+}
+
+fn walk_use_tree(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileExtraction) {
+    match node.kind() {
+        "use_list" => {
+            let mut c = node.walk();
+            for child in node.named_children(&mut c) {
+                walk_use_tree(child, ctx, fx);
+            }
+        }
+        "scoped_use_list" => {
+            let Some(path) = node.child_by_field_name("path") else {
+                return;
+            };
+            let Some(base) = resolve_use_path(path, ctx) else {
+                return;
+            };
+            if !base.is_empty() {
                 fx.import_edges.push(ImportEdgeCandidate {
-                    line,
+                    line: ctx.line,
                     target: ImportTarget::Module {
-                        path: module.clone(),
+                        path: base.join("."),
                     },
-                });
-                fx.import_edges.push(ImportEdgeCandidate {
-                    line,
-                    target: ImportTarget::Symbol { module, name },
                 });
             }
-            continue;
+            if let Some(list) = node.child_by_field_name("list") {
+                walk_use_tree(
+                    list,
+                    UseTreeCtx {
+                        prefix: &base,
+                        ..ctx
+                    },
+                    fx,
+                );
+            }
         }
-        let mut c = n.walk();
-        for child in n.children(&mut c) {
-            stack.push(child);
+        "use_as_clause" => {
+            let Some(path) = node.child_by_field_name("path") else {
+                return;
+            };
+            let alias = node.child_by_field_name("alias").map(|n| text(n, ctx.src));
+            emit_use_leaf(path, ctx, alias, fx);
         }
+        "use_wildcard" => {
+            let full = match node.child_by_field_name("path") {
+                Some(path) => resolve_use_path(path, ctx),
+                None => Some(ctx.prefix.to_vec()),
+            };
+            let Some(full) = full.filter(|p| !p.is_empty()) else {
+                return;
+            };
+            let qn = full.join(".");
+            fx.stars.push((qn.clone(), ctx.line));
+            fx.import_edges.push(ImportEdgeCandidate {
+                line: ctx.line,
+                target: ImportTarget::ModuleRoot { path: qn },
+            });
+        }
+        _ => emit_use_leaf(node, ctx, None, fx),
     }
+}
+
+fn emit_use_leaf(
+    node: Node<'_>,
+    ctx: UseTreeCtx<'_>,
+    alias: Option<String>,
+    fx: &mut FileExtraction,
+) {
+    let Some(full) = resolve_use_path(node, ctx) else {
+        return;
+    };
+    if full.is_empty() {
+        return;
+    }
+    let qn = full.join(".");
+    let raw = text(node, ctx.src);
+    let marker_only = raw == "self";
+    let after_marker = raw.split("::").skip(1).filter(|p| !p.is_empty()).count();
+    let module_leaf = marker_only || (ctx.prefix.is_empty() && after_marker <= 1);
+    if module_leaf {
+        fx.import_edges.push(ImportEdgeCandidate {
+            line: ctx.line,
+            target: ImportTarget::Module { path: qn.clone() },
+        });
+        let binding = alias.or_else(|| {
+            if node.kind() == "self" {
+                None
+            } else {
+                full.last().cloned()
+            }
+        });
+        if let Some(binding) = binding {
+            fx.aliases
+                .push((binding, ImportTarget::ModuleRoot { path: qn }));
+        }
+        return;
+    }
+    let Some((name, parent)) = full.split_last() else {
+        return;
+    };
+    let module = parent.join(".");
+    fx.import_edges.push(ImportEdgeCandidate {
+        line: ctx.line,
+        target: ImportTarget::Module {
+            path: module.clone(),
+        },
+    });
+    fx.import_edges.push(ImportEdgeCandidate {
+        line: ctx.line,
+        target: ImportTarget::Symbol {
+            module: module.clone(),
+            name: name.clone(),
+        },
+    });
+    fx.aliases.push((
+        alias.unwrap_or_else(|| name.clone()),
+        ImportTarget::Symbol {
+            module,
+            name: name.clone(),
+        },
+    ));
+}
+
+/// Resolve one use-tree path node against the enclosing module scope.
+/// `None` means the path is external/absolute and must not produce an edge.
+fn resolve_use_path(node: Node<'_>, ctx: UseTreeCtx<'_>) -> Option<Vec<String>> {
+    let raw = text(node, ctx.src);
+    if raw.starts_with("::") {
+        return None;
+    }
+    let mut parts = raw
+        .split("::")
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
+    let first = parts.next()?;
+    let rest: Vec<String> = parts.collect();
+    let extra_supers = rest.iter().take_while(|p| p.as_str() == "super").count();
+    let mut plain = true;
+    let mut out: Vec<String> = match first.as_str() {
+        "crate" => {
+            plain = false;
+            vec![ctx.crate_root?.to_string()]
+        }
+        "self" if !ctx.prefix.is_empty() => {
+            plain = false;
+            ctx.prefix.to_vec()
+        }
+        "self" => {
+            plain = false;
+            ctx.scope.split('.').map(str::to_string).collect()
+        }
+        "super" if !ctx.prefix.is_empty() => {
+            plain = false;
+            let mut scoped = ctx.prefix.to_vec();
+            for _ in 0..=extra_supers {
+                scoped.pop();
+            }
+            scoped
+        }
+        "super" => {
+            plain = false;
+            let mut scoped: Vec<String> = ctx.scope.split('.').map(str::to_string).collect();
+            for _ in 0..=extra_supers {
+                scoped.pop();
+            }
+            scoped
+        }
+        _ if ctx.prefix.is_empty() => return None,
+        _ => ctx.prefix.to_vec(),
+    };
+    if plain {
+        out.push(first);
+    }
+    out.extend(rest.into_iter().skip(extra_supers));
+    Some(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -2072,7 +2250,7 @@ struct FileCtx {
     crate_root: Option<String>,
     module_sym_idx: usize,
     aliases: HashMap<String, ImportTarget>,
-    stars: Vec<String>,
+    stars: Vec<(String, usize)>,
     /// (scope_func, var) -> constructor target chain; later assignment wins.
     assignments: HashMap<(String, String), Vec<String>>,
     /// (scope_func, var) -> annotation chain.
@@ -2130,6 +2308,9 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             let qualname = s.qualname.clone();
             let kind = s.kind;
             let name = s.name.clone();
+            if kind == "module" {
+                t.module_paths.insert(qualname.clone());
+            }
             t.symbols.push(s);
             t.existing_ids.push(None);
             t.by_qualname.entry(qualname.clone()).or_default().push(idx);
@@ -2215,6 +2396,9 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
     for c in carried_syms {
         let idx = t.symbols.len();
         t.module_paths.insert(c.module.clone());
+        if c.kind == "module" {
+            t.module_paths.insert(c.qualname.clone());
+        }
         t.symbols.push(NewSymbol {
             kind: c.kind,
             name: c.name.clone(),
@@ -2394,6 +2578,28 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                                 site_line: cand.line,
                             });
                         }
+                    } else if let Some(dsts) = t.by_qualname.get(&format!("{module}.{name}")) {
+                        // `use crate::a::b` where b is a submodule: the symbol
+                        // candidate resolves to the module symbol.
+                        if let Some(&dst) = dsts.iter().find(|&&i| t.symbols[i].kind == "module") {
+                            if dst != fctx.module_sym_idx {
+                                t.edges.push(NewEdge {
+                                    src_idx: fctx.module_sym_idx,
+                                    dst_idx: Some(dst),
+                                    dst_name: format!("{module}.{name}"),
+                                    kind: "imports",
+                                    confidence: "EXTRACTED",
+                                    site_line: cand.line,
+                                });
+                            }
+                        } else {
+                            unresolved_calls.push(UnresolvedSite {
+                                file_idx: fi,
+                                name: format!("{module}.{name}"),
+                                kind: "import",
+                                site_line: cand.line,
+                            });
+                        }
                     } else {
                         unresolved_calls.push(UnresolvedSite {
                             file_idx: fi,
@@ -2404,7 +2610,11 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                     }
                 }
                 ImportTarget::Module { path } => {
-                    if fctx.stars.iter().any(|m| m == path) {
+                    if fctx
+                        .stars
+                        .iter()
+                        .any(|(m, line)| m == path && *line == cand.line)
+                    {
                         continue; // the star edge below is the canonical one
                     }
                     if let Some(dsts) = t.by_qualname.get(path) {
@@ -2434,18 +2644,25 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                     // Star imports use ModuleRoot as their edge target: AMBIGUOUS
                     // edge to the module symbol (spec). Plain `import x` emits no
                     // edge; resolution happens at call time.
-                    let is_star = fctx.stars.iter().any(|m| m == path);
+                    let is_star = fctx
+                        .stars
+                        .iter()
+                        .any(|(m, line)| m == path && *line == cand.line);
                     if is_star {
                         if let Some(dsts) = t.by_qualname.get(path) {
-                            if let Some(&dst) = dsts.first() {
-                                t.edges.push(NewEdge {
-                                    src_idx: fctx.module_sym_idx,
-                                    dst_idx: Some(dst),
-                                    dst_name: path.clone(),
-                                    kind: "imports",
-                                    confidence: "AMBIGUOUS",
-                                    site_line: cand.line,
-                                });
+                            if let Some(&dst) =
+                                dsts.iter().find(|&&i| t.symbols[i].kind == "module")
+                            {
+                                if dst != fctx.module_sym_idx {
+                                    t.edges.push(NewEdge {
+                                        src_idx: fctx.module_sym_idx,
+                                        dst_idx: Some(dst),
+                                        dst_name: path.clone(),
+                                        kind: "imports",
+                                        confidence: "AMBIGUOUS",
+                                        site_line: cand.line,
+                                    });
+                                }
                             }
                         }
                     }
@@ -2603,7 +2820,7 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 None => {}
             }
             // Star imports: defer to each star module's top-level names.
-            for m in &fctx.stars {
+            for (m, _) in &fctx.stars {
                 if let Some(out) =
                     bare_candidates(t.by_mod_name.get(&(m.clone(), name.clone())), name)
                 {
@@ -3077,6 +3294,49 @@ mod gt_repro_tests {
             "def g():\n    try:\n        x = foo()\n    except ValueError:\n        pass\n",
         );
         assert_eq!(fx.calls.len(), 1, "calls: {}", fx.calls.len());
+    }
+
+    #[test]
+    fn module_path_collapses_rust_and_ts_markers() {
+        assert_eq!(module_path_for("src/lib.rs"), ("src".to_string(), true));
+        assert_eq!(module_path_for("src/a/mod.rs"), ("src.a".to_string(), true));
+        assert_eq!(module_path_for("src/a.rs"), ("src.a".to_string(), false));
+        assert_eq!(module_path_for("lib.rs"), ("lib".to_string(), true));
+        assert_eq!(module_path_for("pkg/index.mts"), ("pkg".to_string(), true));
+        assert_eq!(
+            module_path_for("pkg/mod.cjs"),
+            ("pkg.mod".to_string(), false)
+        );
+    }
+
+    #[test]
+    fn rust_use_tree_emits_grouped_alias_self_and_super_candidates() {
+        let src = "use crate::a::{f, S as T, self};\nuse super::util::u;\n";
+        let parsed = parse_source(src.as_bytes(), Lang::Rust).unwrap();
+        let fx = extract_file(0, "src/use_tree.rs", src.as_bytes(), &parsed);
+        let mut edges: Vec<_> = fx
+            .import_edges
+            .iter()
+            .map(|c| (c.line, format!("{:?}", c.target)))
+            .collect();
+        edges.sort();
+        edges.dedup();
+        assert_eq!(
+            edges,
+            vec![
+                (1, "Module { path: \"src.a\" }".to_string()),
+                (1, "Symbol { module: \"src.a\", name: \"S\" }".to_string()),
+                (1, "Symbol { module: \"src.a\", name: \"f\" }".to_string()),
+                (2, "Module { path: \"src.util\" }".to_string()),
+                (
+                    2,
+                    "Symbol { module: \"src.util\", name: \"u\" }".to_string()
+                ),
+            ],
+            "use-tree candidates"
+        );
+        assert!(fx.aliases.iter().any(|(a, _)| a == "T"), "alias T");
+        assert!(fx.aliases.iter().any(|(a, _)| a == "u"), "alias u");
     }
 
     #[test]

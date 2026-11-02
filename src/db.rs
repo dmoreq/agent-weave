@@ -396,7 +396,8 @@ pub fn gap_files_for_new_names(
         let mut stmt = old.prepare(
             "SELECT DISTINCT f.path, e.dst_name FROM edges e
              JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
-             WHERE e.kind = 'calls' AND e.confidence = 'AMBIGUOUS'",
+             WHERE e.confidence = 'AMBIGUOUS'
+               AND e.kind IN ('calls', 'imports', 'inherits')",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for r in rows {
