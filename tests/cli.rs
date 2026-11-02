@@ -1131,14 +1131,44 @@ fn usage_summary_payload_section_and_doctor_health() {
 
 #[test]
 fn g5_no_child_processes_survive() {
-    // Invariant 2: zero long-lived children after each subcommand. Run a build
-    // tagged with a unique token, then assert nothing matching the token is
-    // alive (the kg process itself has exited).
+    // Invariant 2: kg spawns only short-lived git commands and leaves no
+    // descendants. Poll the child tree during the build (the previous test
+    // only looked after exit, R6e finding), then assert nothing tagged with
+    // the fixture token survives.
     let repo = fixture("proc");
     let marker = format!("kg-proc-{}", std::process::id());
     write(&repo, &format!("{marker}.py"), "def f():\n    pass\n");
-    let out = kg(&repo).args(["build"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0));
+    for i in 0..200 {
+        write(&repo, &format!("pad{i}.py"), "def p():\n    return 1\n");
+    }
+    let mut child = kg(&repo).arg("build").spawn().unwrap();
+    let pid = child.id().to_string();
+    let mut seen: std::collections::HashSet<String> = Default::default();
+    loop {
+        if let Ok(out) = Command::new("ps")
+            .args(["-o", "comm=", "-P", &pid])
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let comm = line.trim();
+                if !comm.is_empty() {
+                    seen.insert(comm.to_string());
+                }
+            }
+        }
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let status = child.wait().unwrap();
+    assert!(status.success());
+    for comm in &seen {
+        assert!(
+            comm == "git" || comm.ends_with("/git"),
+            "unexpected child process during build: {comm} (seen: {seen:?})"
+        );
+    }
     let probe = Command::new("pgrep")
         .args(["-f", &marker])
         .output()

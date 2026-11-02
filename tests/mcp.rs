@@ -260,6 +260,72 @@ fn g10_initialize_tools_list_and_parity() {
         String::from_utf8_lossy(&cli_clones_hi.stderr).trim_end()
     );
 
+    // R6e: parity covers every pointer/report tool that does not depend on
+    // wall-clock timings or journal state.
+    for (tool, args, cli_args) in [
+        (
+            "callees",
+            json!({"name": "caller"}),
+            vec!["callees", "caller"],
+        ),
+        (
+            "impact",
+            json!({"file": "utils.py"}),
+            vec!["impact", "utils.py"],
+        ),
+        (
+            "hotspots",
+            json!({"limit": 5}),
+            vec!["hotspots", "--limit", "5"],
+        ),
+        ("report", json!({}), vec!["report"]),
+    ] {
+        let cli = Command::new(env!("CARGO_BIN_EXE_kg"))
+            .arg("--root")
+            .arg(&repo)
+            .args(&cli_args)
+            .output()
+            .unwrap();
+        assert_eq!(cli.status.code(), Some(0), "{tool} CLI failed");
+        let via_mcp = rpc(
+            &mut srv,
+            13,
+            "tools/call",
+            json!({"name": tool, "arguments": args}),
+        );
+        assert_eq!(
+            result_text(&via_mcp),
+            String::from_utf8_lossy(&cli.stdout).into_owned(),
+            "{tool} byte parity"
+        );
+    }
+    // unresolved: empty-result parity (channel differs by contract: CLI stderr,
+    // MCP result text; same class text).
+    let cli_unres = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["unresolved"])
+        .output()
+        .unwrap();
+    let unres = rpc(
+        &mut srv,
+        14,
+        "tools/call",
+        json!({"name": "unresolved", "arguments": {}}),
+    );
+    if cli_unres.status.code() == Some(0) {
+        assert_eq!(
+            result_text(&unres),
+            String::from_utf8_lossy(&cli_unres.stdout).into_owned()
+        );
+    } else {
+        assert_eq!(unres["result"]["isError"], true);
+        assert_eq!(
+            result_text(&unres).trim_end(),
+            String::from_utf8_lossy(&cli_unres.stderr).trim_end()
+        );
+    }
+
     // G10 parity extends to path (Amendment 13): hop pointers + chain line
     // byte-equal between the surfaces.
     let cli_path = Command::new(env!("CARGO_BIN_EXE_kg"))
@@ -326,15 +392,16 @@ fn g10_initialize_tools_list_and_parity() {
 
     // Every dispatched tool call journaled with the mcp surface: callers,
     // symbols (plain), symbols (outline), search, clones, clones (min_lines
-    // failure), dead, stats, path. The unknown tool is rejected before
-    // dispatch and journals nothing; the CLI reference commands above added
+    // failure), dead, stats, path, plus the R6e parity additions (callees,
+    // impact, hotspots, report, unresolved). The unknown tool is rejected
+    // before dispatch and journals nothing; CLI reference commands above add
     // their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
     let mcp_lines = log
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 9, "{log}");
+    assert_eq!(mcp_lines, 14, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -345,8 +412,8 @@ fn g10_initialize_tools_list_and_parity() {
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
     assert_eq!(
-        mcp_payload, 6,
-        "callers+symbols(plain)+symbols(outline)+search+dead+path, not stats: {payload}"
+        mcp_payload, 8,
+        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact, not stats: {payload}"
     );
     let callers_line = payload
         .lines()
