@@ -113,3 +113,26 @@ it: −57%/−86%; the effect is stable across scales, not monotonically growing
 value result in the evidence set and the basis for the narrow positioning:
 route/reachability questions on small-to-medium repos are where kg is
 strongest; search/clones remain host-dependent.
+
+## Round-3 closure (2026-11-02, commit 7537b40)
+
+The round-3 verification's remaining findings are closed:
+
+- Export scrub no longer substitutes prose for paths: no `the private evidence
+  vault` tokens, no empty markdown links, Cargo exclude intact, exported CI
+  guard syntactically valid, exported test suite PASS (57 files).
+- Write-path gate is brace-aware: `#[cfg(test)]` modules are stripped before
+  scanning, `File::options`/`File::create_new` are in the primitive set, and
+  three planted controls (evil.rs, post-test walk.rs write, File::options) are
+  caught.
+- Self GT re-frozen at the final commit: 10/10 recall, 44/44 precision.
+- Stage-4 wording corrected: the effect is stable across scales, not
+  monotonically growing; Stage-1 numbers restated accurately (tool calls
+  −57%/−86%, kg calls −91%/−71%).
+- Full battery green: 109/109 tests, fmt, clippy, allowlist, write-path,
+  self GT, path GT 8/8, search recall 0.800, seatbelt with negative control,
+  install smoke, public export.
+
+**Status: publish-ready. Remaining work is owner-only** (right-to-publish
+confirmation, repository creation/push with a public identity, tag/release,
+vulnerability-reporting toggle, handle confirmation).
