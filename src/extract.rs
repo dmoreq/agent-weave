@@ -22,37 +22,200 @@ pub const SCHEMA_VERSION: i32 = 5;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
-    "abs", "aiter", "all", "any", "anext", "ascii", "bin", "bool", "bytearray", "bytes",
-    "callable", "chr", "classmethod", "compile", "complex", "delattr", "dict", "dir", "divmod",
-    "enumerate", "eval", "exec", "filter", "float", "format", "frozenset", "getattr", "globals",
-    "hasattr", "hash", "hex", "id", "input", "int", "isinstance", "issubclass", "iter", "len",
-    "list", "locals", "map", "max", "memoryview", "min", "next", "object", "oct", "open", "ord",
-    "pow", "print", "property", "range", "repr", "reversed", "round", "set", "setattr", "slice",
-    "sorted", "staticmethod", "str", "sum", "super", "tuple", "type", "vars", "zip", "__import__",
-    "Exception", "BaseException", "ArithmeticError", "AssertionError", "AttributeError",
-    "BlockingIOError", "BrokenPipeError", "BufferError", "ChildProcessError", "ConnectionError",
-    "ConnectionRefusedError", "ConnectionResetError", "EOFError", "FileExistsError",
-    "FileNotFoundError", "FloatingPointError", "GeneratorExit", "ImportError", "IndentationError",
-    "IndexError", "InterruptedError", "IsADirectoryError", "KeyError", "KeyboardInterrupt",
-    "LookupError", "MemoryError", "ModuleNotFoundError", "NameError", "NotADirectoryError",
-    "NotImplementedError", "OSError", "OverflowError", "PermissionError", "ProcessLookupError",
-    "RecursionError", "ReferenceError", "RuntimeError", "StopAsyncIteration", "StopIteration",
-    "SyntaxError", "SystemError", "SystemExit", "TabError", "TimeoutError", "TypeError",
-    "UnboundLocalError", "UnicodeDecodeError", "UnicodeEncodeError", "UnicodeError",
-    "UnicodeTranslateError", "ValueError", "ZeroDivisionError",
+    "abs",
+    "aiter",
+    "all",
+    "any",
+    "anext",
+    "ascii",
+    "bin",
+    "bool",
+    "bytearray",
+    "bytes",
+    "callable",
+    "chr",
+    "classmethod",
+    "compile",
+    "complex",
+    "delattr",
+    "dict",
+    "dir",
+    "divmod",
+    "enumerate",
+    "eval",
+    "exec",
+    "filter",
+    "float",
+    "format",
+    "frozenset",
+    "getattr",
+    "globals",
+    "hasattr",
+    "hash",
+    "hex",
+    "id",
+    "input",
+    "int",
+    "isinstance",
+    "issubclass",
+    "iter",
+    "len",
+    "list",
+    "locals",
+    "map",
+    "max",
+    "memoryview",
+    "min",
+    "next",
+    "object",
+    "oct",
+    "open",
+    "ord",
+    "pow",
+    "print",
+    "property",
+    "range",
+    "repr",
+    "reversed",
+    "round",
+    "set",
+    "setattr",
+    "slice",
+    "sorted",
+    "staticmethod",
+    "str",
+    "sum",
+    "super",
+    "tuple",
+    "type",
+    "vars",
+    "zip",
+    "__import__",
+    "Exception",
+    "BaseException",
+    "ArithmeticError",
+    "AssertionError",
+    "AttributeError",
+    "BlockingIOError",
+    "BrokenPipeError",
+    "BufferError",
+    "ChildProcessError",
+    "ConnectionError",
+    "ConnectionRefusedError",
+    "ConnectionResetError",
+    "EOFError",
+    "FileExistsError",
+    "FileNotFoundError",
+    "FloatingPointError",
+    "GeneratorExit",
+    "ImportError",
+    "IndentationError",
+    "IndexError",
+    "InterruptedError",
+    "IsADirectoryError",
+    "KeyError",
+    "KeyboardInterrupt",
+    "LookupError",
+    "MemoryError",
+    "ModuleNotFoundError",
+    "NameError",
+    "NotADirectoryError",
+    "NotImplementedError",
+    "OSError",
+    "OverflowError",
+    "PermissionError",
+    "ProcessLookupError",
+    "RecursionError",
+    "ReferenceError",
+    "RuntimeError",
+    "StopAsyncIteration",
+    "StopIteration",
+    "SyntaxError",
+    "SystemError",
+    "SystemExit",
+    "TabError",
+    "TimeoutError",
+    "TypeError",
+    "UnboundLocalError",
+    "UnicodeDecodeError",
+    "UnicodeEncodeError",
+    "UnicodeError",
+    "UnicodeTranslateError",
+    "ValueError",
+    "ZeroDivisionError",
 ];
 
 /// Well-known stdlib module roots: `os.path.join(...)` on unindexed externals
 /// drops with the builtin counter instead of flooding the unresolved count.
 const STDLIB_MODULES: &[&str] = &[
-    "os", "sys", "re", "json", "math", "time", "datetime", "logging", "pathlib", "collections",
-    "itertools", "functools", "typing", "dataclasses", "enum", "abc", "io", "csv", "sqlite3",
-    "argparse", "subprocess", "shutil", "tempfile", "textwrap", "unicodedata", "uuid", "random",
-    "statistics", "copy", "hashlib", "base64", "urllib", "http", "socket", "threading",
-    "multiprocessing", "concurrent", "asyncio", "contextlib", "warnings", "unittest", "pickle",
-    "glob", "fnmatch", "string", "struct", "zlib", "gzip", "tarfile", "zipfile", "heapq",
-    "bisect", "array", "weakref", "types", "operator", "inspect", "traceback", "atexit",
-    "signal", "stat", "errno", "platform", "getpass", "difflib", "secrets", "gc", "os.path",
+    "os",
+    "sys",
+    "re",
+    "json",
+    "math",
+    "time",
+    "datetime",
+    "logging",
+    "pathlib",
+    "collections",
+    "itertools",
+    "functools",
+    "typing",
+    "dataclasses",
+    "enum",
+    "abc",
+    "io",
+    "csv",
+    "sqlite3",
+    "argparse",
+    "subprocess",
+    "shutil",
+    "tempfile",
+    "textwrap",
+    "unicodedata",
+    "uuid",
+    "random",
+    "statistics",
+    "copy",
+    "hashlib",
+    "base64",
+    "urllib",
+    "http",
+    "socket",
+    "threading",
+    "multiprocessing",
+    "concurrent",
+    "asyncio",
+    "contextlib",
+    "warnings",
+    "unittest",
+    "pickle",
+    "glob",
+    "fnmatch",
+    "string",
+    "struct",
+    "zlib",
+    "gzip",
+    "tarfile",
+    "zipfile",
+    "heapq",
+    "bisect",
+    "array",
+    "weakref",
+    "types",
+    "operator",
+    "inspect",
+    "traceback",
+    "atexit",
+    "signal",
+    "stat",
+    "errno",
+    "platform",
+    "getpass",
+    "difflib",
+    "secrets",
+    "gc",
+    "os.path",
 ];
 
 #[derive(Debug, Clone)]
@@ -75,7 +238,7 @@ pub struct NewEdge {
     pub src_idx: usize,
     pub dst_idx: Option<usize>,
     pub dst_name: String,
-    pub kind: &'static str, // calls | imports | contains | inherits
+    pub kind: &'static str,       // calls | imports | contains | inherits
     pub confidence: &'static str, // EXTRACTED | AMBIGUOUS
     pub site_line: usize,
 }
@@ -203,8 +366,10 @@ pub struct FileExtraction {
 pub fn module_path_for(rel: &str) -> (String, bool) {
     let file_name = rel.rsplit('/').next().unwrap_or(rel);
     let is_py_pkg = file_name == "__init__.py";
-    let is_ts_pkg = file_name == "index.ts" || file_name == "index.tsx"
-        || file_name == "index.js" || file_name == "index.jsx";
+    let is_ts_pkg = file_name == "index.ts"
+        || file_name == "index.tsx"
+        || file_name == "index.js"
+        || file_name == "index.jsx";
     if is_py_pkg || is_ts_pkg {
         let dir = rel
             .strip_suffix(file_name)
@@ -397,7 +562,17 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
     match node.kind() {
         // ---- Rust definitions (P2.5) ----
         "function_item" => {
-            define_function(node, src, fx, ctx, if ctx.class_stack.is_empty() { "function" } else { "method" });
+            define_function(
+                node,
+                src,
+                fx,
+                ctx,
+                if ctx.class_stack.is_empty() {
+                    "function"
+                } else {
+                    "method"
+                },
+            );
         }
         "struct_item" | "enum_item" => {
             define_class_ts(node, src, fx, ctx);
@@ -479,9 +654,15 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             }
         }
         "function_definition" => {
-            let Some(name_node) = node.child_by_field_name("name") else { return };
+            let Some(name_node) = node.child_by_field_name("name") else {
+                return;
+            };
             let name = text(name_node, src);
-            let kind = if ctx.class_stack.is_empty() { "function" } else { "method" };
+            let kind = if ctx.class_stack.is_empty() {
+                "function"
+            } else {
+                "method"
+            };
             let parent_qn = ctx
                 .class_stack
                 .last()
@@ -520,7 +701,9 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             ctx.func_stack.pop();
         }
         "class_definition" => {
-            let Some(name_node) = node.child_by_field_name("name") else { return };
+            let Some(name_node) = node.child_by_field_name("name") else {
+                return;
+            };
             let name = text(name_node, src);
             let parent_qn = ctx
                 .class_stack
@@ -595,8 +778,12 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
     for p in params.children(&mut cursor) {
         // TS: required_parameter / optional_parameter carry pattern + type.
         if matches!(p.kind(), "required_parameter" | "optional_parameter") {
-            let Some(ty) = p.child_by_field_name("type") else { continue };
-            let Some(ident) = p.child_by_field_name("pattern") else { continue };
+            let Some(ty) = p.child_by_field_name("type") else {
+                continue;
+            };
+            let Some(ident) = p.child_by_field_name("pattern") else {
+                continue;
+            };
             if let Some(chain) = dotted_chain(ty, src) {
                 fx.params.push(ParamType {
                     var: text(ident, src),
@@ -616,7 +803,9 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
                 found
             });
             let ty = p.child_by_field_name("type");
-            let (Some(ident), Some(ty)) = (ident, ty) else { continue };
+            let (Some(ident), Some(ty)) = (ident, ty) else {
+                continue;
+            };
             if let Some(chain) = dotted_chain(ty, src) {
                 fx.params.push(ParamType {
                     var: text(ident, src),
@@ -635,28 +824,33 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
 /// return type is unknowable). Handles `var = ...` (function-local) and
 /// `self.field = ...` (class-wide).
 fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
-    let Some(left) = node.child_by_field_name("left") else { return };
-    let Some(right) = node.child_by_field_name("right") else { return };
+    let Some(left) = node.child_by_field_name("left") else {
+        return;
+    };
+    let Some(right) = node.child_by_field_name("right") else {
+        return;
+    };
     let direct_call_chain = |call: Node<'_>| -> Option<Vec<String>> {
         let f = call
             .child_by_field_name("function")
             .or_else(|| call.child_by_field_name("constructor"))?;
         dotted_chain(f, src)
     };
-    let target: Option<Vec<String>> = if matches!(right.kind(), "call" | "call_expression" | "new_expression") {
-        direct_call_chain(right)
-    } else if matches!(right.kind(), "boolean_operator" | "bool_op") {
-        // `x = a or B(...)`: the last top-level operand that is a direct call.
-        let mut cursor = right.walk();
-        let operands: Vec<Node<'_>> = right.named_children(&mut cursor).collect();
-        operands
-            .iter()
-            .rev()
-            .find(|o| matches!(o.kind(), "call" | "call_expression"))
-            .and_then(|o| direct_call_chain(*o))
-    } else {
-        None
-    };
+    let target: Option<Vec<String>> =
+        if matches!(right.kind(), "call" | "call_expression" | "new_expression") {
+            direct_call_chain(right)
+        } else if matches!(right.kind(), "boolean_operator" | "bool_op") {
+            // `x = a or B(...)`: the last top-level operand that is a direct call.
+            let mut cursor = right.walk();
+            let operands: Vec<Node<'_>> = right.named_children(&mut cursor).collect();
+            operands
+                .iter()
+                .rev()
+                .find(|o| matches!(o.kind(), "call" | "call_expression"))
+                .and_then(|o| direct_call_chain(*o))
+        } else {
+            None
+        };
     let Some(target_dotted) = target else { return };
     match left.kind() {
         "identifier" => fx.assignments.push(Assignment {
@@ -720,11 +914,17 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     // `import a.b as c` wraps in aliased_import; a bare
                     // "alias" node appears in some grammar versions.
                     "aliased_import" | "alias" => {
-                        let Some(target) = child.child_by_field_name("name") else { continue };
-                        let Some(alias) = child.child_by_field_name("alias") else { continue };
+                        let Some(target) = child.child_by_field_name("name") else {
+                            continue;
+                        };
+                        let Some(alias) = child.child_by_field_name("alias") else {
+                            continue;
+                        };
                         fx.aliases.push((
                             text(alias, src),
-                            ImportTarget::ModuleRoot { path: text(target, src) },
+                            ImportTarget::ModuleRoot {
+                                path: text(target, src),
+                            },
                         ));
                     }
                     _ => {}
@@ -753,26 +953,42 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                         let name = text(child, src);
                         fx.aliases.push((
                             name.clone(),
-                            ImportTarget::Symbol { module: m.clone(), name: name.clone() },
+                            ImportTarget::Symbol {
+                                module: m.clone(),
+                                name: name.clone(),
+                            },
                         ));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
-                            target: ImportTarget::Symbol { module: m.clone(), name },
+                            target: ImportTarget::Symbol {
+                                module: m.clone(),
+                                name,
+                            },
                         });
                     }
                     // `from m import n as y` wraps the binding in an
                     // aliased_import node (import_statement uses "alias").
                     "aliased_import" | "alias" => {
-                        let Some(target) = child.child_by_field_name("name") else { continue };
-                        let Some(alias) = child.child_by_field_name("alias") else { continue };
+                        let Some(target) = child.child_by_field_name("name") else {
+                            continue;
+                        };
+                        let Some(alias) = child.child_by_field_name("alias") else {
+                            continue;
+                        };
                         let name = text(target, src);
                         fx.aliases.push((
                             text(alias, src),
-                            ImportTarget::Symbol { module: m.clone(), name: name.clone() },
+                            ImportTarget::Symbol {
+                                module: m.clone(),
+                                name: name.clone(),
+                            },
                         ));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
-                            target: ImportTarget::Symbol { module: m.clone(), name },
+                            target: ImportTarget::Symbol {
+                                module: m.clone(),
+                                name,
+                            },
                         });
                     }
                     _ => {}
@@ -821,8 +1037,16 @@ fn resolve_from_module(
 // TypeScript/TSX/JSX definitions (P2)
 // ---------------------------------------------------------------------------
 
-fn define_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx, kind: &'static str) {
-    let Some(name_node) = node.child_by_field_name("name") else { return };
+fn define_function(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    ctx: &mut WalkCtx,
+    kind: &'static str,
+) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
     let name = text(name_node, src);
     let parent_qn = ctx
         .class_stack
@@ -863,7 +1087,9 @@ fn define_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
 }
 
 fn define_class_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
-    let Some(name_node) = node.child_by_field_name("name") else { return };
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
     let name = text(name_node, src);
     let parent_qn = ctx
         .class_stack
@@ -934,8 +1160,12 @@ fn collect_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_i
 
 fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
     // method_definition: name field is a property_identifier inside a class body.
-    let Some(name_node) = node.child_by_field_name("name") else { return };
-    let Some(class_qn) = ctx.class_stack.last().cloned() else { return };
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Some(class_qn) = ctx.class_stack.last().cloned() else {
+        return;
+    };
     let name = text(name_node, src);
     let qualname = format!("{class_qn}.{name}");
     let start = node.start_position().row + 1;
@@ -971,13 +1201,25 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
 
 /// Module-level `const X = () => {...}` / `= function() {...}` -> function
 /// symbol (React components and hooks live here).
-fn record_ts_arrow_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+fn record_ts_arrow_function(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    ctx: &mut WalkCtx,
+) {
     if !ctx.class_stack.is_empty() || !ctx.func_stack.is_empty() {
         return; // nested functions are not indexed symbols
     }
-    let Some(name_node) = node.child_by_field_name("name") else { return };
-    let Some(value) = node.child_by_field_name("value") else { return };
-    if !matches!(value.kind(), "arrow_function" | "function" | "function_expression") {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Some(value) = node.child_by_field_name("value") else {
+        return;
+    };
+    if !matches!(
+        value.kind(),
+        "arrow_function" | "function" | "function_expression"
+    ) {
         return;
     }
     let name = text(name_node, src);
@@ -1012,7 +1254,9 @@ fn record_ts_arrow_function(node: Node<'_>, src: &[u8], fx: &mut FileExtraction,
 /// builtin counter, not the unresolved counter).
 fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
     let line = node.start_position().row + 1;
-    let Some(source_node) = node.child_by_field_name("source") else { return };
+    let Some(source_node) = node.child_by_field_name("source") else {
+        return;
+    };
     let raw = text(source_node, src);
     let source = raw.trim_matches(|c| c == '\'' || c == '"');
     let module = resolve_ts_module(source, &fx.dir);
@@ -1029,11 +1273,17 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     let name = text(part, src);
                     fx.aliases.push((
                         name.clone(),
-                        ImportTarget::Symbol { module: module.clone(), name: "default".to_string() },
+                        ImportTarget::Symbol {
+                            module: module.clone(),
+                            name: "default".to_string(),
+                        },
                     ));
                     fx.import_edges.push(ImportEdgeCandidate {
                         line,
-                        target: ImportTarget::Symbol { module: module.clone(), name },
+                        target: ImportTarget::Symbol {
+                            module: module.clone(),
+                            name,
+                        },
                     });
                 }
                 "namespace_import" => {
@@ -1041,8 +1291,12 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     let mut c3 = part.walk();
                     for p2 in part.children(&mut c3) {
                         if p2.kind() == "identifier" {
-                            fx.aliases
-                                .push((text(p2, src), ImportTarget::ModuleRoot { path: module.clone() }));
+                            fx.aliases.push((
+                                text(p2, src),
+                                ImportTarget::ModuleRoot {
+                                    path: module.clone(),
+                                },
+                            ));
                         }
                     }
                 }
@@ -1052,7 +1306,9 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                         if spec.kind() != "import_specifier" {
                             continue;
                         }
-                        let Some(name_node) = spec.child_by_field_name("name") else { continue };
+                        let Some(name_node) = spec.child_by_field_name("name") else {
+                            continue;
+                        };
                         let name = text(name_node, src);
                         let bound = spec
                             .child_by_field_name("alias")
@@ -1060,11 +1316,17 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                             .unwrap_or_else(|| name.clone());
                         fx.aliases.push((
                             bound,
-                            ImportTarget::Symbol { module: module.clone(), name: name.clone() },
+                            ImportTarget::Symbol {
+                                module: module.clone(),
+                                name: name.clone(),
+                            },
                         ));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
-                            target: ImportTarget::Symbol { module: module.clone(), name },
+                            target: ImportTarget::Symbol {
+                                module: module.clone(),
+                                name,
+                            },
                         });
                     }
                 }
@@ -1163,7 +1425,10 @@ fn record_use_decl(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                 let module = path_parts.join(".");
                 fx.aliases.push((
                     name.clone(),
-                    ImportTarget::Symbol { module: module.clone(), name: name.clone() },
+                    ImportTarget::Symbol {
+                        module: module.clone(),
+                        name: name.clone(),
+                    },
                 ));
                 fx.import_edges.push(ImportEdgeCandidate {
                     line,
@@ -1317,7 +1582,10 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
 
     // Merge carried symbols (fast path): join the resolution tables; their
     // rows are already stored and are never re-inserted.
-    let CarriedIndex { symbols: carried_syms, inherits: carried_inherits } = carried;
+    let CarriedIndex {
+        symbols: carried_syms,
+        inherits: carried_inherits,
+    } = carried;
     for c in carried_syms {
         let idx = t.symbols.len();
         t.module_paths.insert(c.module.clone());
@@ -1331,7 +1599,10 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             signature: String::new(),
         });
         t.existing_ids.push(Some(c.row_id));
-        t.by_qualname.entry(c.qualname.clone()).or_default().push(idx);
+        t.by_qualname
+            .entry(c.qualname.clone())
+            .or_default()
+            .push(idx);
         let direct_child = c.qualname == format!("{}.{}", c.module, c.name);
         if c.kind != "method" && direct_child {
             t.by_mod_name
@@ -1554,7 +1825,9 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             }
             // Star imports: defer to each star module's top-level names.
             for m in &fctx.stars {
-                if let Some(out) = bare_candidates(t.by_mod_name.get(&(m.clone(), name.clone())), name) {
+                if let Some(out) =
+                    bare_candidates(t.by_mod_name.get(&(m.clone(), name.clone())), name)
+                {
                     return out;
                 }
             }
@@ -1571,7 +1844,9 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             let method = chain[1].clone();
             // self/cls (Python) and this (TS) inside a class body.
             if chain[0] == "self" || chain[0] == "cls" || chain[0] == "this" {
-                let Some(class_qn) = &site.scope_class else { return Outcome::Unresolved };
+                let Some(class_qn) = &site.scope_class else {
+                    return Outcome::Unresolved;
+                };
                 if chain.len() == 2 {
                     return mro_outcome(t, class_qn, &method);
                 }
@@ -1588,7 +1863,9 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             }
             // super.m(): skip the own class, resolve against its bases.
             if chain[0] == "super" && chain.len() == 2 {
-                let Some(class_qn) = &site.scope_class else { return Outcome::Unresolved };
+                let Some(class_qn) = &site.scope_class else {
+                    return Outcome::Unresolved;
+                };
                 if let Some(bases) = t.class_bases.get(class_qn) {
                     for base in bases {
                         let out = mro_outcome(t, base, &method);
@@ -1712,9 +1989,10 @@ fn follow_binding(
     let file_idx = t.file_ctx.iter().position(|f| f.module == module)?;
     let fctx = &t.file_ctx[file_idx];
     match fctx.aliases.get(name) {
-        Some(ImportTarget::Symbol { module: m2, name: n2 }) => {
-            follow_binding(t, m2, n2, depth + 1, seen, display)
-        }
+        Some(ImportTarget::Symbol {
+            module: m2,
+            name: n2,
+        }) => follow_binding(t, m2, n2, depth + 1, seen, display),
         _ => None,
     }
 }
@@ -1924,8 +2202,8 @@ fn chain_from_module(t: &Tables, module: String, rest: &[String]) -> Outcome {
 #[cfg(test)]
 mod gt_repro_tests {
     use super::*;
-    use crate::parse::Lang;
     use crate::parse::parse_source;
+    use crate::parse::Lang;
 
     fn extract_src(src: &str) -> FileExtraction {
         let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
@@ -1934,10 +2212,12 @@ mod gt_repro_tests {
 
     #[test]
     fn typed_param_receiver_call_is_recorded() {
-        let fx = extract_src(
-            "class A:\n    def f(self, h: Handler):\n        h.handle(1)\n",
-        );
-        let calls: Vec<_> = fx.calls.iter().map(|c| (&c.callee, &c.scope_func)).collect();
+        let fx = extract_src("class A:\n    def f(self, h: Handler):\n        h.handle(1)\n");
+        let calls: Vec<_> = fx
+            .calls
+            .iter()
+            .map(|c| (&c.callee, &c.scope_func))
+            .collect();
         assert_eq!(calls.len(), 1, "calls recorded: {:?}", calls.len());
         assert!(matches!(calls[0].0, Callee::Attr(_)));
         assert_eq!(fx.params.len(), 1, "params: {:?}", fx.params.len());
@@ -1953,17 +2233,20 @@ mod gt_repro_tests {
 
     #[test]
     fn self_field_assignment_recorded() {
-        let fx = extract_src(
-            "class C:\n    def __init__(self):\n        self.res = Resolver()\n",
+        let fx = extract_src("class C:\n    def __init__(self):\n        self.res = Resolver()\n");
+        assert_eq!(
+            fx.self_fields.len(),
+            1,
+            "self_fields: {}",
+            fx.self_fields.len()
         );
-        assert_eq!(fx.self_fields.len(), 1, "self_fields: {}", fx.self_fields.len());
     }
 }
 
 #[cfg(test)]
 mod alias_repro {
     use super::*;
-    use crate::parse::{Lang, parse_source};
+    use crate::parse::{parse_source, Lang};
 
     #[test]
     fn aliased_from_import_binds_and_emits_edge_candidate() {
@@ -1971,17 +2254,18 @@ mod alias_repro {
         let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
         let fx = extract_file(0, "vihap/validators/gso_loader.py", src.as_bytes(), &parsed);
         assert!(
-            fx.aliases.iter().any(|(a, _)| a == "knowledge_artifacts_dir"),
+            fx.aliases
+                .iter()
+                .any(|(a, _)| a == "knowledge_artifacts_dir"),
             "aliases: {:?}",
             fx.aliases
         );
-        assert_eq!(fx.import_edges.len(), 1, "import_edges: {}", fx.import_edges.len());
+        assert_eq!(
+            fx.import_edges.len(),
+            1,
+            "import_edges: {}",
+            fx.import_edges.len()
+        );
         assert_eq!(fx.calls.len(), 1, "calls: {}", fx.calls.len());
     }
 }
-
-
-
-
-
-

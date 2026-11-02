@@ -72,7 +72,9 @@ impl BuildLock {
                     .ok()
                     .and_then(|s| {
                         s.lines().next().and_then(|l| {
-                            l.split_whitespace().next().and_then(|p| p.parse::<u32>().ok())
+                            l.split_whitespace()
+                                .next()
+                                .and_then(|p| p.parse::<u32>().ok())
                         })
                     })
                     .unwrap_or(0);
@@ -124,7 +126,10 @@ pub fn open_for_query(root: &Path) -> Result<Connection> {
 pub fn check_schema_version(conn: &Connection) -> Result<()> {
     let have: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if have != SCHEMA_VERSION {
-        return Err(KgError::SchemaMismatch { have, want: SCHEMA_VERSION });
+        return Err(KgError::SchemaMismatch {
+            have,
+            want: SCHEMA_VERSION,
+        });
     }
     Ok(())
 }
@@ -203,7 +208,10 @@ pub fn old_files(old: &Connection) -> Result<HashMap<String, (i64, i64, i64)>> {
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows.into_iter().map(|(p, m, s, h)| (p, (m, s, h))).collect())
+    Ok(rows
+        .into_iter()
+        .map(|(p, m, s, h)| (p, (m, s, h)))
+        .collect())
 }
 
 /// Count parse-error files among the carried set (fast-path gate denominator).
@@ -215,8 +223,7 @@ pub fn old_error_count(old: &Connection, rels: &[String]) -> Result<usize> {
         let sql = format!(
             "SELECT COUNT(*) FROM files WHERE parse_status != 'ok' AND path IN ({placeholders})"
         );
-        let c: i64 =
-            old.query_row(&sql, rusqlite::params_from_iter(chunk.iter()), |r| r.get(0))?;
+        let c: i64 = old.query_row(&sql, rusqlite::params_from_iter(chunk.iter()), |r| r.get(0))?;
         n += c as usize;
     }
     Ok(n)
@@ -246,8 +253,9 @@ pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<Str
                  WHERE df.path IN ({placeholders})"
             );
             let mut stmt = old.prepare(&sql)?;
-            let rows =
-                stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| r.get::<_, String>(0))?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+                r.get::<_, String>(0)
+            })?;
             for r in rows {
                 let p = r?;
                 if !dirty.contains(&p) {
@@ -326,7 +334,8 @@ pub fn gap_files_for_new_names(
 
 /// Insert unresolved call names for the fresh rows (schema v5, Amendment 15).
 pub fn insert_unresolved_calls(conn: &Connection, rows: &[(i64, String)]) -> Result<()> {
-    let mut stmt = conn.prepare("INSERT INTO unresolved_calls(file_id, dst_name) VALUES (?1, ?2)")?;
+    let mut stmt =
+        conn.prepare("INSERT INTO unresolved_calls(file_id, dst_name) VALUES (?1, ?2)")?;
     for chunk in rows.chunks(500) {
         for (file_id, name) in chunk {
             stmt.execute(rusqlite::params![file_id, name])?;
@@ -410,8 +419,7 @@ pub fn carry_forward_unchanged(
              SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
-        let mut refresh_mtime =
-            new.prepare("UPDATE files SET mtime = ?1 WHERE path = ?2")?;
+        let mut refresh_mtime = new.prepare("UPDATE files SET mtime = ?1 WHERE path = ?2")?;
         for (rel, mtime, size, current_mtime) in unchanged {
             let inserted = stmt.execute(rusqlite::params![rel, mtime, size])?;
             if inserted > 0 {
@@ -488,7 +496,11 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     Ok(ids)
 }
 
-pub fn insert_symbols(conn: &Connection, symbols: &[NewSymbol], file_ids: &[i64]) -> Result<Vec<i64>> {
+pub fn insert_symbols(
+    conn: &Connection,
+    symbols: &[NewSymbol],
+    file_ids: &[i64],
+) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
     for chunk in symbols.chunks(500) {
         let mut stmt = conn.prepare(
@@ -577,7 +589,9 @@ pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
          FROM symbols s JOIN files f ON f.id = s.file_id",
     )?;
     let rows: Vec<(i64, String, String, String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
     for (id, qualname, name, path, signature) in rows {
@@ -617,7 +631,9 @@ pub fn source_rev(root: &Path) -> String {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    let Some(mut rev) = head else { return "unknown".to_string() };
+    let Some(mut rev) = head else {
+        return "unknown".to_string();
+    };
     let dirty = std::process::Command::new("git")
         .args(["status", "--porcelain"])
         .current_dir(root)
@@ -635,7 +651,13 @@ pub fn source_rev(root: &Path) -> String {
 /// Nanoseconds close the same-second, same-size edit hole that silently kept
 /// a stale index; both sides of every comparison use this function.
 pub fn stat_mtime(path: &Path) -> Option<i64> {
-    fs::metadata(path).ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_nanos() as i64)
+    fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_nanos() as i64)
 }
 
 /// stat size as i64.
@@ -653,7 +675,9 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let conn = create_fresh(&dir).unwrap();
-        let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         drop(conn);
         let _ = fs::remove_dir_all(&dir);

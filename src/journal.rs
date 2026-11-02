@@ -90,7 +90,13 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
 
 /// Handlers inject the query outcome before the process exits. No-op when the
 /// journal was not armed (disabled, or a non-journaled subcommand).
-pub fn record_result(result_count: usize, shown: usize, total: usize, stale: bool, ambiguous: usize) {
+pub fn record_result(
+    result_count: usize,
+    shown: usize,
+    total: usize,
+    stale: bool,
+    ambiguous: usize,
+) {
     PENDING.with(|p| {
         if let Some(pending) = p.borrow_mut().as_mut() {
             pending.result_count = result_count;
@@ -343,13 +349,18 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
     if plines > 0 {
         let mut names: std::collections::BTreeMap<String, usize> = Default::default();
         let mut n_pointers = 0usize;
-        for line in read_payload_log(root).lines().filter(|l| !l.trim().is_empty()) {
+        for line in read_payload_log(root)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+        {
             if let Some((_tool, name, _built_at, pointers)) = parse_payload_line(line) {
                 *names.entry(name).or_default() += 1;
                 n_pointers += pointers.len();
             }
         }
-        out.push(format!("  payload: {plines} entries, {n_pointers} pointers"));
+        out.push(format!(
+            "  payload: {plines} entries, {n_pointers} pointers"
+        ));
         let mut top: Vec<(&String, &usize)> = names.iter().collect();
         top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
         for (name, calls) in top.into_iter().take(5) {
@@ -449,7 +460,9 @@ pub fn verify(
     let sampled: Vec<&(String, String, u64, Vec<String>)> = if n_entries <= limit {
         entries.iter().collect()
     } else {
-        (0..limit).map(|i| &entries[i * n_entries / limit]).collect()
+        (0..limit)
+            .map(|i| &entries[i * n_entries / limit])
+            .collect()
     };
     // Payload epoch: an entry recorded against a superseded index (a rebuild
     // happened between query and verify) cannot PROVE a pointer wrong — its

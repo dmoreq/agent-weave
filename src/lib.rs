@@ -1,8 +1,8 @@
 //! Library surface for integration tests (binary entry lives in main.rs).
 
 pub mod build;
-pub mod clones;
 pub mod cli;
+pub mod clones;
 pub mod db;
 pub mod doctor;
 pub mod error;

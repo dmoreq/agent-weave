@@ -104,7 +104,10 @@ fn cuj1_build_happy_path_and_readonly_tree() {
     let before = snapshot(&repo);
     let (code, stdout, _stderr) = build(&repo);
     assert_eq!(code, 0);
-    let line = stdout.lines().find(|l| l.starts_with("kg: built index")).unwrap();
+    let line = stdout
+        .lines()
+        .find(|l| l.starts_with("kg: built index"))
+        .unwrap();
     for key in ["files=3", "parse_errors=0", "wall="] {
         assert!(line.contains(key), "stats line missing {key}: {line}");
     }
@@ -163,8 +166,16 @@ fn stdout_is_clean(stdout: &[u8]) -> bool {
 #[test]
 fn cuj4_ambiguous_name_exit2_with_candidates() {
     let repo = fixture("cuj4");
-    write(&repo, "a.py", "class A:\n    def process(self):\n        return 1\n");
-    write(&repo, "b.py", "class B:\n    def process(self):\n        return 2\n");
+    write(
+        &repo,
+        "a.py",
+        "class A:\n    def process(self):\n        return 1\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "class B:\n    def process(self):\n        return 2\n",
+    );
     build(&repo);
     let out = kg(&repo).args(["callers", "process"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
@@ -242,7 +253,10 @@ fn cuj8_parse_quality_abort_exit7() {
     let out = kg(&repo).args(["build"]).output().unwrap();
     assert_eq!(out.status.code(), Some(7));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("kg: parse-quality: 25% of 4 files"), "{stderr}");
+    assert!(
+        stderr.contains("kg: parse-quality: 25% of 4 files"),
+        "{stderr}"
+    );
     // --force proceeds.
     let out = kg(&repo).args(["build", "--force"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
@@ -271,16 +285,25 @@ fn g4_staleness_header_after_edit() {
     fs::write(repo.join("utils.py"), &swapped).unwrap();
     let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("kg: 2 of "), "re-hash staleness: {stdout}");
+    assert!(
+        stdout.starts_with("kg: 2 of "),
+        "re-hash staleness: {stdout}"
+    );
 }
 
 #[test]
 fn response_contract_limit_clamps() {
     let repo = fixture("limit");
     build(&repo);
-    let out = kg(&repo).args(["callers", "normalize", "--limit", "0"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["callers", "normalize", "--limit", "0"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    let out = kg(&repo).args(["callers", "normalize", "--limit", "999999"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["callers", "normalize", "--limit", "999999"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0), "clamped, not rejected");
 }
 
@@ -301,19 +324,39 @@ fn fast_path_preserves_callers_of_changed_file() {
     build(&repo);
     let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("app.py:6"), "baseline caller present: {stdout}");
+    assert!(
+        stdout.contains("app.py:6"),
+        "baseline caller present: {stdout}"
+    );
     // Change utils.py (fresh); app.py/widget.py are carried.
-    write(&repo, "utils.py", &format!("{UTILS}\n\ndef extra():\n    return 1\n"));
+    write(
+        &repo,
+        "utils.py",
+        &format!("{UTILS}\n\ndef extra():\n    return 1\n"),
+    );
     build(&repo);
     let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "caller edges must survive: {stdout}");
-    assert!(stdout.contains("app.py:6"), "app.py caller survived: {stdout}");
-    assert!(stdout.contains("utils.py:5"), "utils.py caller survived: {stdout}");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "caller edges must survive: {stdout}"
+    );
+    assert!(
+        stdout.contains("app.py:6"),
+        "app.py caller survived: {stdout}"
+    );
+    assert!(
+        stdout.contains("utils.py:5"),
+        "utils.py caller survived: {stdout}"
+    );
     let out = kg(&repo).args(["impact", "utils.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "impact must survive: {stdout}");
-    assert!(stdout.contains("app.py:6"), "impact edge survived: {stdout}");
+    assert!(
+        stdout.contains("app.py:6"),
+        "impact edge survived: {stdout}"
+    );
 }
 
 #[test]
@@ -355,11 +398,18 @@ fn prebuilt_index_restore_carries_on_hash_match() {
     );
 
     // And a real edit still re-resolves correctly on top of the restore.
-    write(&repo, "utils.py", &format!("{UTILS}\n\ndef extra():\n    return 1\n"));
+    write(
+        &repo,
+        "utils.py",
+        &format!("{UTILS}\n\ndef extra():\n    return 1\n"),
+    );
     let (_, _, _) = build(&repo);
     let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("app.py:6"), "dirty closure on restored index: {stdout}");
+    assert!(
+        stdout.contains("app.py:6"),
+        "dirty closure on restored index: {stdout}"
+    );
 }
 
 #[test]
@@ -385,11 +435,17 @@ fn callees_depth_two_is_transitive() {
         "def base():\n    return 0\n\ndef leaf():\n    return base()\n\ndef mid():\n    return leaf()\n\ndef top():\n    return mid()\n",
     );
     build(&repo);
-    let out = kg(&repo).args(["callees", "top", "--depth", "2"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["callees", "top", "--depth", "2"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("a.py:7"), "direct callee mid: {stdout}");
-    assert!(stdout.contains("a.py:4"), "transitive callee leaf: {stdout}");
+    assert!(
+        stdout.contains("a.py:4"),
+        "transitive callee leaf: {stdout}"
+    );
     assert!(
         !stdout.contains("a.py:1"),
         "depth 2 must NOT include the distance-3 callee base: {stdout}"
@@ -422,9 +478,18 @@ fn dead_lists_uncalled_and_excludes_called() {
     assert!(stdout.contains("app.py:4"), "run is dead: {stdout}");
     assert!(stdout.contains("utils.py:4"), "caller is dead: {stdout}");
     assert!(stdout.contains("widget.py:5"), "render2 is dead: {stdout}");
-    assert!(!stdout.contains("utils.py:1"), "normalize is called: {stdout}");
-    assert!(!stdout.contains("widget.py:1"), "Widget is constructed: {stdout}");
-    assert!(!stdout.contains("widget.py:2"), "render is called: {stdout}");
+    assert!(
+        !stdout.contains("utils.py:1"),
+        "normalize is called: {stdout}"
+    );
+    assert!(
+        !stdout.contains("widget.py:1"),
+        "Widget is constructed: {stdout}"
+    );
+    assert!(
+        !stdout.contains("widget.py:2"),
+        "render is called: {stdout}"
+    );
 }
 
 #[test]
@@ -435,11 +500,18 @@ fn unresolved_reports_counts_and_zero_is_exit1() {
     let out = kg(&repo).args(["unresolved"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("kg: unresolved=1 callees in 1 files"), "{stdout}");
+    assert!(
+        stdout.contains("kg: unresolved=1 callees in 1 files"),
+        "{stdout}"
+    );
     assert!(stdout.contains("m.py unresolved=1"), "{stdout}");
 
     let clean = temp_repo("unresolved-clean");
-    write(&clean, "a.py", "def g():\n    return 1\n\ndef go():\n    return g()\n");
+    write(
+        &clean,
+        "a.py",
+        "def g():\n    return 1\n\ndef go():\n    return g()\n",
+    );
     build(&clean);
     let out = kg(&clean).args(["unresolved"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -455,8 +527,14 @@ fn symbols_lists_file_symbols_and_unknown_exit1() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     assert!(stdout.contains("utils.py:1 module utils"), "{stdout}");
-    assert!(stdout.contains("utils.py:1 function utils.normalize"), "{stdout}");
-    assert!(stdout.contains("utils.py:4 function utils.caller"), "{stdout}");
+    assert!(
+        stdout.contains("utils.py:1 function utils.normalize"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("utils.py:4 function utils.caller"),
+        "{stdout}"
+    );
 
     let out = kg(&repo).args(["symbols", "nope.py"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -517,7 +595,10 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("utils.py:1"), "{stdout}");
-    assert!(!stdout.contains("[ambiguous]"), "search hits carry no tier tag: {stdout}");
+    assert!(
+        !stdout.contains("[ambiguous]"),
+        "search hits carry no tier tag: {stdout}"
+    );
     // Amendment 14b: the hit line carries the stored signature.
     assert!(
         stdout.contains("def normalize(text):"),
@@ -575,18 +656,24 @@ fn clones_seed_gate() {
     // Distractors: unique files (no duplication) and a near-duplicate whose
     // identifiers differ (normalized-text inequality -> no window matches).
     for u in 0..8 {
-        write(&repo, &format!("unique{u}.py"), &body(&format!("u{u}"), 6 + u));
+        write(
+            &repo,
+            &format!("unique{u}.py"),
+            &body(&format!("u{u}"), 6 + u),
+        );
     }
     write(&repo, "near.py", &body("near_variant", 9));
     build(&repo);
 
-    let out = kg(&repo).args(["clones", "--limit", "10000"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["clones", "--limit", "10000"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let first = stdout.lines().next().unwrap().to_string();
     assert_eq!(
-        first,
-        "kg: clone candidates — normalized-text equality, not proof of semantic duplication",
+        first, "kg: clone candidates — normalized-text equality, not proof of semantic duplication",
         "{stdout}"
     );
 
@@ -596,7 +683,10 @@ fn clones_seed_gate() {
         .collect();
     let mut detected = 0usize;
     for (a, b) in &expected_pairs {
-        if pair_lines.iter().any(|l| l.contains(a.as_str()) && l.contains(b.as_str())) {
+        if pair_lines
+            .iter()
+            .any(|l| l.contains(a.as_str()) && l.contains(b.as_str()))
+        {
             detected += 1;
         }
     }
@@ -612,13 +702,19 @@ fn clones_seed_gate() {
     );
 
     // min-lines above every seeded span: gate to zero, exit 1.
-    let out = kg(&repo).args(["clones", "--min-lines", "100"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["clones", "--min-lines", "100"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1));
 
     // Carry-forward: no-change rebuild keeps the candidates (re-count from
     // the second run's own stdout — detection must hold independently).
     build(&repo);
-    let out = kg(&repo).args(["clones", "--limit", "10000"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["clones", "--limit", "10000"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout2 = String::from_utf8_lossy(&out.stdout);
     let pair_lines2: Vec<&str> = stdout2
@@ -627,7 +723,11 @@ fn clones_seed_gate() {
         .collect();
     let detected2 = expected_pairs
         .iter()
-        .filter(|(a, b)| pair_lines2.iter().any(|l| l.contains(a.as_str()) && l.contains(b.as_str())))
+        .filter(|(a, b)| {
+            pair_lines2
+                .iter()
+                .any(|l| l.contains(a.as_str()) && l.contains(b.as_str()))
+        })
         .count();
     assert!(
         detected2 >= 8,
@@ -639,15 +739,27 @@ fn clones_seed_gate() {
 fn journal_written_and_usage_summarizes() {
     // Amendment 6: build + callers journal entries; kg usage aggregates them.
     let repo = fixture("journal");
-    kg(&repo).env_remove("KG_NO_JOURNAL").args(["build"]).output().unwrap();
-    kg(&repo).env_remove("KG_NO_JOURNAL").args(["callers", "normalize"]).output().unwrap();
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["build"])
+        .output()
+        .unwrap();
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
     let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
     assert_eq!(log.lines().count(), 2, "one entry per invocation: {log}");
     assert!(log.contains("\"tool\":\"build\""), "{log}");
     assert!(log.contains("\"tool\":\"callers\""), "{log}");
     assert!(log.contains("\"surface\":\"cli\""), "{log}");
 
-    let out = kg(&repo).env_remove("KG_NO_JOURNAL").args(["usage"]).output().unwrap();
+    let out = kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["usage"])
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     assert!(stdout.contains("kg usage: 2 journaled calls"), "{stdout}");
@@ -658,12 +770,22 @@ fn journal_written_and_usage_summarizes() {
 #[test]
 fn journal_opt_out_via_env_and_flag() {
     let repo = fixture("journal-env");
-    kg(&repo).env("KG_NO_JOURNAL", "1").args(["build"]).output().unwrap();
-    assert!(!repo.join(".kg/usage.log").exists(), "env opt-out must suppress the journal");
+    kg(&repo)
+        .env("KG_NO_JOURNAL", "1")
+        .args(["build"])
+        .output()
+        .unwrap();
+    assert!(
+        !repo.join(".kg/usage.log").exists(),
+        "env opt-out must suppress the journal"
+    );
 
     let repo = fixture("journal-flag");
     kg(&repo).args(["--no-journal", "build"]).output().unwrap();
-    assert!(!repo.join(".kg/usage.log").exists(), "--no-journal must suppress the journal");
+    assert!(
+        !repo.join(".kg/usage.log").exists(),
+        "--no-journal must suppress the journal"
+    );
 
     // usage on an empty journal: exit 1 with a reason.
     let out = kg(&repo).args(["usage"]).output().unwrap();
@@ -723,14 +845,22 @@ fn payload_log_written_for_pointer_tools_only() {
     assert!(line.contains("\"source_rev\":\""), "{line}");
     assert_eq!(payload_pointers(line), data_lines, "byte-equal pointers");
 
-    kg(&repo).env_remove("KG_NO_JOURNAL").args(["dead"]).output().unwrap();
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["dead"])
+        .output()
+        .unwrap();
     kg(&repo)
         .env_remove("KG_NO_JOURNAL")
         .args(["symbols", "utils.py"])
         .output()
         .unwrap();
     let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
-    assert_eq!(payload.lines().count(), 3, "one payload line per pointer call");
+    assert_eq!(
+        payload.lines().count(),
+        3,
+        "one payload line per pointer call"
+    );
     assert!(payload.contains("\"tool\":\"dead\""), "{payload}");
     assert!(payload.contains("\"tool\":\"symbols\""), "{payload}");
     assert!(
@@ -740,7 +870,11 @@ fn payload_log_written_for_pointer_tools_only() {
 
     // Non-pointer tools journal to usage.log but add no payload line.
     let before = payload.lines().count();
-    kg(&repo).env_remove("KG_NO_JOURNAL").args(["stats"]).output().unwrap();
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["stats"])
+        .output()
+        .unwrap();
     let after = fs::read_to_string(repo.join(".kg/usage-results.jsonl"))
         .unwrap()
         .lines()
@@ -772,7 +906,11 @@ fn session_and_arm_tags_recorded_in_both_logs() {
 fn payload_opt_out_and_empty_or_ambiguous_writes_none() {
     // Opt-out suppresses both journal files.
     let repo = fixture("payload-optout");
-    kg(&repo).env("KG_NO_JOURNAL", "1").args(["build"]).output().unwrap();
+    kg(&repo)
+        .env("KG_NO_JOURNAL", "1")
+        .args(["build"])
+        .output()
+        .unwrap();
     kg(&repo)
         .env("KG_NO_JOURNAL", "1")
         .args(["callers", "normalize"])
@@ -820,32 +958,54 @@ fn usage_verify_reports_ok_changed_fail() {
         .args(["callers", "normalize"])
         .output()
         .unwrap();
-    kg(&repo).env_remove("KG_NO_JOURNAL").args(["dead"]).output().unwrap();
+    kg(&repo)
+        .env_remove("KG_NO_JOURNAL")
+        .args(["dead"])
+        .output()
+        .unwrap();
 
     let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("kg usage --verify: 5 pointers sampled from 2 entries"), "{stdout}");
-    assert!(stdout.contains("changed=0 fail=0"), "all OK on a fresh build: {stdout}");
+    assert!(
+        stdout.contains("kg usage --verify: 5 pointers sampled from 2 entries"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("changed=0 fail=0"),
+        "all OK on a fresh build: {stdout}"
+    );
 
     // Edit app.py (dead pointers include app.py:4; callers include app.py:6):
     // the index still holds the old hash -> those pointers are CHANGED.
-    write(&repo, "app.py", "from utils import normalize\n\ndef run():\n    return normalize('z')\n");
+    write(
+        &repo,
+        "app.py",
+        "from utils import normalize\n\ndef run():\n    return normalize('z')\n",
+    );
     let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("changed=2"), "app.py pointers unverifiable: {stdout}");
+    assert!(
+        stdout.contains("changed=2"),
+        "app.py pointers unverifiable: {stdout}"
+    );
     assert!(stdout.contains("fail=0"), "changed is not fail: {stdout}");
 
     // Corrupt one pointer beyond bounds -> FAIL, still exit 0.
     let ppath = repo.join(".kg/usage-results.jsonl");
-    let payload = fs::read_to_string(&ppath).unwrap().replace("utils.py:5", "utils.py:9999");
+    let payload = fs::read_to_string(&ppath)
+        .unwrap()
+        .replace("utils.py:5", "utils.py:9999");
     fs::write(&ppath, payload).unwrap();
     let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "report-only");
     assert!(stdout.contains("fail=1"), "{stdout}");
-    assert!(stdout.contains("FAIL utils.py:9999 (line beyond"), "{stdout}");
+    assert!(
+        stdout.contains("FAIL utils.py:9999 (line beyond"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -860,11 +1020,17 @@ fn usage_verify_stride_sample_and_empty_payload() {
             .output()
             .unwrap();
     }
-    let out = kg(&repo).args(["usage", "--verify", "--limit", "10"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["usage", "--verify", "--limit", "10"])
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     // 10 entries x 2 pointers each.
-    assert!(stdout.contains("20 pointers sampled from 60 entries"), "{stdout}");
+    assert!(
+        stdout.contains("20 pointers sampled from 60 entries"),
+        "{stdout}"
+    );
 
     // No payload at all: exit 1 with a reason.
     let repo = fixture("verify-empty");
@@ -882,7 +1048,10 @@ fn usage_verify_stride_sample_and_empty_payload() {
         .args(["callers", "normalize"])
         .output()
         .unwrap();
-    let out = kg(&repo).args(["usage", "--verify", "--limit", "0"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["usage", "--verify", "--limit", "0"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -899,13 +1068,23 @@ fn usage_verify_epoch_rebuild_is_changed_not_fail() {
         .args(["callers", "normalize"])
         .output()
         .unwrap();
-    write(&repo, "app.py", "from utils import normalize\n\ndef run():\n    return normalize('z')\n");
+    write(
+        &repo,
+        "app.py",
+        "from utils import normalize\n\ndef run():\n    return normalize('z')\n",
+    );
     build(&repo);
     let out = kg(&repo).args(["usage", "--verify"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("ok=1 changed=1 fail=0"), "old-epoch pointers: {stdout}");
-    assert!(!stdout.contains("FAIL"), "no structural failures across epochs: {stdout}");
+    assert!(
+        stdout.contains("ok=1 changed=1 fail=0"),
+        "old-epoch pointers: {stdout}"
+    );
+    assert!(
+        !stdout.contains("FAIL"),
+        "no structural failures across epochs: {stdout}"
+    );
 }
 
 #[test]
@@ -922,7 +1101,10 @@ fn usage_summary_payload_section_and_doctor_health() {
     let out = kg(&repo).args(["usage"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("payload: 1 entries, 2 pointers"), "{stdout}");
+    assert!(
+        stdout.contains("payload: 1 entries, 2 pointers"),
+        "{stdout}"
+    );
     assert!(stdout.contains("normalize: 1 calls"), "{stdout}");
 
     let out = kg(&repo).args(["doctor"]).output().unwrap();
@@ -935,7 +1117,10 @@ fn usage_summary_payload_section_and_doctor_health() {
     build(&repo);
     let out = kg(&repo).args(["usage"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("payload:"), "no section without payload: {stdout}");
+    assert!(
+        !stdout.contains("payload:"),
+        "no section without payload: {stdout}"
+    );
     let out = kg(&repo).args(["doctor"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -969,17 +1154,28 @@ fn p15_stats_hotspots_report() {
     let out = kg(&repo).args(["stats"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("files=3") && stdout.contains("symbols=") && stdout.contains("edges="), "{stdout}");
+    assert!(
+        stdout.contains("files=3") && stdout.contains("symbols=") && stdout.contains("edges="),
+        "{stdout}"
+    );
 
     let out = kg(&repo).args(["hotspots"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("loc=") && stdout.contains("cyc="), "{stdout}");
+    assert!(
+        stdout.contains("loc=") && stdout.contains("cyc="),
+        "{stdout}"
+    );
 
     let out = kg(&repo).args(["report"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    for section in ["## 1. index overview", "## 2. architecture map", "## 3. hotspots", "## 4. most-called symbols"] {
+    for section in [
+        "## 1. index overview",
+        "## 2. architecture map",
+        "## 3. hotspots",
+        "## 4. most-called symbols",
+    ] {
         assert!(stdout.contains(section), "missing {section}: {stdout}");
     }
 }
@@ -997,9 +1193,15 @@ fn partial_v4_index_rebuilds_fresh() {
         .args([idx.to_string_lossy().as_ref(), "DROP TABLE clone_groups;"])
         .output()
         .unwrap();
-    assert!(status.status.success(), "sqlite3 demotion failed (fixture-only tool)");
+    assert!(
+        status.status.success(),
+        "sqlite3 demotion failed (fixture-only tool)"
+    );
     let (code, stdout, stderr) = build(&repo);
-    assert_eq!(code, 0, "rebuild over partial v4 index failed: {stdout}{stderr}");
+    assert_eq!(
+        code, 0,
+        "rebuild over partial v4 index failed: {stdout}{stderr}"
+    );
     assert!(!stderr.contains("clone_groups"), "{stdout}{stderr}");
 }
 
@@ -1122,9 +1324,8 @@ fn path_seed_gate() {
         "kg: no-results: no call path from 'deep.f01' to 'deep.f12' within depth 10; a longer path may exist (resolved edges only)\n",
         "scenario 5 truncated stderr: {stderr}"
     );
-    let mut expected = String::from(
-        "kg: path — resolved static edges only; dynamic dispatch may hide paths\n",
-    );
+    let mut expected =
+        String::from("kg: path — resolved static edges only; dynamic dispatch may hide paths\n");
     for i in 1..=10 {
         expected.push_str(&format!("deep.py:{}\n", 2 * i));
     }
@@ -1162,12 +1363,15 @@ fn path_seed_gate() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert_eq!(
-        stderr,
-        "kg: no-results: 'chain.ca' and 'chain.ca' resolve to the same symbol\n",
+        stderr, "kg: no-results: 'chain.ca' and 'chain.ca' resolve to the same symbol\n",
         "scenario 6 stderr: {stderr}"
     );
     let out = kg(&repo).args(["path", "dup", "dup"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(2), "ambiguous shared name exits 2, not 1");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "ambiguous shared name exits 2, not 1"
+    );
 
     // (7) Ambiguous `from` endpoint: exit 2, role in the detail, candidates
     // on stdout; the Class.method form resolves.
@@ -1175,8 +1379,7 @@ fn path_seed_gate() {
     assert_eq!(out.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert_eq!(
-        stdout,
-        "amb.py:2 amb.Apage.dup\namb.py:6 amb.Bpage.dup\n",
+        stdout, "amb.py:2 amb.Apage.dup\namb.py:6 amb.Bpage.dup\n",
         "scenario 7 stdout: {stdout}"
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -1204,8 +1407,7 @@ fn path_seed_gate() {
     assert_eq!(out.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert_eq!(
-        stdout,
-        "amb.py:2 amb.Apage.dup\namb.py:6 amb.Bpage.dup\n",
+        stdout, "amb.py:2 amb.Apage.dup\namb.py:6 amb.Bpage.dup\n",
         "scenario 8 stdout: {stdout}"
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
@@ -1259,7 +1461,11 @@ fn deep_nesting_does_not_abort_build() {
     let repo = temp_repo("deep-nesting");
     let py = format!("x = {}1{}\n", "(".repeat(2000), ")".repeat(2000));
     let ts = format!("const v = {}1{};\n", "[".repeat(2000), "]".repeat(2000));
-    let rs = format!("fn f() {{ let x = {}1{}; }}\n", "(".repeat(2000), ")".repeat(2000));
+    let rs = format!(
+        "fn f() {{ let x = {}1{}; }}\n",
+        "(".repeat(2000),
+        ")".repeat(2000)
+    );
     write(&repo, "deep.py", &py);
     write(&repo, "deep.ts", &ts);
     write(&repo, "deep.rs", &rs);
@@ -1278,7 +1484,11 @@ fn clones_pair_generation_is_bounded() {
     let repo = temp_repo("clones-cap");
     let header = "# shared license header line one\n# shared license header line two\n# shared license header line three\n# shared license header line four\n# shared license header line five\n";
     for i in 0..120 {
-        write(&repo, &format!("f{i:03}.py"), &format!("{header}def solo_{i}(x):\n    return x + {i}\n"));
+        write(
+            &repo,
+            &format!("f{i:03}.py"),
+            &format!("{header}def solo_{i}(x):\n    return x + {i}\n"),
+        );
     }
     build(&repo);
     let out = kg(&repo).args(["clones", "--limit", "5"]).output().unwrap();
@@ -1296,16 +1506,29 @@ fn incremental_build_heals_resolution_gaps() {
     // symbol added later must be re-extracted by the fast path.
     let repo = temp_repo("gap-heal");
     write(&repo, "b.py", "def existing():\n    return 1\n");
-    write(&repo, "a.py", "import b\n\ndef use():\n    return b.foo()\n");
+    write(
+        &repo,
+        "a.py",
+        "import b\n\ndef use():\n    return b.foo()\n",
+    );
     build(&repo);
     let out = kg(&repo).args(["callers", "foo"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "foo does not exist yet");
     // Add the missing symbol; the next incremental build must heal a.py.
-    write(&repo, "b.py", "def existing():\n    return 1\n\ndef foo():\n    return 2\n");
+    write(
+        &repo,
+        "b.py",
+        "def existing():\n    return 1\n\ndef foo():\n    return 2\n",
+    );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
     let out = kg(&repo).args(["callers", "foo"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "fast path healed the gap: {:?}", out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "fast path healed the gap: {:?}",
+        out
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("a.py:4"), "{stdout}");
 }
@@ -1322,14 +1545,25 @@ fn constructor_calls_attribute_to_the_class() {
     );
     build(&repo);
     let out = kg(&repo).args(["callers", "Widget"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "class has an inbound call edge: {:?}", out);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "class has an inbound call edge: {:?}",
+        out
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("c.py:6"), "{stdout}");
-    let out = kg(&repo).args(["callers", "c.Widget.__init__"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["callers", "c.Widget.__init__"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0), "ctor keeps its own edge");
     let out = kg(&repo).args(["dead"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("c.py:1"), "instantiated class must not be dead: {stdout}");
+    assert!(
+        !stdout.contains("c.py:1"),
+        "instantiated class must not be dead: {stdout}"
+    );
 }
 
 #[test]
@@ -1369,17 +1603,29 @@ fn tracked_but_gitignored_sources_are_indexed() {
     write(&repo, ".gitignore", "generated/\n");
     write(&repo, "generated/g.py", "def hidden_fn():\n    return 1\n");
     let out = std::process::Command::new("git")
-        .args(["init", "-q"]).current_dir(&repo).output().unwrap();
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let out = std::process::Command::new("git")
-        .args(["add", "-f", "generated/g.py"]).current_dir(&repo).output().unwrap();
+        .args(["add", "-f", "generated/g.py"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     build(&repo);
     let out = kg(&repo).args(["stats"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("files=1"), "tracked-ignored file indexed: {stdout}");
+    assert!(
+        stdout.contains("files=1"),
+        "tracked-ignored file indexed: {stdout}"
+    );
     let out = kg(&repo).args(["callers", "hidden_fn"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "defined but uncalled");
-    let out = kg(&repo).args(["symbols", "generated/g.py"]).output().unwrap();
+    let out = kg(&repo)
+        .args(["symbols", "generated/g.py"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(0), "file indexed");
 }

@@ -31,12 +31,20 @@ pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
             |r| r.get(0),
         )
         .unwrap_or(0);
-    let size = std::fs::metadata(db::db_path(root)).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::metadata(db::db_path(root))
+        .map(|m| m.len())
+        .unwrap_or(0);
     let kg_version: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'kg_version'", [], |r| r.get(0))
+        .query_row("SELECT value FROM meta WHERE key = 'kg_version'", [], |r| {
+            r.get(0)
+        })
         .unwrap_or_else(|_| "?".into());
     let grammar: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'grammar_version'", [], |r| r.get(0))
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'grammar_version'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or_else(|_| "?".into());
     Ok(format!(
         "kg stats: files={files} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} kg={kg_version} grammar={grammar}"
@@ -113,7 +121,11 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
     let mut stmt = conn.prepare("SELECT path, loc, cyclomatic FROM files")?;
     let rows: Vec<(String, i64, i64)> = stmt
         .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     if rows.is_empty() {
@@ -164,7 +176,12 @@ pub fn hotspots(conn: &Connection, root: &Path, limit: usize) -> Result<Vec<Stri
         .map(|s| {
             format!(
                 "{:.3} {} (loc={} cyc={} churn90={} fix180={})",
-                s.score, s.rel, s.loc as usize, s.cyclomatic as usize, s.churn as usize, s.fixes as usize
+                s.score,
+                s.rel,
+                s.loc as usize,
+                s.cyclomatic as usize,
+                s.churn as usize,
+                s.fixes as usize
             )
         })
         .collect())

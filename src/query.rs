@@ -27,8 +27,7 @@ const CLONES_CAVEAT: &str =
 
 /// Permanent honesty caveat for `kg path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
-const PATH_CAVEAT: &str =
-    "kg: path — resolved static edges only; dynamic dispatch may hide paths";
+const PATH_CAVEAT: &str = "kg: path — resolved static edges only; dynamic dispatch may hide paths";
 
 /// One resolved candidate: (path, line, qualname).
 pub type Candidate = (String, i64, String);
@@ -52,7 +51,13 @@ impl Pointer {
         if self.detail.is_empty() {
             format!("{}:{}{}", self.file, self.line, self.tag)
         } else {
-            format!("{}:{}{} {}", self.file, self.line, self.tag.trim_start(), self.detail)
+            format!(
+                "{}:{}{} {}",
+                self.file,
+                self.line,
+                self.tag.trim_start(),
+                self.detail
+            )
         }
     }
 }
@@ -83,7 +88,13 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>
          ORDER BY s.qualname, f.path",
     )?;
     let rows = stmt.query_map(rusqlite::params![name], |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, i64>(4)?))
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, i64>(4)?,
+        ))
     })?;
     let mut ids = Vec::new();
     let mut cands = Vec::new();
@@ -126,8 +137,10 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     let count_sql = format!(
         "SELECT COUNT(*) FROM edges e WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
     );
-    let count_params: Vec<rusqlite::types::Value> =
-        ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+    let count_params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
     let total: usize = conn.query_row(
         &count_sql,
         rusqlite::params_from_iter(count_params.iter()),
@@ -142,7 +155,10 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
          ORDER BY f.path, e.site_line LIMIT {limit}"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let params: Vec<rusqlite::types::Value> = ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+    let params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
         let site: i64 = r.get(0)?;
         let conf: String = r.get(1)?;
@@ -150,7 +166,11 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         Ok(Pointer {
             file: path,
             line: site,
-            tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
+            tag: if conf == "AMBIGUOUS" {
+                " [ambiguous]"
+            } else {
+                ""
+            },
             detail: String::new(),
         })
     })?;
@@ -195,8 +215,10 @@ pub fn callees(
         let count_sql = format!(
             "SELECT COUNT(*) FROM edges e WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
         );
-        let count_params: Vec<rusqlite::types::Value> =
-            ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+        let count_params: Vec<rusqlite::types::Value> = ids
+            .iter()
+            .map(|i| rusqlite::types::Value::from(*i))
+            .collect();
         total_opt = Some(conn.query_row(
             &count_sql,
             rusqlite::params_from_iter(count_params.iter()),
@@ -213,7 +235,9 @@ pub fn callees(
          WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'
          ORDER BY path, line LIMIT {limit}"
             ),
-            ids.iter().map(|i| rusqlite::types::Value::from(*i)).collect(),
+            ids.iter()
+                .map(|i| rusqlite::types::Value::from(*i))
+                .collect(),
         )
     } else {
         let seed = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -240,12 +264,8 @@ pub fn callees(
             ),
             ids.iter()
                 .map(|i| rusqlite::types::Value::from(*i))
-                .chain(std::iter::once(rusqlite::types::Value::from(
-                    depth as i64,
-                )))
-                .chain(std::iter::once(rusqlite::types::Value::from(
-                    depth as i64,
-                )))
+                .chain(std::iter::once(rusqlite::types::Value::from(depth as i64)))
+                .chain(std::iter::once(rusqlite::types::Value::from(depth as i64)))
                 .collect(),
         )
     };
@@ -257,7 +277,11 @@ pub fn callees(
         Ok(Pointer {
             file: path,
             line,
-            tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
+            tag: if conf == "AMBIGUOUS" {
+                " [ambiguous]"
+            } else {
+                ""
+            },
             detail: String::new(),
         })
     })?;
@@ -274,7 +298,13 @@ pub fn callees(
 /// caveat header, hop call-site pointers in path order, final chain line of
 /// resolved full qualnames. Payload-journaled (Amendment 10), `name` = the
 /// `from` argument.
-pub fn path(conn: &Connection, root: &Path, from: &str, to: &str, depth: usize) -> Result<Vec<String>> {
+pub fn path(
+    conn: &Connection,
+    root: &Path,
+    from: &str,
+    to: &str,
+    depth: usize,
+) -> Result<Vec<String>> {
     let depth = depth.clamp(1, 10);
     let (from_ids, from_cands) = target_ids(conn, from)?;
     if from_ids.is_empty() {
@@ -320,7 +350,10 @@ pub fn path(conn: &Connection, root: &Path, from: &str, to: &str, depth: usize) 
                 "no call path from '{from_qn}' to '{to_qn}' within depth {depth}; a longer path may exist (resolved edges only)"
             )));
         }
-        PathSearch::Found { chain_ids, hop_sites } => (chain_ids, hop_sites),
+        PathSearch::Found {
+            chain_ids,
+            hop_sites,
+        } => (chain_ids, hop_sites),
     };
     let hops = hop_sites.len();
     // One batched lookup for the chain qualnames (final line) and the hop
@@ -392,7 +425,10 @@ pub fn path(conn: &Connection, root: &Path, from: &str, to: &str, depth: usize) 
         };
         chain_names.push(q.as_str());
     }
-    out.push(format!("kg: chain {} ({hops} hops)", chain_names.join(" -> ")));
+    out.push(format!(
+        "kg: chain {} ({hops} hops)",
+        chain_names.join(" -> ")
+    ));
     Ok(out)
 }
 
@@ -431,8 +467,10 @@ fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result
                    AND e.src_id IN ({placeholders})"
             );
             let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<rusqlite::types::Value> =
-                chunk.iter().map(|i| rusqlite::types::Value::from(*i)).collect();
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|i| rusqlite::types::Value::from(*i))
+                .collect();
             let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
@@ -462,7 +500,9 @@ fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result
         let grouped = level_edges(&frontier)?;
         let mut next: Vec<i64> = Vec::new();
         for &v in &frontier {
-            let Some(neighbors) = grouped.get(&v) else { continue };
+            let Some(neighbors) = grouped.get(&v) else {
+                continue;
+            };
             // Sorted by (dst qualname, dst path, site_line): the first
             // unvisited row per destination carries the smallest site_line.
             for (_, _, site, w) in neighbors {
@@ -501,7 +541,10 @@ fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result
         }
         chain_ids.reverse();
         hop_sites.reverse();
-        return Ok(PathSearch::Found { chain_ids, hop_sites });
+        return Ok(PathSearch::Found {
+            chain_ids,
+            hop_sites,
+        });
     }
     if !frontier.is_empty() && d == depth {
         // Cap-truncation probe: an unvisited out-neighbor of any node at the
@@ -520,7 +563,9 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
     let limit = clamp_limit(limit)?;
     let rel = file.trim_start_matches("./").to_string();
     let exists: bool = conn
-        .query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| {
+            r.get(0)
+        })
         .map(|c: i64| c > 0)?;
     if !exists {
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
@@ -549,11 +594,23 @@ pub fn impact(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resul
         Ok(Pointer {
             file: path,
             line: site,
-            tag: if conf == "AMBIGUOUS" { " [ambiguous]" } else { "" },
+            tag: if conf == "AMBIGUOUS" {
+                " [ambiguous]"
+            } else {
+                ""
+            },
             detail: String::new(),
         })
     })?;
-    collect_output(conn, root, &rel, rows, limit, "0 impacting files found", Some(total))
+    collect_output(
+        conn,
+        root,
+        &rel,
+        rows,
+        limit,
+        "0 impacting files found",
+        Some(total),
+    )
 }
 
 /// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
@@ -585,9 +642,22 @@ pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput>
     let rows = stmt.query_map([], |r| {
         let path: String = r.get(1)?;
         let line: i64 = r.get(2)?;
-        Ok(Pointer { file: path, line, tag: "", detail: String::new() })
+        Ok(Pointer {
+            file: path,
+            line,
+            tag: "",
+            detail: String::new(),
+        })
     })?;
-    let mut out = collect_output(conn, root, "", rows, limit, "0 dead-code candidates found", Some(total))?;
+    let mut out = collect_output(
+        conn,
+        root,
+        "",
+        rows,
+        limit,
+        "0 dead-code candidates found",
+        Some(total),
+    )?;
     out.header = Some(match out.header.take() {
         Some(stale) => format!("{DEAD_CAVEAT}\n{stale}"),
         None => DEAD_CAVEAT.to_string(),
@@ -599,7 +669,9 @@ pub fn dead(conn: &Connection, root: &Path, limit: usize) -> Result<QueryOutput>
 /// Report shape — cap, no staleness; header carries the index total.
 pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
-    let total: i64 = conn.query_row("SELECT COALESCE(SUM(unresolved), 0) FROM files", [], |r| r.get(0))?;
+    let total: i64 = conn.query_row("SELECT COALESCE(SUM(unresolved), 0) FROM files", [], |r| {
+        r.get(0)
+    })?;
     if total == 0 {
         return Err(KgError::NoResults(
             "0 unresolved callees (full call-site coverage)".to_string(),
@@ -610,9 +682,7 @@ pub fn unresolved(conn: &Connection, limit: usize) -> Result<Vec<String>> {
          ORDER BY unresolved DESC, path",
     )?;
     let rows = stmt
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
-        })?
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let n_files = rows.len();
     let shown = n_files.min(limit);
@@ -800,7 +870,12 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
 /// Caveat line always first — candidates, never proof. NOT payload-journaled
 /// (Amendment 12 deviation: pair lines are not single pointers, so the
 /// `usage --verify` structural checks do not apply).
-pub fn clones(conn: &Connection, root: &Path, min_lines: usize, limit: usize) -> Result<Vec<String>> {
+pub fn clones(
+    conn: &Connection,
+    root: &Path,
+    min_lines: usize,
+    limit: usize,
+) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     let min_lines = min_lines.max(crate::clones::WINDOW);
     let mut stmt = conn.prepare(
@@ -860,13 +935,12 @@ pub fn clones(conn: &Connection, root: &Path, min_lines: usize, limit: usize) ->
                 if (*ea - *sa + 1) < min_lines as i64 || (*eb - *sb + 1) < min_lines as i64 {
                     continue;
                 }
-                let (fa, sta, ena, fb, stb, enb) = if (pa.as_str(), *sa, *ea)
-                    <= (pb.as_str(), *sb, *eb)
-                {
-                    (pa, *sa, *ea, pb, *sb, *eb)
-                } else {
-                    (pb, *sb, *eb, pa, *sa, *ea)
-                };
+                let (fa, sta, ena, fb, stb, enb) =
+                    if (pa.as_str(), *sa, *ea) <= (pb.as_str(), *sb, *eb) {
+                        (pa, *sa, *ea, pb, *sb, *eb)
+                    } else {
+                        (pb, *sb, *eb, pa, *sa, *ea)
+                    };
                 let key = (fa.clone(), sta, ena, fb.clone(), stb, enb);
                 if seen.insert(key) {
                     pairs.push((fa.clone(), sta, ena, fb.clone(), stb, enb));
@@ -1032,17 +1106,31 @@ pub fn file_changed(conn: &Connection, root: &Path, rel: &str) -> bool {
     let row = conn.query_row(
         "SELECT mtime, size, content_hash FROM files WHERE path = ?1",
         [rel],
-        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
     );
-    let Ok((stored_mtime, stored_size, stored_hash)) = row else { return false };
+    let Ok((stored_mtime, stored_size, stored_hash)) = row else {
+        return false;
+    };
     let abs = root.join(rel);
-    let Some(size) = db::stat_size(&abs) else { return true };
+    let Some(size) = db::stat_size(&abs) else {
+        return true;
+    };
     if size != stored_size {
         return true;
     }
-    let Some(mtime) = db::stat_mtime(&abs) else { return true };
+    let Some(mtime) = db::stat_mtime(&abs) else {
+        return true;
+    };
     if mtime != stored_mtime {
-        let Ok(bytes) = std::fs::read(&abs) else { return true };
+        let Ok(bytes) = std::fs::read(&abs) else {
+            return true;
+        };
         let hash = fnv1a64(&bytes) as i64;
         return hash != stored_hash;
     }

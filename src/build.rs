@@ -8,7 +8,11 @@ use std::time::Instant;
 
 use crate::error::{KgError, Result};
 
-pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64) -> Result<String> {
+pub fn run_build(
+    root_arg: Option<&Path>,
+    force: bool,
+    max_parse_error_rate: f64,
+) -> Result<String> {
     if !max_parse_error_rate.is_finite() || !(0.0..=1.0).contains(&max_parse_error_rate) {
         return Err(KgError::Usage(format!(
             "--max-parse-error-rate must be a finite value in [0, 1], got {max_parse_error_rate}"
@@ -24,7 +28,11 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     let walk_secs = t0.elapsed().as_secs_f64();
 
     // Fast path: files unchanged since a compatible previous index.
-    let old = if force { None } else { crate::db::probe_old(&root)? };
+    let old = if force {
+        None
+    } else {
+        crate::db::probe_old(&root)?
+    };
     let old_map = match &old {
         Some(c) => crate::db::old_files(c)?,
         None => Default::default(),
@@ -44,19 +52,17 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
             // Dual-key (Amendment 9): (mtime, size) mismatch, but same size and
             // same content hash -> carry (the CI cache-restore case). One
             // read+hash instead of parse+extract.
-            Some((_om, osz, oh)) if *osz == f.size as i64 => {
-                match std::fs::read(&f.abs) {
-                    Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == *oh => {
-                        carried.insert(f.rel.clone());
-                        mtime_updates.insert(f.rel.clone(), mtime);
-                    }
-                    _ => fresh.push(crate::walk::WalkedFile {
-                        abs: f.abs.clone(),
-                        rel: f.rel.clone(),
-                        size: f.size,
-                    }),
+            Some((_om, osz, oh)) if *osz == f.size as i64 => match std::fs::read(&f.abs) {
+                Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == *oh => {
+                    carried.insert(f.rel.clone());
+                    mtime_updates.insert(f.rel.clone(), mtime);
                 }
-            }
+                _ => fresh.push(crate::walk::WalkedFile {
+                    abs: f.abs.clone(),
+                    rel: f.rel.clone(),
+                    size: f.size,
+                }),
+            },
             _ => fresh.push(crate::walk::WalkedFile {
                 abs: f.abs.clone(),
                 rel: f.rel.clone(),
@@ -97,8 +103,13 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     // index into `fresh`, consumed by insert_files/insert_symbols) is
     // unchanged.
     let t0 = Instant::now();
-    let (mut fresh_rows, mut extractions, mut fresh_shingles, mut fresh_error_files, mut extract_secs_sum) =
-        extract_units(&fresh, 0)?;
+    let (
+        mut fresh_rows,
+        mut extractions,
+        mut fresh_shingles,
+        mut fresh_error_files,
+        mut extract_secs_sum,
+    ) = extract_units(&fresh, 0)?;
 
     // Amendment 15 (R6d A4): the fast path must heal resolution gaps. When
     // the fresh extraction introduces symbol names that did not exist in the
@@ -151,10 +162,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     // Parse-quality gate (CUJ8): rate over ALL files, abort before DB work.
     let total_files = stats.files.len();
     let carried_errors = match &old {
-        Some(c) => crate::db::old_error_count(
-            c,
-            &carried.iter().cloned().collect::<Vec<_>>(),
-        )?,
+        Some(c) => crate::db::old_error_count(c, &carried.iter().cloned().collect::<Vec<_>>())?,
         None => 0,
     };
     let error_files = fresh_error_files + carried_errors;
@@ -181,10 +189,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     let resolution = crate::extract::resolve(extractions, carried_index);
     let _resolve_secs = t0.elapsed().as_secs_f64();
     // Per-file unresolved counts: parallel to the fresh-file order.
-    for (row, unresolved) in fresh_rows
-        .iter_mut()
-        .zip(&resolution.unresolved_per_file)
-    {
+    for (row, unresolved) in fresh_rows.iter_mut().zip(&resolution.unresolved_per_file) {
         row.unresolved = *unresolved;
     }
 
@@ -220,7 +225,11 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     crate::db::insert_unresolved_calls(&conn, &unresolved_rows)?;
 
     // Symbols: fresh rows insert; carried rows keep their previous ids.
-    let fresh_sym_count = resolution.existing_ids.iter().filter(|e| e.is_none()).count();
+    let fresh_sym_count = resolution
+        .existing_ids
+        .iter()
+        .filter(|e| e.is_none())
+        .count();
     let mut fresh_symbols: Vec<crate::extract::NewSymbol> = Vec::with_capacity(fresh_sym_count);
     let mut fresh_pos: Vec<Option<usize>> = Vec::with_capacity(resolution.symbols.len());
     for (sym, existing) in resolution.symbols.iter().zip(&resolution.existing_ids) {
@@ -283,9 +292,7 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
             .unwrap_or_else(|_| "0".into()),
     )?;
     crate::db::set_meta(&conn, "source_rev", &crate::db::source_rev(&root))?;
-    let sql_count = |sql: &str| -> Result<i64> {
-        Ok(conn.query_row(sql, [], |r| r.get(0))?)
-    };
+    let sql_count = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
     let sym_total = sql_count("SELECT COUNT(*) FROM symbols")?;
     let edge_total = sql_count("SELECT COUNT(*) FROM edges")?;
     let file_total = sql_count("SELECT COUNT(*) FROM files")?;
@@ -312,7 +319,10 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     // Amendment 11c: parse= is the parallel phase's wall time and extract= the
     // summed per-worker extraction time — the two overlap on parallel builds.
     if stats.skipped_large > 0 {
-        eprintln!("[kg] skipped {} file(s) over the 1MB size cap", stats.skipped_large);
+        eprintln!(
+            "[kg] skipped {} file(s) over the 1MB size cap",
+            stats.skipped_large
+        );
     }
     Ok(format!(
         "kg: built index: files={total} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={carried} wall={wall:.2}s (walk={w:.2}s parse={p:.2}s extract={e:.2}s db={d:.2}s)",
@@ -341,8 +351,6 @@ fn resolve_sym_id(
         None => resolution.existing_ids.get(sym_idx).copied().flatten(),
     }
 }
-
-
 
 /// Parse + extract one batch of walked files on scoped workers (Amendment 11c
 /// parallel parse; R6d Blocker 1: 64 MB stacks). `base_idx` keeps the
@@ -374,39 +382,43 @@ fn extract_units(
             let chunk = chunk.to_vec();
             let handle = std::thread::Builder::new()
                 .stack_size(64 * 1024 * 1024)
-                .spawn_scoped(scope, move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
-                    let mut units = Vec::with_capacity(chunk.len());
-                    let mut secs = 0f64;
-                    for (local, f) in chunk.into_iter().enumerate() {
-                        let idx = base_idx + chunk_no * chunk_len + local;
-                        let bytes = std::fs::read(&f.abs)?;
-                        let lang = crate::parse::Lang::from_rel(&f.rel);
-                        let parsed = crate::parse::parse_source(&bytes, lang)?;
-                        let e0 = Instant::now();
-                        let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
-                        secs += e0.elapsed().as_secs_f64();
-                        let cyclomatic =
-                            crate::parse::decision_nodes(parsed.tree.root_node(), crate::parse::decision_kinds(lang))
-                                as i64;
-                        let shingles = crate::clones::shingles(&bytes);
-                        units.push((
-                            crate::db::FilesRow {
-                                rel: f.rel,
-                                size: f.size as i64,
-                                mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
-                                content_hash: crate::hash::fnv1a64(&bytes) as i64,
-                                parse_status: parsed.status,
-                                error_nodes: parsed.error_nodes,
-                                unresolved: 0,
-                                loc: bytes.split(|b: &u8| *b == b'\n').count() as i64,
-                                cyclomatic,
-                            },
-                            fx,
-                            shingles,
-                        ));
-                    }
-                    Ok((units, secs))
-                })?;
+                .spawn_scoped(
+                    scope,
+                    move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
+                        let mut units = Vec::with_capacity(chunk.len());
+                        let mut secs = 0f64;
+                        for (local, f) in chunk.into_iter().enumerate() {
+                            let idx = base_idx + chunk_no * chunk_len + local;
+                            let bytes = std::fs::read(&f.abs)?;
+                            let lang = crate::parse::Lang::from_rel(&f.rel);
+                            let parsed = crate::parse::parse_source(&bytes, lang)?;
+                            let e0 = Instant::now();
+                            let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
+                            secs += e0.elapsed().as_secs_f64();
+                            let cyclomatic = crate::parse::decision_nodes(
+                                parsed.tree.root_node(),
+                                crate::parse::decision_kinds(lang),
+                            ) as i64;
+                            let shingles = crate::clones::shingles(&bytes);
+                            units.push((
+                                crate::db::FilesRow {
+                                    rel: f.rel,
+                                    size: f.size as i64,
+                                    mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
+                                    content_hash: crate::hash::fnv1a64(&bytes) as i64,
+                                    parse_status: parsed.status,
+                                    error_nodes: parsed.error_nodes,
+                                    unresolved: 0,
+                                    loc: bytes.split(|b: &u8| *b == b'\n').count() as i64,
+                                    cyclomatic,
+                                },
+                                fx,
+                                shingles,
+                            ));
+                        }
+                        Ok((units, secs))
+                    },
+                )?;
             handles.push(handle);
         }
         for h in handles {
@@ -425,5 +437,11 @@ fn extract_units(
         }
         Ok(())
     })?;
-    Ok((rows, extractions, shingles_out, error_files, extract_secs_sum))
+    Ok((
+        rows,
+        extractions,
+        shingles_out,
+        error_files,
+        extract_secs_sum,
+    ))
 }

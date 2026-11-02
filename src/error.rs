@@ -44,8 +44,15 @@ pub enum KgError {
     },
     CorruptIndex(String),
     Locked(u32),
-    SchemaMismatch { have: i32, want: i32 },
-    ParseQuality { rate: f64, files: usize, threshold: f64 },
+    SchemaMismatch {
+        have: i32,
+        want: i32,
+    },
+    ParseQuality {
+        rate: f64,
+        files: usize,
+        threshold: f64,
+    },
     Internal(String),
 }
 

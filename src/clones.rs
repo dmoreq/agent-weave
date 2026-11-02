@@ -13,7 +13,11 @@ pub type FileShingles = (i64, Vec<Shingle>);
 
 /// One fresh-file parse unit: DB row, extraction rows, and the file's
 /// shingles (worker-local; merged in spawn order by the build).
-pub type ParseUnit = (crate::db::FilesRow, crate::extract::FileExtraction, Vec<Shingle>);
+pub type ParseUnit = (
+    crate::db::FilesRow,
+    crate::extract::FileExtraction,
+    Vec<Shingle>,
+);
 
 /// Window size in kept (non-blank, trimmed) lines. The query-side
 /// `--min-lines` filter merges adjacent matching windows, so spans longer
@@ -30,7 +34,9 @@ pub fn shingles(bytes: &[u8]) -> Vec<(i64, i64, i64)> {
     for (i, line) in text.as_bytes().split(|b| *b == b'\n').enumerate() {
         let trimmed: &[u8] = {
             let mut end = line.len();
-            while end > 0 && (line[end - 1] == b' ' || line[end - 1] == b'\t' || line[end - 1] == b'\r') {
+            while end > 0
+                && (line[end - 1] == b' ' || line[end - 1] == b'\t' || line[end - 1] == b'\r')
+            {
                 end -= 1;
             }
             &line[..end]

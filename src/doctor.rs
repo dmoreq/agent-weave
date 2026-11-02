@@ -23,8 +23,7 @@ pub fn report(root: &Path) -> Result<()> {
     let conn = db::open_for_query(root)?;
     println!("kg: doctor report for {}", root.display());
 
-    let integrity: String =
-        conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     println!("  integrity: {integrity}");
 
     let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -36,11 +35,7 @@ pub fn report(root: &Path) -> Result<()> {
         ("source_rev", "source rev"),
     ] {
         let v: Option<String> = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = ?1",
-                [key],
-                |r| r.get(0),
-            )
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
             .ok();
         println!("  {label}: {}", v.unwrap_or_else(|| "<missing>".into()));
     }
@@ -50,15 +45,27 @@ pub fn report(root: &Path) -> Result<()> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    let rate = if total > 0 { bad as f64 / total as f64 } else { 0.0 };
-    println!("  parse coverage: {bad}/{total} files with errors ({:.1}%)", rate * 100.0);
+    let rate = if total > 0 {
+        bad as f64 / total as f64
+    } else {
+        0.0
+    };
+    println!(
+        "  parse coverage: {bad}/{total} files with errors ({:.1}%)",
+        rate * 100.0
+    );
 
     let stale = stale_ratio(&conn, root)?;
-    println!("  stale ratio: {:.1}% of indexed files changed on disk", stale * 100.0);
+    println!(
+        "  stale ratio: {:.1}% of indexed files changed on disk",
+        stale * 100.0
+    );
 
     report_orphans(root);
 
-    let size = std::fs::metadata(db::db_path(root)).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::metadata(db::db_path(root))
+        .map(|m| m.len())
+        .unwrap_or(0);
     println!("  db size: {size} bytes (target < 52428800)");
 
     // Payload journal health (Amendment 10): volume only — contents are
@@ -91,11 +98,17 @@ fn report_orphans(root: &Path) {
     let dir = db::kg_dir(root);
     let new = db::db_new_path(root);
     if new.exists() {
-        println!("  orphan: {} (leftover build — rerun kg build or delete)", new.display());
+        println!(
+            "  orphan: {} (leftover build — rerun kg build or delete)",
+            new.display()
+        );
     }
     let lock = dir.join("build.lock");
     if lock.exists() {
-        println!("  lock file: {} present (stale if no build is running)", lock.display());
+        println!(
+            "  lock file: {} present (stale if no build is running)",
+            lock.display()
+        );
     }
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().to_string();

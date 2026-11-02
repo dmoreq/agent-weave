@@ -79,7 +79,10 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
     let mut line = String::new();
     loop {
         line.clear();
-        let read = reader.by_ref().take(MAX_FRAME_BYTES + 1).read_line(&mut line)?;
+        let read = reader
+            .by_ref()
+            .take(MAX_FRAME_BYTES + 1)
+            .read_line(&mut line)?;
         if read == 0 {
             return Ok(());
         }
@@ -108,7 +111,11 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
             }
         };
         let id = msg.get("id").cloned();
-        let Some(method) = msg.get("method").and_then(|m| m.as_str()).map(str::to_string) else {
+        let Some(method) = msg
+            .get("method")
+            .and_then(|m| m.as_str())
+            .map(str::to_string)
+        else {
             continue; // a response or malformed frame — no reply
         };
         let is_notification = id.is_none();
@@ -126,42 +133,64 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
             "tools/list" => write_result(&mut out, id, json!({"tools": tools()}))?,
             "tools/call" => {
                 let params = msg.get("params").cloned().unwrap_or(Value::Null);
-                let tool_name = params.get("name").and_then(|n| n.as_str()).map(str::to_string);
+                let tool_name = params
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .map(str::to_string);
                 let Some(tool_name) = tool_name else {
                     if !is_notification {
                         write_error(&mut out, id, -32602, "missing tool name")?;
                     }
                     continue;
                 };
-                if !tools().as_array().map(|t| t.iter().any(|t| t["name"] == tool_name)).unwrap_or(false) {
+                if !tools()
+                    .as_array()
+                    .map(|t| t.iter().any(|t| t["name"] == tool_name))
+                    .unwrap_or(false)
+                {
                     if !is_notification {
-                        write_error(&mut out, id, -32602, format!("unknown tool '{tool_name}'").as_str())?;
+                        write_error(
+                            &mut out,
+                            id,
+                            -32602,
+                            format!("unknown tool '{tool_name}'").as_str(),
+                        )?;
                     }
                     continue;
                 }
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
                 let started = Instant::now();
                 // Panic isolation (R6d A7): one tool must not kill the server.
-                let (text, is_error, exit_code) = match std::panic::catch_unwind(
-                    std::panic::AssertUnwindSafe(|| call_tool(&root, &tool_name, &arguments)),
-                ) {
-                    Ok(v) => v,
-                    Err(_) => (
-                        "kg: internal: tool panicked — server still running\n".to_string(),
-                        true,
-                        6,
-                    ),
-                };
+                let (text, is_error, exit_code) =
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        call_tool(&root, &tool_name, &arguments)
+                    })) {
+                        Ok(v) => v,
+                        Err(_) => (
+                            "kg: internal: tool panicked — server still running\n".to_string(),
+                            true,
+                            6,
+                        ),
+                    };
                 crate::journal::finalize(
                     Some(&root),
                     exit_code,
                     started.elapsed().as_micros() as u64,
                 );
-                write_result(&mut out, id, json!({"content": [{"type": "text", "text": text}], "isError": is_error}))?;
+                write_result(
+                    &mut out,
+                    id,
+                    json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
+                )?;
             }
             _ => {
                 if !is_notification {
-                    write_error(&mut out, id, -32601, format!("method not found: {method}").as_str())?;
+                    write_error(
+                        &mut out,
+                        id,
+                        -32601,
+                        format!("method not found: {method}").as_str(),
+                    )?;
                 }
             }
         }
@@ -173,7 +202,12 @@ fn write_result(out: &mut impl Write, id: Option<Value>, result: Value) -> std::
     writeln!(out, "{msg}")
 }
 
-fn write_error(out: &mut impl Write, id: Option<Value>, code: i64, message: &str) -> std::io::Result<()> {
+fn write_error(
+    out: &mut impl Write,
+    id: Option<Value>,
+    code: i64,
+    message: &str,
+) -> std::io::Result<()> {
     let msg = json!({
         "jsonrpc": "2.0",
         "id": id.unwrap_or(Value::Null),
@@ -187,7 +221,10 @@ fn arg_str(args: &Value, key: &str) -> Option<String> {
 }
 
 fn arg_usize(args: &Value, key: &str, default: usize) -> usize {
-    args.get(key).and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(default)
+    args.get(key)
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(default)
 }
 
 fn arg_bool(args: &Value, key: &str) -> bool {
@@ -222,12 +259,19 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             crate::build::run_build(
                 Some(root),
                 arg_bool(args, "force"),
-                args.get("max_parse_error_rate").and_then(|v| v.as_f64()).unwrap_or(0.05),
+                args.get("max_parse_error_rate")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.05),
             )?
         )),
         "callers" => {
             let conn = crate::db::open_for_query(root)?;
-            let out = crate::query::callers(&conn, root, &arg_str(args, "name").unwrap_or_default(), arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?;
+            let out = crate::query::callers(
+                &conn,
+                root,
+                &arg_str(args, "name").unwrap_or_default(),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?;
             record(&out);
             Ok(crate::query::render_output(&out))
         }
@@ -255,23 +299,38 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
         }
         "impact" => {
             let conn = crate::db::open_for_query(root)?;
-            let out = crate::query::impact(&conn, root, &arg_str(args, "file").unwrap_or_default(), arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?;
+            let out = crate::query::impact(
+                &conn,
+                root,
+                &arg_str(args, "file").unwrap_or_default(),
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?;
             record(&out);
             Ok(crate::query::render_output(&out))
         }
         "dead" => {
             let conn = crate::db::open_for_query(root)?;
-            let out = crate::query::dead(&conn, root, arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?;
+            let out = crate::query::dead(
+                &conn,
+                root,
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?;
             record(&out);
             Ok(crate::query::render_output(&out))
         }
         "unresolved" => {
             let conn = crate::db::open_for_query(root)?;
-            Ok(join_lines(&crate::query::unresolved(&conn, arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?))
+            Ok(join_lines(&crate::query::unresolved(
+                &conn,
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+            )?))
         }
         "symbols" => {
             let conn = crate::db::open_for_query(root)?;
-            let outline = args.get("outline").and_then(|v| v.as_bool()).unwrap_or(false);
+            let outline = args
+                .get("outline")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             Ok(join_lines(&crate::query::symbols(
                 &conn,
                 root,
@@ -307,10 +366,21 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             "{}\n",
             crate::insights::stats(&crate::db::open_for_query(root)?, root)?
         )),
-        "hotspots" => Ok(join_lines(&crate::insights::hotspots(&crate::db::open_for_query(root)?, root, arg_usize(args, "limit", 10))?)),
-        "report" => Ok(join_lines(&crate::insights::report(&crate::db::open_for_query(root)?, root)?)),
+        "hotspots" => Ok(join_lines(&crate::insights::hotspots(
+            &crate::db::open_for_query(root)?,
+            root,
+            arg_usize(args, "limit", 10),
+        )?)),
+        "report" => Ok(join_lines(&crate::insights::report(
+            &crate::db::open_for_query(root)?,
+            root,
+        )?)),
         "usage" => {
-            if args.get("verify").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if args
+                .get("verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 let conn = crate::db::open_for_query(root)?;
                 Ok(join_lines(&crate::journal::verify(
                     root,
@@ -351,14 +421,20 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(name) = arg_str(args, "name") {
                 out.push(("name", name));
             }
-            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+            out.push((
+                "limit",
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+            ));
         }
         "callees" => {
             if let Some(name) = arg_str(args, "name") {
                 out.push(("name", name));
             }
             out.push(("depth", arg_usize(args, "depth", 1).to_string()));
-            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+            out.push((
+                "limit",
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+            ));
         }
         "path" => {
             if let Some(from) = arg_str(args, "from") {
@@ -373,15 +449,24 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(file) = arg_str(args, "file") {
                 out.push(("file", file));
             }
-            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+            out.push((
+                "limit",
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+            ));
         }
         "symbols" => {
             if let Some(file) = arg_str(args, "file") {
                 out.push(("file", file));
             }
-            let outline = args.get("outline").and_then(|v| v.as_bool()).unwrap_or(false);
+            let outline = args
+                .get("outline")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             out.push(("outline", outline.to_string()));
-            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+            out.push((
+                "limit",
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+            ));
         }
         "dead" | "unresolved" | "hotspots" => {
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
@@ -390,7 +475,10 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(terms) = arg_str(args, "terms") {
                 out.push(("terms", terms));
             }
-            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+            out.push((
+                "limit",
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+            ));
         }
         "clones" => {
             out.push((
@@ -401,10 +489,17 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                     .unwrap_or(5)
                     .to_string(),
             ));
-            out.push(("limit", arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string()));
+            out.push((
+                "limit",
+                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+            ));
         }
         "usage" => {
-            if args.get("verify").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if args
+                .get("verify")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 out.push(("verify", "true".to_string()));
                 out.push(("limit", arg_usize(args, "limit", 50).to_string()));
             }

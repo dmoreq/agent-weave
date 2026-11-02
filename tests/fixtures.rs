@@ -5,7 +5,7 @@
 
 use kg::extract::extract_file;
 use kg::extract::resolve;
-use kg::parse::{Lang, parse_source};
+use kg::parse::{parse_source, Lang};
 
 fn edges_for(src: &str) -> Vec<(String, String, String)> {
     // (kind, confidence, dst_name) of all calls edges, single-file project.
@@ -82,8 +82,7 @@ fn import_x_as_y_binds_module_root() {
     // Single-file index has no helpers module -> unresolved is CORRECT here;
     // the binding itself must exist (asserted via the two-file test below).
     assert!(
-        !e.iter()
-            .any(|(k, _, n)| k == "calls" && n == "help_me"),
+        !e.iter().any(|(k, _, n)| k == "calls" && n == "help_me"),
         "no bare-name false edge: {e:?}"
     );
 }
@@ -127,14 +126,12 @@ fn module_qualified_constructor_resolves() {
     let fx1 = extract_file(0, "pkg/pkg2/mod.py", src1.as_bytes(), &parsed1);
     let fx2 = extract_file(1, "pkg/other.py", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
-    let hit = resolution.edges.iter().any(|e| {
-        e.kind == "calls"
-            && e.confidence == "EXTRACTED"
-            && e.dst_name.contains("mod.K")
-    });
+    let hit = resolution
+        .edges
+        .iter()
+        .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("mod.K"));
     assert!(hit, "mod.K() must resolve: {:?}", resolution.edges);
 }
-
 
 #[test]
 fn or_fallback_construction_types_receiver() {
@@ -168,29 +165,32 @@ fn root_level_relative_import_resolves_without_stray_dot() {
     // module resolved to ".widget" (stray leading dot) and the W() call was
     // misclassified as dropped-external instead of resolving to the class.
     let src1 = "class Widget:\n    def render(self):\n        return 1\n";
-    let src2 = "from .widget import Widget as W\n\ndef run():\n    w = W()\n    return w.render()\n";
+    let src2 =
+        "from .widget import Widget as W\n\ndef run():\n    w = W()\n    return w.render()\n";
     let parsed1 = parse_source(src1.as_bytes(), Lang::Python).unwrap();
     let parsed2 = parse_source(src2.as_bytes(), Lang::Python).unwrap();
     let fx1 = extract_file(0, "widget.py", src1.as_bytes(), &parsed1);
     let fx2 = extract_file(1, "app.py", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
-        resolution
-            .edges
-            .iter()
-            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "widget.Widget"),
+        resolution.edges.iter().any(|e| e.kind == "calls"
+            && e.confidence == "EXTRACTED"
+            && e.dst_name == "widget.Widget"),
         "W() must resolve to widget.Widget: {:?}",
         resolution.edges
     );
     assert!(
-        resolution
-            .edges
-            .iter()
-            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "widget.Widget.render"),
+        resolution.edges.iter().any(|e| e.kind == "calls"
+            && e.confidence == "EXTRACTED"
+            && e.dst_name == "widget.Widget.render"),
         "w.render() must resolve: {:?}",
         resolution.edges
     );
-    assert_eq!(resolution.stats.unresolved_callees, 0, "no unresolved left: {:?}", resolution.stats);
+    assert_eq!(
+        resolution.stats.unresolved_callees, 0,
+        "no unresolved left: {:?}",
+        resolution.stats
+    );
 }
 
 #[test]
@@ -202,12 +202,19 @@ fn ts_class_method_and_this_call() {
     let names: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
     assert!(names.contains(&"apps.core.ledger.Ledger"), "{names:?}");
     assert!(names.contains(&"apps.core.ledger.Ledger.add"), "{names:?}");
-    assert!(names.contains(&"apps.core.ledger.Ledger.normalize"), "{names:?}");
+    assert!(
+        names.contains(&"apps.core.ledger.Ledger.normalize"),
+        "{names:?}"
+    );
     let resolution = kg::extract::resolve(vec![fx], Default::default());
     let hit = resolution.edges.iter().any(|e| {
         e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Ledger.normalize")
     });
-    assert!(hit, "this.normalize(n) must resolve: {:?}", resolution.edges);
+    assert!(
+        hit,
+        "this.normalize(n) must resolve: {:?}",
+        resolution.edges
+    );
 }
 
 #[test]
@@ -219,9 +226,10 @@ fn ts_new_expression_resolves_to_constructor() {
     let fx1 = kg::extract::extract_file(0, "apps/core/widget.ts", src1.as_bytes(), &p1);
     let fx2 = kg::extract::extract_file(1, "apps/core/factory.ts", src2.as_bytes(), &p2);
     let resolution = kg::extract::resolve(vec![fx1, fx2], Default::default());
-    let hit = resolution.edges.iter().any(|e| {
-        e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Widget")
-    });
+    let hit = resolution
+        .edges
+        .iter()
+        .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Widget"));
     assert!(hit, "new Widget() must resolve: {:?}", resolution.edges);
 }
 
@@ -234,10 +242,15 @@ fn ts_relative_import_resolves_by_path() {
     let fx1 = kg::extract::extract_file(0, "apps/web/src/lib/format.ts", src1.as_bytes(), &p1);
     let fx2 = kg::extract::extract_file(1, "apps/web/src/features/run.ts", src2.as_bytes(), &p2);
     let resolution = kg::extract::resolve(vec![fx1, fx2], Default::default());
-    let hit = resolution.edges.iter().any(|e| {
-        e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("format")
-    });
-    assert!(hit, "../lib/format import must resolve: {:?}", resolution.edges);
+    let hit = resolution
+        .edges
+        .iter()
+        .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("format"));
+    assert!(
+        hit,
+        "../lib/format import must resolve: {:?}",
+        resolution.edges
+    );
 }
 
 #[test]
@@ -247,7 +260,10 @@ fn ts_external_import_calls_drop() {
     let fx = kg::extract::extract_file(0, "apps/web/src/useCount.ts", src.as_bytes(), &parsed);
     let resolution = kg::extract::resolve(vec![fx], Default::default());
     assert!(
-        !resolution.edges.iter().any(|e| e.kind == "calls" && e.dst_name.contains("useState")),
+        !resolution
+            .edges
+            .iter()
+            .any(|e| e.kind == "calls" && e.dst_name.contains("useState")),
         "no useState edge"
     );
     assert!(
@@ -271,7 +287,9 @@ fn rust_crate_three_segment_call_resolves() {
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
         resolution.edges.iter().any(|e| {
-            e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "src.query.file_changed"
+            e.kind == "calls"
+                && e.confidence == "EXTRACTED"
+                && e.dst_name == "src.query.file_changed"
         }),
         "crate::query::file_changed must resolve: {:?}",
         resolution.edges
@@ -287,10 +305,9 @@ fn local_variable_shadows_same_named_module() {
     let fx = extract_file(0, "d.py", src.as_bytes(), &parsed);
     let resolution = resolve(vec![fx], Default::default());
     assert!(
-        resolution
-            .edges
-            .iter()
-            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("D.m")),
+        resolution.edges.iter().any(|e| e.kind == "calls"
+            && e.confidence == "EXTRACTED"
+            && e.dst_name.contains("D.m")),
         "local-var receiver typing must shadow the module name: {:?}",
         resolution.edges
     );
@@ -302,21 +319,28 @@ fn fts5_is_compiled_into_bundled_sqlite() {
     // future rusqlite bundled build drops it.
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     let on: i64 = conn
-        .query_row(
-            "SELECT sqlite_compileoption_used('ENABLE_FTS5')",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT sqlite_compileoption_used('ENABLE_FTS5')", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(on, 1, "FTS5 missing from the bundled SQLite build");
 }
 
 #[test]
 fn split_ident_splits_camel_snake_and_dotted_idents() {
-    assert_eq!(kg::extract::split_ident("HierarchicalAddressParser.parse"), "hierarchical address parser parse");
-    assert_eq!(kg::extract::split_ident("get_knowledge_base"), "get knowledge base");
+    assert_eq!(
+        kg::extract::split_ident("HierarchicalAddressParser.parse"),
+        "hierarchical address parser parse"
+    );
+    assert_eq!(
+        kg::extract::split_ident("get_knowledge_base"),
+        "get knowledge base"
+    );
     assert_eq!(kg::extract::split_ident("FNV-1a"), "fnv 1a");
-    assert_eq!(kg::extract::split_ident("normalize_ascii"), "normalize ascii");
+    assert_eq!(
+        kg::extract::split_ident("normalize_ascii"),
+        "normalize ascii"
+    );
     assert_eq!(kg::extract::split_ident(""), "");
 }
 

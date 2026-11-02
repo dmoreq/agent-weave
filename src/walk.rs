@@ -12,7 +12,9 @@ use crate::error::{KgError, Result};
 pub const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
 /// P2 extension allowlist: Python + TypeScript/TSX + JavaScript/JSX.
-pub const SOURCE_EXTS: &[&str] = &["py", "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs", "rs"];
+pub const SOURCE_EXTS: &[&str] = &[
+    "py", "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs", "rs",
+];
 
 #[derive(Clone)]
 pub struct WalkedFile {
@@ -33,7 +35,10 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
     match explicit {
         Some(p) => {
             if !p.is_dir() {
-                return Err(KgError::Usage(format!("--root {} is not a directory", p.display())));
+                return Err(KgError::Usage(format!(
+                    "--root {} is not a directory",
+                    p.display()
+                )));
             }
             Ok(p.to_path_buf())
         }
@@ -120,10 +125,17 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
             skipped_large += 1;
             continue;
         }
-        files.push(WalkedFile { abs: path.to_path_buf(), rel, size });
+        files.push(WalkedFile {
+            abs: path.to_path_buf(),
+            rel,
+            size,
+        });
     }
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    Ok(WalkStats { files, skipped_large })
+    Ok(WalkStats {
+        files,
+        skipped_large,
+    })
 }
 
 #[cfg(test)]
@@ -143,7 +155,10 @@ mod tests {
         write(&dir.join("sub/b.py"), b"y = 2\n");
         write(&dir.join("sub/c.txt"), b"not indexed\n");
         write(&dir.join(".kg/index.db"), b"stale");
-        write(&dir.join("sub/huge.py"), &[b'a'; MAX_FILE_SIZE as usize + 1]);
+        write(
+            &dir.join("sub/huge.py"),
+            &[b'a'; MAX_FILE_SIZE as usize + 1],
+        );
 
         let stats = walk(&dir, &["py"]).unwrap();
         let rels: Vec<&str> = stats.files.iter().map(|f| f.rel.as_str()).collect();

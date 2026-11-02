@@ -4,8 +4,8 @@
 #![forbid(unsafe_code)]
 
 mod build;
-mod clones;
 mod cli;
+mod clones;
 mod db;
 mod doctor;
 mod error;
@@ -17,7 +17,6 @@ mod mcp;
 mod parse;
 mod query;
 mod walk;
-
 
 use clap::Parser;
 use std::time::Instant;
@@ -32,7 +31,10 @@ fn main() {
     let root_arg = cli.root.clone();
     let no_journal = cli.no_journal;
     let journaled = !no_journal
-        && !matches!(cli.cmd, cli::Cmd::Doctor { .. } | cli::Cmd::Usage { .. } | cli::Cmd::Mcp {});
+        && !matches!(
+            cli.cmd,
+            cli::Cmd::Doctor { .. } | cli::Cmd::Usage { .. } | cli::Cmd::Mcp {}
+        );
     if journaled {
         journal::begin("cli", tool_name(&cli.cmd), &journal_args(&cli.cmd));
     }
@@ -105,7 +107,10 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
 
 fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
     match cmd {
-        cli::Cmd::Build { force, max_parse_error_rate } => vec![
+        cli::Cmd::Build {
+            force,
+            max_parse_error_rate,
+        } => vec![
             ("force", force.to_string()),
             ("threshold", max_parse_error_rate.to_string()),
         ],
@@ -127,7 +132,11 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         }
         cli::Cmd::Dead { limit } => vec![("limit", limit.to_string())],
         cli::Cmd::Unresolved { limit } => vec![("limit", limit.to_string())],
-        cli::Cmd::Symbols { file, outline, limit } => {
+        cli::Cmd::Symbols {
+            file,
+            outline,
+            limit,
+        } => {
             vec![
                 ("file", file.clone()),
                 ("outline", outline.to_string()),
@@ -135,10 +144,7 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             ]
         }
         cli::Cmd::Search { terms, limit } => {
-            vec![
-                ("terms", terms.clone()),
-                ("limit", limit.to_string()),
-            ]
+            vec![("terms", terms.clone()), ("limit", limit.to_string())]
         }
         cli::Cmd::Clones { min_lines, limit } => {
             vec![
@@ -158,7 +164,10 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
 fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
     let root_arg = cli.root.as_deref();
     match cli.cmd {
-        cli::Cmd::Build { force, max_parse_error_rate } => {
+        cli::Cmd::Build {
+            force,
+            max_parse_error_rate,
+        } => {
             let line = build::run_build(root_arg, force, max_parse_error_rate)?;
             println!("{line}");
             Ok(())
@@ -250,7 +259,11 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Symbols { file, outline, limit } => {
+        cli::Cmd::Symbols {
+            file,
+            outline,
+            limit,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             for line in query::symbols(&conn, &root, &file, outline, limit)? {

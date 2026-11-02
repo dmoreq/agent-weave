@@ -62,7 +62,11 @@ pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
         .ok_or_else(|| KgError::Internal("tree-sitter returned no tree".to_string()))?;
     let error_nodes = count_error_nodes(tree.root_node());
     let status = if error_nodes == 0 { "ok" } else { "partial" };
-    Ok(ParsedFile { tree, error_nodes, status })
+    Ok(ParsedFile {
+        tree,
+        error_nodes,
+        status,
+    })
 }
 
 fn count_error_nodes(root: Node<'_>) -> usize {
