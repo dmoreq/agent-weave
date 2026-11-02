@@ -1,0 +1,11 @@
+I'll check the pending handoff, then trace whether `src.main.main` reaches `src.extract.walk_node` in the resolved call graph.The pending handoff is a different question and a different output file. I will trace `src.main.main` to `src.extract.walk_node` with callers and callees.The resolved graph has a 5-hop route. I am writing that result to the answer file.`src.main.main` reaches `src.extract.walk_node` in the resolved call graph in 5 hops.
+
+| Hop | Call site | Edge |
+|-----|-----------|------|
+| 1 | `src/main.rs:37` | `main` → `run` |
+| 2 | `src/main.rs:146` | `run` → `run_build` |
+| 3 | `src/build.rs:121` | `run_build` → `extract_file` |
+| 4 | `src/extract.rs:265` | `extract_file` → `walk_children` |
+| 5 | `src/extract.rs:379` | `walk_children` → `walk_node` |
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-P1.json`.

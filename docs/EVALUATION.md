@@ -102,6 +102,16 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 (5 frozen tasks x 2 arms x 2 runs, one agent host), replicated with a
 query-first routing policy (+10 runs) and cross-checked on a second host.
 
+**Utility of features added after that battery** (G14/G16/G17 were
+quality-only gates). Stage 1 — `kg path`, 24 runs = 3 route tasks x 2 arms
+x 2 hosts x 2 runs on sanitized corpora, oracle = the frozen G17 pairs:
+correctness 24/24 in BOTH arms, so no loss; routed arm cut kg calls
+44.8 -> 4.0 and input tokens 360K -> 156K per run on Grok Build, and
+5.2 -> 1.5 kg calls / 27.0K -> 17.4K input tokens on OpenCode
+gpt-6-sol. One `path` call answers most route questions; the control arm
+stays correct at high exploration cost. Record:
+`baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
+
 ### 5.1 Correctness first
 
 | | grep-only arm | kg arm |
@@ -186,6 +196,7 @@ raise model capability.
 | G16 clones | `baselines/g16-clones-2026-11-01.md` |
 | P4 spec + implementation reviews | `baselines/reviews/R4-P4.md`, `baselines/reviews/` (R4b record) |
 | agent A/B + routing + replication | `baselines/grok-a-b-2026-11-01.md` (+ `baselines/grok-a-b-2026-11-01/` manifests and audits) |
+| feature-utility A/B (path, Stage 1) | `baselines/agent-utility-2026-11-02.md`, protocol `baselines/tasks-utility.md`, run artifacts `baselines/utility-run-2026-11-02/` |
 | tasks, ground truth, harness | `baselines/tasks.md`, `baselines/ground-truth*.md`, `baselines/harness/` |
 
 Internal records use real corpus-repo names; this document intentionally does

@@ -1,0 +1,7 @@
+I'll check the call graph for a path from `scripts.build_knowledge_base.main` to `vihap.cleaners.unicode.normalize_ascii`.`main` reaches `normalize_ascii` within six hops. Next I will recover the call-site lines on that path.`scripts.build_knowledge_base.main` reaches `vihap.cleaners.unicode.normalize_ascii` in 3 resolved call hops.
+
+1. `scripts/build_knowledge_base.py:1702` — `main` calls `export_master_admin_marshal`
+2. `scripts/build_knowledge_base.py:1402` — that calls `SqliteFileReference.get_district_streets_mapping`
+3. `tests/support/sqlite_master_reference.py:32` — that calls `normalize_ascii`
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-P3.json`.

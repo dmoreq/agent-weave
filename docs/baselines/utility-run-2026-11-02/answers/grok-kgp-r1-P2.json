@@ -1,0 +1,6 @@
+{
+  "exists": false,
+  "hops": 0,
+  "route": [],
+  "answer": "No route exists. kg path reports no resolved call path from src.parse to src.extract.record_ts_arrow_function at any depth <= 10, and src.parse has zero callees."
+}

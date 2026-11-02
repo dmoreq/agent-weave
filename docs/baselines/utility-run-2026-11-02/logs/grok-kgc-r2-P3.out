@@ -1,0 +1,9 @@
+The pending handoff is a different run that used `kg path`. This run forbids that command, so I will reconstruct the call route with `kg callers`, `kg callees`, and `kg symbols`.Yes. `scripts.build_knowledge_base.main` reaches `vihap.cleaners.unicode.normalize_ascii` in 3 resolved calls.
+
+| Hop | Call site | Call |
+| --- | --- | --- |
+| 1 | `scripts/build_knowledge_base.py:1702` | `main` calls `export_master_admin_marshal` |
+| 2 | `scripts/build_knowledge_base.py:1402` | `export_master_admin_marshal` calls `SqliteFileReference.get_district_streets_mapping` |
+| 3 | `tests/support/sqlite_master_reference.py:32` | `get_district_streets_mapping` calls `normalize_ascii` |
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-P3.json`.

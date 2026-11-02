@@ -1,0 +1,3 @@
+`kg path` reports no resolved route from `src.parse` to `src.extract.record_ts_arrow_function`. Writing that result.No route exists from `src.parse` to `src.extract.record_ts_arrow_function` in the resolved call graph.
+
+`kg path` reports no call path at any depth <= 10, and `src.parse` has zero resolved callees. The result is in `/tmp/utility-answers-2026-11-02/grok-kgp-r2-P2.json` with `exists: false`, `hops: 0`, and `route: []`.

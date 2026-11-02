@@ -1,0 +1,11 @@
+The qualified name `src.main.main` is not in the index. I will look up the real symbol ids for `main` and `walk_node`, then walk the resolved call edges.`src.main.main` reaches `src.extract.walk_node` in 5 resolved call hops.
+
+| Hop | Call site | Edge |
+|---:|---|---|
+| 1 | `src/main.rs:37` | `main` → `run` |
+| 2 | `src/main.rs:146` | `run` → `run_build` |
+| 3 | `src/build.rs:121` | `run_build` → `extract_file` |
+| 4 | `src/extract.rs:265` | `extract_file` → `walk_children` |
+| 5 | `src/extract.rs:379` | `walk_children` → `walk_node` |
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-P1.json`.

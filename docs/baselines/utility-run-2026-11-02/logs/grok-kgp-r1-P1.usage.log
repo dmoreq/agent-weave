@@ -1,0 +1,1 @@
+{"ts":1793580511,"surface":"cli","tool":"path","args":{"name":"src.main.main","to":"src.extract.walk_node","depth":"10"},"result_count":5,"shown":5,"total":5,"ambiguous":0,"exit_code":0,"latency_us":1298,"stale":false,"kg_version":"0.1.0","session":"grok-kgp-r1-P1","arm":"grok-kgp-r1-P1"}

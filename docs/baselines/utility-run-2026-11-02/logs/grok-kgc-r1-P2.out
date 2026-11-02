@@ -1,0 +1,3 @@
+I'll check the pending handoff, then trace whether `src.parse` reaches `src.extract.record_ts_arrow_function` in the resolved call graph.No route exists from `src.parse` to `src.extract.record_ts_arrow_function` in the resolved call graph.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-P2.json` with `exists: false`, `hops: 0`, and an empty route. `src.parse` has zero outgoing call edges. The only resolved caller of `record_ts_arrow_function` is `src/extract.rs:415`.

@@ -1,0 +1,53 @@
+[start] grok-kgc-r1-P2 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:39:25
+[done] grok-kgc-r1-P2 exit=0 07:40:43
+[start] oc-kgc-r1-P2 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 07:40:43
+[done] oc-kgc-r1-P2 exit=0 07:41:01
+[start] grok-kgc-r1-P2 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:42:05
+[done] grok-kgc-r1-P2 exit=0 07:43:33
+[start] grok-kgp-r1-P2 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:43:33
+[done] grok-kgp-r1-P2 exit=0 07:44:38
+[start] grok-kgp-r2-P2 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:44:38
+[done] grok-kgp-r2-P2 exit=0 07:45:37
+[start] grok-kgc-r2-P2 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:45:37
+[done] grok-kgc-r2-P2 exit=0 07:46:39
+[start] grok-kgc-r1-P1 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:46:39
+[done] grok-kgc-r1-P1 exit=0 07:48:19
+[start] grok-kgp-r1-P1 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:48:20
+[done] grok-kgp-r1-P1 exit=0 07:48:41
+[start] grok-kgp-r2-P1 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:48:42
+[done] grok-kgp-r2-P1 exit=0 07:49:12
+[start] grok-kgc-r2-P1 host=grok repo=/tmp/utility-corpus-2026-11-02/kg 07:49:13
+[done] grok-kgc-r2-P1 exit=0 07:51:20
+[start] grok-kgc-r1-P3 host=grok repo=/tmp/utility-corpus-2026-11-02/vihap 07:51:20
+[done] grok-kgc-r1-P3 exit=0 07:54:22
+[start] grok-kgp-r1-P3 host=grok repo=/tmp/utility-corpus-2026-11-02/vihap 07:54:22
+[done] grok-kgp-r1-P3 exit=0 07:54:52
+[start] grok-kgp-r2-P3 host=grok repo=/tmp/utility-corpus-2026-11-02/vihap 07:54:52
+[done] grok-kgp-r2-P3 exit=0 07:55:14
+[start] grok-kgc-r2-P3 host=grok repo=/tmp/utility-corpus-2026-11-02/vihap 07:55:15
+[done] grok-kgc-r2-P3 exit=0 07:57:34
+[start] oc-kgc-r1-P2 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 07:57:34
+[done] oc-kgc-r1-P2 exit=0 07:57:40
+[start] oc-kgp-r1-P2 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 07:57:40
+[done] oc-kgp-r1-P2 exit=0 07:58:07
+[start] oc-kgp-r2-P2 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 07:58:07
+[done] oc-kgp-r2-P2 exit=0 07:58:32
+[start] oc-kgc-r2-P2 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 07:58:33
+[done] oc-kgc-r2-P2 exit=0 07:59:20
+[start] oc-kgc-r1-P1 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 07:59:21
+[done] oc-kgc-r1-P1 exit=0 08:00:21
+[start] oc-kgp-r1-P1 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 08:00:21
+[done] oc-kgp-r1-P1 exit=0 08:00:45
+[start] oc-kgp-r2-P1 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 08:00:45
+[done] oc-kgp-r2-P1 exit=0 08:01:03
+[start] oc-kgc-r2-P1 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 08:01:03
+[start] oc-kgc-r2-P1 host=opencode repo=/tmp/utility-corpus-2026-11-02/kg 08:10:24
+[done] oc-kgc-r2-P1 exit=0 08:10:29
+[start] oc-kgc-r1-P3 host=opencode repo=/tmp/utility-corpus-2026-11-02/vihap 08:10:29
+[done] oc-kgc-r1-P3 exit=0 08:11:54
+[start] oc-kgp-r1-P3 host=opencode repo=/tmp/utility-corpus-2026-11-02/vihap 08:11:54
+[done] oc-kgp-r1-P3 exit=0 08:12:13
+[start] oc-kgp-r2-P3 host=opencode repo=/tmp/utility-corpus-2026-11-02/vihap 08:12:13
+[done] oc-kgp-r2-P3 exit=0 08:12:35
+[start] oc-kgc-r2-P3 host=opencode repo=/tmp/utility-corpus-2026-11-02/vihap 08:12:35
+[done] oc-kgc-r2-P3 exit=0 08:13:51
