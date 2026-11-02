@@ -533,3 +533,22 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
     );
     let _ = fs::remove_dir_all(&repo);
 }
+
+#[test]
+fn malformed_json_frame_returns_parse_error() {
+    let repo = fixture("mcp-badjson");
+    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let mut srv = spawn(&repo);
+    srv.stdin.write_all(b"not json\n").unwrap();
+    srv.stdin.flush().unwrap();
+    let mut line = String::new();
+    srv.reader.read_line(&mut line).unwrap();
+    let resp: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(resp["error"]["code"], -32700, "{resp}");
+}

@@ -76,14 +76,21 @@ fn variable_reassignment_last_binding_wins() {
 
 #[test]
 fn import_x_as_y_binds_module_root() {
-    // R1 Critical: `import helpers as hp; hp.help_me()` must resolve.
-    let src = "import helpers as hp\n\ndef go():\n    return hp.help_me()\n";
-    let e = edges_for(src);
-    // Single-file index has no helpers module -> unresolved is CORRECT here;
-    // the binding itself must exist (asserted via the two-file test below).
+    // R1: `import helpers as hp; hp.help_me()` must resolve to the module's
+    // function (positive assertion; the old test only asserted an absence).
+    let src1 = "def help_me():\n    return 1\n";
+    let src2 = "import helpers as hp\n\ndef go():\n    return hp.help_me()\n";
+    let p1 = parse_source(src1.as_bytes(), Lang::Python).unwrap();
+    let p2 = parse_source(src2.as_bytes(), Lang::Python).unwrap();
+    let fx1 = extract_file(0, "helpers.py", src1.as_bytes(), &p1);
+    let fx2 = extract_file(1, "mod.py", src2.as_bytes(), &p2);
+    let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
-        !e.iter().any(|(k, _, n)| k == "calls" && n == "help_me"),
-        "no bare-name false edge: {e:?}"
+        resolution.edges.iter().any(|e| {
+            e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "helpers.help_me"
+        }),
+        "hp.help_me() must resolve to helpers.help_me: {:?}",
+        resolution.edges
     );
 }
 

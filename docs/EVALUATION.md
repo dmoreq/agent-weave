@@ -27,7 +27,7 @@ Corpora are referred to by neutral labels throughout:
 | corpus D | Python DAG/notebook generator | 596 | 3,119 | 3,849 |
 | corpus E | Python map-search service | 150 | 1,381 | 3,486 |
 | corpus F | Python data-science pipeline | 27 | 103 | 166 |
-| kg self | this repository (Rust) | 36 | 372 | 1,145 |
+| kg self | this repository (Rust) | 36 | 372 | 1,148 |
 
 ## 1. Methodology
 

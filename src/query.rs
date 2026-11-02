@@ -209,24 +209,23 @@ pub fn callees(
     // Callee pointer: the callee's definition line. AMBIGUOUS edges have no
     // dst symbol; they surface as the call site itself with the ambiguous tag.
     // depth > 1: recursive closure over call edges from the reached set.
-    let mut total_opt: Option<usize> = None;
-    let (sql, params): (String, Vec<rusqlite::types::Value>) = if depth == 1 {
+    let total_opt: Option<usize>;
+    let mut params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
+    let sql: String = if depth == 1 {
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let count_sql = format!(
             "SELECT COUNT(*) FROM edges e WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
         );
-        let count_params: Vec<rusqlite::types::Value> = ids
-            .iter()
-            .map(|i| rusqlite::types::Value::from(*i))
-            .collect();
         total_opt = Some(conn.query_row(
             &count_sql,
-            rusqlite::params_from_iter(count_params.iter()),
+            rusqlite::params_from_iter(params.iter()),
             |r| r.get::<_, i64>(0),
         )? as usize);
-        (
-            format!(
-                "SELECT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
+        format!(
+            "SELECT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
                 COALESCE(df.path, sf.path) AS path
          FROM edges e
          JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
@@ -234,40 +233,39 @@ pub fn callees(
          LEFT JOIN files df ON df.id = ds.file_id
          WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'
          ORDER BY path, line LIMIT {limit}"
-            ),
-            ids.iter()
-                .map(|i| rusqlite::types::Value::from(*i))
-                .collect(),
         )
     } else {
         let seed = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        (
-            format!(
-                "WITH RECURSIVE reach(sym, d) AS (
+        let cte = format!(
+            "WITH RECURSIVE reach(sym, d) AS (
              SELECT id, 0 FROM symbols WHERE id IN ({seed})
              UNION
              SELECT e.dst_id, r.d + 1 FROM edges e JOIN reach r ON e.src_id = r.sym
              WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL AND r.d < ?{d}
-         )
-         SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
+         )",
+            d = 1 + ids.len()
+        );
+        let select = format!(
+            "SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
                 COALESCE(df.path, sf.path) AS path
          FROM reach r
-         -- r.d < depth: emit out-edges only from nodes within N-1 hops, so
-         -- the closure closes exactly N levels (R6d A3: it closed N+1).
          JOIN edges e ON e.src_id = r.sym AND e.kind = 'calls' AND r.d < ?{d2}
          JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
-         LEFT JOIN files df ON df.id = ds.file_id
-         ORDER BY path, line",
-                d = 1 + ids.len(),
-                d2 = 2 + ids.len()
-            ),
-            ids.iter()
-                .map(|i| rusqlite::types::Value::from(*i))
-                .chain(std::iter::once(rusqlite::types::Value::from(depth as i64)))
-                .chain(std::iter::once(rusqlite::types::Value::from(depth as i64)))
-                .collect(),
-        )
+         LEFT JOIN files df ON df.id = ds.file_id",
+            d2 = 2 + ids.len()
+        );
+        params.push(rusqlite::types::Value::from(depth as i64));
+        params.push(rusqlite::types::Value::from(depth as i64));
+        let count_sql = format!("{cte} SELECT COUNT(*) FROM ({select})");
+        total_opt = Some(conn.query_row(
+            &count_sql,
+            rusqlite::params_from_iter(params.iter()),
+            |r| r.get::<_, i64>(0),
+        )? as usize);
+        // Bounded materialization (R6 round-2): the closure result is
+        // counted above and fetched with LIMIT, never fully collected.
+        format!("{cte} {select} ORDER BY path, line LIMIT {limit}")
     };
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {

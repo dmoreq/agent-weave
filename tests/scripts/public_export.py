@@ -37,6 +37,13 @@ REPLACEMENTS = [
     ("HierarchicalAddressParser", "WidgetParser"),
     ("get_knowledge_base", "get_widget_base"),
     ("normalize_ascii", "normalize_text"),
+    ("knowledge.marshal_io", "pkg.io"),
+    ("marshal_io", "io_utils"),
+    ("default_artifacts_dir", "default_artifacts_path"),
+    ("knowledge_artifacts_dir", "knowledge_artifacts_path"),
+    ("hierarchical address parser parse", "widget parser parse"),
+    ("get knowledge base", "get widget base"),
+    ("normalize ascii", "normalize text"),
     ("gso_loader", "module_loader"),
     ("AddressPairwiseScorer", "PairScorer"),
     ("AddressQualityScorer", "QualityScorer"),
@@ -88,6 +95,13 @@ def scrub(out: Path) -> None:
         for old, new in REPLACEMENTS:
             text = text.replace(old, new)
         path.write_text(text)
+    # Doc-only path references: keep Cargo.toml excludes valid.
+    for path in out.rglob("*.md"):
+        t = path.read_text(errors="replace")
+        t = t.replace("docs/baselines/", "").replace("baselines/", "")
+        t = re.sub(r"\[([^\]]+)\]\([^)]*evidence-vault[^)]*\)", r"\1", t)
+        t = re.sub(r"\[([^\]]+)\]\([^)]*baselines[^)]*\)", r"\1", t)
+        path.write_text(t)
     # The gate script itself carries the private-pattern vocabulary; it stays
     # in the private repo (R6 review finding).
     self_copy = out / "tests" / "scripts" / "public_export.py"
@@ -130,7 +144,7 @@ def gate(out: Path) -> int:
             "ds-team-" + "dag", "be-map-search-" + "v2", "be-ds-" + "forecast",
             "be-parser-" + "geocoder", "be-" + "mercury", "food-" + "dispatch",
             "agent-" + "skills"]),
-        "private_symbols": "|".join(["Hierarchical" + "AddressParser",
+        "private_symbols": "|".join(["Hierarchical" + "AddressParser", "marshal" + "_io",
             "get_knowledge" + "_base", "normalize_" + "ascii",
             "_gso_" + "loader", "AddressPairwise" + "Scorer",
             "AddressQuality" + "Scorer", "Gso" + "Index",
@@ -172,6 +186,16 @@ def main() -> int:
     export(src, out)
     scrub(out)
     rc = gate(out)
+    if rc == 0:
+        # The export must pass its own test suite (R6 round-2 Blocker).
+        test = subprocess.run(
+            ["cargo", "test", "--locked", "--release"],
+            cwd=out, capture_output=True, text=True,
+        )
+        print("export tests:", "PASS" if test.returncode == 0 else "FAIL")
+        if test.returncode != 0:
+            print(test.stderr[-3000:])
+            rc = 1
     files = len(subprocess.run(
         ["git", "ls-files", "--cached"], cwd=out, capture_output=True, text=True
     ).stdout.splitlines())

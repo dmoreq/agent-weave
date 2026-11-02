@@ -1659,3 +1659,72 @@ fn tracked_but_gitignored_sources_are_indexed() {
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "file indexed");
 }
+
+#[test]
+fn parallel_builds_produce_identical_tables() {
+    // G12 (R6 round-2): fresh builds must be byte-identical regardless of
+    // worker scheduling. Dump canonical rows twice and compare.
+    let repo = temp_repo("parallel-det");
+    for i in 0..40 {
+        write(
+            &repo,
+            &format!("f{i:02}.py"),
+            &format!("def a{i}():\n    return b{i}()\n\ndef b{i}():\n    return {i}\n"),
+        );
+    }
+    let dump = |tag: &str| -> String {
+        let db = repo.join(".kg/index.db");
+        let out = Command::new("python3")
+            .arg("-c")
+            .arg(format!(
+                "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\n\
+                 rows=[tuple(str(x) for x in r) for q in [\
+                 'SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic FROM files ORDER BY path',\
+                 'SELECT qualname,kind,line_start,line_end,signature FROM symbols ORDER BY qualname,line_start',\
+                 'SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line']\
+                 for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
+                db.display()
+            ))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{tag}: dump failed");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    build(&repo);
+    let first = dump("first");
+    let (code, stdout, stderr) = build(&repo); // fast path
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let second = dump("second");
+    let out = kg(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let third = dump("force");
+    assert_eq!(first, second, "fast-path rebuild changed table content");
+    assert_eq!(first, third, "forced rebuild changed table content");
+}
+
+#[test]
+fn doctor_invalidate_removes_the_index() {
+    let repo = fixture("invalidate");
+    build(&repo);
+    assert!(repo.join(".kg/index.db").exists());
+    let out = kg(&repo).args(["doctor", "--invalidate"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(!repo.join(".kg/index.db").exists(), "index removed");
+    let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "no index after invalidate");
+}
+
+#[test]
+fn truncated_index_exits_3() {
+    // CUJ3: a truncated index file is the corrupt-index class (exit 3).
+    let repo = fixture("truncated");
+    build(&repo);
+    let db = repo.join(".kg/index.db");
+    let mut bytes = fs::read(&db).unwrap();
+    bytes.truncate(bytes.len() / 3);
+    fs::write(&db, bytes).unwrap();
+    let out = kg(&repo).args(["callers", "normalize"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(3), "truncated index is corrupt");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("corrupt-index"), "{stderr}");
+}
