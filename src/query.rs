@@ -1662,7 +1662,7 @@ pub fn complexity(
            AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
            AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}
          ORDER BY s.cyclomatic DESC, s.effective_loc DESC, s.qualname,
-                  s.file_id, s.line_start LIMIT {limit}"
+                  s.file_path, s.line_start LIMIT {limit}"
     ))?;
     let rows: Vec<String> = stmt
         .query_map(

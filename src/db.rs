@@ -196,6 +196,7 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
         ("symbols", "nesting"),
         ("symbols", "effective_loc"),
         ("symbols", "exported"),
+        ("symbols", "file_path"),
         ("files", "generated"),
         ("unresolved_calls", "site_line"),
         ("unresolved_calls", "kind"),
@@ -521,8 +522,8 @@ pub fn carry_forward_unchanged(
         }
     }
     new.execute_batch(
-        "INSERT INTO symbols(id, kind, name, qualname, file_id, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
-         SELECT id, kind, name, qualname, file_id, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported
+        "INSERT INTO symbols(id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
+         SELECT id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported
          FROM olddb.symbols WHERE file_id IN (SELECT id FROM files);
          INSERT INTO edges(id, src_id, dst_id, dst_name, kind, confidence, site_line)
          SELECT id, src_id, dst_id, dst_name, kind, confidence, site_line
@@ -588,12 +589,13 @@ pub fn insert_symbols(
     conn: &Connection,
     symbols: &[NewSymbol],
     file_ids: &[i64],
+    file_paths: &[String],
 ) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
     for chunk in symbols.chunks(500) {
         let mut stmt = conn.prepare(
-            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
         for s in chunk {
             stmt.execute(rusqlite::params![
@@ -601,6 +603,7 @@ pub fn insert_symbols(
                 s.name,
                 s.qualname,
                 file_ids[s.file_idx],
+                file_paths[s.file_idx].clone(),
                 s.line_start as i64,
                 s.line_end as i64,
                 s.signature,

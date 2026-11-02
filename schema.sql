@@ -1,8 +1,9 @@
--- kg schema v6 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
+-- kg schema v7 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
 -- v2 -> v3 adds files.loc/files.cyclomatic; v3 -> v4 adds symbols.signature,
 -- Amendment 12a; v4 -> v5 adds unresolved_calls, Amendment 15; v5 -> v6 adds
--- Amendment 19: per-symbol metrics, exported flags, generated-file tag, and
--- unresolved edge kind/site line).
+-- Amendment 19 metrics/exported/generated/unresolved kind/site; v6 -> v7 adds
+-- symbols.file_path, Amendment 20: denormalized path for deterministic
+-- complexity ordering).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -33,6 +34,9 @@ CREATE TABLE symbols(
     name TEXT NOT NULL,
     qualname TEXT NOT NULL,
     file_id INTEGER NOT NULL REFERENCES files(id),
+    -- Denormalized files.path (Amendment 20); keeps complexity ORDER BY
+    -- (qualname, path, line_start) fully index-backed.
+    file_path TEXT NOT NULL DEFAULT '',
     line_start INTEGER NOT NULL,
     line_end INTEGER NOT NULL,
     -- One-line signature (Amendment 12a): first line of the symbol's node
@@ -60,7 +64,7 @@ CREATE INDEX edges_src ON edges(src_id, kind);
 CREATE INDEX symbols_file ON symbols(file_id);
 CREATE INDEX symbols_qualname ON symbols(qualname);
 CREATE INDEX symbols_complexity_idx
-    ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_id, line_start);
+    ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_path, line_start);
 -- Symbol search (Amendment 12b): standalone FTS5 over split identifier
 -- tokens; repopulated by one pass from symbols at the end of every build
 -- (the build replaces the whole DB, so no incremental maintenance exists).

@@ -800,6 +800,28 @@ CREATE INDEX symbols_complexity_idx
   command/flag surface is removed; an in-place column drop is forbidden, and
   a later cleanup is a v7 rebuild under the single normative version policy.
 
+### 6.1 Schema v7 (Amendment 20, P8 optimization)
+
+One additive bump after the P8 review cycle, limited to deterministic
+`complexity` ordering:
+
+```sql
+ALTER TABLE symbols ADD COLUMN file_path TEXT NOT NULL DEFAULT '';
+-- Replaces the v6 index; the old index is dropped with the table on rebuild.
+CREATE INDEX symbols_complexity_idx
+  ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_path, line_start);
+```
+
+- `PRAGMA user_version = 7`; `SCHEMA_VERSION = 7`. Query opens on v6 exit 5
+  with the rebuild hint; `kg build` rebuilds fresh.
+- `probe_old` adds `("symbols", "file_path")` to the required column set. A
+  v7-stamped index missing the column or the index rebuilds fresh.
+- `insert_symbols` fills `file_path` from the aligned fresh file paths;
+  `carry_forward_unchanged` copies it for every carried symbol. The value is
+  `files.path` (root-relative), never absolute.
+- Gate G26 extends with: fresh and carried indexes return byte-identical
+  `complexity` output for `pkg.py` vs `pkg/__init__.py` ties, ordered by path.
+
 ## 7. Algorithms, bounds, and determinism
 
 ### 7.1 Reverse BFS (`impact --depth > 1`, `tests`)

@@ -207,7 +207,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v6 — run kg build"),
+        stderr.contains("schema v99, binary expects v7 — run kg build"),
         "{stderr}"
     );
 }
@@ -1770,10 +1770,10 @@ fn p15_stats_hotspots_report() {
 }
 
 #[test]
-fn partial_v6_index_rebuilds_fresh() {
-    // Amendment 19: a v6-stamped index missing a required index must disable
-    // the fast path and rebuild, not fail carry-forward.
-    let repo = fixture("partial-v6");
+fn partial_complexity_index_rebuilds_fresh() {
+    // Amendment 19/20: an index missing a required index must disable the
+    // fast path and rebuild, not fail carry-forward.
+    let repo = fixture("partial-index");
     build(&repo);
     let idx = repo.join(".kg/index.db");
     let status = std::process::Command::new("sqlite3")
@@ -1790,7 +1790,114 @@ fn partial_v6_index_rebuilds_fresh() {
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(
         code, 0,
-        "rebuild over partial v6 index failed: {stdout}{stderr}"
+        "rebuild over partial index failed: {stdout}{stderr}"
+    );
+}
+
+#[test]
+fn partial_v7_file_path_column_rebuilds_fresh() {
+    // Amendment 20: a v7-stamped index missing symbols.file_path must disable
+    // the fast path. Recreate the v6 table shape behind a v7 stamp.
+    let repo = fixture("partial-file-path");
+    build(&repo);
+    let idx = repo.join(".kg/index.db");
+    let status = std::process::Command::new("sqlite3")
+        .args([
+            idx.to_string_lossy().as_ref(),
+            "DROP INDEX symbols_complexity_idx;
+             ALTER TABLE symbols DROP COLUMN file_path;
+             CREATE INDEX symbols_complexity_idx
+               ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_id, line_start);",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "sqlite3 demotion failed (fixture-only tool)"
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(
+        code, 0,
+        "rebuild over missing file_path failed: {stdout}{stderr}"
+    );
+    let out = kg(&repo).args(["complexity"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("app.py"),
+        "fresh index lost symbols after v7 rebuild"
+    );
+}
+
+#[test]
+fn v6_database_rebuilds_to_v7() {
+    // Amendment 20: a v6 user_version disables the fast path; build rewrites
+    // the index at v7 instead of carrying v6 rows.
+    let repo = fixture("v6-to-v7");
+    build(&repo);
+    let idx = repo.join(".kg/index.db");
+    let status = std::process::Command::new("sqlite3")
+        .args([idx.to_string_lossy().as_ref(), "PRAGMA user_version = 6;"])
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "sqlite3 version demotion failed");
+    let out = kg(&repo).args(["stats"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(5), "v6 query open must exit 5");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("schema v6, binary expects v7 — run kg build"),
+        "{stderr}"
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "v6 rebuild failed: {stdout}{stderr}");
+    let out = std::process::Command::new("sqlite3")
+        .args([idx.to_string_lossy().as_ref(), "PRAGMA user_version;"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "7",
+        "build did not stamp v7"
+    );
+}
+
+#[test]
+fn complexity_path_tiebreak_is_stable_fresh_and_carried() {
+    // Amendment 20: pkg.f exists in pkg.py and pkg/__init__.py with equal
+    // metrics. Ordering must use file_path, so a carried index whose file_id
+    // order differs from a fresh one still prints byte-identical output.
+    let repo = temp_repo("complexity-path");
+    let body = "def f(x):\n    if x:\n        return 1\n    return 0\n";
+    write(&repo, "pkg/__init__.py", body);
+    build(&repo);
+    write(&repo, "pkg.py", body);
+    build(&repo);
+
+    let carried = kg(&repo)
+        .args(["complexity", "--limit", "10"])
+        .output()
+        .unwrap();
+    let carried_out = String::from_utf8_lossy(&carried.stdout).into_owned();
+    assert_eq!(carried.status.code(), Some(0), "{carried_out}");
+    let py_at = carried_out.find("pkg.py:1").expect("pkg.py row");
+    let init_at = carried_out
+        .find("pkg/__init__.py:1")
+        .expect("pkg/__init__.py row");
+    assert!(
+        py_at < init_at,
+        "carried order must be path-ordered: {carried_out}"
+    );
+
+    fs::remove_dir_all(repo.join(".kg")).unwrap();
+    build(&repo);
+    let fresh = kg(&repo)
+        .args(["complexity", "--limit", "10"])
+        .output()
+        .unwrap();
+    let fresh_out = String::from_utf8_lossy(&fresh.stdout).into_owned();
+    assert_eq!(fresh.status.code(), Some(0), "{fresh_out}");
+    assert_eq!(
+        fresh_out, carried_out,
+        "fresh and carried complexity outputs differ"
     );
 }
 

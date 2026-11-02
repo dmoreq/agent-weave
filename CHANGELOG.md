@@ -7,6 +7,15 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Changed — schema v7 (Amendment 20)
+
+- `symbols.file_path` denormalizes `files.path`; `symbols_complexity_idx`
+  covers `(cyclomatic, effective_loc, qualname, file_path, line_start)` so
+  `kg complexity` tie-breaks by path, not insertion-order `file_id`.
+- v6 indexes are not migrated: query opens exit 5 and `kg build` rebuilds.
+  Fresh inserts and carry-forward both populate the column; `probe_old`
+  rejects a v7-stamped index that lacks it.
+
 ### Added — P8 structural graph (Amendment 19, schema v6)
 
 - `kg implementers <name>`: resolved inbound `inherits` edges; Rust

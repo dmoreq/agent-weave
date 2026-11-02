@@ -283,7 +283,9 @@ pub fn run_build(
             fresh_pos.push(None);
         }
     }
-    let fresh_sym_ids = crate::db::insert_symbols(&conn, &fresh_symbols, &fresh_file_ids)?;
+    let fresh_paths: Vec<String> = fresh_rows.iter().map(|r| r.rel.clone()).collect();
+    let fresh_sym_ids =
+        crate::db::insert_symbols(&conn, &fresh_symbols, &fresh_file_ids, &fresh_paths)?;
 
     // Edges: endpoints map fresh -> inserted id, carried -> previous row id.
     let mut edge_rows: Vec<crate::db::EdgeRow> = Vec::with_capacity(resolution.edges.len());
