@@ -30,12 +30,14 @@ REPOS = {"P1": KG_ROOT, "P2": KG_ROOT, "P3": VIHAP_ROOT, "S1": KG_ROOT, "S2": KG
          "C1": Path("/tmp/utility-corpus-2026-11-02/clones"), "C2": Path("/tmp/utility-corpus-2026-11-02/clones"),
          "D1": Path("/tmp/utility-corpus-2026-11-02/scale"), "D2": Path("/tmp/utility-corpus-2026-11-02/scale"),
          "D3": Path("/tmp/utility-corpus-2026-11-02/scale"),
+         "E1": Path("/tmp/prose-new"), "E2": Path("/tmp/prosev-new"), "E3": Path("/tmp/prosev-new"),
          "B1": VIHAP_ROOT, "B2": VIHAP_ROOT}
 FEATURE_TOOL = {"P1": "path", "P2": "path", "P3": "path",  # Stage 1
                  "S1": "search", "S2": "search", "S3": "search",  # Stage 2
                  "C1": "clones", "C2": "clones",  # Stage 3
                  "B1": "search", "B2": "search",  # Stage 2b
-                 "D1": "path", "D2": "path", "D3": "path"}  # Stage 4 (scale)
+                 "D1": "path", "D2": "path", "D3": "path",  # Stage 4 (scale)
+                 "E1": "search", "E2": "search", "E3": "search"}  # Stage 2c (prose)
 OC_DB = Path.home() / ".local/share/opencode/opencode.db"
 
 
@@ -160,11 +162,11 @@ def main() -> int:
         if rec["host"] == "grok":
             for d in Path.home().glob(f".grok/sessions/*/{meta['sid']}/chat_history.jsonl"):
                 probe += d.read_text(errors="replace")
-        low = probe.lower()
-        if "sqlite3" in low or any(
-            marker in low
-            for marker in (".tables", "from clone_groups", "from edges")
-        ):
+        # Only flag actual shell commands against the index; transcript text
+        # (search output mentioning sqlite3.Cursor etc.) is not a query.
+        import re as _re
+        cmds = _re.findall(r'"command":"[^"]*"', probe)
+        if any("sqlite3" in c or "index.db" in c for c in cmds):
             rec["violations"].append("direct sqlite query in transcript")
         audit.append(rec)
     (ROOT / out_name).write_text(json.dumps(audit, indent=1) + "\n")

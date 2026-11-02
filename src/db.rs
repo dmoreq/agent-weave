@@ -509,8 +509,8 @@ pub fn insert_symbols(
     let mut ids = Vec::with_capacity(symbols.len());
     for chunk in symbols.chunks(500) {
         let mut stmt = conn.prepare(
-            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end, signature)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO symbols(kind, name, qualname, file_id, line_start, line_end, signature, docstring)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         for s in chunk {
             stmt.execute(rusqlite::params![
@@ -520,7 +520,8 @@ pub fn insert_symbols(
                 file_ids[s.file_idx],
                 s.line_start as i64,
                 s.line_end as i64,
-                s.signature
+                s.signature,
+                s.docstring
             ])?;
             ids.push(conn.last_insert_rowid());
         }
@@ -590,22 +591,30 @@ pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
 /// haystacks grep already matches and a name-only index could not.
 pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
-        "SELECT s.id, s.qualname, s.name, f.path, s.signature
+        "SELECT s.id, s.qualname, s.name, f.path, s.signature, s.docstring
          FROM symbols s JOIN files f ON f.id = s.file_id",
     )?;
-    let rows: Vec<(i64, String, String, String, String)> = stmt
+    let rows: Vec<(i64, String, String, String, String, String)> = stmt
         .query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
-    for (id, qualname, name, path, signature) in rows {
+    for (id, qualname, name, path, signature, docstring) in rows {
         let text = format!(
-            "{} {} {} {}",
+            "{} {} {} {} {}",
             crate::extract::split_ident(&qualname),
             crate::extract::split_ident(&name),
             crate::extract::split_ident(&path),
-            crate::extract::split_ident(&signature)
+            crate::extract::split_ident(&signature),
+            crate::extract::split_ident(&docstring)
         );
         ins.execute(rusqlite::params![id, text])?;
     }

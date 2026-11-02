@@ -44,6 +44,15 @@ changes bump the minor while 0.x is unstable.
   `path:line qualname signature` (contract bump; empty signature keeps the
   12b byte shape). Payload/G10 parity unchanged.
 
+### Added — `kg search` docstring vocabulary (Amendment 16, schema v6)
+
+- `symbols.docstring` (additive): one-line documentation captured from the
+  already-parsed node (Python docstring first line; nearest leading comment
+  for TS/JS/Rust), marker-stripped, cap 160 chars, no bodies (OQ6 approved).
+- Indexed text gains `split_ident(docstring)` tokens; G14 recall unchanged
+  at 0.800; a frozen 6-query prose-gap set improves 5/6 over the pre-P7
+  binary; search hit rendering unchanged.
+
 ### Fixed — R6 remediation (Amendment 15, schema v5)
 
 - Build abort on deeply nested source replaced by an explicit depth guard

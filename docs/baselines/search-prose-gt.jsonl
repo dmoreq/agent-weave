@@ -1,0 +1,6 @@
+{"repo": "kg", "query": "Session attribution Amendment tags", "expect": ["env_tag"]}
+{"repo": "kg", "query": "journal this invocation No-op", "expect": ["begin"]}
+{"repo": "kg", "query": "Handlers inject query outcome", "expect": ["record_result"]}
+{"repo": "kg", "query": "Serialize append usage line", "expect": ["finalize"]}
+{"repo": "kg", "query": "Summarize usage per-tool calls", "expect": ["summary"]}
+{"repo": "vihap", "query": "accelerated translate table", "expect": ["_ascii_diacritic_trans"]}

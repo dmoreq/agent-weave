@@ -1,7 +1,7 @@
--- kg schema v5 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
+-- kg schema v6 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
 -- v2 -> v3 adds files.loc/files.cyclomatic; v3 -> v4 adds symbols.signature,
--- Amendment 12a; v4 -> v5 adds unresolved_calls, Amendment 15: unresolved call
--- names per file, so the fast path re-extracts only files whose gaps can heal).
+-- Amendment 12a; v4 -> v5 adds unresolved_calls, Amendment 15; v5 -> v6 adds
+-- symbols.docstring, Amendment 16: one-line documentation, no bodies).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -34,7 +34,10 @@ CREATE TABLE symbols(
     line_end INTEGER NOT NULL,
     -- One-line signature (Amendment 12a): first line of the symbol's node
     -- text, trimmed, hard cap 160 chars. Empty for module symbols. No bodies.
-    signature TEXT NOT NULL DEFAULT ''
+    signature TEXT NOT NULL DEFAULT '',
+    -- One-line documentation (Amendment 16): Python docstring first line or
+    -- nearest leading comment; marker-stripped, cap 160 chars.
+    docstring TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE edges(
     id INTEGER PRIMARY KEY,

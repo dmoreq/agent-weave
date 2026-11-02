@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 5;
+pub const SCHEMA_VERSION: i32 = 6;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -230,6 +230,73 @@ pub struct NewSymbol {
     /// One-line signature (Amendment 12a): first line of the node's text,
     /// trimmed, hard cap 160 chars. Empty for module/synthetic symbols.
     pub signature: String,
+    /// One-line documentation (Amendment 16): Python docstring first line or
+    /// the nearest leading comment line. Marker-stripped, cap 160 chars.
+    /// Never a source body.
+    pub docstring: String,
+}
+
+/// First line of a documentation string/comment, markers stripped, capped.
+fn clean_doc(raw: &str) -> String {
+    let s = raw.trim();
+    if let Some(rest) = s.strip_prefix("/*") {
+        let rest = rest.trim_start_matches('*');
+        let body = rest.split("*/").next().unwrap_or(rest);
+        let first = body
+            .lines()
+            .map(|l| l.trim().trim_start_matches('*').trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or("");
+        return first.chars().take(160).collect();
+    }
+    let s = s
+        .trim_start_matches('#')
+        .trim_start_matches('/')
+        .trim_start_matches('!');
+    let s = s.trim_start_matches(|c| c == '"' || c == '\'');
+    let s = s.trim_end_matches(|c| c == '"' || c == '\'');
+    s.lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(160)
+        .collect()
+}
+
+/// One-line documentation for a symbol (Amendment 16): Python docstring first
+/// line, or the nearest leading comment line for TS/JS/Rust. Empty when none.
+fn docstring_of(node: Node<'_>, src: &[u8]) -> String {
+    if let Some(body) = node.child_by_field_name("body") {
+        if let Some(first) = body.named_child(0) {
+            if first.kind() == "expression_statement" {
+                if let Some(lit) = first.named_child(0) {
+                    if lit.kind() == "string" {
+                        return clean_doc(&text(lit, src));
+                    }
+                }
+            }
+        }
+    }
+    let mut cur = node.prev_named_sibling();
+    let mut comments: Vec<String> = Vec::new();
+    while let Some(prev) = cur {
+        match prev.kind() {
+            "line_comment" | "block_comment" | "comment" => {
+                comments.push(text(prev, src));
+                cur = prev.prev_named_sibling();
+            }
+            "attribute_item" | "decorator" => cur = prev.prev_named_sibling(),
+            _ => break,
+        }
+    }
+    for raw in comments.iter().rev() {
+        let cleaned = clean_doc(raw);
+        if !cleaned.is_empty() {
+            return cleaned;
+        }
+    }
+    String::new()
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +482,7 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
             line_start: 1,
             line_end: 1,
             signature: String::new(),
+            docstring: String::new(),
         }],
         edges: Vec::new(),
         inherits: Vec::new(),
@@ -678,6 +746,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 qualname: qualname.clone(),
                 file_idx: fx.file_idx,
                 signature: signature_of(node, src),
+                docstring: docstring_of(node, src),
                 line_start: start,
                 line_end: node.end_position().row + 1,
             });
@@ -720,6 +789,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 qualname: qualname.clone(),
                 file_idx: fx.file_idx,
                 signature: signature_of(node, src),
+                docstring: docstring_of(node, src),
                 line_start: start,
                 line_end: node.end_position().row + 1,
             });
@@ -1063,6 +1133,7 @@ fn define_function(
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
         signature: signature_of(node, src),
+        docstring: docstring_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -1106,6 +1177,7 @@ fn define_class_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
         signature: signature_of(node, src),
+        docstring: docstring_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -1176,6 +1248,7 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
         signature: signature_of(node, src),
+        docstring: docstring_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -1232,6 +1305,7 @@ fn record_ts_arrow_function(
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
         signature: signature_of(node, src),
+        docstring: docstring_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
     });
@@ -1600,6 +1674,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             line_start: 0,
             line_end: 0,
             signature: String::new(),
+            docstring: String::new(),
         });
         t.existing_ids.push(Some(c.row_id));
         t.by_qualname

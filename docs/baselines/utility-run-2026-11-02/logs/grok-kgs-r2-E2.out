@@ -1,0 +1,3 @@
+I'll look up the pending handoff, then search the code index for the function that builds the C-accelerated diacritics translate table.The first search ranked address translators, not a diacritics table. I'll search again with tighter terms.`_ascii_diacritic_trans` is the closest hit. I'll read its definition and search for the C-accelerated wording.`vihap.cleaners.unicode._ascii_diacritic_trans` at `vihap/cleaners/unicode.py:23` builds the C-accelerated diacritics translate table. Its docstring says it builds a C-accelerated translate table that mirrors NFD, Mn-stripping, and đ→d, and it returns `str.maketrans(mapping)`.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r2-E2.json`.

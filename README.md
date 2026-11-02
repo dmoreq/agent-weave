@@ -46,7 +46,7 @@ kg callers Widget.render      # pointer list: path:line, capped at 50
 kg callees parse --depth 3    # transitive call closure
 kg path Widget.render parse_fragment  # shortest call route (resolved edges; depth cap 10)
 kg impact app.py              # files that call into app.py
-kg search parser fragment     # BM25 symbol search (identifiers + path + signature tokens); hits carry the signature
+kg search parser fragment     # BM25 symbol search (identifiers + path + signature + docstring tokens); hits carry the signature
 kg clones                     # duplicate-block candidates (caveat: not proof)
 kg dead                       # dead-code candidates (caveat: not proof)
 kg unresolved                 # per-file unresolved-callee counts
