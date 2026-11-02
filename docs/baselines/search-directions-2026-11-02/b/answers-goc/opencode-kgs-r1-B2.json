@@ -1,0 +1,7 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": ["pkg/beta.py:6"],
+  "qualname": "pkg.beta.coerce",
+  "answer": "coerce returns a list of HexWard and is called by bootstrap."
+}

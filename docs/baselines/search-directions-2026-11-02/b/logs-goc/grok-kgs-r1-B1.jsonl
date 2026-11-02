@@ -1,0 +1,3 @@
+I'll start with `kg search` for the mercer street tolerance parameter, then verify the definition pointer before writing the answer.The search hit names `pkg.alpha.process` with `mercer_street_tolerance`. I'll read that definition to confirm the return.Wrote `/tmp/kg-lab/b/answers/grok-kgs-r1-B1.json`.
+
+`pkg.alpha.process` at `pkg/alpha.py:2` accepts `mercer_street_tolerance` and returns a `dict[str, float]` with keys `value` and `tolerance`.

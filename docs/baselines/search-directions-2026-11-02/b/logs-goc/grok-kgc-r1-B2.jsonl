@@ -1,0 +1,3 @@
+I'll start by checking the project handoff list, then locate the helper that returns `HexWard` and is called from bootstrap.`coerce` is the helper. It returns `list[HexWard]` and `bootstrap` calls it. I will write that pointer to the answer file.Wrote `/tmp/kg-lab/b/answers/grok-kgc-r1-B2.json`.
+
+`pkg.beta.coerce` at `pkg/beta.py:6` returns `list[HexWard]`. `bootstrap` calls it.

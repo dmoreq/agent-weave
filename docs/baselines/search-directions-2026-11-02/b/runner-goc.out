@@ -1,0 +1,33 @@
+=== grok-kgc-r1-B1
+[done] grok-kgc-r1-B1 exit=0 tools=12 kg=1 feat=0
+=== grok-kgs-r1-B1
+[done] grok-kgs-r1-B1 exit=0 tools=3 kg=1 feat=1
+=== grok-kgs-r2-B1
+[done] grok-kgs-r2-B1 exit=0 tools=4 kg=1 feat=1
+=== grok-kgc-r2-B1
+[done] grok-kgc-r2-B1 exit=0 tools=9 kg=1 feat=0
+=== grok-kgc-r1-B2
+[done] grok-kgc-r1-B2 exit=0 tools=8 kg=3 feat=0
+=== grok-kgs-r1-B2
+[done] grok-kgs-r1-B2 exit=0 tools=3 kg=2 feat=1
+=== grok-kgs-r2-B2
+[done] grok-kgs-r2-B2 exit=0 tools=4 kg=3 feat=1
+=== grok-kgc-r2-B2
+[done] grok-kgc-r2-B2 exit=0 tools=8 kg=3 feat=0
+=== opencode-kgc-r1-B1
+[done] opencode-kgc-r1-B1 exit=0 tools=7 kg=1 feat=0
+=== opencode-kgs-r1-B1
+[done] opencode-kgs-r1-B1 exit=0 tools=3 kg=1 feat=1
+=== opencode-kgs-r2-B1
+[done] opencode-kgs-r2-B1 exit=0 tools=3 kg=1 feat=1
+=== opencode-kgc-r2-B1
+[done] opencode-kgc-r2-B1 exit=0 tools=8 kg=0 feat=0
+=== opencode-kgc-r1-B2
+[done] opencode-kgc-r1-B2 exit=0 tools=7 kg=0 feat=0
+=== opencode-kgs-r1-B2
+[done] opencode-kgs-r1-B2 exit=0 tools=3 kg=1 feat=1
+=== opencode-kgs-r2-B2
+[done] opencode-kgs-r2-B2 exit=0 tools=3 kg=1 feat=1
+=== opencode-kgc-r2-B2
+[done] opencode-kgc-r2-B2 exit=0 tools=7 kg=2 feat=0
+=== GOC done

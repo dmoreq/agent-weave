@@ -14,7 +14,7 @@
 | direction | result | decision |
 |---|---|---|
 | A. Source-first ranking | G14 0.725 -> **0.800** (21/28 -> 23/28); held-out 5/8 **unchanged**; gap 6/6; latency neutral | **Reject as default.** Gate-specific; keep only as an opt-in experiment. |
-| B. Search on noisy corpus | 16/16 correct; tools **−58%/−61%**, kg calls −44%/−50%, input tokens −29%/−59% | **Positive at this task class.** Search utility is real when grep is noisy and the target vocabulary lives in signatures. |
+| B. Search on noisy corpus | 32/32 correct across 4 hosts; tools **−58% to −62%**, input tokens −29% to −59% (Grok output +11%) | **Positive at this task class on 4/4 hosts.** Search utility is real when grep is noisy and the target vocabulary lives in signatures. |
 | C. Proactive map | C1 7/8 correct (treatment 4/4); tools 0/+4%, kg calls −22%/−71%, tokens mixed; C2 invalid | **Defer.** No tool-call benefit; 6,980-char context cost; the task needs redesign. |
 
 ## Root cause, corrected
@@ -75,9 +75,20 @@ matches 2,000 files.
 | zcode | control | 11.0 | 3.00 | 20,654 | 137,792 | 1,884 | 33.4 |
 | zcode | search | **4.25 (−61%)** | **1.50 (−50%)** | **8,563 (−59%)** | **66,624 (−52%)** | **885 (−53%)** | **12.7 (−62%)** |
 
-Correctness: 16/16. Both hosts clear the 20% tool-call bar with parity, and
-token/cache/out deltas move in the same direction. This is the first search
-battery where the utility hypothesis holds on both hosts.
+Grok Build and OpenCode ran the same corpus, prompts, and GT (16 more cells):
+
+| host | arm | tools | kg calls | input tok | out tok | seconds |
+|---|---|---:|---:|---:|---:|---:|
+| grok | control | 9.25 | 2.00 | 217,609 | 2,325 | 46.2 |
+| grok | search | **3.50 (−62%)** | 1.75 (−12%) | **117,318 (−46%)** | 2,591 (+11%) | 44.1 (−5%) |
+| opencode | control | 7.25 | 0.75 | 14,275 | 453 | 51.0 |
+| opencode | search | **3.00 (−59%)** | 1.00 (+33%) | **8,793 (−38%)** | **235 (−48%)** | **21.0 (−59%)** |
+
+Correctness: 32/32 across all four hosts. Every host clears the 20%
+tool-call bar with parity. Input tokens fall on all four; Grok output tokens
+rise 11% (noise). kg calls fall on agy/zcode, are flat on Grok (control
+already used `kg symbols`), and rise on OpenCode because the control used
+almost no kg at all — the win there is grep/read replacement.
 
 Limits: synthetic corpus and two tasks; the vocabulary is signature-only by
 construction. Control can still guess the underscore spelling
@@ -120,9 +131,9 @@ narrower task, and compare against `kg report`'s existing fan-in section.
 |---|---|---|---|
 | problem addressed | top-10 crowding | task-fit / grep noise | orientation without a query |
 | measured accuracy | G14 +2 symbols; held-out 0 | 16/16 parity | C1 7/8; treatment 4/4 |
-| tool-call effect | not measured in an A/B | **−58% / −61%** | 0% / +4% |
+| tool-call effect | not measured in an A/B | **−58% to −62% (4/4 hosts)** | 0% / +4% |
 | kg-call effect | n/a | −44% / −50% | −22% / −71% |
-| token effect | latency only (neutral) | **−29% / −59%** | mixed |
+| token effect | latency only (neutral) | **input −29% to −59%** | mixed |
 | context cost | none | none (call output replaces reads) | +6,980 chars |
 | decision | reject default; opt-in experiment | adopt for noisy/signature class | defer; redesign task |
 
@@ -137,7 +148,7 @@ narrower task, and compare against `kg report`'s existing fan-in section.
 - C GT was audited in two cycles; C2 was declared invalid after budget/time
   breaches. C1 control retains `kg report`/`kg hotspots`, so the map's
   incremental value is compared against existing centrality surfaces.
-- n=2 per cell; two hosts, two models; cross-host tokens are not comparable.
+- n=2 per cell; four hosts/models for B, two for A/C; cross-host tokens are not comparable.
 - agy exceeded the 25-tool budget in some C cells; B had no violations.
 
 ## Reproduction

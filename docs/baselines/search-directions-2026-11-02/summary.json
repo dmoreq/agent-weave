@@ -92,5 +92,39 @@
    "tok_out": 3831,
    "duration_s": 42.65
   }
+ },
+ "B2": {
+  "grok_kgc": {
+   "n": 4,
+   "tools": 9.25,
+   "kg_calls": 2,
+   "tok_in": 217609.25,
+   "tok_out": 2325.25,
+   "duration_s": 46.23
+  },
+  "grok_kgs": {
+   "n": 4,
+   "tools": 3.5,
+   "kg_calls": 1.75,
+   "tok_in": 117318.25,
+   "tok_out": 2591,
+   "duration_s": 44.12
+  },
+  "opencode_kgc": {
+   "n": 4,
+   "tools": 7.25,
+   "kg_calls": 0.75,
+   "tok_in": 14275,
+   "tok_out": 452.5,
+   "duration_s": 51.0
+  },
+  "opencode_kgs": {
+   "n": 4,
+   "tools": 3,
+   "kg_calls": 1,
+   "tok_in": 8792.75,
+   "tok_out": 235.25,
+   "duration_s": 21.0
+  }
  }
 }

@@ -1,0 +1,3 @@
+I'll start with the required `kg search`, then verify the definition pointer before writing the answer file.Search points at `pkg.beta.coerce`. I'll confirm that definition and that `bootstrap` calls it.`pkg.beta.coerce` at `pkg/beta.py:6` returns `list[HexWard]` and is called by `pkg.beta.bootstrap`.
+
+Wrote `/tmp/kg-lab/b/answers/grok-kgs-r2-B2.json`.

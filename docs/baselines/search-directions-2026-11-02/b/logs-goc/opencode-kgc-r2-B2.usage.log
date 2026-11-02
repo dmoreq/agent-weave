@@ -1,0 +1,2 @@
+{"ts":1793631720,"surface":"cli","tool":"symbols","args":{"file":"pkg/beta.py","outline":"false","metrics":"false","limit":"50"},"result_count":5,"shown":5,"total":5,"ambiguous":0,"exit_code":0,"latency_us":110758,"stale":false,"kg_version":"0.2.1","session":"opencode-kgc-r2-B2","arm":"opencode-kgc-r2-B2"}
+{"ts":1793631731,"surface":"cli","tool":"callers","args":{"name":"pkg.beta.coerce","limit":"50"},"result_count":1,"shown":1,"total":1,"ambiguous":0,"exit_code":0,"latency_us":9558,"stale":false,"kg_version":"0.2.1","session":"opencode-kgc-r2-B2","arm":"opencode-kgc-r2-B2"}
