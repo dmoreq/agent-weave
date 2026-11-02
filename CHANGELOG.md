@@ -31,6 +31,17 @@ changes bump the minor while 0.x is unstable.
   8/8 frozen GT pairs, 0.6-1.4 ms in-process best-of-7 across the 85k-symbol
   synth corpus and the 26-file self-index (spawn-inclusive wall < 10 ms).
 
+### Changed — `kg search` readability (Amendment 14, P6)
+
+- Indexed text widened with `split_ident(path)` + `split_ident(signature)`
+  tokens (derived data; schema stays v4; the FTS is repopulated at build
+  end). Signature-only vocabulary ("usize", "option path", "any", "i64 vec")
+  now retrieves the symbols that carry it — frozen gap set 6/6 improved,
+  frozen G14 recall unchanged at 0.850.
+- Search hit lines gain the stored one-line signature:
+  `path:line qualname signature` (contract bump; empty signature keeps the
+  12b byte shape). Payload/G10 parity unchanged.
+
 ### Fixed
 
 - `tests/scripts/write_path_check.sh`: stale exclusion pattern (G5 was red

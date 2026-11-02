@@ -667,8 +667,11 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     if expr.is_empty() {
         return Err(KgError::Usage("empty search terms".to_string()));
     }
+    // Amendment 14b: hits carry the stored one-line signature after the
+    // qualname — the agent no longer needs a follow-up `symbols` call to
+    // learn what the hit is. Empty signature keeps the 12b byte shape.
     let mut stmt = conn.prepare(
-        "SELECT f.path, s.line_start, s.qualname
+        "SELECT f.path, s.line_start, s.qualname, s.signature
          FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid
          JOIN files f ON f.id = s.file_id
@@ -676,11 +679,17 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
          ORDER BY bm25(symbols_fts)",
     )?;
     let rows = stmt.query_map([&expr], |r| {
+        let qualname: String = r.get(2)?;
+        let signature: String = r.get(3)?;
         Ok(Pointer {
             file: r.get::<_, String>(0)?,
             line: r.get::<_, i64>(1)?,
             tag: "",
-            detail: r.get::<_, String>(2)?,
+            detail: if signature.is_empty() {
+                qualname
+            } else {
+                format!("{qualname} {signature}")
+            },
         })
     })?;
     let out = collect_output(

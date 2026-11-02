@@ -512,6 +512,20 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("utils.py:1"), "{stdout}");
     assert!(!stdout.contains("[ambiguous]"), "search hits carry no tier tag: {stdout}");
+    // Amendment 14b: the hit line carries the stored signature.
+    assert!(
+        stdout.contains("def normalize(text):"),
+        "search hit carries the signature: {stdout}"
+    );
+    // Amendment 14a: signature-only vocabulary is searchable (no symbol
+    // name contains the `def` token; every signature does).
+    let out = kg(&repo).args(["search", "def"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("utils.py:1"),
+        "signature tokens reach symbols: {stdout}"
+    );
 
     // No match: exit 1 with the documented reason line.
     let out = kg(&repo).args(["search", "zzzqqqxyz"]).output().unwrap();

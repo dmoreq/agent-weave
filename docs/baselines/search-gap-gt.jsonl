@@ -1,0 +1,6 @@
+{"repo": "kg", "query": "option path", "expect": ["stat_mtime", "stat_size", "discover_root"]}
+{"repo": "kg", "query": "usize", "expect": ["clamp_limit"]}
+{"repo": "kg", "query": "mut", "expect": ["walk_children"]}
+{"repo": "kg", "query": "i64 vec", "expect": ["shingles"]}
+{"repo": "kg", "query": "bool", "expect": ["is_index_corruption"]}
+{"repo": "vihap", "query": "any", "expect": ["_to_list"]}

@@ -490,18 +490,25 @@ pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
 
 /// Populate the FTS5 symbol-search index from the fully-inserted symbols
 /// table (Amendment 12b): one pass covering fresh AND carried rows, called
-/// inside the build transaction after `insert_edge_rows`.
+/// inside the build transaction after `insert_edge_rows`. Amendment 14
+/// widens the indexed text with path and signature tokens — the two
+/// haystacks grep already matches and a name-only index could not.
 pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
-    let mut stmt = conn.prepare("SELECT id, qualname, name FROM symbols")?;
-    let rows: Vec<(i64, String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.qualname, s.name, f.path, s.signature
+         FROM symbols s JOIN files f ON f.id = s.file_id",
+    )?;
+    let rows: Vec<(i64, String, String, String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
-    for (id, qualname, name) in rows {
+    for (id, qualname, name, path, signature) in rows {
         let text = format!(
-            "{} {}",
+            "{} {} {} {}",
             crate::extract::split_ident(&qualname),
-            crate::extract::split_ident(&name)
+            crate::extract::split_ident(&name),
+            crate::extract::split_ident(&path),
+            crate::extract::split_ident(&signature)
         );
         ins.execute(rusqlite::params![id, text])?;
     }
