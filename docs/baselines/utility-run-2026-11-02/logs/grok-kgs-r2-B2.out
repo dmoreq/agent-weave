@@ -1,0 +1,5 @@
+`vihap.adapters.sklearn._coerce_string_sequence` converts the input to `list[str]` and is the helper `_fit_string_sequence` calls.
+
+The definition is at `vihap/adapters/sklearn.py:117`. Its signature is `def _coerce_string_sequence(X: Any) -> list[str]`, and `_fit_string_sequence` calls it as `clean_items = _coerce_string_sequence(X)`.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r2-B2.json`.

@@ -1,0 +1,5 @@
+`vihap.adapters.sklearn._to_list` at `vihap/adapters/sklearn.py:79` converts a sequence to `list[Any]` and is called by `_raw_items_from_sklearn_input`.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgs-r1-B1.json` with `exists=true`, `hops=0`, and route `["vihap/adapters/sklearn.py:79"]`.
+
+`def _to_list(seq: Any) -> list[Any]` is called inside `_raw_items_from_sklearn_input` at lines 113 and 114 (`return _to_list(_tabular_address_column(X))` and `return _to_list(X)`).

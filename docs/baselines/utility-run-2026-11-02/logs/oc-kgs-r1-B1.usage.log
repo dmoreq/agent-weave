@@ -1,0 +1,2 @@
+{"ts":1793590365,"surface":"cli","tool":"search","args":{"terms":"raw items from sklearn input","limit":"50"},"result_count":50,"shown":50,"total":238,"ambiguous":0,"exit_code":0,"latency_us":3557,"stale":false,"kg_version":"0.1.0","session":"oc-kgs-r1-B1","arm":"oc-kgs-r1-B1"}
+{"ts":1793590382,"surface":"cli","tool":"search","args":{"terms":"_to_list","limit":"50"},"result_count":50,"shown":50,"total":430,"ambiguous":0,"exit_code":0,"latency_us":1600,"stale":false,"kg_version":"0.1.0","session":"oc-kgs-r1-B1","arm":"oc-kgs-r1-B1"}

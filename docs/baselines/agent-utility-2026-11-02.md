@@ -211,3 +211,38 @@ All three features keep their quality gates (G14/G16/G17). The utility
 A/B adds a second axis: `path` is utility-proven on both tested hosts;
 `search` shows no economics gain at the tested task class; `clones`
 transfers on Grok, not on OpenCode at n=2.
+
+## Stage 2b — `kg search` after the Amendment 14 upgrade (retest)
+
+Protocol: 16 cells = B1-B2 × 2 arms × 2 hosts × 2 runs on vihap, after the
+P6 upgrade (path+signature FTS tokens; signature rendered in hits). The
+first Stage-2b GT design was rejected by the Goldfish audit (B2 had 35
+equally valid `(str|None)->str` answers; B1 had two exact
+`(Any)->list[Any]` matches). Rewritten around a delegation constraint +
+signature: B1 = the `list[Any]` coercion helper called by
+`_raw_items_from_sklearn_input` (unique, search rank 1); B2 = the
+`list[str]` helper called by `_fit_string_sequence` (unique, search rank 1).
+
+### Correctness: 16/16 both arms
+
+### Economics (mean per run; host-recorded)
+
+| host | arm | kg calls | tool calls | input tokens |
+|------|-----|----------|------------|--------------|
+| Grok Build | kgc control | 1.0 | 7.25 | 242,431 |
+| Grok Build | kgs treatment | 2.0 | **4.5 (−38%)** | **174,928 (−28%)** |
+| OpenCode gpt-6-sol | kgc control | 1.0 | 6.0 | 13,248 |
+| OpenCode gpt-6-sol | kgs treatment | 1.25 | **5.0 (−17%)** | 9,053 (−32%, small numbers) |
+
+### G18(iii) verdict: FAIL by the stated bar (>= 20% on BOTH hosts)
+
+Grok clears the bar (−38% calls, −28% tokens). OpenCode lands at −17%
+calls — one call short; its token delta (−32% on 13K→9K) is cache-noisy
+and does not rescue the call bar. Per Amendment 14, a (iii) failure keeps
+the automatic revert on the table, but the owner may re-decide to keep the
+recall improvement (G18 i+ii passed: frozen recall unchanged 0.850, gap
+set 6/6 improved) — recorded here, not silently taken.
+
+Scope: 2 tasks, n=2/arm/host; the upgrade demonstrably changes what
+search can retrieve, but the agent-economics gain remains host-dependent
+(the same pattern as Stages 2 and 3).

@@ -1,0 +1,1 @@
+{"exists": true, "hops": 0, "route": ["vihap/adapters/sklearn.py:117"], "answer": "vihap.adapters.sklearn._coerce_string_sequence has signature (X: Any) -> list[str] and is called by _fit_string_sequence to normalize X."}

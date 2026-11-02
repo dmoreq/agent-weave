@@ -1,0 +1,3 @@
+The pending handoff is a different deliverable path, so I am answering this request. Next I will locate `_fit_string_sequence` and the helper it calls.`vihap.adapters.sklearn._coerce_string_sequence` at `vihap/adapters/sklearn.py:117` returns `list[str]`, and `_fit_string_sequence` calls it at line 225.
+
+Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-B2.json`.

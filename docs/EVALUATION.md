@@ -115,7 +115,11 @@ stays correct at high exploration cost. Stage 2 — `kg search`, same
 single-target lookups whose vocabulary matches identifiers. Stage 3 —
 `kg clones`, 16 runs on a seeded fixture: correctness 16/16 both arms;
 tools −59% and tokens −39% on Grok, tools −17% and noisy tokens on
-OpenCode — PARTIAL (host-dependent, Grok only). Record:
+OpenCode — PARTIAL (host-dependent, Grok only). Search retest after the
+Amendment 14 upgrade (path+signature tokens, signature in hits; 16 runs):
+16/16 correct, Grok −38% calls / −28% tokens, OpenCode −17% calls —
+G18(iii) FAIL by the both-hosts bar, owner decision recorded in the
+baseline report. Record:
 `baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
 
 ### 5.1 Correctness first

@@ -122,3 +122,17 @@ file? Answer yes/no and justify from the tool output."
   C2 question now defines duplicate as identical normalized text (5+ lines,
   blank lines ignored); C2 answer contract adds `pairs=[]`; the scorer and
   audit now flag zero-tool cells and direct sqlite/index.db reads.
+- 2026-11-02, Stage 2b design (search upgrade retest, Amendment 14/G18iii;
+  16 cells = B1-B2 x 2 arms x 2 hosts x 2 runs, vihap, search-routed arm
+  vs grep+symbols control). Goldfish audit round 1 rejected the first
+  design (B2 had 35 equally valid `(str|None)->str` answers; B1 had two
+  exact `(Any)->list[Any]` matches). Rewritten around a delegation
+  constraint + signature: B1 asks for the `list[Any]` coercion helper
+  called by `_raw_items_from_sklearn_input` (unique: sklearn.py:79,
+  search rank 1 for "any list"); B2 asks for the `list[str]` helper called
+  by `_fit_string_sequence` (unique: sklearn.py:117, search rank 1 for
+  "sequence list str"). Mechanical uniqueness + rank checks recorded in
+  the run log; no B cell ran under the rejected design. Corpus note
+  corrected: only the kg corpus strips docs/skills/tests/scripts; the
+  vihap corpus keeps them (the vihap tasks target source behavior, and
+  removing docs would not remove test-name competitors anyway).

@@ -1,0 +1,340 @@
+[
+ {
+  "runid": "grok-kgc-r1-B1",
+  "host": "grok",
+  "arm": "kgc",
+  "task": "B1",
+  "sid": "f18a79d5-1213-4757-bb4a-9ea6af6721fc",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 233614,
+  "tok_out": 1772,
+  "model": "grok-4.7-build",
+  "model_calls": 7,
+  "tools": 7,
+  "out_bytes": 27187,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgc-r1-B2",
+  "host": "grok",
+  "arm": "kgc",
+  "task": "B2",
+  "sid": "e8f43348-cafe-41c4-a9b1-0bd21469caa1",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 269665,
+  "tok_out": 1804,
+  "model": "grok-4.7-build",
+  "model_calls": 8,
+  "tools": 8,
+  "out_bytes": 27366,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgc-r2-B1",
+  "host": "grok",
+  "arm": "kgc",
+  "task": "B1",
+  "sid": "79844b3d-e2e6-47ab-9115-258989a6b034",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 231076,
+  "tok_out": 1578,
+  "model": "grok-4.7-build",
+  "model_calls": 7,
+  "tools": 7,
+  "out_bytes": 25930,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgc-r2-B2",
+  "host": "grok",
+  "arm": "kgc",
+  "task": "B2",
+  "sid": "6f013efe-9893-4f5e-bbf0-d7606f775bb0",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 235368,
+  "tok_out": 1781,
+  "model": "grok-4.7-build",
+  "model_calls": 7,
+  "tools": 7,
+  "out_bytes": 27292,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgs-r1-B1",
+  "host": "grok",
+  "arm": "kgs",
+  "task": "B1",
+  "sid": "e8873a51-cfec-49e9-9fea-30557d203342",
+  "exit": "0",
+  "kg_calls": 4,
+  "kg_tool_breakdown": {
+   "search": 2,
+   "callees": 1,
+   "callers": 1
+  },
+  "violations": [],
+  "tok_in": 223361,
+  "tok_out": 2559,
+  "model": "grok-4.7-build",
+  "model_calls": 6,
+  "tools": 6,
+  "out_bytes": 39703,
+  "feature_calls": 2,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgs-r1-B2",
+  "host": "grok",
+  "arm": "kgs",
+  "task": "B2",
+  "sid": "7a50dd5c-f6d7-4b1d-8e08-cc3f09b4c95e",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "search": 1
+  },
+  "violations": [],
+  "tok_in": 167685,
+  "tok_out": 1275,
+  "model": "grok-4.7-build",
+  "model_calls": 5,
+  "tools": 4,
+  "out_bytes": 31053,
+  "feature_calls": 1,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgs-r2-B1",
+  "host": "grok",
+  "arm": "kgs",
+  "task": "B1",
+  "sid": "e2d5c3ca-a274-4c33-857d-87abdeb6cb67",
+  "exit": "0",
+  "kg_calls": 2,
+  "kg_tool_breakdown": {
+   "search": 2
+  },
+  "violations": [],
+  "tok_in": 173336,
+  "tok_out": 1597,
+  "model": "grok-4.7-build",
+  "model_calls": 5,
+  "tools": 4,
+  "out_bytes": 35016,
+  "feature_calls": 2,
+  "answered": true
+ },
+ {
+  "runid": "grok-kgs-r2-B2",
+  "host": "grok",
+  "arm": "kgs",
+  "task": "B2",
+  "sid": "4d0f1ea1-c5aa-4b3f-ad9c-f8c535ff09e7",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "search": 1
+  },
+  "violations": [],
+  "tok_in": 135332,
+  "tok_out": 2412,
+  "model": "grok-4.7-build",
+  "model_calls": 4,
+  "tools": 4,
+  "out_bytes": 28802,
+  "feature_calls": 1,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgc-r1-B1",
+  "host": "opencode",
+  "arm": "kgc",
+  "task": "B1",
+  "sid": "ses_util_oc_kgc_r1_B1",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 22813,
+  "tok_out": 506,
+  "model": "gpt-6-sol",
+  "model_calls": 6,
+  "tools": 5,
+  "out_bytes": null,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgc-r1-B2",
+  "host": "opencode",
+  "arm": "kgc",
+  "task": "B2",
+  "sid": "ses_util_oc_kgc_r1_B2",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 23273,
+  "tok_out": 614,
+  "model": "gpt-6-sol",
+  "model_calls": 8,
+  "tools": 7,
+  "out_bytes": null,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgc-r2-B1",
+  "host": "opencode",
+  "arm": "kgc",
+  "task": "B1",
+  "sid": "ses_util_oc_kgc_r2_B1",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 3992,
+  "tok_out": 501,
+  "model": "gpt-6-sol",
+  "model_calls": 7,
+  "tools": 6,
+  "out_bytes": null,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgc-r2-B2",
+  "host": "opencode",
+  "arm": "kgc",
+  "task": "B2",
+  "sid": "ses_util_oc_kgc_r2_B2",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "symbols": 1
+  },
+  "violations": [],
+  "tok_in": 2915,
+  "tok_out": 508,
+  "model": "gpt-6-sol",
+  "model_calls": 7,
+  "tools": 6,
+  "out_bytes": null,
+  "feature_calls": 0,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgs-r1-B1",
+  "host": "opencode",
+  "arm": "kgs",
+  "task": "B1",
+  "sid": "ses_util_oc_kgs_r1_B1",
+  "exit": "0",
+  "kg_calls": 2,
+  "kg_tool_breakdown": {
+   "search": 2
+  },
+  "violations": [],
+  "tok_in": 23354,
+  "tok_out": 537,
+  "model": "gpt-6-sol",
+  "model_calls": 7,
+  "tools": 6,
+  "out_bytes": null,
+  "feature_calls": 2,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgs-r1-B2",
+  "host": "opencode",
+  "arm": "kgs",
+  "task": "B2",
+  "sid": "ses_util_oc_kgs_r1_B2",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "search": 1
+  },
+  "violations": [],
+  "tok_in": 5239,
+  "tok_out": 462,
+  "model": "gpt-6-sol",
+  "model_calls": 6,
+  "tools": 5,
+  "out_bytes": null,
+  "feature_calls": 1,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgs-r2-B1",
+  "host": "opencode",
+  "arm": "kgs",
+  "task": "B1",
+  "sid": "ses_util_oc_kgs_r2_B1",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "search": 1
+  },
+  "violations": [],
+  "tok_in": 3427,
+  "tok_out": 487,
+  "model": "gpt-6-sol",
+  "model_calls": 5,
+  "tools": 4,
+  "out_bytes": null,
+  "feature_calls": 1,
+  "answered": true
+ },
+ {
+  "runid": "oc-kgs-r2-B2",
+  "host": "opencode",
+  "arm": "kgs",
+  "task": "B2",
+  "sid": "ses_util_oc_kgs_r2_B2",
+  "exit": "0",
+  "kg_calls": 1,
+  "kg_tool_breakdown": {
+   "search": 1
+  },
+  "violations": [],
+  "tok_in": 4192,
+  "tok_out": 472,
+  "model": "gpt-6-sol",
+  "model_calls": 6,
+  "tools": 5,
+  "out_bytes": null,
+  "feature_calls": 1,
+  "answered": true
+ }
+]

@@ -1,0 +1,1 @@
+{"exists": true, "hops": 0, "route": ["vihap/adapters/sklearn.py:117"], "qualname": "vihap.adapters.sklearn._coerce_string_sequence"}

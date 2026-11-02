@@ -1,0 +1,3 @@
+The pending handoff is a different answer file and forbids `kg search`. This request requires `kg search` first, so I am searching for `_fit_string_sequence` now.`vihap.adapters.sklearn._coerce_string_sequence` at `vihap/adapters/sklearn.py:117` converts a sequence to `list[str]` and is called by `_fit_string_sequence`.
+
+The result is written to `/tmp/utility-answers-2026-11-02/grok-kgs-r1-B2.json`.

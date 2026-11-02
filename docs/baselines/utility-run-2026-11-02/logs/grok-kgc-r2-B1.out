@@ -1,0 +1,7 @@
+I'll list pending handoffs for this project, then locate the helper that `_raw_items_from_sklearn_input` uses to convert a sequence to `list[Any]`.The pending handoff is a similar prompt with a different output path. I'll locate `_raw_items_from_sklearn_input` with grep, then confirm the helper with `kg symbols`.`kg symbols` places `vihap.adapters.sklearn._to_list` at `vihap/adapters/sklearn.py:79`. I'll write that pointer into the answer file.`vihap.adapters.sklearn._to_list` converts a sequence to `list[Any]` and is called by `_raw_items_from_sklearn_input`.
+
+- **Route:** `vihap/adapters/sklearn.py:79`
+- **Signature:** `def _to_list(seq: Any) -> list[Any]`
+- **Call sites:** `return _to_list(_tabular_address_column(X))` and `return _to_list(X)` inside `_raw_items_from_sklearn_input`
+
+The JSON is written to `/tmp/utility-answers-2026-11-02/grok-kgc-r2-B1.json`.
