@@ -95,73 +95,55 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
     // index into `fresh`, consumed by insert_files/insert_symbols) is
     // unchanged.
     let t0 = Instant::now();
-    let mut fresh_rows: Vec<crate::db::FilesRow> = Vec::with_capacity(fresh.len());
-    let mut extractions: Vec<crate::extract::FileExtraction> = Vec::with_capacity(fresh.len());
-    let mut fresh_error_files = 0usize;
-    let mut extract_secs_sum = 0f64;
-    let mut fresh_shingles: Vec<Vec<crate::clones::Shingle>> = Vec::with_capacity(fresh.len());
-    let workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
-        .clamp(1, 8);
-    let chunk_len = (fresh.len().div_ceil(workers)).max(1);
-    std::thread::scope(|scope| -> Result<()> {
-        let mut handles = Vec::new();
-        for (base, chunk) in fresh.chunks(chunk_len).enumerate() {
-            let chunk = chunk.to_vec();
-            handles.push(scope.spawn(move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
-                let mut units = Vec::with_capacity(chunk.len());
-                let mut secs = 0f64;
-                for (local, f) in chunk.into_iter().enumerate() {
-                    let idx = base * chunk_len + local;
-                    let bytes = std::fs::read(&f.abs)?;
-                    let lang = crate::parse::Lang::from_rel(&f.rel);
-                    let parsed = crate::parse::parse_source(&bytes, lang)?;
-                    let e0 = Instant::now();
-                    let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
-                    secs += e0.elapsed().as_secs_f64();
-                    // Hotspots metrics on the tree we already hold (Amendment
-                    // 11d): line count + decision-node count, same formulas
-                    // hotspots previously computed per query.
-                    let cyclomatic =
-                        crate::parse::decision_nodes(parsed.tree.root_node(), crate::parse::decision_kinds(lang))
-                            as i64;
-                    let shingles = crate::clones::shingles(&bytes);
-                    units.push((
-                        crate::db::FilesRow {
-                            rel: f.rel,
-                            size: f.size as i64,
-                            mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
-                            content_hash: crate::hash::fnv1a64(&bytes) as i64,
-                            parse_status: parsed.status,
-                            error_nodes: parsed.error_nodes,
-                            unresolved: 0,
-                            loc: bytes.split(|b: &u8| *b == b'\n').count() as i64,
-                            cyclomatic,
-                        },
-                        fx,
-                        shingles,
-                    ));
+    let (mut fresh_rows, mut extractions, mut fresh_shingles, mut fresh_error_files, mut extract_secs_sum) =
+        extract_units(&fresh, 0)?;
+
+    // Amendment 15 (R6d A4): the fast path must heal resolution gaps. When
+    // the fresh extraction introduces symbol names that did not exist in the
+    // old index, a carried file whose unresolved call (or AMBIGUOUS edge)
+    // mentions one of those names can now resolve — re-extract exactly those
+    // files. Bounded by gap rows, not by corpus size.
+    if let Some(c) = &old {
+        let mut old_names = crate::db::symbol_names(c)?;
+        let mut new_names: std::collections::HashSet<String> = Default::default();
+        for fx in &extractions {
+            for sym in &fx.symbols {
+                if !old_names.contains(&sym.name) {
+                    new_names.insert(sym.name.clone());
                 }
-                Ok((units, secs))
-            }));
-        }
-        for h in handles {
-            let (units, secs) = h
-                .join()
-                .map_err(|_| KgError::Internal("parse worker panicked".to_string()))??;
-            extract_secs_sum += secs;
-            for (row, fx, shingles) in units {
-                if row.error_nodes > 0 {
-                    fresh_error_files += 1;
+                if !old_names.contains(&sym.qualname) {
+                    new_names.insert(sym.qualname.clone());
                 }
-                fresh_rows.push(row);
-                extractions.push(fx);
-                fresh_shingles.push(shingles);
             }
         }
-        Ok(())
-    })?;
+        if !new_names.is_empty() {
+            let gap = crate::db::gap_files_for_new_names(c, &new_names)?;
+            let mut second: Vec<crate::walk::WalkedFile> = Vec::new();
+            for rel in gap {
+                if carried.remove(&rel) {
+                    if let Some(f) = stats.files.iter().find(|f| f.rel == rel) {
+                        second.push(crate::walk::WalkedFile {
+                            abs: f.abs.clone(),
+                            rel: f.rel.clone(),
+                            size: f.size,
+                        });
+                    }
+                }
+            }
+            second.sort_by(|a, b| a.rel.cmp(&b.rel));
+            if !second.is_empty() {
+                let base = fresh.len();
+                let (mut r2, mut e2, mut s2, err2, sec2) = extract_units(&second, base)?;
+                fresh.extend(second);
+                fresh_rows.append(&mut r2);
+                extractions.append(&mut e2);
+                fresh_shingles.append(&mut s2);
+                fresh_error_files += err2;
+                extract_secs_sum += sec2;
+            }
+        }
+        old_names.clear();
+    }
     let parse_secs = t0.elapsed().as_secs_f64();
 
     // Parse-quality gate (CUJ8): rate over ALL files, abort before DB work.
@@ -225,6 +207,15 @@ pub fn run_build(root_arg: Option<&Path>, force: bool, max_parse_error_rate: f64
         crate::db::carry_forward_unchanged(&conn, &root, &unchanged)?;
     }
     let fresh_file_ids = crate::db::insert_files(&conn, &fresh_rows)?;
+    // Schema v5 / Amendment 15: unresolved call names per fresh file, so a
+    // later build can re-extract exactly the files whose gaps a new symbol
+    // could heal.
+    let unresolved_rows: Vec<(i64, String)> = resolution
+        .unresolved_calls
+        .iter()
+        .map(|(fi, name)| (fresh_file_ids[*fi], name.clone()))
+        .collect();
+    crate::db::insert_unresolved_calls(&conn, &unresolved_rows)?;
 
     // Symbols: fresh rows insert; carried rows keep their previous ids.
     let fresh_sym_count = resolution.existing_ids.iter().filter(|e| e.is_none()).count();
@@ -349,3 +340,88 @@ fn resolve_sym_id(
     }
 }
 
+
+
+/// Parse + extract one batch of walked files on scoped workers (Amendment 11c
+/// parallel parse; R6d Blocker 1: 64 MB stacks). `base_idx` keeps the
+/// extraction file index aligned with the caller's accumulated `fresh` vector.
+#[allow(clippy::type_complexity)]
+fn extract_units(
+    files: &[crate::walk::WalkedFile],
+    base_idx: usize,
+) -> Result<(
+    Vec<crate::db::FilesRow>,
+    Vec<crate::extract::FileExtraction>,
+    Vec<Vec<crate::clones::Shingle>>,
+    usize,
+    f64,
+)> {
+    let mut rows: Vec<crate::db::FilesRow> = Vec::with_capacity(files.len());
+    let mut extractions: Vec<crate::extract::FileExtraction> = Vec::with_capacity(files.len());
+    let mut shingles_out: Vec<Vec<crate::clones::Shingle>> = Vec::with_capacity(files.len());
+    let mut error_files = 0usize;
+    let mut extract_secs_sum = 0f64;
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, 8);
+    let chunk_len = (files.len().div_ceil(workers)).max(1);
+    std::thread::scope(|scope| -> Result<()> {
+        let mut handles = Vec::new();
+        for (chunk_no, chunk) in files.chunks(chunk_len).enumerate() {
+            let chunk = chunk.to_vec();
+            let handle = std::thread::Builder::new()
+                .stack_size(64 * 1024 * 1024)
+                .spawn_scoped(scope, move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
+                    let mut units = Vec::with_capacity(chunk.len());
+                    let mut secs = 0f64;
+                    for (local, f) in chunk.into_iter().enumerate() {
+                        let idx = base_idx + chunk_no * chunk_len + local;
+                        let bytes = std::fs::read(&f.abs)?;
+                        let lang = crate::parse::Lang::from_rel(&f.rel);
+                        let parsed = crate::parse::parse_source(&bytes, lang)?;
+                        let e0 = Instant::now();
+                        let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
+                        secs += e0.elapsed().as_secs_f64();
+                        let cyclomatic =
+                            crate::parse::decision_nodes(parsed.tree.root_node(), crate::parse::decision_kinds(lang))
+                                as i64;
+                        let shingles = crate::clones::shingles(&bytes);
+                        units.push((
+                            crate::db::FilesRow {
+                                rel: f.rel,
+                                size: f.size as i64,
+                                mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
+                                content_hash: crate::hash::fnv1a64(&bytes) as i64,
+                                parse_status: parsed.status,
+                                error_nodes: parsed.error_nodes,
+                                unresolved: 0,
+                                loc: bytes.split(|b: &u8| *b == b'\n').count() as i64,
+                                cyclomatic,
+                            },
+                            fx,
+                            shingles,
+                        ));
+                    }
+                    Ok((units, secs))
+                })?;
+            handles.push(handle);
+        }
+        for h in handles {
+            let (units, secs) = h
+                .join()
+                .map_err(|_| KgError::Internal("parse worker panicked".to_string()))??;
+            extract_secs_sum += secs;
+            for (row, fx, shingles) in units {
+                if row.error_nodes > 0 {
+                    error_files += 1;
+                }
+                rows.push(row);
+                extractions.push(fx);
+                shingles_out.push(shingles);
+            }
+        }
+        Ok(())
+    })?;
+    Ok((rows, extractions, shingles_out, error_files, extract_secs_sum))
+}

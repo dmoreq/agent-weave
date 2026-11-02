@@ -4,7 +4,7 @@
 //! stdout text. Every tool call journals with `surface:"mcp"` (J2). The
 //! process itself is not journaled.
 
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::Path;
 use std::time::Instant;
 
@@ -63,17 +63,38 @@ fn tools() -> Value {
 
 /// Serve until stdin closes. All protocol output goes to stdout; the only
 /// stdout bytes ever written are complete JSON-RPC messages.
-pub fn serve(root_arg: Option<&Path>) -> crate::error::Result<()> {
+pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<()> {
     let root = crate::walk::discover_root(root_arg)?;
+    if no_journal {
+        // Amendment 6 opt-out must hold on the MCP surface too (R6d A7).
+        std::env::set_var("KG_NO_JOURNAL", "1");
+    }
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
+    // Bounded frame size (R6d A7): the MCP input is untrusted; without a cap
+    // a single oversized frame forces memory linear in its size.
+    const MAX_FRAME_BYTES: u64 = 8 * 1024 * 1024;
     let mut line = String::new();
     loop {
         line.clear();
-        if reader.read_line(&mut line)? == 0 {
+        let read = reader.by_ref().take(MAX_FRAME_BYTES + 1).read_line(&mut line)?;
+        if read == 0 {
             return Ok(());
+        }
+        if read as u64 > MAX_FRAME_BYTES {
+            // Drain the rest of the oversized frame to resync, then reject.
+            let mut sink = Vec::new();
+            loop {
+                sink.clear();
+                let n = reader.read_until(b'\n', &mut sink)?;
+                if n == 0 || sink.ends_with(b"\n") {
+                    break;
+                }
+            }
+            write_error(&mut out, None, -32600, "frame too large")?;
+            continue;
         }
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -120,7 +141,17 @@ pub fn serve(root_arg: Option<&Path>) -> crate::error::Result<()> {
                 }
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
                 let started = Instant::now();
-                let (text, is_error, exit_code) = call_tool(&root, &tool_name, &arguments);
+                // Panic isolation (R6d A7): one tool must not kill the server.
+                let (text, is_error, exit_code) = match std::panic::catch_unwind(
+                    std::panic::AssertUnwindSafe(|| call_tool(&root, &tool_name, &arguments)),
+                ) {
+                    Ok(v) => v,
+                    Err(_) => (
+                        "kg: internal: tool panicked — server still running\n".to_string(),
+                        true,
+                        6,
+                    ),
+                };
                 crate::journal::finalize(
                     Some(&root),
                     exit_code,
@@ -186,11 +217,14 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
     let journal_args = tool_journal_args(tool, args);
     crate::journal::begin("mcp", tool, &journal_args);
     match tool {
-        "build" => crate::build::run_build(
-            Some(root),
-            arg_bool(args, "force"),
-            args.get("max_parse_error_rate").and_then(|v| v.as_f64()).unwrap_or(0.05),
-        ),
+        "build" => Ok(format!(
+            "{}\n",
+            crate::build::run_build(
+                Some(root),
+                arg_bool(args, "force"),
+                args.get("max_parse_error_rate").and_then(|v| v.as_f64()).unwrap_or(0.05),
+            )?
+        )),
         "callers" => {
             let conn = crate::db::open_for_query(root)?;
             let out = crate::query::callers(&conn, root, &arg_str(args, "name").unwrap_or_default(), arg_usize(args, "limit", crate::query::DEFAULT_LIMIT))?;
@@ -269,7 +303,10 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
-        "stats" => Ok(crate::insights::stats(&crate::db::open_for_query(root)?, root)?),
+        "stats" => Ok(format!(
+            "{}\n",
+            crate::insights::stats(&crate::db::open_for_query(root)?, root)?
+        )),
         "hotspots" => Ok(join_lines(&crate::insights::hotspots(&crate::db::open_for_query(root)?, root, arg_usize(args, "limit", 10))?)),
         "report" => Ok(join_lines(&crate::insights::report(&crate::db::open_for_query(root)?, root)?)),
         "usage" => {

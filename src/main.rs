@@ -25,6 +25,9 @@ use std::time::Instant;
 use error::Result;
 
 fn main() {
+    // git read-only commands must not refresh/rewrite `.git/index` — the
+    // safety invariant says no writes outside `.kg/` (R6d A8).
+    std::env::set_var("GIT_OPTIONAL_LOCKS", "0");
     let cli = cli::Cli::parse();
     let root_arg = cli.root.clone();
     let no_journal = cli.no_journal;
@@ -34,7 +37,7 @@ fn main() {
         journal::begin("cli", tool_name(&cli.cmd), &journal_args(&cli.cmd));
     }
     let started = Instant::now();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cli)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cli, no_journal)));
     let latency_us = started.elapsed().as_micros() as u64;
     let root = walk::discover_root(root_arg.as_deref()).ok();
     match result {
@@ -56,7 +59,20 @@ fn main() {
             eprintln!("{e}");
             std::process::exit(e.exit_code());
         }
-        Err(_panic) => {
+        Err(panic) => {
+            // A closed downstream pipe (e.g. `kg callers x | head -1`) is not
+            // an internal failure: exit quietly like a POSIX filter (R6d A8).
+            let msg = panic
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| panic.downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            if msg.contains("Broken pipe") {
+                if journaled {
+                    journal::finalize(root.as_deref(), 0, latency_us);
+                }
+                std::process::exit(0);
+            }
             if journaled {
                 journal::finalize(root.as_deref(), 6, latency_us);
             }
@@ -139,7 +155,7 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
     }
 }
 
-fn run(cli: cli::Cli) -> Result<()> {
+fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
     let root_arg = cli.root.as_deref();
     match cli.cmd {
         cli::Cmd::Build { force, max_parse_error_rate } => {
@@ -225,7 +241,7 @@ fn run(cli: cli::Cli) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Mcp {} => mcp::serve(root_arg),
+        cli::Cmd::Mcp {} => mcp::serve(root_arg, no_journal),
         cli::Cmd::Unresolved { limit } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;

@@ -195,15 +195,21 @@ pub fn callees(
          SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
                 COALESCE(df.path, sf.path) AS path
          FROM reach r
-         JOIN edges e ON e.src_id = r.sym AND e.kind = 'calls'
+         -- r.d < depth: emit out-edges only from nodes within N-1 hops, so
+         -- the closure closes exactly N levels (R6d A3: it closed N+1).
+         JOIN edges e ON e.src_id = r.sym AND e.kind = 'calls' AND r.d < ?{d2}
          JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
          LEFT JOIN files df ON df.id = ds.file_id
          ORDER BY path, line",
-                d = 1 + ids.len()
+                d = 1 + ids.len(),
+                d2 = 2 + ids.len()
             ),
             ids.iter()
                 .map(|i| rusqlite::types::Value::from(*i))
+                .chain(std::iter::once(rusqlite::types::Value::from(
+                    depth as i64,
+                )))
                 .chain(std::iter::once(rusqlite::types::Value::from(
                     depth as i64,
                 )))
@@ -676,7 +682,9 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
          JOIN symbols s ON s.id = ft.rowid
          JOIN files f ON f.id = s.file_id
          WHERE symbols_fts MATCH ?1
-         ORDER BY bm25(symbols_fts)",
+         -- Tie-break on stable columns: rowids differ between fresh and
+         -- carried builds, so bm25 alone is not deterministic (R6d A9).
+         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start",
     )?;
     let rows = stmt.query_map([&expr], |r| {
         let qualname: String = r.get(2)?;
@@ -742,9 +750,15 @@ pub fn clones(conn: &Connection, root: &Path, min_lines: usize, limit: usize) ->
         let (h, path, s, e) = r?;
         groups.entry(h).or_default().push((path, s, e));
     }
+    // Pair generation is bounded (R6d Blocker 2): a shared header can put
+    // thousands of regions in one shingle group, and the full pair set is
+    // quadratic. Candidates beyond the caps are reported as a lower bound.
+    const MAX_REGIONS_PER_GROUP: usize = 64;
+    const MAX_PAIRS: usize = 20_000;
+    let mut capped = false;
     let mut seen = std::collections::BTreeSet::new();
     let mut pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
-    for regions in groups.values() {
+    'groups: for regions in groups.values() {
         // Merge overlapping / near-adjacent windows (gap < window) per file:
         // one long clone produces many overlapping windows, one region.
         let mut merged: Vec<(String, i64, i64)> = Vec::new();
@@ -760,8 +774,16 @@ pub fn clones(conn: &Connection, root: &Path, min_lines: usize, limit: usize) ->
         if merged.len() < 2 {
             continue;
         }
+        if merged.len() > MAX_REGIONS_PER_GROUP {
+            merged.truncate(MAX_REGIONS_PER_GROUP);
+            capped = true;
+        }
         for i in 0..merged.len() {
             for j in (i + 1)..merged.len() {
+                if pairs.len() >= MAX_PAIRS {
+                    capped = true;
+                    break 'groups;
+                }
                 let (pa, sa, ea) = &merged[i];
                 let (pb, sb, eb) = &merged[j];
                 if (*ea - *sa + 1) < min_lines as i64 || (*eb - *sb + 1) < min_lines as i64 {
@@ -799,6 +821,9 @@ pub fn clones(conn: &Connection, root: &Path, min_lines: usize, limit: usize) ->
     let pairs = merged_pairs;
     if pairs.is_empty() {
         return Err(KgError::NoResults("0 clone candidates found".to_string()));
+    }
+    if capped {
+        eprintln!("[kg] clone pair generation capped — result is a lower bound");
     }
     let shown = pairs.len().min(limit);
     let displayed = &pairs[..shown];

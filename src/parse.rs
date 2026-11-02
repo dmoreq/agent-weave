@@ -66,15 +66,18 @@ pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
 }
 
 fn count_error_nodes(root: Node<'_>) -> usize {
-    fn rec(node: Node<'_>) -> usize {
-        let mut n = usize::from(node.is_error() || node.is_missing());
+    // Explicit stack: source nesting depth is attacker-controlled, and a
+    // recursive walk aborts the process on pathological files (R6d Blocker 1).
+    let mut n = 0usize;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        n += usize::from(node.is_error() || node.is_missing());
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            n += rec(child);
+            stack.push(child);
         }
-        n
     }
-    rec(root)
+    n
 }
 
 /// Language-aware cyclomatic-proxy decision kinds (hotspots metric, G7).
@@ -114,15 +117,17 @@ pub fn decision_kinds(lang: Lang) -> &'static [&'static str] {
 
 /// Count decision nodes of the given kinds in the subtree.
 pub fn decision_nodes(root: Node<'_>, kinds: &[&str]) -> usize {
-    fn rec(node: Node<'_>, kinds: &[&str]) -> usize {
-        let mut n = usize::from(kinds.contains(&node.kind()));
+    // Explicit stack — same depth-safety rationale as count_error_nodes.
+    let mut n = 0usize;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        n += usize::from(kinds.contains(&node.kind()));
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            n += rec(child, kinds);
+            stack.push(child);
         }
-        n
     }
-    rec(root, kinds)
+    n
 }
 
 #[cfg(test)]

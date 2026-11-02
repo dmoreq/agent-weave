@@ -1,6 +1,7 @@
--- kg schema v4 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
+-- kg schema v5 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
 -- v2 -> v3 adds files.loc/files.cyclomatic; v3 -> v4 adds symbols.signature,
--- Amendment 12a: one-line signature, no bodies, captured once at build).
+-- Amendment 12a; v4 -> v5 adds unresolved_calls, Amendment 15: unresolved call
+-- names per file, so the fast path re-extracts only files whose gaps can heal).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
@@ -51,6 +52,14 @@ CREATE INDEX symbols_qualname ON symbols(qualname);
 -- tokens; repopulated by one pass from symbols at the end of every build
 -- (the build replaces the whole DB, so no incremental maintenance exists).
 CREATE VIRTUAL TABLE symbols_fts USING fts5(text);
+-- Unresolved call sites per file (Amendment 15, schema v5): dst_name is the
+-- callee as written (name or dotted chain). The fast path re-extracts a
+-- carried file when a newly added symbol matches one of its unresolved names.
+CREATE TABLE unresolved_calls(
+    file_id INTEGER NOT NULL REFERENCES files(id),
+    dst_name TEXT NOT NULL
+);
+CREATE INDEX unresolved_calls_file ON unresolved_calls(file_id);
 -- Clone candidates (Amendment 12d): normalized 5-line-window FNV-1a shingles
 -- computed during the build parse phase for fresh files and carried forward
 -- with the fast path; grouping/pairing happens at query time.

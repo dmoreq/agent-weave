@@ -20,9 +20,9 @@ use crate::error::{KgError, Result};
 use crate::extract::{CarriedIndex, CarriedSymbol, NewSymbol, SCHEMA_VERSION};
 
 /// Compile-time grammar identity, derived from the Cargo.lock-pinned grammar
-/// crate version (tree-sitter versioning rule: runtime + grammars upgrade in
-/// one commit, golden fixture replay must stay identical).
-pub const GRAMMAR_VERSION: &str = "py-0.25.0+ts-0.23.2+js-0.25.0+rs-0.24.2";
+/// crate versions by build.rs (R6d A8: a hand-maintained string had already
+/// drifted from the lock). The identity gates the fast path.
+pub const GRAMMAR_VERSION: &str = env!("KG_GRAMMAR_VERSION");
 
 pub fn kg_dir(root: &Path) -> PathBuf {
     root.join(".kg")
@@ -260,6 +260,79 @@ pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<Str
     Ok(dirty)
 }
 
+/// Every symbol name and qualname in the old index (Amendment 15): the fast
+/// path compares fresh extraction names against this set to detect names that
+/// did not exist before the change.
+pub fn symbol_names(conn: &Connection) -> Result<HashSet<String>> {
+    let mut out = HashSet::new();
+    let mut stmt = conn.prepare("SELECT name, qualname FROM symbols")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for r in rows {
+        let (name, qualname) = r?;
+        out.insert(name);
+        out.insert(qualname);
+    }
+    Ok(out)
+}
+
+/// Carried files whose resolution gaps mention any of `new_names`
+/// (Amendment 15): a file with an unresolved call or an AMBIGUOUS calls edge
+/// whose last name segment is a newly added symbol must be re-extracted, or
+/// the fast path would keep a stale unresolved answer. Bounded by the gap
+/// rows, not by the corpus.
+pub fn gap_files_for_new_names(
+    old: &Connection,
+    new_names: &HashSet<String>,
+) -> Result<HashSet<String>> {
+    if new_names.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut out = HashSet::new();
+    let matches = |dst: &str| -> bool {
+        let last = dst.rsplit('.').next().unwrap_or(dst);
+        new_names.contains(last)
+    };
+    {
+        let mut stmt = old.prepare(
+            "SELECT f.path, u.dst_name FROM unresolved_calls u
+             JOIN files f ON f.id = u.file_id",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows {
+            let (path, dst) = r?;
+            if matches(&dst) {
+                out.insert(path);
+            }
+        }
+    }
+    {
+        let mut stmt = old.prepare(
+            "SELECT DISTINCT f.path, e.dst_name FROM edges e
+             JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+             WHERE e.kind = 'calls' AND e.confidence = 'AMBIGUOUS'",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows {
+            let (path, dst) = r?;
+            if matches(&dst) {
+                out.insert(path);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Insert unresolved call names for the fresh rows (schema v5, Amendment 15).
+pub fn insert_unresolved_calls(conn: &Connection, rows: &[(i64, String)]) -> Result<()> {
+    let mut stmt = conn.prepare("INSERT INTO unresolved_calls(file_id, dst_name) VALUES (?1, ?2)")?;
+    for chunk in rows.chunks(500) {
+        for (file_id, name) in chunk {
+            stmt.execute(rusqlite::params![file_id, name])?;
+        }
+    }
+    Ok(())
+}
+
 /// Symbols + inherits pairs of the carried set, for resolution tables.
 pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedIndex> {
     let mut symbols = Vec::new();
@@ -363,7 +436,10 @@ pub fn carry_forward_unchanged(
            AND (dst_id IS NULL OR dst_id IN (SELECT id FROM symbols));
          INSERT INTO clone_groups(shingle_hash, file_id, line_start, line_end)
          SELECT shingle_hash, file_id, line_start, line_end
-         FROM olddb.clone_groups WHERE file_id IN (SELECT id FROM files);",
+         FROM olddb.clone_groups WHERE file_id IN (SELECT id FROM files);
+         INSERT INTO unresolved_calls(file_id, dst_name)
+         SELECT file_id, dst_name FROM olddb.unresolved_calls
+         WHERE file_id IN (SELECT id FROM files);",
     )?;
     Ok(reused)
 }

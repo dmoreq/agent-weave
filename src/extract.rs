@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 4;
+pub const SCHEMA_VERSION: i32 = 5;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -96,9 +96,10 @@ pub struct Resolution {
     /// the binary's meta total is the per-file SQL sum instead.
     #[allow(dead_code)]
     pub stats: ExtractStats,
-    /// Parallel to the input `files` (fresh files only): unresolved-callee count
-    /// per file, so the meta total is an authoritative SQL sum and stays stable
-    /// across incremental builds.
+    /// Unresolved call sites as (fresh-file index, callee display name).
+    /// Amendment 15 / schema v5: lets the fast path re-extract exactly the
+    /// carried files whose unresolved names became resolvable after a change.
+    pub unresolved_calls: Vec<(usize, String)>,
     pub unresolved_per_file: Vec<usize>,
 }
 
@@ -270,6 +271,7 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
 struct WalkCtx {
     class_stack: Vec<String>, // qualnames
     func_stack: Vec<String>,  // qualnames
+    depth: usize,             // AST recursion depth (R6d Blocker 1 guard)
 }
 
 impl WalkCtx {
@@ -373,11 +375,22 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
     }
 }
 
+/// Hard nesting ceiling. Source nesting is attacker-controlled; beyond this
+/// depth the subtree is skipped instead of risking a stack abort (R6d
+/// Blocker 1). Workers run on 64 MB stacks, so legitimate deep ASTs below
+/// this bound are unaffected.
+const MAX_AST_DEPTH: usize = 8_192;
+
 fn walk_children(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    if ctx.depth >= MAX_AST_DEPTH {
+        return;
+    }
+    ctx.depth += 1;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         walk_node(child, src, fx, ctx);
     }
+    ctx.depth -= 1;
 }
 
 fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
@@ -1097,15 +1110,24 @@ fn resolve_ts_module(source: &str, dir: &str) -> String {
 }
 
 fn impl_type_name(node: Node<'_>, src: &[u8]) -> String {
-    // impl [<generics>] Type [for Trait] — take the first type_identifier.
-    let mut stack = vec![node];
-    while let Some(n) = stack.pop() {
-        if n.kind() == "type_identifier" {
-            return text(n, src);
+    // The implementing type is the grammar's `type` field. For
+    // `impl Trait for Type` that field is `Type` (the `trait` field holds the
+    // trait). R6d A5: the previous first-type_identifier DFS returned a
+    // parameter/return type from the body, scoping methods under the wrong
+    // type.
+    if let Some(t) = node.child_by_field_name("type") {
+        if t.kind() == "type_identifier" {
+            return text(t, src);
         }
-        let mut c = n.walk();
-        for child in n.children(&mut c) {
-            stack.push(child);
+        let mut stack = vec![t];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "type_identifier" {
+                return text(n, src);
+            }
+            let mut c = n.walk();
+            for child in n.children(&mut c) {
+                stack.push(child);
+            }
         }
     }
     "UnknownImpl".to_string()
@@ -1366,6 +1388,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
 
     let mut stats = ExtractStats::default();
     let mut unresolved_per_file = vec![0usize; t.file_ctx.len()];
+    let mut unresolved_calls: Vec<(usize, String)> = Vec::new();
 
     // Import edges.
     for fctx in &t.file_ctx {
@@ -1422,14 +1445,34 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                     .unwrap_or(fctx.module_sym_idx)
             };
             match outcome {
-                Outcome::Extracted(dst) => t.edges.push(NewEdge {
-                    src_idx,
-                    dst_idx: Some(dst),
-                    dst_name: t.symbols[dst].qualname.clone(),
-                    kind: "calls",
-                    confidence: "EXTRACTED",
-                    site_line: site.line,
-                }),
+                Outcome::Extracted(dst) => {
+                    // R6d A6: keep the edge to the class itself so
+                    // `callers Class` and `dead` are correct, and add a
+                    // second edge to its constructor when unique.
+                    let dst_name = t.symbols[dst].qualname.clone();
+                    t.edges.push(NewEdge {
+                        src_idx,
+                        dst_idx: Some(dst),
+                        dst_name: dst_name.clone(),
+                        kind: "calls",
+                        confidence: "EXTRACTED",
+                        site_line: site.line,
+                    });
+                    if t.symbols[dst].kind == "class" {
+                        if let Some(ctor) = ctor_target(&t, dst) {
+                            if ctor != dst {
+                                t.edges.push(NewEdge {
+                                    src_idx,
+                                    dst_idx: Some(ctor),
+                                    dst_name: t.symbols[ctor].qualname.clone(),
+                                    kind: "calls",
+                                    confidence: "EXTRACTED",
+                                    site_line: site.line,
+                                });
+                            }
+                        }
+                    }
+                }
                 Outcome::Ambiguous(name) => t.edges.push(NewEdge {
                     src_idx,
                     dst_idx: None,
@@ -1442,6 +1485,11 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                 Outcome::Unresolved => {
                     stats.unresolved_callees += 1;
                     unresolved_per_file[fi] += 1;
+                    let name = match &site.callee {
+                        Callee::Name(n) => n.clone(),
+                        Callee::Attr(parts) => parts.join("."),
+                    };
+                    unresolved_calls.push((fi, name));
                 }
             }
         }
@@ -1453,30 +1501,26 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
         edges: t.edges,
         stats,
         unresolved_per_file,
+        unresolved_calls,
     }
 }
 
 fn resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
-    let outcome = raw_resolve_call(t, fi, site);
-    redirect_ctor(t, outcome)
+    raw_resolve_call(t, fi, site)
 }
 
-/// Instantiating a class calls its `__init__`: redirect class-symbol targets
-/// to the class's own `__init__` method when it exists.
-fn redirect_ctor(t: &Tables, outcome: Outcome) -> Outcome {
-    let Outcome::Extracted(idx) = outcome else { return outcome };
-    if t.symbols[idx].kind != "class" {
-        return Outcome::Extracted(idx);
-    }
-    let class_qn = t.symbols[idx].qualname.clone();
+/// Unique constructor of a class (`__init__` / `constructor`), if any.
+/// Instantiations emit edges to BOTH the class and this constructor (R6d A6).
+fn ctor_target(t: &Tables, class_idx: usize) -> Option<usize> {
+    let class_qn = t.symbols[class_idx].qualname.clone();
     for ctor in ["__init__", "constructor"] {
         match t.class_methods.get(&class_qn).and_then(|m| m.get(ctor)) {
-            Some(inits) if inits.len() == 1 => return Outcome::Extracted(inits[0]),
-            Some(_) => return Outcome::Extracted(idx), // ambiguous ctor: keep class
+            Some(inits) if inits.len() == 1 => return Some(inits[0]),
+            Some(_) => return None, // ambiguous ctor: class edge only
             None => continue,
         }
     }
-    Outcome::Extracted(idx)
+    None
 }
 
 fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {

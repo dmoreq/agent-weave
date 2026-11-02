@@ -86,6 +86,13 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
         Some(set)
     })();
 
+    if git_visible.is_some() {
+        // The git-visible set is the source of truth. Walker-level ignore
+        // pruning would drop TRACKED-but-gitignored files before the set can
+        // keep them (R6d A9), so disable it when we have the set.
+        builder.git_ignore(false).ignore(false).parents(false);
+    }
+
     let mut files = Vec::new();
     let mut skipped_large = 0usize;
     for entry in builder.build() {

@@ -195,7 +195,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v4 — run kg build"),
+        stderr.contains("schema v99, binary expects v5 — run kg build"),
         "{stderr}"
     );
 }
@@ -376,18 +376,24 @@ fn unresolved_count_stable_across_incremental_builds() {
 
 #[test]
 fn callees_depth_two_is_transitive() {
+    // R6d A3: depth N must close exactly N levels. Chain: top -> mid ->
+    // leaf -> base (as.py lines 7, 4, 1).
     let repo = temp_repo("depth");
     write(
         &repo,
         "a.py",
-        "def leaf():\n    return 1\n\ndef mid():\n    return leaf()\n\ndef top():\n    return mid()\n",
+        "def base():\n    return 0\n\ndef leaf():\n    return base()\n\ndef mid():\n    return leaf()\n\ndef top():\n    return mid()\n",
     );
     build(&repo);
     let out = kg(&repo).args(["callees", "top", "--depth", "2"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("a.py:4"), "direct callee mid: {stdout}");
-    assert!(stdout.contains("a.py:1"), "transitive callee leaf: {stdout}");
+    assert!(stdout.contains("a.py:7"), "direct callee mid: {stdout}");
+    assert!(stdout.contains("a.py:4"), "transitive callee leaf: {stdout}");
+    assert!(
+        !stdout.contains("a.py:1"),
+        "depth 2 must NOT include the distance-3 callee base: {stdout}"
+    );
 }
 
 #[test]
@@ -1243,4 +1249,137 @@ fn path_seed_gate() {
          kg: chain chain.ca -> chain.cb -> chain.cc -> chain.cd (3 hops)\n",
         "scenario 10: {stdout}"
     );
+}
+
+#[test]
+fn deep_nesting_does_not_abort_build() {
+    // R6d Blocker 1: source nesting is attacker-controlled. 2,000 nested
+    // parens used to abort the build (SIGABRT). The build must exit 0 and
+    // index the file (the extractor guards above MAX_AST_DEPTH).
+    let repo = temp_repo("deep-nesting");
+    let py = format!("x = {}1{}\n", "(".repeat(2000), ")".repeat(2000));
+    let ts = format!("const v = {}1{};\n", "[".repeat(2000), "]".repeat(2000));
+    let rs = format!("fn f() {{ let x = {}1{}; }}\n", "(".repeat(2000), ")".repeat(2000));
+    write(&repo, "deep.py", &py);
+    write(&repo, "deep.ts", &ts);
+    write(&repo, "deep.rs", &rs);
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "deep nesting must not abort: {stdout}{stderr}");
+    assert!(stdout.contains("files=3"), "{stdout}");
+    let out = kg(&repo).args(["stats"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn clones_pair_generation_is_bounded() {
+    // R6d Blocker 2: a shared header puts every file in one shingle group;
+    // the full pair set is quadratic. The caps must engage and report a
+    // lower bound instead of materializing millions of pairs.
+    let repo = temp_repo("clones-cap");
+    let header = "# shared license header line one\n# shared license header line two\n# shared license header line three\n# shared license header line four\n# shared license header line five\n";
+    for i in 0..120 {
+        write(&repo, &format!("f{i:03}.py"), &format!("{header}def solo_{i}(x):\n    return x + {i}\n"));
+    }
+    build(&repo);
+    let out = kg(&repo).args(["clones", "--limit", "5"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("lower bound"),
+        "cap note expected when regions exceed MAX_REGIONS_PER_GROUP: {stderr}"
+    );
+}
+
+#[test]
+fn incremental_build_heals_resolution_gaps() {
+    // R6d A4 / Amendment 15: a carried caller whose unresolved call names a
+    // symbol added later must be re-extracted by the fast path.
+    let repo = temp_repo("gap-heal");
+    write(&repo, "b.py", "def existing():\n    return 1\n");
+    write(&repo, "a.py", "import b\n\ndef use():\n    return b.foo()\n");
+    build(&repo);
+    let out = kg(&repo).args(["callers", "foo"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "foo does not exist yet");
+    // Add the missing symbol; the next incremental build must heal a.py.
+    write(&repo, "b.py", "def existing():\n    return 1\n\ndef foo():\n    return 2\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = kg(&repo).args(["callers", "foo"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "fast path healed the gap: {:?}", out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("a.py:4"), "{stdout}");
+}
+
+#[test]
+fn constructor_calls_attribute_to_the_class() {
+    // R6d A6: `Widget()` must be a caller of the class (not only __init__),
+    // so `callers Class` works and `dead` does not list an instantiated class.
+    let repo = temp_repo("ctor");
+    write(
+        &repo,
+        "c.py",
+        "class Widget:\n    def __init__(self):\n        self.x = 1\n\ndef make():\n    return Widget()\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["callers", "Widget"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "class has an inbound call edge: {:?}", out);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("c.py:6"), "{stdout}");
+    let out = kg(&repo).args(["callers", "c.Widget.__init__"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "ctor keeps its own edge");
+    let out = kg(&repo).args(["dead"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("c.py:1"), "instantiated class must not be dead: {stdout}");
+}
+
+#[test]
+fn grammar_version_matches_cargo_lock() {
+    // R6d A8: the fast-path grammar identity is derived from Cargo.lock and
+    // must not drift from the pinned crates.
+    let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock")).unwrap();
+    let mut versions = std::collections::HashMap::new();
+    let mut name = String::new();
+    for line in lock.lines() {
+        if let Some(rest) = line.strip_prefix("name = ") {
+            name = rest.trim().trim_matches('"').to_string();
+        } else if let Some(rest) = line.strip_prefix("version = ") {
+            versions.insert(name.clone(), rest.trim().trim_matches('"').to_string());
+        }
+    }
+    for (crate_name, short) in [
+        ("tree-sitter-python", "py"),
+        ("tree-sitter-typescript", "ts"),
+        ("tree-sitter-javascript", "js"),
+        ("tree-sitter-rust", "rs"),
+    ] {
+        let expected = format!("{short}-{}", versions[crate_name]);
+        assert!(
+            kg::db::GRAMMAR_VERSION.contains(&expected),
+            "GRAMMAR_VERSION {} missing {expected}",
+            kg::db::GRAMMAR_VERSION
+        );
+    }
+}
+
+#[test]
+fn tracked_but_gitignored_sources_are_indexed() {
+    // R6d A9: a force-added file covered by .gitignore is git-visible and
+    // must be indexed.
+    let repo = temp_repo("tracked-ignored");
+    write(&repo, ".gitignore", "generated/\n");
+    write(&repo, "generated/g.py", "def hidden_fn():\n    return 1\n");
+    let out = std::process::Command::new("git")
+        .args(["init", "-q"]).current_dir(&repo).output().unwrap();
+    assert!(out.status.success());
+    let out = std::process::Command::new("git")
+        .args(["add", "-f", "generated/g.py"]).current_dir(&repo).output().unwrap();
+    assert!(out.status.success());
+    build(&repo);
+    let out = kg(&repo).args(["stats"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("files=1"), "tracked-ignored file indexed: {stdout}");
+    let out = kg(&repo).args(["callers", "hidden_fn"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "defined but uncalled");
+    let out = kg(&repo).args(["symbols", "generated/g.py"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "file indexed");
 }

@@ -319,3 +319,19 @@ fn split_ident_splits_camel_snake_and_dotted_idents() {
     assert_eq!(kg::extract::split_ident("normalize_ascii"), "normalize ascii");
     assert_eq!(kg::extract::split_ident(""), "");
 }
+
+#[test]
+fn rust_impl_methods_scope_to_the_impl_type() {
+    // R6d A5: `impl Foo { fn make() -> Bar }` must yield m.Foo.make, not
+    // m.Bar.make; `impl Bar { fn go(&self, other: Foo) -> Foo }` must yield
+    // m.Bar.go, not m.Foo.go.
+    let src = "struct Foo;\nstruct Bar;\n\nimpl Foo {\n    fn make() -> Bar {\n        Bar\n    }\n    fn plain() {}\n}\n\nimpl Bar {\n    fn go(&self, other: Foo) -> Foo {\n        other\n    }\n}\n";
+    let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::Rust).unwrap();
+    let fx = kg::extract::extract_file(0, "src/m.rs", src.as_bytes(), &parsed);
+    let quals: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
+    assert!(quals.contains(&"src.m.Foo.make"), "{quals:?}");
+    assert!(quals.contains(&"src.m.Foo.plain"), "{quals:?}");
+    assert!(quals.contains(&"src.m.Bar.go"), "{quals:?}");
+    assert!(!quals.contains(&"src.m.Bar.make"), "{quals:?}");
+    assert!(!quals.contains(&"src.m.Foo.go"), "{quals:?}");
+}
