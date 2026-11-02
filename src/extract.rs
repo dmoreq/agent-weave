@@ -520,6 +520,8 @@ fn python_all_names(root: Node<'_>, src: &[u8]) -> Option<std::collections::Hash
 }
 
 /// Populate the exported/public flag from language rules (Amendment 19).
+/// Two passes: non-method symbols first, then methods, so an `impl Type` that
+/// appears before `pub struct Type` still exports its public methods.
 fn finalize_exports(fx: &mut FileExtraction, src: &[u8], root: Node<'_>) {
     let lines: Vec<&[u8]> = src.split(|b| *b == b'\n').collect();
     let all_names = if fx.lang == Lang::Python {
@@ -527,51 +529,96 @@ fn finalize_exports(fx: &mut FileExtraction, src: &[u8], root: Node<'_>) {
     } else {
         None
     };
+    let ts_local = if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+        ts_local_export_names(root, src)
+    } else {
+        HashSet::new()
+    };
     for i in 0..fx.symbols.len() {
-        let kind = fx.symbols[i].kind;
-        let name = fx.symbols[i].name.clone();
-        let qualname = fx.symbols[i].qualname.clone();
-        let signature = fx.symbols[i].signature.clone();
-        let line = fx.symbols[i].line_start.saturating_sub(1);
-        let parent_qn = qualname.rsplit_once('.').map(|(p, _)| p.to_string());
-        let parent = parent_qn
-            .as_ref()
-            .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p));
-        let parent_exported = parent.map(|s| s.exported).unwrap_or(false);
-        let parent_is_module = parent.map(|s| s.kind == "module").unwrap_or(false);
-        let exported = match fx.lang {
-            Lang::Python => {
-                if kind == "module" {
-                    false
-                } else if let Some(all) = &all_names {
-                    all.contains(&name)
-                } else if kind == "method" {
-                    parent_exported && !name.starts_with('_')
-                } else {
-                    qualname == format!("{}.{}", fx.module, name) && !name.starts_with('_')
-                }
-            }
-            Lang::Rust => {
-                let sig = signature.trim_start();
-                let is_pub = sig.starts_with("pub ");
-                is_pub && (kind != "method" || parent_exported || parent_is_module)
-            }
-            Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
-                let source_line = lines
-                    .get(line)
-                    .map(|l| String::from_utf8_lossy(l).to_string())
-                    .unwrap_or_default();
-                if matches!(kind, "class" | "function") {
-                    fx.symbols[i].exported
-                } else if kind == "method" && parent_exported {
-                    !name.starts_with('#') && !source_line.contains("private ")
-                } else {
-                    false
-                }
-            }
-        };
-        fx.symbols[i].exported = exported;
+        if fx.symbols[i].kind != "method" {
+            fx.symbols[i].exported = export_base(fx, i, all_names.as_ref(), &ts_local);
+        }
     }
+    for i in 0..fx.symbols.len() {
+        if fx.symbols[i].kind == "method" {
+            fx.symbols[i].exported = export_method(fx, i, &lines);
+        }
+    }
+}
+
+fn export_base(
+    fx: &FileExtraction,
+    i: usize,
+    all_names: Option<&HashSet<String>>,
+    ts_local: &HashSet<String>,
+) -> bool {
+    let sym = &fx.symbols[i];
+    if sym.kind == "module" {
+        return false;
+    }
+    let top_level = sym.qualname == format!("{}.{}", fx.module, sym.name);
+    match fx.lang {
+        Lang::Python => match all_names {
+            Some(all) => all.contains(&sym.name),
+            None => top_level && !sym.name.starts_with('_'),
+        },
+        Lang::Rust => sym.signature.trim_start().starts_with("pub "),
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
+            if !matches!(sym.kind, "class" | "function" | "interface" | "trait") {
+                return false;
+            }
+            sym.exported || (top_level && ts_local.contains(&sym.name))
+        }
+    }
+}
+
+fn export_method(fx: &FileExtraction, i: usize, lines: &[&[u8]]) -> bool {
+    let sym = &fx.symbols[i];
+    let parent_qn = sym.qualname.rsplit_once('.').map(|(p, _)| p.to_string());
+    let parent = parent_qn
+        .as_ref()
+        .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p));
+    let parent_exported = parent.map(|s| s.exported).unwrap_or(false);
+    let parent_is_module = parent.map(|s| s.kind == "module").unwrap_or(false);
+    match fx.lang {
+        Lang::Python => parent_exported && !sym.name.starts_with('_'),
+        Lang::Rust => {
+            sym.signature.trim_start().starts_with("pub ") && (parent_exported || parent_is_module)
+        }
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
+            let source_line = lines
+                .get(sym.line_start.saturating_sub(1))
+                .map(|l| String::from_utf8_lossy(l).to_string())
+                .unwrap_or_default();
+            parent_exported && !sym.name.starts_with('#') && !source_line.contains("private ")
+        }
+    }
+}
+
+/// Names listed by a local `export { X }` (no source specifier). This is a
+/// module binding list, so only top-level symbols consume it.
+fn ts_local_export_names(root: Node<'_>, src: &[u8]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut cursor = root.walk();
+    for stmt in root.named_children(&mut cursor) {
+        if stmt.kind() != "export_statement" || stmt.child_by_field_name("source").is_some() {
+            continue;
+        }
+        let mut stack = vec![stmt];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "export_specifier" {
+                if let Some(name) = n.child_by_field_name("name") {
+                    out.insert(text(name, src));
+                }
+                continue;
+            }
+            let mut c = n.walk();
+            for child in n.children(&mut c) {
+                stack.push(child);
+            }
+        }
+    }
+    out
 }
 
 /// Resolve Rust `impl Trait for Type` pairs against same-file type symbols.
@@ -1818,6 +1865,22 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
     ctx.func_stack.pop();
 }
 
+/// True when a TS declaration is wrapped by an `export` statement.
+fn ts_exported_ancestor(node: Node<'_>) -> bool {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        match n.kind() {
+            "export_statement" => return true,
+            "variable_declarator"
+            | "lexical_declaration"
+            | "variable_declaration"
+            | "parenthesized_expression" => cur = n.parent(),
+            _ => return false,
+        }
+    }
+    false
+}
+
 /// Module-level `const X = () => {...}` / `= function() {...}` -> function
 /// symbol (React components and hooks live here).
 fn record_ts_arrow_function(
@@ -1843,7 +1906,7 @@ fn record_ts_arrow_function(
     }
     let name = text(name_node, src);
     let qualname = format!("{}.{}", fx.module, name);
-    let start = node.start_position().row + 1;
+    let start = value.start_position().row + 1;
     let sym_idx = fx.symbols.len();
     let (cyc, br, nest, loc) = callable_metrics(value, src, fx.lang);
     fx.symbols.push(NewSymbol {
@@ -1852,13 +1915,15 @@ fn record_ts_arrow_function(
         qualname: qualname.clone(),
         file_idx: fx.file_idx,
         signature: signature_of(node, src),
+        // Metrics and line range use the same arrow/function-expression node;
+        // a multiline `const f =` header must not make loc and lines disagree.
         line_start: start,
-        line_end: node.end_position().row + 1,
+        line_end: value.end_position().row + 1,
         cyclomatic: cyc,
         branches: br,
         nesting: nest,
         effective_loc: loc,
-        ..Default::default()
+        exported: ts_exported_ancestor(node),
     });
     // Module symbol contains it.
     fx.edges.push(NewEdge {

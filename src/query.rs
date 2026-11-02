@@ -1637,7 +1637,7 @@ pub fn complexity(
         &format!(
             "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE s.kind IN ('function','method')
-           AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
+           AND s.cyclomatic > 0 AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
            AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}"
         ),
         rusqlite::params![
@@ -1659,7 +1659,7 @@ pub fn complexity(
                 s.effective_loc, s.qualname
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE s.kind IN ('function','method')
-           AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
+           AND s.cyclomatic > 0 AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
            AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}
          ORDER BY s.cyclomatic DESC, s.effective_loc DESC, s.qualname,
                   s.file_path, s.line_start LIMIT {limit}"

@@ -700,6 +700,90 @@ fn imports_lists_outbound_resolved_edges() {
 }
 
 #[test]
+fn api_exports_impl_before_type_and_ts_arrows() {
+    let repo = temp_repo("api-two-pass");
+    write(
+        &repo,
+        "lib.rs",
+        "impl Widget {\n    pub fn helper(&self) {}\n}\npub struct Widget;\n",
+    );
+    write(
+        &repo,
+        "app.ts",
+        "export const arrow = (x: number) => x;\nconst local = () => 1;\nexport { local };\nexport class C {\n    private helper() {}\n    ok() {}\n}\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["api", "lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("lib.Widget.helper"),
+        "impl-before-type method is not exported: {stdout}"
+    );
+
+    let out = kg(&repo).args(["api", "app.ts"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for row in ["app.arrow", "app.local", "app.C.ok"] {
+        assert!(stdout.contains(row), "missing export {row}: {stdout}");
+    }
+    assert!(
+        !stdout.contains("helper"),
+        "private method exported: {stdout}"
+    );
+}
+
+#[test]
+fn ts_arrow_metrics_use_the_arrow_range() {
+    let repo = temp_repo("ts-arrow-range");
+    write(
+        &repo,
+        "app.ts",
+        "const arrow =\n  (\n    x: number,\n  ) => {\n    return x;\n  };\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["symbols", "app.ts", "--metrics"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("app.arrow") && stdout.contains("loc=5"),
+        "arrow metrics range is inconsistent: {stdout}"
+    );
+}
+
+#[test]
+fn complexity_excludes_zero_metric_trait_signatures() {
+    let repo = temp_repo("complexity-signatures");
+    write(
+        &repo,
+        "lib.rs",
+        "trait Shape {\n    fn area(&self) -> f64;\n}\n\n#[inline]\nfn real() {\n    // comment\n}\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["complexity", "--min-cyc", "0"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        !stdout.contains("Shape.area"),
+        "trait signature listed: {stdout}"
+    );
+    assert!(
+        stdout.contains("lib.real"),
+        "real function missing: {stdout}"
+    );
+    assert!(
+        stdout.contains("loc=2"),
+        "attribute/comment lines changed loc: {stdout}"
+    );
+}
+
+#[test]
 fn ts_relative_imports_collapse_extensions_and_index() {
     let repo = temp_repo("ts-extensions");
     write(
