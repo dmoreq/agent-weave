@@ -1,0 +1,10 @@
+{
+  "exists": true,
+  "hops": 3,
+  "route": [
+    "scripts/build_knowledge_base.py:1702",
+    "scripts/build_knowledge_base.py:1423",
+    "vihap/cleaners/admin.py:92"
+  ],
+  "answer": "Yes. main calls export_master_admin_marshal at scripts/build_knowledge_base.py:1702, which calls vihap.cleaners.admin.normalize_admin_name at line 1423; normalize_admin_name then calls normalize_ascii at vihap/cleaners/admin.py:92. The normalize_ascii imported by admin comes from vihap.cleaners.text_utils, which re-exports it from vihap.cleaners.unicode, so the edge resolves to vihap.cleaners.unicode.normalize_ascii."
+}

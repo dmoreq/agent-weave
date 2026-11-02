@@ -1,0 +1,15 @@
+{
+  "qualname": "vihap.matching.similarity.pairwise_address_similarity",
+  "callers": [
+    "tests/test_scoring_sklearn_api.py:120",
+    "tests/test_scoring_sklearn_api.py:128",
+    "tests/test_scoring_sklearn_api.py:137",
+    "tests/test_scoring_sklearn_api.py:142",
+    "vihap/matching/similarity.py:356"
+  ],
+  "callees": [
+    "vihap/cleaners/unicode.py:47",
+    "vihap/matching/similarity.py:158"
+  ],
+  "answer": "vihap.matching.similarity.pairwise_address_similarity (defined at vihap/matching/similarity.py:267) is called from four test sites in tests/test_scoring_sklearn_api.py (120, 128, 137, 142) and from compute_similarity_matrix at vihap/matching/similarity.py:356; its only in-repo direct callees are normalize_ascii (vihap/cleaners/unicode.py:47) and evaluate_street_similarity (vihap/matching/similarity.py:158)."
+}

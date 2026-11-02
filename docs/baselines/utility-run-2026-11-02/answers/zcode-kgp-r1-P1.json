@@ -1,0 +1,12 @@
+{
+  "exists": true,
+  "hops": 5,
+  "route": [
+    "src/main.rs:37",
+    "src/main.rs:146",
+    "src/build.rs:121",
+    "src/extract.rs:265",
+    "src/extract.rs:379"
+  ],
+  "answer": "Yes. src.main.main reaches src.extract.walk_node over 5 static call edges: main -> run, run -> build::run_build, run_build -> extract::extract_file, extract_file -> walk_children, walk_children -> walk_node."
+}

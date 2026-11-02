@@ -250,3 +250,28 @@ changes: Python nested defs scope to the enclosing function, Rust inline
 `mod` and TS namespaces qualify members, module symbols no longer create
 false ambiguity, hotspots count `elif`/`case`/ternary and exclude comment-only
 LOC, clones filter `--min-lines` after window merging.
+
+## 9. Host extension — agy CLI and zcode CLI (2026-11-02)
+
+Replayed the frozen A/B prompts on two additional hosts: agy 1.4.12 with
+`gemini-3.8-flash-high`, and zcode 0.1.82 with its default DeepSeek V4.1
+Flash model. 52 cells: path P1-P3 x 2 arms x 2 hosts x 2 runs, plus one run
+each for search B1-B2, clones C1-C2, and context F1-F3. Full record:
+`baselines/hosts-utility-2026-11-02.md`; raw cells under
+`baselines/utility-run-2026-11-02/`.
+
+| feature | agy | zcode | correctness |
+|---|---|---|---|
+| `path` | tools −71%, kg calls −81%, input tokens −63% | tools −63%, kg calls −64%, input tokens −36% | 6/6 both |
+| `context` | tools −28%, kg calls −57%, input tokens −36% | tools −48%, kg calls −67%, input tokens −25% | 3/3 both |
+| `search` | tools −38%, input −47%, kg calls +50% | tools −29%, input +10%, kg calls +100% | 2/2 both |
+| `clones` | tools −22%, input −18% | tools −6%, input −2%, kg calls 4.5 | 2/2 both |
+
+`path` and `context` clear the 20% tool-call bar on both new hosts with
+correctness parity. `search` meets the call bar but raises kg calls and has
+mixed token economics. `clones` transfers only on agy, the same
+host-dependence seen on Grok/OpenCode. Search/clones/context are n=1 per
+cell, directional; path is n=2. Two limitations are recorded in the baseline:
+agy exceeded the 25-tool budget in 5 control cells, and F2 is scored against a host-specific expected overlay
+containing two verified sites that v0.2.1 now resolves; the shared frozen
+oracle is unchanged.

@@ -1,0 +1,7 @@
+{
+  "exists": false,
+  "hops": 0,
+  "route": [],
+  "pairs": [],
+  "answer": "No. kg clones reported only four candidate pairs (pair01_a/b, pair02_a/b, pair03_a/b, pair04_a/b), none involving near.py, and a direct normalized-line comparison found no 5+ line block shared with near.py because every code line uses distinct near-specific identifiers."
+}

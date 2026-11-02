@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Stage-5 scorer (kg context): exact qualname + caller/callee set agreement."""
-import json, re, sys
+import json, os, re, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent
-EXP = Path("/Users/quy.doan/Workspace/kg/docs/baselines/expected")
+SHARED_EXP = Path("/Users/quy.doan/Workspace/kg/docs/baselines/expected")
+EXP = Path(os.environ.get("KG_EXPECTED_DIR", SHARED_EXP))
 
 def score(runid):
     parts = runid.split("-"); arm, task = parts[1], parts[3]
-    exp = json.loads((EXP / f"{task}.json").read_text())
+    exp_path = EXP / f"{task}.json"
+    if not exp_path.exists():
+        exp_path = SHARED_EXP / f"{task}.json"
+    exp = json.loads(exp_path.read_text())
     f = ROOT / "answers" / f"{runid}.json"
     out = {"runid": runid, "ok": False, "why": ""}
     if not f.exists():

@@ -1,0 +1,1 @@
+{"ts":1793622335,"surface":"cli","tool":"path","name":"scripts.build_knowledge_base.main","session":"","arm":"","built_at":1793620621575,"source_rev":"unknown","stale":false,"shown":3,"total":3,"pointers":["scripts/build_knowledge_base.py:1702","scripts/build_knowledge_base.py:1402","tests/support/sqlite_master_reference.py:32"]}

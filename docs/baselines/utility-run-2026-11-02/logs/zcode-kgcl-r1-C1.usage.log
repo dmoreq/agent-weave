@@ -1,0 +1,2 @@
+{"ts":1793622463,"surface":"cli","tool":"clones","args":{"min_lines":"5","path":"","exclude_generated":"false","limit":"50"},"result_count":4,"shown":4,"total":4,"ambiguous":0,"exit_code":0,"latency_us":1436,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
+{"ts":1793622476,"surface":"cli","tool":"clones","args":{"min_lines":"5","path":"","exclude_generated":"false","limit":"10000"},"result_count":4,"shown":4,"total":4,"ambiguous":0,"exit_code":0,"latency_us":957,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

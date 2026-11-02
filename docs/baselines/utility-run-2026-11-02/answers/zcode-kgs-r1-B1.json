@@ -1,0 +1,6 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": ["vihap/adapters/sklearn.py:79"],
+  "answer": "vihap.adapters.sklearn._to_list is declared `def _to_list(seq: Any) -> list[Any]` at vihap/adapters/sklearn.py:79 and is called twice inside _raw_items_from_sklearn_input (lines 113 and 114: `_to_list(_tabular_address_column(X))` and `_to_list(X)`), confirming the signature and call site match."
+}

@@ -1,0 +1,104 @@
+[start] agy-kgc-r1-P1 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 17:54:53
+[done] agy-kgc-r1-P1 exit=0 17:57:57 tools=27 kg=15 dur=183.9s
+[start] agy-kgp-r1-P1 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 17:57:57
+[done] agy-kgp-r1-P1 exit=0 17:58:52 tools=8 kg=1 dur=55.1s
+[start] agy-kgc-r2-P1 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 17:58:52
+[done] agy-kgc-r2-P1 exit=0 18:00:57 tools=22 kg=15 dur=124.1s
+[start] agy-kgp-r2-P1 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 18:00:57
+[done] agy-kgp-r2-P1 exit=0 18:01:53 tools=7 kg=1 dur=56.0s
+[start] agy-kgc-r1-P2 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 18:01:53
+[done] agy-kgc-r1-P2 exit=0 18:05:18 tools=31 kg=27 dur=205.0s
+[start] agy-kgp-r1-P2 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 18:05:18
+[done] agy-kgp-r1-P2 exit=0 18:06:37 tools=14 kg=10 dur=79.4s
+[start] agy-kgc-r2-P2 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 18:06:37
+[done] agy-kgc-r2-P2 exit=0 18:09:06 tools=28 kg=23 dur=149.0s
+[start] agy-kgp-r2-P2 host=agy repo=/tmp/utility-corpus-2026-11-02/kg 18:09:06
+[done] agy-kgp-r2-P2 exit=0 18:10:38 tools=15 kg=10 dur=91.6s
+[start] agy-kgp-r1-P3 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:50:28
+[done] agy-kgp-r1-P3 exit=0 18:51:23 tools=6 kg=1 dur=55.7s
+[start] agy-kgc-r2-P3 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:51:23
+[done] agy-kgc-r2-P3 exit=0 18:56:06 tools=46 kg=25 dur=282.8s
+[start] agy-kgp-r2-P3 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:56:06
+[done] agy-kgp-r2-P3 exit=0 18:57:01 tools=6 kg=1 dur=54.4s
+[start] agy-kgc-r1-B1 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:57:01
+[done] agy-kgc-r1-B1 exit=0 18:57:57 tools=6 kg=1 dur=55.5s
+[start] agy-kgs-r1-B1 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:57:57
+[done] agy-kgs-r1-B1 exit=0 18:58:53 tools=5 kg=2 dur=55.9s
+[start] agy-kgc-r1-B2 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:58:53
+[done] agy-kgc-r1-B2 exit=0 18:59:57 tools=7 kg=1 dur=64.6s
+[start] agy-kgs-r1-B2 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 18:59:57
+[done] agy-kgs-r1-B2 exit=0 19:00:49 tools=3 kg=1 dur=51.9s
+[start] agy-kgc-r1-C1 host=agy repo=/tmp/utility-corpus-2026-11-02/clones 19:00:49
+[done] agy-kgc-r1-C1 exit=0 19:03:11 tools=17 kg=1 dur=141.3s
+[start] agy-kgcl-r1-C1 host=agy repo=/tmp/utility-corpus-2026-11-02/clones 19:03:11
+[done] agy-kgcl-r1-C1 exit=0 19:04:24 tools=8 kg=1 dur=73.6s
+[start] agy-kgc-r1-C2 host=agy repo=/tmp/utility-corpus-2026-11-02/clones 19:04:24
+[done] agy-kgc-r1-C2 exit=0 19:05:20 tools=6 kg=0 dur=55.9s
+[start] agy-kgcl-r1-C2 host=agy repo=/tmp/utility-corpus-2026-11-02/clones 19:05:20
+[done] agy-kgcl-r1-C2 exit=0 19:06:23 tools=10 kg=1 dur=63.1s
+[start] agy-kgc-r1-F1 host=agy repo=/tmp/prosev-new 19:06:24
+[done] agy-kgc-r1-F1 exit=0 19:07:39 tools=13 kg=5 dur=74.8s
+[start] agy-kgx-r1-F1 host=agy repo=/tmp/prosev-new 19:07:39
+[done] agy-kgx-r1-F1 exit=0 19:09:22 tools=14 kg=5 dur=103.7s
+[start] agy-kgc-r1-F2 host=agy repo=/tmp/prosev-new 19:09:22
+[done] agy-kgc-r1-F2 exit=0 19:11:08 tools=16 kg=6 dur=105.9s
+[start] agy-kgx-r1-F2 host=agy repo=/tmp/prosev-new 19:11:08
+[done] agy-kgx-r1-F2 exit=0 19:12:17 tools=8 kg=1 dur=68.4s
+[start] agy-kgc-r1-F3 host=agy repo=/tmp/prosev-new 19:12:17
+[done] agy-kgc-r1-F3 exit=0 19:14:44 tools=21 kg=10 dur=146.7s
+[start] agy-kgx-r1-F3 host=agy repo=/tmp/prosev-new 19:14:44
+[done] agy-kgx-r1-F3 exit=0 19:16:48 tools=14 kg=3 dur=124.2s
+[start] zcode-kgc-r1-P1 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:16:48
+[done] zcode-kgc-r1-P1 exit=0 19:17:42 tools=17 kg=15 dur=54.3s
+[start] zcode-kgp-r1-P1 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:17:42
+[done] zcode-kgp-r1-P1 exit=0 19:17:52 tools=3 kg=1 dur=10.0s
+[start] zcode-kgc-r2-P1 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:17:52
+[done] zcode-kgc-r2-P1 exit=0 19:19:48 tools=22 kg=21 dur=115.4s
+[start] zcode-kgp-r2-P1 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:19:48
+[done] zcode-kgp-r2-P1 exit=0 19:19:58 tools=2 kg=1 dur=10.1s
+[start] zcode-kgc-r1-P2 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:19:58
+[done] zcode-kgc-r1-P2 exit=0 19:20:39 tools=12 kg=23 dur=41.5s
+[start] zcode-kgp-r1-P2 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:20:39
+[done] zcode-kgp-r1-P2 exit=0 19:22:17 tools=14 kg=23 dur=98.0s
+[start] zcode-kgc-r2-P2 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:22:17
+[done] zcode-kgc-r2-P2 exit=0 19:23:05 tools=17 kg=23 dur=47.6s
+[start] zcode-kgp-r2-P2 host=zcode repo=/tmp/utility-corpus-2026-11-02/kg 19:23:05
+[done] zcode-kgp-r2-P2 exit=0 19:23:32 tools=9 kg=10 dur=27.3s
+[start] zcode-kgc-r1-P3 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:23:32
+[done] zcode-kgc-r1-P3 exit=0 19:24:22 tools=21 kg=13 dur=49.1s
+[start] zcode-kgp-r1-P3 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:24:22
+[done] zcode-kgp-r1-P3 exit=0 19:24:44 tools=4 kg=1 dur=22.7s
+[start] zcode-kgc-r2-P3 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:24:44
+[done] zcode-kgc-r2-P3 exit=0 19:25:31 tools=13 kg=9 dur=46.6s
+[start] zcode-kgp-r2-P3 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:25:31
+[done] zcode-kgp-r2-P3 exit=0 19:25:53 tools=6 kg=1 dur=22.2s
+[start] zcode-kgc-r1-B1 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:25:53
+[done] zcode-kgc-r1-B1 exit=0 19:26:14 tools=7 kg=1 dur=20.3s
+[start] zcode-kgs-r1-B1 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:26:14
+[done] zcode-kgs-r1-B1 exit=0 19:26:29 tools=5 kg=2 dur=15.1s
+[start] zcode-kgc-r1-B2 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:26:29
+[done] zcode-kgc-r1-B2 exit=0 19:26:48 tools=7 kg=1 dur=19.0s
+[start] zcode-kgs-r1-B2 host=zcode repo=/tmp/utility-corpus-2026-11-02/vihap 19:26:48
+[done] zcode-kgs-r1-B2 exit=0 19:26:59 tools=5 kg=2 dur=11.7s
+[start] zcode-kgc-r1-C1 host=zcode repo=/tmp/utility-corpus-2026-11-02/clones 19:27:00
+[done] zcode-kgc-r1-C1 exit=0 19:27:39 tools=10 kg=0 dur=39.6s
+[start] zcode-kgcl-r1-C1 host=zcode repo=/tmp/utility-corpus-2026-11-02/clones 19:27:39
+[done] zcode-kgcl-r1-C1 exit=0 19:28:05 tools=5 kg=4 dur=25.9s
+[start] zcode-kgc-r1-C2 host=zcode repo=/tmp/utility-corpus-2026-11-02/clones 19:28:05
+[done] zcode-kgc-r1-C2 exit=0 19:28:35 tools=6 kg=0 dur=29.7s
+[start] zcode-kgcl-r1-C2 host=zcode repo=/tmp/utility-corpus-2026-11-02/clones 19:28:35
+[done] zcode-kgcl-r1-C2 exit=0 19:29:03 tools=10 kg=5 dur=27.9s
+[start] zcode-kgc-r1-F1 host=zcode repo=/tmp/prosev-new 19:29:03
+[done] zcode-kgc-r1-F1 exit=0 19:29:45 tools=9 kg=3 dur=42.6s
+[start] zcode-kgx-r1-F1 host=zcode repo=/tmp/prosev-new 19:29:45
+[done] zcode-kgx-r1-F1 exit=0 19:30:06 tools=5 kg=1 dur=20.9s
+[start] zcode-kgc-r1-F2 host=zcode repo=/tmp/prosev-new 19:30:06
+[done] zcode-kgc-r1-F2 exit=0 19:30:25 tools=10 kg=3 dur=18.4s
+[start] zcode-kgx-r1-F2 host=zcode repo=/tmp/prosev-new 19:30:25
+[done] zcode-kgx-r1-F2 exit=0 19:30:56 tools=5 kg=1 dur=31.2s
+[start] zcode-kgc-r1-F3 host=zcode repo=/tmp/prosev-new 19:30:56
+[done] zcode-kgc-r1-F3 exit=0 19:31:16 tools=8 kg=3 dur=20.2s
+[start] zcode-kgx-r1-F3 host=zcode repo=/tmp/prosev-new 19:31:16
+[done] zcode-kgx-r1-F3 exit=0 19:31:30 tools=4 kg=1 dur=13.8s
+[start] agy-kgc-r1-P3 host=agy repo=/tmp/utility-corpus-2026-11-02/vihap 19:35:11
+[done] agy-kgc-r1-P3 exit=0 19:40:59 tools=39 kg=23 dur=348.0s

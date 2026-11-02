@@ -1,0 +1,10 @@
+{
+  "exists": true,
+  "hops": 3,
+  "route": [
+    "scripts/build_knowledge_base.py:1702",
+    "scripts/build_knowledge_base.py:1402",
+    "tests/support/sqlite_master_reference.py:32"
+  ],
+  "answer": "Yes. main calls export_master_admin_marshal, which calls SqliteFileReference.get_district_streets_mapping, which calls normalize_ascii. The path crosses into tests/support because that class is imported inside export_master_admin_marshal."
+}

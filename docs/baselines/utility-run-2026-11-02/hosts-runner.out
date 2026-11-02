@@ -1,0 +1,105 @@
+=== cell 1/999: agy-kgc-r1-P1 ===
+[done] agy-kgc-r1-P1 exit=0 tools=27 kg=15 dur=183.9s
+=== cell 2/999: agy-kgp-r1-P1 ===
+[done] agy-kgp-r1-P1 exit=0 tools=8 kg=1 dur=55.1s
+=== cell 3/999: agy-kgc-r2-P1 ===
+[done] agy-kgc-r2-P1 exit=0 tools=22 kg=15 dur=124.1s
+=== cell 4/999: agy-kgp-r2-P1 ===
+[done] agy-kgp-r2-P1 exit=0 tools=7 kg=1 dur=56.0s
+=== cell 5/999: agy-kgc-r1-P2 ===
+[done] agy-kgc-r1-P2 exit=0 tools=31 kg=27 dur=205.0s
+=== cell 6/999: agy-kgp-r1-P2 ===
+[done] agy-kgp-r1-P2 exit=0 tools=14 kg=10 dur=79.4s
+=== cell 7/999: agy-kgc-r2-P2 ===
+[done] agy-kgc-r2-P2 exit=0 tools=28 kg=23 dur=149.0s
+=== cell 8/999: agy-kgp-r2-P2 ===
+[done] agy-kgp-r2-P2 exit=0 tools=15 kg=10 dur=91.6s
+=== cell 9/999: agy-kgc-r1-P3 ===
+[done] agy-kgc-r1-P3 exit=-9 tools=0 kg=0 dur=2389.1s
+=== cell 10/999: agy-kgp-r1-P3 ===
+[done] agy-kgp-r1-P3 exit=0 tools=6 kg=1 dur=55.7s
+=== cell 11/999: agy-kgc-r2-P3 ===
+[done] agy-kgc-r2-P3 exit=0 tools=46 kg=25 dur=282.8s
+=== cell 12/999: agy-kgp-r2-P3 ===
+[done] agy-kgp-r2-P3 exit=0 tools=6 kg=1 dur=54.4s
+=== cell 13/999: agy-kgc-r1-B1 ===
+[done] agy-kgc-r1-B1 exit=0 tools=6 kg=1 dur=55.5s
+=== cell 14/999: agy-kgs-r1-B1 ===
+[done] agy-kgs-r1-B1 exit=0 tools=5 kg=2 dur=55.9s
+=== cell 15/999: agy-kgc-r1-B2 ===
+[done] agy-kgc-r1-B2 exit=0 tools=7 kg=1 dur=64.6s
+=== cell 16/999: agy-kgs-r1-B2 ===
+[done] agy-kgs-r1-B2 exit=0 tools=3 kg=1 dur=51.9s
+=== cell 17/999: agy-kgc-r1-C1 ===
+[done] agy-kgc-r1-C1 exit=0 tools=17 kg=1 dur=141.3s
+=== cell 18/999: agy-kgcl-r1-C1 ===
+[done] agy-kgcl-r1-C1 exit=0 tools=8 kg=1 dur=73.6s
+=== cell 19/999: agy-kgc-r1-C2 ===
+[done] agy-kgc-r1-C2 exit=0 tools=6 kg=0 dur=55.9s
+=== cell 20/999: agy-kgcl-r1-C2 ===
+[done] agy-kgcl-r1-C2 exit=0 tools=10 kg=1 dur=63.1s
+=== cell 21/999: agy-kgc-r1-F1 ===
+[done] agy-kgc-r1-F1 exit=0 tools=13 kg=5 dur=74.8s
+=== cell 22/999: agy-kgx-r1-F1 ===
+[done] agy-kgx-r1-F1 exit=0 tools=14 kg=5 dur=103.7s
+=== cell 23/999: agy-kgc-r1-F2 ===
+[done] agy-kgc-r1-F2 exit=0 tools=16 kg=6 dur=105.9s
+=== cell 24/999: agy-kgx-r1-F2 ===
+[done] agy-kgx-r1-F2 exit=0 tools=8 kg=1 dur=68.4s
+=== cell 25/999: agy-kgc-r1-F3 ===
+[done] agy-kgc-r1-F3 exit=0 tools=21 kg=10 dur=146.7s
+=== cell 26/999: agy-kgx-r1-F3 ===
+[done] agy-kgx-r1-F3 exit=0 tools=14 kg=3 dur=124.2s
+=== cell 27/999: zcode-kgc-r1-P1 ===
+[done] zcode-kgc-r1-P1 exit=0 tools=17 kg=15 dur=54.3s
+=== cell 28/999: zcode-kgp-r1-P1 ===
+[done] zcode-kgp-r1-P1 exit=0 tools=3 kg=1 dur=10.0s
+=== cell 29/999: zcode-kgc-r2-P1 ===
+[done] zcode-kgc-r2-P1 exit=0 tools=22 kg=21 dur=115.4s
+=== cell 30/999: zcode-kgp-r2-P1 ===
+[done] zcode-kgp-r2-P1 exit=0 tools=2 kg=1 dur=10.1s
+=== cell 31/999: zcode-kgc-r1-P2 ===
+[done] zcode-kgc-r1-P2 exit=0 tools=12 kg=23 dur=41.5s
+=== cell 32/999: zcode-kgp-r1-P2 ===
+[done] zcode-kgp-r1-P2 exit=0 tools=14 kg=23 dur=98.0s
+=== cell 33/999: zcode-kgc-r2-P2 ===
+[done] zcode-kgc-r2-P2 exit=0 tools=17 kg=23 dur=47.6s
+=== cell 34/999: zcode-kgp-r2-P2 ===
+[done] zcode-kgp-r2-P2 exit=0 tools=9 kg=10 dur=27.3s
+=== cell 35/999: zcode-kgc-r1-P3 ===
+[done] zcode-kgc-r1-P3 exit=0 tools=21 kg=13 dur=49.1s
+=== cell 36/999: zcode-kgp-r1-P3 ===
+[done] zcode-kgp-r1-P3 exit=0 tools=4 kg=1 dur=22.7s
+=== cell 37/999: zcode-kgc-r2-P3 ===
+[done] zcode-kgc-r2-P3 exit=0 tools=13 kg=9 dur=46.6s
+=== cell 38/999: zcode-kgp-r2-P3 ===
+[done] zcode-kgp-r2-P3 exit=0 tools=6 kg=1 dur=22.2s
+=== cell 39/999: zcode-kgc-r1-B1 ===
+[done] zcode-kgc-r1-B1 exit=0 tools=7 kg=1 dur=20.3s
+=== cell 40/999: zcode-kgs-r1-B1 ===
+[done] zcode-kgs-r1-B1 exit=0 tools=5 kg=2 dur=15.1s
+=== cell 41/999: zcode-kgc-r1-B2 ===
+[done] zcode-kgc-r1-B2 exit=0 tools=7 kg=1 dur=19.0s
+=== cell 42/999: zcode-kgs-r1-B2 ===
+[done] zcode-kgs-r1-B2 exit=0 tools=5 kg=2 dur=11.7s
+=== cell 43/999: zcode-kgc-r1-C1 ===
+[done] zcode-kgc-r1-C1 exit=0 tools=10 kg=0 dur=39.6s
+=== cell 44/999: zcode-kgcl-r1-C1 ===
+[done] zcode-kgcl-r1-C1 exit=0 tools=5 kg=4 dur=25.9s
+=== cell 45/999: zcode-kgc-r1-C2 ===
+[done] zcode-kgc-r1-C2 exit=0 tools=6 kg=0 dur=29.7s
+=== cell 46/999: zcode-kgcl-r1-C2 ===
+[done] zcode-kgcl-r1-C2 exit=0 tools=10 kg=5 dur=27.9s
+=== cell 47/999: zcode-kgc-r1-F1 ===
+[done] zcode-kgc-r1-F1 exit=0 tools=9 kg=3 dur=42.6s
+=== cell 48/999: zcode-kgx-r1-F1 ===
+[done] zcode-kgx-r1-F1 exit=0 tools=5 kg=1 dur=20.9s
+=== cell 49/999: zcode-kgc-r1-F2 ===
+[done] zcode-kgc-r1-F2 exit=0 tools=10 kg=3 dur=18.4s
+=== cell 50/999: zcode-kgx-r1-F2 ===
+[done] zcode-kgx-r1-F2 exit=0 tools=5 kg=1 dur=31.2s
+=== cell 51/999: zcode-kgc-r1-F3 ===
+[done] zcode-kgc-r1-F3 exit=0 tools=8 kg=3 dur=20.2s
+=== cell 52/999: zcode-kgx-r1-F3 ===
+[done] zcode-kgx-r1-F3 exit=0 tools=4 kg=1 dur=13.8s
+=== runner done: 52 new cells ===

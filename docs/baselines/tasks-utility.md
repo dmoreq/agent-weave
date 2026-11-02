@@ -152,3 +152,20 @@ shipped binary at freeze (exact hop counts; negative verified structurally).
 - D3: `pkg.m500.f500 -> pkg.m505.f505` — exists, 5 hops.
 - Arms/hosts/runs as Stage 1 (kgc control composes callers/callees or grep;
   kgp routes to `kg path`). 24 cells.
+
+## Host extension — agy CLI and zcode CLI (2026-11-02)
+
+- Same frozen prompts/expected sets; path P1-P3 (2 runs), search B1-B2,
+  clones C1-C2, context F1-F3 (1 run), two arms, two hosts = 52 cells.
+- Runner: `utility-run-2026-11-02/run_hosts_2026-11-02.py`; results:
+  `docs/baselines/hosts-utility-2026-11-02.md`.
+- Dated corrections before valid cells: answers moved from
+  `/tmp/utility-answers-2026-11-02` to `~/kg-eval-archive/answers-2026-11-02`
+  after agy read a prior answer in smoke; valid runs use
+  `/tmp/utility-answers-2026-11-02-hosts` and a prompt isolation clause.
+  Accounting is transcript-based because both hosts scrub KG_ARM/KG_SESSION.
+- Dated GT correction: F2 is scored for this battery against
+  `docs/baselines/expected-hosts-2026-11-02/F2.json`, which adds
+  `vihap/validators/street_validator.py:629` and `:707` (verified source
+  calls that v0.2.1 now resolves); the shared frozen `expected/F2.json` is
+  unchanged.

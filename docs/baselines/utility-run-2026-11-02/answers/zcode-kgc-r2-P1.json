@@ -1,0 +1,6 @@
+{
+  "exists": true,
+  "hops": 5,
+  "route": ["src/main.rs:37", "src/main.rs:146", "src/build.rs:121", "src/extract.rs:265", "src/extract.rs:379"],
+  "answer": "Yes. The resolved call chain runs main -> run -> run_build -> extract_file -> walk_children -> walk_node in 5 hops; main.rs:146 is the run_build call, build.rs:121 the extract_file call, extract.rs:265 the walk_children call, and extract.rs:379 the walk_node call."
+}
