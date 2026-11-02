@@ -1,0 +1,22 @@
+Question: List every function and method defined in `vihap/cleaners/route.py` with kind, line, qualname, and full signature. Exclude the module and class symbols.
+
+Item format: Items are exactly `<path>:<line> <kind> <qualname> <signature>`.
+
+Repository: /tmp/kg-lab/corpora/vihap
+kg CLI: /tmp/kg-lab/target-base/release/kg
+Run kg with --root /tmp/kg-lab/corpora/vihap
+
+Answer: write EXACTLY this JSON object to {ANSWER_PATH}
+{
+  "items": ["<item>", ...],
+  "answer": "<one or two sentences>"
+}
+
+Rules:
+- Every item must come from source or kg output; use repo-relative paths.
+- Budget: at most 25 tool calls. Do not modify files. No network.
+- Do not read or list paths outside the repository except the answer file.
+- Do not read other answer files or anything under .kg/ directly.
+- When the JSON file is written, stop.
+
+Run `kg symbols vihap/cleaners/route.py --outline --limit 100` FIRST. Each line is `<path>:<line> <kind> <qualname> <signature>`; exclude the module and class lines.

@@ -1,0 +1,12 @@
+{
+  "items": [
+    "vihap/adapters/sklearn.py:394 vihap.adapters.sklearn.RouteRefTransformer.transform",
+    "vihap/cleaners/route.py:267 vihap.cleaners.route.is_route_ref",
+    "vihap/cleaners/route.py:299 vihap.cleaners.route.canonicalize_route_ref",
+    "vihap/parsers/street_parser.py:408 vihap.parsers.street_parser.MicroStreetParser._validate_street_candidate",
+    "vihap/parsers/street_parser.py:918 vihap.parsers.street_parser.MicroStreetParser._apply_street_house_reorder_before_lane",
+    "vihap/validators/street_validator.py:656 vihap.validators.street_validator.StreetValidator.validate",
+    "vihap/validators/street_validator.py:719 vihap.validators.street_validator.StreetValidator.validate"
+  ],
+  "answer": "Seven non-test call sites call vihap.cleaners.route.parse_route_ref: two internal helpers in cleaners/route.py, two in parsers/street_parser.py, two in validators/street_validator.py, and one in adapters/sklearn.py. The remaining kg matches are test files or a re-export in cleaners/__init__.py."
+}

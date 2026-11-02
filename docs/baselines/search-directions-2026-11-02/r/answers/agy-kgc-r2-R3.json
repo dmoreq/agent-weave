@@ -1,0 +1,13 @@
+{
+  "items": [
+    "tests/test_route_cleaner.py (21 sites)",
+    "tests/test_route_qualifiers.py (4 sites)",
+    "tests/test_street_validator.py (2 sites)",
+    "vihap/adapters/sklearn.py (1 sites)",
+    "vihap/cleaners/heuristics.py (1 sites)",
+    "vihap/parsers/housing.py (1 sites)",
+    "vihap/parsers/street_parser.py (7 sites)",
+    "vihap/validators/street_validator.py (2 sites)"
+  ],
+  "answer": "A total of 8 files call into vihap/cleaners/route.py across 39 call sites. These include three test files (27 sites) and five production modules across parsers, adapters, validators, and cleaners (12 sites)."
+}

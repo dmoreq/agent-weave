@@ -1,0 +1,22 @@
+Question: For `vihap/cleaners/route.py`, list every file that calls into it and the number of call sites per file, including tests.
+
+Item format: Items are exactly `<file> (<N> sites)`.
+
+Repository: /tmp/kg-lab/corpora/vihap
+kg CLI: /tmp/kg-lab/target-base/release/kg
+Run kg with --root /tmp/kg-lab/corpora/vihap
+
+Answer: write EXACTLY this JSON object to {ANSWER_PATH}
+{
+  "items": ["<item>", ...],
+  "answer": "<one or two sentences>"
+}
+
+Rules:
+- Every item must come from source or kg output; use repo-relative paths.
+- Budget: at most 25 tool calls. Do not modify files. No network.
+- Do not read or list paths outside the repository except the answer file.
+- Do not read other answer files or anything under .kg/ directly.
+- When the JSON file is written, stop.
+
+Do NOT use `kg impact`. Use `kg imports`, `kg search`, grep/read.

@@ -1,0 +1,64 @@
+[start] agy-kgc-r1-R1 22:33:04
+[done] agy-kgc-r1-R1 exit=0 tools=25 kg=8 feat=0 22:36:24
+[start] agy-kgt-r1-R1 22:36:24
+[done] agy-kgt-r1-R1 exit=0 tools=12 kg=2 feat=1 22:37:33
+[start] agy-kgt-r2-R1 22:37:33
+[done] agy-kgt-r2-R1 exit=0 tools=18 kg=1 feat=1 22:39:26
+[start] agy-kgc-r2-R1 22:39:26
+[done] agy-kgc-r2-R1 exit=0 tools=27 kg=19 feat=0 22:43:13
+[start] agy-kgc-r1-R2 22:43:13
+[done] agy-kgc-r1-R2 exit=0 tools=29 kg=19 feat=0 22:47:41
+[start] agy-kgt-r1-R2 22:47:41
+[done] agy-kgt-r1-R2 exit=0 tools=9 kg=2 feat=1 22:49:07
+[start] agy-kgt-r2-R2 22:49:07
+[done] agy-kgt-r2-R2 exit=0 tools=4 kg=1 feat=1 22:49:57
+[start] agy-kgc-r2-R2 22:49:58
+[done] agy-kgc-r2-R2 exit=0 tools=36 kg=28 feat=0 22:54:43
+[start] agy-kgc-r1-R3 22:54:43
+[done] agy-kgc-r1-R3 exit=0 tools=42 kg=16 feat=0 23:00:56
+[start] agy-kgt-r1-R3 23:00:56
+[done] agy-kgt-r1-R3 exit=0 tools=3 kg=1 feat=1 23:01:42
+[start] agy-kgt-r2-R3 23:01:43
+[done] agy-kgt-r2-R3 exit=0 tools=5 kg=3 feat=2 23:02:37
+[start] agy-kgc-r2-R3 23:02:37
+[done] agy-kgc-r2-R3 exit=0 tools=46 kg=12 feat=1 23:10:29
+[start] agy-kgc-r1-R4 23:10:29
+[done] agy-kgc-r1-R4 exit=0 tools=13 kg=8 feat=0 23:13:58
+[start] agy-kgt-r1-R4 23:13:58
+[done] agy-kgt-r1-R4 exit=0 tools=5 kg=1 feat=1 23:15:13
+[start] agy-kgt-r2-R4 23:15:13
+[done] agy-kgt-r2-R4 exit=0 tools=6 kg=2 feat=1 23:16:24
+[start] agy-kgc-r2-R4 23:16:24
+[done] agy-kgc-r2-R4 exit=0 tools=8 kg=2 feat=0 23:19:02
+[start] zcode-kgc-r1-R1 23:19:02
+[done] zcode-kgc-r1-R1 exit=0 tools=10 kg=9 feat=0 23:19:22
+[start] zcode-kgt-r1-R1 23:19:22
+[done] zcode-kgt-r1-R1 exit=0 tools=4 kg=4 feat=1 23:19:43
+[start] zcode-kgt-r2-R1 23:19:43
+[done] zcode-kgt-r2-R1 exit=0 tools=4 kg=4 feat=1 23:19:57
+[start] zcode-kgc-r2-R1 23:19:57
+[done] zcode-kgc-r2-R1 exit=0 tools=9 kg=8 feat=0 23:20:34
+[start] zcode-kgc-r1-R2 23:20:34
+[done] zcode-kgc-r1-R2 exit=0 tools=19 kg=18 feat=0 23:22:59
+[start] zcode-kgt-r1-R2 23:22:59
+[done] zcode-kgt-r1-R2 exit=0 tools=3 kg=2 feat=1 23:23:08
+[start] zcode-kgt-r2-R2 23:23:08
+[done] zcode-kgt-r2-R2 exit=0 tools=4 kg=3 feat=1 23:23:25
+[start] zcode-kgc-r2-R2 23:23:25
+[done] zcode-kgc-r2-R2 exit=0 tools=16 kg=16 feat=0 23:24:50
+[start] zcode-kgc-r1-R3 23:24:50
+[done] zcode-kgc-r1-R3 exit=0 tools=19 kg=18 feat=0 23:28:06
+[start] zcode-kgt-r1-R3 23:28:06
+[done] zcode-kgt-r1-R3 exit=0 tools=2 kg=2 feat=2 23:28:26
+[start] zcode-kgt-r2-R3 23:28:26
+[done] zcode-kgt-r2-R3 exit=0 tools=3 kg=2 feat=1 23:28:44
+[start] zcode-kgc-r2-R3 23:28:44
+[done] zcode-kgc-r2-R3 exit=0 tools=13 kg=12 feat=0 23:30:42
+[start] zcode-kgc-r1-R4 23:30:42
+[done] zcode-kgc-r1-R4 exit=0 tools=7 kg=7 feat=0 23:31:14
+[start] zcode-kgt-r1-R4 23:31:14
+[done] zcode-kgt-r1-R4 exit=0 tools=3 kg=3 feat=1 23:31:37
+[start] zcode-kgt-r2-R4 23:31:37
+[done] zcode-kgt-r2-R4 exit=0 tools=3 kg=2 feat=1 23:31:51
+[start] zcode-kgc-r2-R4 23:31:51
+[done] zcode-kgc-r2-R4 exit=0 tools=5 kg=3 feat=0 23:32:14

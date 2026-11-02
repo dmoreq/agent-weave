@@ -1,0 +1,20 @@
+{
+  "items": [
+    "vihap/cleaners/route.py:94 method vihap.cleaners.route.RouteRefInfo.street_type (self) -> str",
+    "vihap/cleaners/route.py:106 function vihap.cleaners.route._normalize_number (number: str) -> str",
+    "vihap/cleaners/route.py:114 function vihap.cleaners.route._build_canonical_name (form: str, number: str, qualifier: str | None = None) -> str",
+    "vihap/cleaners/route.py:122 function vihap.cleaners.route._split_compact_prefix (text: str) -> str",
+    "vihap/cleaners/route.py:128 function vihap.cleaners.route._invalid_info (raw: str) -> RouteRefInfo",
+    "vihap/cleaners/route.py:140 function vihap.cleaners.route._is_bare_ct_prefix_match (match: re.Match[str], rule: _PrefixRule) -> bool",
+    "vihap/cleaners/route.py:146 function vihap.cleaners.route._is_standalone_route_ref (working_ascii: str, match: re.Match[str]) -> bool",
+    "vihap/cleaners/route.py:153 function vihap.cleaners.route._is_ct_tower_block_number (number: str) -> bool",
+    "vihap/cleaners/route.py:168 function vihap.cleaners.route._accept_bare_ct_expressway (working_ascii: str, match: re.Match[str], number_raw: str) -> bool",
+    "vihap/cleaners/route.py:178 function vihap.cleaners.route._resolve_suffix_qualifier (m_qual: re.Match[str]) -> str | None",
+    "vihap/cleaners/route.py:191 function vihap.cleaners.route._extract_route_qualifier (working_ascii: str, match: re.Match[str]) -> tuple[bool, str | None]",
+    "vihap/cleaners/route.py:213 function vihap.cleaners.route.parse_route_ref (text: str) -> RouteRefInfo",
+    "vihap/cleaners/route.py:265 function vihap.cleaners.route.is_route_ref (text: str) -> bool",
+    "vihap/cleaners/route.py:270 function vihap.cleaners.route.is_highway_km_post (text: str | Any) -> bool",
+    "vihap/cleaners/route.py:295 function vihap.cleaners.route.canonicalize_route_ref (text: str | Any) -> str"
+  ],
+  "answer": "Identified 15 functions and methods defined in vihap/cleaners/route.py with kind, line, qualname, and signature extracted from source and kg symbol index. Module and class symbols have been excluded."
+}

@@ -1,0 +1,65 @@
+=== agy-kgc-r1-R1
+[done] agy-kgc-r1-R1 exit=0 tools=25 kg=8 feat=0
+=== agy-kgt-r1-R1
+[done] agy-kgt-r1-R1 exit=0 tools=12 kg=2 feat=1
+=== agy-kgt-r2-R1
+[done] agy-kgt-r2-R1 exit=0 tools=18 kg=1 feat=1
+=== agy-kgc-r2-R1
+[done] agy-kgc-r2-R1 exit=0 tools=27 kg=19 feat=0
+=== agy-kgc-r1-R2
+[done] agy-kgc-r1-R2 exit=0 tools=29 kg=19 feat=0
+=== agy-kgt-r1-R2
+[done] agy-kgt-r1-R2 exit=0 tools=9 kg=2 feat=1
+=== agy-kgt-r2-R2
+[done] agy-kgt-r2-R2 exit=0 tools=4 kg=1 feat=1
+=== agy-kgc-r2-R2
+[done] agy-kgc-r2-R2 exit=0 tools=36 kg=28 feat=0
+=== agy-kgc-r1-R3
+[done] agy-kgc-r1-R3 exit=0 tools=42 kg=16 feat=0
+=== agy-kgt-r1-R3
+[done] agy-kgt-r1-R3 exit=0 tools=3 kg=1 feat=1
+=== agy-kgt-r2-R3
+[done] agy-kgt-r2-R3 exit=0 tools=5 kg=3 feat=2
+=== agy-kgc-r2-R3
+[done] agy-kgc-r2-R3 exit=0 tools=46 kg=12 feat=1
+=== agy-kgc-r1-R4
+[done] agy-kgc-r1-R4 exit=0 tools=13 kg=8 feat=0
+=== agy-kgt-r1-R4
+[done] agy-kgt-r1-R4 exit=0 tools=5 kg=1 feat=1
+=== agy-kgt-r2-R4
+[done] agy-kgt-r2-R4 exit=0 tools=6 kg=2 feat=1
+=== agy-kgc-r2-R4
+[done] agy-kgc-r2-R4 exit=0 tools=8 kg=2 feat=0
+=== zcode-kgc-r1-R1
+[done] zcode-kgc-r1-R1 exit=0 tools=10 kg=9 feat=0
+=== zcode-kgt-r1-R1
+[done] zcode-kgt-r1-R1 exit=0 tools=4 kg=4 feat=1
+=== zcode-kgt-r2-R1
+[done] zcode-kgt-r2-R1 exit=0 tools=4 kg=4 feat=1
+=== zcode-kgc-r2-R1
+[done] zcode-kgc-r2-R1 exit=0 tools=9 kg=8 feat=0
+=== zcode-kgc-r1-R2
+[done] zcode-kgc-r1-R2 exit=0 tools=19 kg=18 feat=0
+=== zcode-kgt-r1-R2
+[done] zcode-kgt-r1-R2 exit=0 tools=3 kg=2 feat=1
+=== zcode-kgt-r2-R2
+[done] zcode-kgt-r2-R2 exit=0 tools=4 kg=3 feat=1
+=== zcode-kgc-r2-R2
+[done] zcode-kgc-r2-R2 exit=0 tools=16 kg=16 feat=0
+=== zcode-kgc-r1-R3
+[done] zcode-kgc-r1-R3 exit=0 tools=19 kg=18 feat=0
+=== zcode-kgt-r1-R3
+[done] zcode-kgt-r1-R3 exit=0 tools=2 kg=2 feat=2
+=== zcode-kgt-r2-R3
+[done] zcode-kgt-r2-R3 exit=0 tools=3 kg=2 feat=1
+=== zcode-kgc-r2-R3
+[done] zcode-kgc-r2-R3 exit=0 tools=13 kg=12 feat=0
+=== zcode-kgc-r1-R4
+[done] zcode-kgc-r1-R4 exit=0 tools=7 kg=7 feat=0
+=== zcode-kgt-r1-R4
+[done] zcode-kgt-r1-R4 exit=0 tools=3 kg=3 feat=1
+=== zcode-kgt-r2-R4
+[done] zcode-kgt-r2-R4 exit=0 tools=3 kg=2 feat=1
+=== zcode-kgc-r2-R4
+[done] zcode-kgc-r2-R4 exit=0 tools=5 kg=3 feat=0
+=== R done

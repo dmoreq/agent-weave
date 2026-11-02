@@ -16,6 +16,7 @@
 | A. Source-first ranking | G14 0.725 -> **0.800** (21/28 -> 23/28); held-out 5/8 **unchanged**; gap 6/6; latency neutral | **Reject as default.** Gate-specific; keep only as an opt-in experiment. |
 | B. Search on noisy corpus | 32/32 correct across 4 hosts; tools **−58% to −62%**, input tokens −29% to −59% (Grok output +11%) | **Positive at this task class on 4/4 hosts.** Search utility is real when grep is noisy and the target vocabulary lives in signatures. |
 | C. Proactive map | C1 7/8 correct (treatment 4/4); tools 0/+4%, kg calls −22%/−71%, tokens mixed; C2 invalid | **Defer.** No tool-call benefit; 6,980-char context cost; the task needs redesign. |
+| R. callers/callees/impact/outline | 31 valid cells; treatment 16/16 correct, controls 10/16; tools **−42% to −90%**, kg calls −50% to −94%, input −18% to −85% | **Positive on both hosts.** One-call replacement beats composition/grep for all four surfaces. |
 
 ## Root cause, corrected
 
@@ -95,6 +96,48 @@ construction. Control can still guess the underscore spelling
 (`grep -rl mercer_street` = 1 file), so the result measures a realistic but
 favourable noise class, not all real repositories.
 
+
+## R. Feature A/B: callers / callees / impact / outline (agy + zcode)
+
+Same vihap corpus; four tasks, each with one feature-specific arm and one
+control that is forbidden to use that feature. n=2 per cell; 32 cells.
+
+| task | host | arm | tools | kg calls | input tok | correctness |
+|---|---|---|---:|---:|---:|---|
+| R1 callers | agy | control | 26.0 | 13.5 | 91,620 | 2/2 |
+| R1 callers | agy | callers | **15.0 (−42%)** | **1.5 (−89%)** | **57,030 (−38%)** | 2/2 |
+| R1 callers | zcode | control | 9.5 | 8.5 | 16,402 | 2/2 |
+| R1 callers | zcode | callers | **4.0 (−58%)** | **4.0 (−53%)** | **13,484 (−18%)** | 2/2 |
+| R2 callees | agy | control | 32.5 | 23.5 | 101,882 | 2/2 |
+| R2 callees | agy | callees | **6.5 (−80%)** | **1.5 (−94%)** | **28,512 (−72%)** | 2/2 |
+| R2 callees | zcode | control | 17.5 | 17.0 | 34,556 | 2/2 |
+| R2 callees | zcode | callees | **3.5 (−80%)** | **2.5 (−85%)** | **13,326 (−61%)** | 2/2 |
+| R3 impact | agy | control (n=1) | 42.0 | 16.0 | 136,929 | 0/1 |
+| R3 impact | agy | impact | **4.0 (−90%)** | **2.0 (−88%)** | **21,068 (−85%)** | 2/2 |
+| R3 impact | zcode | control | 16.0 | 15.0 | 39,264 | 0/2 |
+| R3 impact | zcode | impact | **2.5 (−84%)** | **2.0 (−87%)** | **12,037 (−69%)** | 2/2 |
+| R4 outline | agy | control | 10.5 | 5.0 | 58,402 | 1/2 |
+| R4 outline | agy | outline | **5.5 (−48%)** | **1.5 (−70%)** | **25,559 (−56%)** | 2/2 |
+| R4 outline | zcode | control | 6.0 | 5.0 | 18,265 | 1/2 |
+| R4 outline | zcode | outline | **3.0 (−50%)** | **2.5 (−50%)** | **14,148 (−23%)** | 2/2 |
+
+Correctness: treatment **16/16**, control **10/16** (9/15 after excluding
+one contaminated control). Controls failed on the self-file impact row
+(R3: 4/8 cells missed `route.py`'s 19 internal call sites) and on method
+signatures (R4: 2/8 cells wrote `(self) -> str` instead of the full method
+signature). Treatment answers matched exactly.
+
+One control cell (`agy-kgc-r2-R3`) used `kg impact` once despite the ban; it
+is excluded from the economics table (control n=1 for agy R3) and counted as
+a contamination violation. agy controls exceeded the 25-tool budget in five
+cells; treatments did not.
+
+Reading: this is the strongest feature-level result in the lab. Each feature
+replaces a multi-step grep/read composition with one call, and the token
+reduction follows. `callers` is the weakest of the four (agy −42% tools,
+zcode −58%); `impact` and `callees` are −80% to −90%. `outline` is a
+moderate win (−48%/−50%) because the control can read one file.
+
 ## C. Proactive symbol map
 
 Prototype: `kg map --limit N [--path P] [--exclude-generated]`; output
@@ -137,6 +180,10 @@ narrower task, and compare against `kg report`'s existing fan-in section.
 | context cost | none | none (call output replaces reads) | +6,980 chars |
 | decision | reject default; opt-in experiment | adopt for noisy/signature class | defer; redesign task |
 
+R (callers/callees/impact/outline, agy+zcode): treatment 16/16 vs control
+10/16; tools −42% to −90%, kg calls −50% to −94%, input −18% to −85%;
+controls failed on self-file impact rows and method signature format.
+
 ## Threats to validity
 
 - Base moved to P8 (`c39e21f`); baseline G14 on this base is 0.725 (21/28),
@@ -148,7 +195,9 @@ narrower task, and compare against `kg report`'s existing fan-in section.
 - C GT was audited in two cycles; C2 was declared invalid after budget/time
   breaches. C1 control retains `kg report`/`kg hotspots`, so the map's
   incremental value is compared against existing centrality surfaces.
-- n=2 per cell; four hosts/models for B, two for A/C; cross-host tokens are not comparable.
+- n=2 per cell; four hosts/models for B, two for R/A/C; cross-host tokens
+  are not comparable. R has one contaminated control (excluded from
+  economics) and five agy control budget breaches; treatments were clean.
 - agy exceeded the 25-tool budget in some C cells; B had no violations.
 
 ## Reproduction
