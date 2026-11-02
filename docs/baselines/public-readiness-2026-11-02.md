@@ -161,3 +161,22 @@ schema back to v5); the negative result and GT stay as evidence
   for lack of economics; both remain quality-gated, honestly labeled.
 
 The repository is publish-ready pending the owner-only actions listed above.
+
+## Final feature completion (2026-11-02, commits a4db60d + 6fd19c5)
+
+All in-flight features are now complete:
+
+- **`kg context` (Amendment 17/P8)**: implementation, exact-byte fixtures,
+  MCP parity, spec + G21, skill routing, Stage 5 A/B (23/24 correct; kg calls
+  −84% Grok, tool calls −46% OpenCode, Grok −19%) — kept by owner re-decision,
+  recorded as host-dependent.
+- **Residual closures**: PEP 420 namespace resolution; empty-result caveat for
+  `dead`/`clones`; MCP protocol-version negotiation; serial-vs-parallel build
+  determinism test (`KG_WORKERS`); GitHub Actions SHA-pinned.
+- Remaining recorded deferrals (not features): G15 skill-drift script lives in
+  the companion-skills repo; exit-6 panic-path contract test (panic boundary
+  covered by code review); dependabot/SPDX headers.
+- Full battery green at the final commit: 112 tests, fmt, clippy, allowlist,
+  write-path (negative controls), self GT 10/10, path GT 8/8, search 0.800,
+  seatbelt with blocked probe, install smoke, cargo audit, MSRV 1.90, export
+  57 files PASS.
