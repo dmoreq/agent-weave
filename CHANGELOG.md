@@ -44,14 +44,12 @@ changes bump the minor while 0.x is unstable.
   `path:line qualname signature` (contract bump; empty signature keeps the
   12b byte shape). Payload/G10 parity unchanged.
 
-### Added — `kg search` docstring vocabulary (Amendment 16, schema v6)
+### Reverted — `kg search` docstring indexing (attempted Amendment 16)
 
-- `symbols.docstring` (additive): one-line documentation captured from the
-  already-parsed node (Python docstring first line; nearest leading comment
-  for TS/JS/Rust), marker-stripped, cap 160 chars, no bodies (OQ6 approved).
-- Indexed text gains `split_ident(docstring)` tokens; G14 recall unchanged
-  at 0.800; a frozen 6-query prose-gap set improves 5/6 over the pre-P7
-  binary; search hit rendering unchanged.
+- Attempted schema v6 `symbols.docstring` + FTS widening. Retrieval improved
+  (prose-gap 5/6, G14 unchanged at 0.800) but the Stage 2c utility A/B failed
+  (Grok tool calls +12%, OpenCode −9%) — reverted under gate G20's kill rule.
+  Evidence retained: `docs/baselines/stage2c-prose-2026-11-02.md`.
 
 ### Fixed — R6 remediation (Amendment 15, schema v5)
 

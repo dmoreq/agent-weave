@@ -206,7 +206,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v6 — run kg build"),
+        stderr.contains("schema v99, binary expects v5 — run kg build"),
         "{stderr}"
     );
 }
@@ -1727,21 +1727,4 @@ fn truncated_index_exits_3() {
     assert_eq!(out.status.code(), Some(3), "truncated index is corrupt");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("corrupt-index"), "{stderr}");
-}
-
-#[test]
-fn search_reaches_docstring_vocabulary() {
-    // Amendment 16: prose words that appear only in a docstring are
-    // searchable, and the hit is the documented symbol.
-    let repo = temp_repo("doc-search");
-    write(
-        &repo,
-        "a.py",
-        "def transform():\n    \"\"\"Rebuilds the retry policy table.\"\"\"\n    return 1\n",
-    );
-    build(&repo);
-    let out = kg(&repo).args(["search", "retry policy"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("a.py:1"), "docstring hit: {stdout}");
 }

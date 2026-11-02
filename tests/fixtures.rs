@@ -366,24 +366,3 @@ fn rust_impl_methods_scope_to_the_impl_type() {
     assert!(!quals.contains(&"src.m.Bar.make"), "{quals:?}");
     assert!(!quals.contains(&"src.m.Foo.go"), "{quals:?}");
 }
-
-#[test]
-fn docstrings_are_captured_one_line_per_language() {
-    let py = "def f():\n    \"\"\"Splits identifier text.\"\"\"\n    return 1\n";
-    let p = parse_source(py.as_bytes(), Lang::Python).unwrap();
-    let fx = extract_file(0, "a.py", py.as_bytes(), &p);
-    let f = fx.symbols.iter().find(|s| s.name == "f").unwrap();
-    assert_eq!(f.docstring, "Splits identifier text.");
-
-    let rs = "/// Tokenises source text.\nfn g() {\n    let _ = 1;\n}\n";
-    let p = parse_source(rs.as_bytes(), Lang::Rust).unwrap();
-    let fx = extract_file(0, "a.rs", rs.as_bytes(), &p);
-    let g = fx.symbols.iter().find(|s| s.name == "g").unwrap();
-    assert_eq!(g.docstring, "Tokenises source text.");
-
-    let ts = "// Handles retry policy.\nfunction h() {\n  return 1;\n}\n";
-    let p = parse_source(ts.as_bytes(), Lang::TypeScript).unwrap();
-    let fx = extract_file(0, "a.ts", ts.as_bytes(), &p);
-    let h = fx.symbols.iter().find(|s| s.name == "h").unwrap();
-    assert_eq!(h.docstring, "Handles retry policy.");
-}
