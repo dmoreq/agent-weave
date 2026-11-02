@@ -1,0 +1,96 @@
+{
+ "A": {
+  "g14": {
+   "off": {
+    "mean": 0.725,
+    "pooled": "21/28"
+   },
+   "on": {
+    "mean": 0.8,
+    "pooled": "23/28"
+   }
+  },
+  "gap": "6/6 both",
+  "heldout": "5/8 both",
+  "latency_ms": {
+   "off": 0.95,
+   "on": 0.79
+  }
+ },
+ "B": {
+  "agy_kgc": {
+   "n": 4,
+   "tools": 10,
+   "kg_calls": 2.25,
+   "tok_in": 58606,
+   "cache_read": 182380,
+   "tok_out": 3550,
+   "duration_s": 86.85
+  },
+  "agy_kgs": {
+   "n": 4,
+   "tools": 4.25,
+   "kg_calls": 1.25,
+   "tok_in": 41641.5,
+   "cache_read": 57190.25,
+   "tok_out": 2273.5,
+   "duration_s": 51.05
+  },
+  "zcode_kgc": {
+   "n": 4,
+   "tools": 11,
+   "kg_calls": 3,
+   "tok_in": 20653.5,
+   "cache_read": 137792,
+   "tok_out": 1883.5,
+   "duration_s": 33.4
+  },
+  "zcode_kgs": {
+   "n": 4,
+   "tools": 4.25,
+   "kg_calls": 1.5,
+   "tok_in": 8562.5,
+   "cache_read": 66624,
+   "tok_out": 884.75,
+   "duration_s": 12.68
+  }
+ },
+ "C": {
+  "agy_kgc": {
+   "n": 2,
+   "tools": 22.5,
+   "kg_calls": 9,
+   "tok_in": 98298.5,
+   "cache_read": 651190,
+   "tok_out": 8780,
+   "duration_s": 166.25
+  },
+  "agy_kgm": {
+   "n": 2,
+   "tools": 23.5,
+   "kg_calls": 7,
+   "tok_in": 77027.5,
+   "cache_read": 757994,
+   "tok_out": 8242.5,
+   "duration_s": 149.5
+  },
+  "zcode_kgc": {
+   "n": 2,
+   "tools": 14,
+   "kg_calls": 3.5,
+   "tok_in": 26755.5,
+   "cache_read": 211584,
+   "tok_out": 3185.5,
+   "duration_s": 33.15
+  },
+  "zcode_kgm": {
+   "n": 2,
+   "tools": 14,
+   "kg_calls": 1,
+   "tok_in": 28133,
+   "cache_read": 221568,
+   "tok_out": 3831,
+   "duration_s": 42.65
+  }
+ }
+}

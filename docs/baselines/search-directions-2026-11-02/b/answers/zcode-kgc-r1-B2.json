@@ -1,0 +1,7 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": ["pkg/beta.py:6"],
+  "qualname": "pkg.beta.coerce",
+  "answer": "pkg.beta.coerce is defined at pkg/beta.py:6; it returns list[HexWard] and is called by pkg.beta.bootstrap at pkg/beta.py:12."
+}

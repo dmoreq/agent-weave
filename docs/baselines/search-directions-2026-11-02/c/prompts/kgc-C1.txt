@@ -1,0 +1,23 @@
+Question: Which files would you read first to understand how a raw address becomes a ParsedAddress, and which function is the public entry point?
+
+Repository: /tmp/kg-lab/corpora/vihap
+kg CLI: /tmp/kg-lab/target-map/release/kg
+Run kg with --root /tmp/kg-lab/corpora/vihap
+
+Answer: write EXACTLY this JSON object to {ANSWER_PATH}
+{
+  "entry": "<qualname of the entry point>",
+  "files": ["<repo-relative path>", ...],
+  "answer": "<one or two sentences>"
+}
+
+Rules:
+- Name the single entry point the question asks for.
+- List the repository files an engineer should read first; use repo-relative paths.
+- Every claim must come from repository source or kg output.
+- Budget: at most 25 tool calls. Do not modify files. No network.
+- Do not read or list paths outside the repository except the answer file.
+- Do not read other answer files or anything under .kg/ directly.
+- When the JSON file is written, stop.
+
+Do NOT use `kg map`. Use `kg search`, `kg path`, `kg context`, `kg callers`, `kg symbols`, grep/read.

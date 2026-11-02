@@ -1,0 +1,12 @@
+{
+ "files": [
+  "vihap/validators/street_validator.py",
+  "vihap/cleaners/abbreviation_engine.py",
+  "vihap/parsers/street_parser.py",
+  "vihap/models.py"
+ ],
+ "entries": [
+  "vihap.validators.street_validator.StreetValidator.validate",
+  "vihap.validators.StreetValidator.validate"
+ ]
+}

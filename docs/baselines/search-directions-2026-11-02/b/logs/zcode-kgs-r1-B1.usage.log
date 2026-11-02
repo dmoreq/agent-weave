@@ -1,0 +1,2 @@
+{"ts":1793627761,"surface":"cli","tool":"search","args":{"terms":"mercer street tolerance","kind":"","path":"","exact":"false","limit":"10"},"result_count":10,"shown":10,"total":2001,"ambiguous":0,"exit_code":0,"latency_us":13693,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
+{"ts":1793627763,"surface":"cli","tool":"search","args":{"terms":"mercer_street_tolerance","kind":"","path":"","exact":"false","limit":"10"},"result_count":10,"shown":10,"total":2001,"ambiguous":0,"exit_code":0,"latency_us":4995,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

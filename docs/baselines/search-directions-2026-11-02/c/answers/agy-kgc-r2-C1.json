@@ -1,0 +1,11 @@
+{
+  "entry": "vihap.parse",
+  "files": [
+    "vihap/__init__.py",
+    "vihap/parsers/hierarchical_parser.py",
+    "vihap/models.py",
+    "vihap/parsers/macro_resolver.py",
+    "vihap/parsers/street_parser.py"
+  ],
+  "answer": "The public entry point is vihap.parse in vihap/__init__.py, which delegates to HierarchicalAddressParser.parse in vihap/parsers/hierarchical_parser.py. This pipeline normalizes the input, decomposes administrative and street components via macro_resolver.py and street_parser.py, and constructs a ParsedAddress model defined in vihap/models.py."
+}

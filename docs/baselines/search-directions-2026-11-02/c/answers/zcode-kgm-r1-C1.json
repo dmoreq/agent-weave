@@ -1,0 +1,12 @@
+{
+  "entry": "vihap.parse",
+  "files": [
+    "vihap/__init__.py",
+    "vihap/parsers/hierarchical_parser.py",
+    "vihap/parsers/street_parser.py",
+    "vihap/parsers/pipeline.py",
+    "vihap/parsers/macro_resolver.py",
+    "vihap/models.py"
+  ],
+  "answer": "The public entry point is vihap.parse, which delegates to HierarchicalAddressParser.parse. That parser preprocesses the raw string, resolves admin nodes right-to-left via MacroAdminResolver, runs MicroStreetParser through the 12-stage MicroAddressPipeline, then assembles AddressComponents into ParsedAddress."
+}

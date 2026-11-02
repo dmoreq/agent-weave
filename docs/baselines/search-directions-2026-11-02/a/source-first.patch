@@ -1,0 +1,223 @@
+diff --git a/src/cli.rs b/src/cli.rs
+index 6af92f8..03015d7 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -229,6 +229,9 @@ pub enum Cmd {
+         /// Match the full qualname or bare name exactly
+         #[arg(long)]
+         exact: bool,
++        /// Rank source symbols above same-score test-file symbols
++        #[arg(long)]
++        prefer_source: bool,
+         /// Maximum results shown (default 50, max 10000)
+         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+         limit: usize,
+diff --git a/src/main.rs b/src/main.rs
+index 23d2ef3..53d23ee 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -254,12 +254,14 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
+             kind,
+             path,
+             exact,
++            prefer_source,
+             limit,
+         } => vec![
+             ("terms", terms.clone()),
+             ("kind", kind.clone().unwrap_or_default()),
+             ("path", path.clone().unwrap_or_default()),
+             ("exact", exact.to_string()),
++            ("prefer_source", prefer_source.to_string()),
+             ("limit", limit.to_string()),
+         ],
+         cli::Cmd::Clones {
+@@ -598,6 +600,7 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
+             kind,
+             path,
+             exact,
++            prefer_source,
+             limit,
+         } => {
+             let root = walk::discover_root(root_arg)?;
+@@ -610,6 +613,7 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
+                 path.as_deref(),
+                 exact,
+                 limit,
++                prefer_source,
+             )? {
+                 println!("{line}");
+             }
+diff --git a/src/mcp.rs b/src/mcp.rs
+index 9b1e807..b95077c 100644
+--- a/src/mcp.rs
++++ b/src/mcp.rs
+@@ -61,8 +61,8 @@ fn tools() -> Value {
+          "inputSchema": schema_obj(json!({"path": {"type": "string"}, "limit": limit}), &[])},
+         {"name": "resolve", "description": "Batch-resolve names: found/ambiguous/missing per name",
+          "inputSchema": schema_obj(json!({"names": {"type": "array", "items": {"type": "string"}, "maxItems": 1000}}), &["names"])},
+-        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms; kind/path/exact filters",
+-         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "kind": {"type": "string"}, "path": {"type": "string"}, "exact": {"type": "boolean"}, "limit": limit}), &["terms"])},
++        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms; kind/path/exact filters; prefer_source demotes test paths",
++         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "kind": {"type": "string"}, "path": {"type": "string"}, "exact": {"type": "boolean"}, "prefer_source": {"type": "boolean"}, "limit": limit}), &["terms"])},
+         {"name": "clones", "description": "Duplicate-block candidates: merged 5-line shingle windows, paired",
+          "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &[])},
+ 
+@@ -532,6 +532,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
+                 arg_str(args, "path").as_deref(),
+                 arg_bool(args, "exact"),
+                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
++                arg_bool(args, "prefer_source"),
+             )?))
+         }
+         "clones" => {
+@@ -764,6 +765,7 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
+             out.push(("kind", arg_str(args, "kind").unwrap_or_default()));
+             out.push(("path", arg_str(args, "path").unwrap_or_default()));
+             out.push(("exact", arg_bool(args, "exact").to_string()));
++            out.push(("prefer_source", arg_bool(args, "prefer_source").to_string()));
+             out.push((
+                 "limit",
+                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
+diff --git a/src/query.rs b/src/query.rs
+index 6dca761..978f3ac 100644
+--- a/src/query.rs
++++ b/src/query.rs
+@@ -2254,6 +2254,7 @@ fn symbols_directory(
+ /// tokens. Hits are symbol identities — the tier field position stays empty
+ /// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
+ /// for cap, post-cap staleness, and payload capture.
++#[allow(clippy::too_many_arguments)] // experiment flag; adoption folds into SearchOptions
+ pub fn search(
+     conn: &Connection,
+     root: &Path,
+@@ -2262,8 +2263,16 @@ pub fn search(
+     path: Option<&str>,
+     exact: bool,
+     limit: usize,
++    prefer_source: bool,
+ ) -> Result<Vec<String>> {
+     let limit = clamp_limit(limit)?;
++    // Ranking pool (lab): a test-file symbol can outrank the source symbol
++    // with the same score. Fetch a bounded pool before demoting test paths.
++    let pool = if prefer_source {
++        limit.saturating_mul(5).clamp(64, 500)
++    } else {
++        limit
++    };
+     // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
+     // and rarer tokens rank higher — natural-language fit without brittle
+     // all-token AND requirements.
+@@ -2354,12 +2363,8 @@ pub fn search(
+          WHERE symbols_fts MATCH ?1 {filter}
+          -- Tie-break on stable columns: rowids differ between fresh and
+          -- carried builds, so bm25 alone is not deterministic (R6d A9).
+-         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
++         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {pool}"
+     ))?;
+-    // Rank a bounded candidate set in Rust (R7): bm25 sees one text column,
+-    // so a full parameter list can outrank the symbol's own name. Re-rank by
+-    // how many query tokens occur in the qualname (prefix either way), then
+-    // keep bm25 order as the stable tie-break. The cap bounds the work.
+     let rows = stmt.query_map([&expr], |r| {
+         let qualname: String = r.get(2)?;
+         let signature: String = r.get(3)?;
+@@ -2374,11 +2379,20 @@ pub fn search(
+             },
+         })
+     })?;
++    let mut ranked: Vec<Pointer> = Vec::new();
++    for row in rows {
++        ranked.push(row?);
++    }
++    // Source-first (lab): stable sort keeps bm25 order inside each class.
++    // A query that explicitly asks for tests is not demoted.
++    if prefer_source && !query_wants_tests(&toks, path) {
++        ranked.sort_by_key(|p| path_is_test(&p.file));
++    }
+     let out = collect_output(
+         conn,
+         root,
+         terms,
+-        rows,
++        ranked.into_iter().map(Ok),
+         limit,
+         &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
+         Some(total),
+@@ -2666,6 +2680,23 @@ fn search_lines(out: QueryOutput) -> Result<Vec<String>> {
+     Ok(lines)
+ }
+ 
++/// Test-file path classes used only by the opt-in source-first ranking.
++fn path_is_test(path: &str) -> bool {
++    path.starts_with("tests/") || path.contains("/tests/")
++}
++
++fn query_wants_tests(tokens: &[String], path: Option<&str>) -> bool {
++    if path.is_some_and(|p| p.starts_with("tests") || p.contains("/tests")) {
++        return true;
++    }
++    tokens.iter().any(|t| {
++        matches!(
++            t.as_str(),
++            "test" | "tests" | "spec" | "specs" | "fixture" | "fixtures"
++        )
++    })
++}
++
+ /// Bounded English morphology variants for a zero-hit token (R7).
+ fn derived_forms(tok: &str, out: &mut Vec<String>) {
+     if tok.len() <= 4 {
+diff --git a/tests/cli.rs b/tests/cli.rs
+index d6ae64e..4b90d47 100644
+--- a/tests/cli.rs
++++ b/tests/cli.rs
+@@ -2571,3 +2571,49 @@ fn search_stem_fallback_handles_ion_nouns() {
+     assert_eq!(out.status.code(), Some(0), "{stdout}");
+     assert!(stdout.contains("a.rotate"), "{stdout}");
+ }
++
++#[test]
++fn prefer_source_demotes_test_paths() {
++    let repo = temp_repo("prefer-source");
++    write(
++        &repo,
++        "src.py",
++        "def resolve_target(value):\n    return value\n",
++    );
++    write(
++        &repo,
++        "tests/test_x.py",
++        "def test_resolve_target(value):\n    return value\n",
++    );
++    build(&repo);
++    let out = kg(&repo)
++        .args(["search", "resolve target"])
++        .output()
++        .unwrap();
++    let plain = String::from_utf8_lossy(&out.stdout);
++    assert_eq!(out.status.code(), Some(0), "{plain}");
++    let out = kg(&repo)
++        .args(["search", "resolve target", "--prefer-source"])
++        .output()
++        .unwrap();
++    let preferred = String::from_utf8_lossy(&out.stdout);
++    assert_eq!(out.status.code(), Some(0), "{preferred}");
++    let src = preferred.find("src.py").expect("source hit");
++    let test = preferred.find("tests/test_x.py").expect("test hit");
++    assert!(src < test, "source-first order: {preferred}");
++    assert!(
++        !preferred.contains("showing 1 of"),
++        "flag must not drop the test hit: {preferred}"
++    );
++
++    // A query that explicitly asks for tests is not demoted.
++    let out = kg(&repo)
++        .args(["search", "test resolve target", "--prefer-source"])
++        .output()
++        .unwrap();
++    let asked = String::from_utf8_lossy(&out.stdout);
++    assert!(
++        asked.find("tests/test_x.py").expect("test hit") < asked.find("src.py").expect("src hit"),
++        "test query keeps test first: {asked}"
++    );
++}

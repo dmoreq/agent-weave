@@ -1,0 +1,26 @@
+| query | hits | expects | recall |
+|-------|------|---------|--------|
+| build lock concurrency | 1 | 1 | 1.00 |
+| schema version check on open | 1 | 1 | 1.00 |
+| carry unchanged files forward fast path | 1 | 2 | 0.50 |
+| create fresh database write meta | 2 | 2 | 1.00 |
+| query result cap limit | 1 | 1 | 1.00 |
+| callers of a symbol | 0 | 1 | 0.00 |
+| staleness detection file changed since build | 1 | 2 | 0.50 |
+| journal payload rotation size threshold | 0 | 1 | 0.00 |
+| verify replay sampled payload pointers | 1 | 1 | 1.00 |
+| walk tree extract symbols | 2 | 2 | 1.00 |
+| capture one line signature | 1 | 1 | 1.00 |
+| resolve call ambiguous candidates | 1 | 1 | 1.00 |
+| doctor integrity orphans report | 2 | 2 | 1.00 |
+| mcp dispatch tool json rpc | 2 | 2 | 1.00 |
+| normalize unicode ascii diacritics | 2 | 2 | 1.00 |
+| knowledge base singleton cache reset | 1 | 2 | 0.50 |
+| grammar alternation fragment builder | 1 | 1 | 1.00 |
+| parse address pipeline entry | 0 | 1 | 0.00 |
+| admin node resolution stage | 1 | 1 | 1.00 |
+| street component validation stage | 0 | 1 | 0.00 |
+
+mean per-query recall: 0.725
+pooled symbol recall: 21/28 = 0.750 (Wilson 95% [0.566, 0.873])
+G14: PASS (bar: mean recall >= 0.70)

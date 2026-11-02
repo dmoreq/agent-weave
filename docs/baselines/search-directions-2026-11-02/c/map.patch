@@ -1,0 +1,208 @@
+diff --git a/src/cli.rs b/src/cli.rs
+index 6af92f8..6e51a99 100644
+--- a/src/cli.rs
++++ b/src/cli.rs
+@@ -271,6 +271,18 @@ pub enum Cmd {
+         #[arg(long)]
+         exclude_generated: bool,
+     },
++    /// Proactive symbol map: top symbols by resolved call fan-in
++    Map {
++        /// Maximum symbols shown (default 40, max 10000)
++        #[arg(long, default_value_t = 40)]
++        limit: usize,
++        /// Restrict to a repo-relative file or directory prefix
++        #[arg(long)]
++        path: Option<String>,
++        /// Exclude generated files
++        #[arg(long)]
++        exclude_generated: bool,
++    },
+     /// Inspect index health (integrity, versions, staleness, orphans)
+     Doctor {
+         /// Delete the index entirely (one-command exit to grep-only)
+diff --git a/src/insights.rs b/src/insights.rs
+index fc3b470..02cbd9b 100644
+--- a/src/insights.rs
++++ b/src/insights.rs
+@@ -223,6 +223,81 @@ pub fn hotspots(
+         .collect())
+ }
+ 
++/// Proactive symbol map: top symbols by distinct resolved call fan-in.
++/// Static centrality over `calls` edges; not a semantic summary.
++pub fn map(
++    conn: &Connection,
++    limit: usize,
++    path: Option<&str>,
++    exclude_generated: bool,
++) -> Result<Vec<String>> {
++    const MAP_CAVEAT: &str =
++        "kg: map — static centrality over resolved call edges; importance is not a summary";
++    let limit = crate::query::clamp_limit(limit)?;
++    if let Some(p) = path {
++        crate::query::validate_path_scope(p, false)?;
++    }
++    let mut scope = crate::query::path_scope_sql_pub("f", path);
++    if exclude_generated {
++        scope.push_str(" AND f.generated = 0");
++    }
++    let total: usize = conn.query_row(
++        &format!(
++            "SELECT COUNT(DISTINCT s.id) FROM edges e
++             JOIN symbols s ON s.id = e.dst_id
++             JOIN files f ON f.id = s.file_id
++             WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL {scope}"
++        ),
++        [],
++        |r| r.get::<_, i64>(0),
++    )? as usize;
++    if total == 0 {
++        return Err(KgError::NoResults(
++            "0 symbols with resolved call fan-in".to_string(),
++        ));
++    }
++    let mut stmt = conn.prepare(&format!(
++        "SELECT f.path, s.line_start, s.kind, s.qualname, s.signature,
++                COUNT(DISTINCT e.src_id) AS fan_in
++         FROM edges e
++         JOIN symbols s ON s.id = e.dst_id
++         JOIN files f ON f.id = s.file_id
++         WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL {scope}
++         GROUP BY s.id
++         ORDER BY fan_in DESC, s.qualname, f.path, s.line_start
++         LIMIT {limit}"
++    ))?;
++    let rows = stmt
++        .query_map([], |r| {
++            Ok((
++                r.get::<_, String>(0)?,
++                r.get::<_, i64>(1)?,
++                r.get::<_, String>(2)?,
++                r.get::<_, String>(3)?,
++                r.get::<_, String>(4)?,
++                r.get::<_, i64>(5)?,
++            ))
++        })?
++        .collect::<std::result::Result<Vec<_>, _>>()?;
++    let shown = rows.len();
++    let mut out = vec![MAP_CAVEAT.to_string()];
++    for (path, line, kind, qualname, signature, fan_in) in rows {
++        let sig = if signature.is_empty() {
++            String::new()
++        } else {
++            format!(" {signature}")
++        };
++        out.push(format!(
++            "{path}:{line} {kind} {qualname}{sig} fan_in={fan_in}"
++        ));
++    }
++    if total > shown {
++        out.push(format!("showing {shown} of {total}"));
++        eprintln!("[kg] capped at {shown} results ({total} total)");
++    }
++    Ok(out)
++}
++
+ pub fn report(
+     conn: &Connection,
+     root: &Path,
+diff --git a/src/main.rs b/src/main.rs
+index 23d2ef3..65fb396 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -128,6 +128,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
+         cli::Cmd::Stats {} => "stats",
+         cli::Cmd::Hotspots { .. } => "hotspots",
+         cli::Cmd::Report { .. } => "report",
++        cli::Cmd::Map { .. } => "map",
+         cli::Cmd::Doctor { .. } => "doctor",
+         cli::Cmd::Usage { .. } => "usage",
+         cli::Cmd::Mcp {} => "mcp",
+@@ -290,6 +291,15 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
+             ("path", path.clone().unwrap_or_default()),
+             ("exclude_generated", exclude_generated.to_string()),
+         ],
++        cli::Cmd::Map {
++            limit,
++            path,
++            exclude_generated,
++        } => vec![
++            ("limit", limit.to_string()),
++            ("path", path.clone().unwrap_or_default()),
++            ("exclude_generated", exclude_generated.to_string()),
++        ],
+         cli::Cmd::Doctor { invalidate } => vec![("invalidate", invalidate.to_string())],
+         cli::Cmd::Usage { .. } => vec![],
+         cli::Cmd::Mcp {} => vec![],
+@@ -665,6 +675,18 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
+             }
+             Ok(())
+         }
++        cli::Cmd::Map {
++            limit,
++            path,
++            exclude_generated,
++        } => {
++            let root = walk::discover_root(root_arg)?;
++            let conn = db::open_for_query(&root)?;
++            for line in insights::map(&conn, limit, path.as_deref(), exclude_generated)? {
++                println!("{line}");
++            }
++            Ok(())
++        }
+         cli::Cmd::Doctor { invalidate } => {
+             let root = walk::discover_root(root_arg)?;
+             if invalidate {
+diff --git a/tests/cli.rs b/tests/cli.rs
+index d6ae64e..084e2e7 100644
+--- a/tests/cli.rs
++++ b/tests/cli.rs
+@@ -2571,3 +2571,47 @@ fn search_stem_fallback_handles_ion_nouns() {
+     assert_eq!(out.status.code(), Some(0), "{stdout}");
+     assert!(stdout.contains("a.rotate"), "{stdout}");
+ }
++
++#[test]
++fn map_ranks_symbols_by_call_fan_in() {
++    let repo = temp_repo("map-fanin");
++    write(
++        &repo,
++        "a.py",
++        "def target():\n    return 1\n\ndef target2():\n    return 2\n\ndef c1():\n    return target()\n\ndef c2():\n    return target()\n\ndef c3():\n    return target2()\n",
++    );
++    build(&repo);
++    let out = kg(&repo).args(["map", "--limit", "5"]).output().unwrap();
++    let stdout = String::from_utf8_lossy(&out.stdout);
++    assert_eq!(out.status.code(), Some(0), "{stdout}");
++    assert!(stdout.starts_with("kg: map —"), "{stdout}");
++    let target = stdout
++        .lines()
++        .position(|l| l.contains("a.target"))
++        .expect("target row");
++    let other = stdout
++        .lines()
++        .position(|l| l.contains("a.target2"))
++        .expect("target2 row");
++    assert!(target < other, "fan-in order: {stdout}");
++    assert!(stdout.contains("fan_in=2"), "{stdout}");
++
++    let out = kg(&repo)
++        .args(["map", "--limit", "5", "--path", "a.py"])
++        .output()
++        .unwrap();
++    let stdout = String::from_utf8_lossy(&out.stdout);
++    assert_eq!(out.status.code(), Some(0), "{stdout}");
++    assert!(stdout.contains("a.target"), "{stdout}");
++
++    let empty = temp_repo("map-empty");
++    write(&empty, "a.py", "def lonely():\n    return 1\n");
++    build(&empty);
++    let out = kg(&empty).args(["map"]).output().unwrap();
++    assert_eq!(out.status.code(), Some(1));
++    assert!(
++        String::from_utf8_lossy(&out.stderr).contains("0 symbols with resolved call fan-in"),
++        "{}",
++        String::from_utf8_lossy(&out.stderr)
++    );
++}

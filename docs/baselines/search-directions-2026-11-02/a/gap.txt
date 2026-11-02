@@ -1,0 +1,10 @@
+| query | repo | old recall | new recall | improved |
+|-------|------|-----------|-----------|----------|
+| option path | kg | 1.00 | 1.00 | NO |
+| usize | kg | 1.00 | 1.00 | NO |
+| mut | kg | 1.00 | 1.00 | NO |
+| i64 vec | kg | 1.00 | 1.00 | NO |
+| bool | kg | 1.00 | 1.00 | NO |
+| any | vihap | 1.00 | 1.00 | NO |
+
+improved: 0/6 (gate: >= 4/6)

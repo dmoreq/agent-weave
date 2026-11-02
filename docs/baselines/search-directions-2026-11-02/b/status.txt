@@ -1,0 +1,32 @@
+[start] agy-kgs-r1-B1 20:45:51
+[done] agy-kgs-r1-B1 exit=0 tools=4 kg=1 feat=1 20:46:44
+[start] zcode-kgc-r1-B1 20:46:49
+[done] zcode-kgc-r1-B1 exit=0 tools=11 kg=2 feat=0 20:47:34
+[start] agy-kgc-r1-B1 20:47:39
+[done] agy-kgc-r1-B1 exit=0 tools=8 kg=2 feat=0 20:49:03
+[start] agy-kgs-r2-B1 20:49:03
+[done] agy-kgs-r2-B1 exit=0 tools=4 kg=1 feat=1 20:50:04
+[start] agy-kgc-r2-B1 20:50:04
+[done] agy-kgc-r2-B1 exit=0 tools=8 kg=1 feat=0 20:50:59
+[start] agy-kgc-r1-B2 20:51:00
+[done] agy-kgc-r1-B2 exit=0 tools=14 kg=4 feat=0 20:52:35
+[start] agy-kgs-r1-B2 20:52:35
+[done] agy-kgs-r1-B2 exit=0 tools=5 kg=2 feat=1 20:53:23
+[start] agy-kgs-r2-B2 20:53:23
+[done] agy-kgs-r2-B2 exit=0 tools=4 kg=1 feat=1 20:54:05
+[start] agy-kgc-r2-B2 20:54:05
+[done] agy-kgc-r2-B2 exit=0 tools=10 kg=2 feat=0 20:55:58
+[start] zcode-kgs-r1-B1 20:55:58
+[done] zcode-kgs-r1-B1 exit=0 tools=5 kg=2 feat=2 20:56:10
+[start] zcode-kgs-r2-B1 20:56:10
+[done] zcode-kgs-r2-B1 exit=0 tools=6 kg=2 feat=1 20:56:26
+[start] zcode-kgc-r2-B1 20:56:26
+[done] zcode-kgc-r2-B1 exit=0 tools=7 kg=1 feat=0 20:57:10
+[start] zcode-kgc-r1-B2 20:57:10
+[done] zcode-kgc-r1-B2 exit=0 tools=15 kg=6 feat=0 20:57:36
+[start] zcode-kgs-r1-B2 20:57:36
+[done] zcode-kgs-r1-B2 exit=0 tools=3 kg=1 feat=1 20:57:49
+[start] zcode-kgs-r2-B2 20:57:49
+[done] zcode-kgs-r2-B2 exit=0 tools=3 kg=1 feat=1 20:57:58
+[start] zcode-kgc-r2-B2 20:57:58
+[done] zcode-kgc-r2-B2 exit=0 tools=11 kg=3 feat=0 20:58:18

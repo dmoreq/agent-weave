@@ -1,0 +1,7 @@
+{
+  "exists": true,
+  "hops": 0,
+  "route": ["pkg/beta.py:6"],
+  "qualname": "pkg.beta.coerce",
+  "answer": "pkg.beta.coerce is the helper: it returns list[HexWard], building HexWard instances from the input items. bootstrap calls it at pkg/beta.py:12 with coerce([], normalize_hex_ward=True)."
+}
