@@ -42,3 +42,41 @@ and outputs verified.
 - Tagged release with install smoke on macOS/Linux.
 
 Full evidence: `docs/baselines/reviews/R6a..R6g` + `R6-synthesis.md`.
+
+## Post-remediation status (2026-11-02, after commits 7748bfa..HEAD)
+
+All R6 code blockers and Important items are fixed or explicitly deferred;
+every gate below was re-run on this tree:
+
+| gate | result |
+|---|---|
+| cargo test (schema v5) | 105/105 |
+| fmt / clippy | clean |
+| allowlist (exact, 70 packages) / write-path | PASS |
+| self GT (refreshed) | 10/10 recall, 44/44 precision |
+| path GT | 8/8 (one pair re-frozen 5->6 after the build refactor) |
+| search recall | 0.800 (23/28), bar 0.70 |
+| seatbelt + negative control | PASS (network probe blocked) |
+| install smoke / audit | PASS / 0 vulnerabilities |
+| public export (57 files) | PASS — private names/symbols/paths/email/secrets = 0; gate script excluded; no dead paths |
+
+Blocker-to-fix map: deep nesting -> MAX_AST_DEPTH + 64 MB stacks; clones O(k^2)
+-> region/pair caps; incremental O(N^2) -> index-backed work-queue (4000-chain
+edit 9.4 s -> 0.20 s); MCP frame memory -> chunked drain (207 MB -> 13.8 MB);
+gap healing -> schema v5 `unresolved_calls` + qualname matching; generic impls
+-> in-order type-field traversal; non-ASCII paths -> NUL-delimited git set;
+license/privacy/CI/claims -> as listed in the R6 records.
+
+Deferred (recorded, non-blocking): PEP 420 namespace-package resolution; empty
+`dead`/`clones` caveat; MCP protocol negotiation; two known precision failures
+(`tests/test_marshal_kb.py:76`, `vihap/validators/gso_loader.py:703`).
+
+**Remaining owner actions before a public push**: (1) written confirmation of
+the right to publish/relicense the code and evidence-derived docs; (2) create
+the GitHub repository and run `git push` of the exported tree with a public
+git identity; (3) tag `v0.1.0` and publish the release artifacts; (4) enable
+GitHub private vulnerability reporting; (5) confirm the GitHub handle used in
+metadata (`quy-doan/kg`).
+
+**Daily-use recommendation (unchanged)**: host LSP + Serena + ast-grep + rg as
+the primary stack; keep kg for `path`/file-impact on repos <= ~3k files.
