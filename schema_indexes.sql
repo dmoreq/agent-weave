@@ -1,4 +1,4 @@
--- kg schema v7 secondary indexes.
+-- aw schema v7 secondary indexes.
 -- A fresh build creates these after the bulk insert, so each index is sorted
 -- once instead of maintained per row. The final schema is identical to the
 -- historical schema.sql layout (same names, same key order).

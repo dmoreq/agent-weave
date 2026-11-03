@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
-use crate::error::{KgError, Result};
+use crate::error::{AwError, Result};
 
 pub fn run_build(
     root_arg: Option<&Path>,
@@ -14,7 +14,7 @@ pub fn run_build(
     max_parse_error_rate: f64,
 ) -> Result<String> {
     if !max_parse_error_rate.is_finite() || !(0.0..=1.0).contains(&max_parse_error_rate) {
-        return Err(KgError::Usage(format!(
+        return Err(AwError::Usage(format!(
             "--max-parse-error-rate must be a finite value in [0, 1], got {max_parse_error_rate}"
         )));
     }
@@ -132,12 +132,12 @@ pub fn run_build(
             );
             if stats.skipped_large > 0 {
                 eprintln!(
-                    "[kg] skipped {} file(s) over the 1MB size cap",
+                    "[aw] skipped {} file(s) over the 1MB size cap",
                     stats.skipped_large
                 );
             }
             return Ok(format!(
-                "kg: built index: files={} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={} wall={wall:.2}s (walk={w:.2}s parse=0.00s extract=0.00s db=0.00s)",
+                "aw: built index: files={} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={} wall={wall:.2}s (walk={w:.2}s parse=0.00s extract=0.00s db=0.00s)",
                 stats.files.len(),
                 stats.files.len(),
                 wall = started.elapsed().as_secs_f64(),
@@ -218,7 +218,7 @@ pub fn run_build(
         let rate = error_files as f64 / total_files as f64;
         if rate > max_parse_error_rate {
             let _ = std::fs::remove_file(crate::db::db_new_path(&root));
-            return Err(KgError::ParseQuality {
+            return Err(AwError::ParseQuality {
                 rate,
                 files: total_files,
                 threshold: max_parse_error_rate,
@@ -370,7 +370,7 @@ pub fn run_build(
     crate::db::create_secondary_indexes(&conn)?;
 
     // Meta manifest; counts are authoritative SQL totals over the whole index.
-    crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;
+    crate::db::set_meta(&conn, "aw_version", env!("CARGO_PKG_VERSION"))?;
     crate::db::set_meta(&conn, "grammar_version", crate::db::GRAMMAR_VERSION)?;
     crate::db::set_meta(&conn, "signature_version", crate::db::SIGNATURE_VERSION)?;
     crate::db::set_meta(&conn, "metrics_version", crate::db::METRICS_VERSION)?;
@@ -487,7 +487,7 @@ pub fn run_build(
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
     conn.close()
-        .map_err(|(_, e)| crate::error::KgError::from(e))?;
+        .map_err(|(_, e)| crate::error::AwError::from(e))?;
 
     // Atomic swap: fsync the finished `.new`, then rename(2) onto index.db —
     // readers see old or new, never missing (no delete step exists).
@@ -501,12 +501,12 @@ pub fn run_build(
     // summed per-worker extraction time — the two overlap on parallel builds.
     if stats.skipped_large > 0 {
         eprintln!(
-            "[kg] skipped {} file(s) over the 1MB size cap",
+            "[aw] skipped {} file(s) over the 1MB size cap",
             stats.skipped_large
         );
     }
     Ok(format!(
-        "kg: built index: files={total} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={carried} wall={wall:.2}s (walk={w:.2}s parse={p:.2}s extract={e:.2}s db={d:.2}s)",
+        "aw: built index: files={total} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={carried} wall={wall:.2}s (walk={w:.2}s parse={p:.2}s extract={e:.2}s db={d:.2}s)",
         total = total_files,
         symbols = sym_total,
         edges = edge_total,
@@ -552,7 +552,7 @@ fn extract_units(
     let mut shingles_out: Vec<Vec<crate::clones::Shingle>> = Vec::with_capacity(files.len());
     let mut error_files = 0usize;
     let mut extract_secs_sum = 0f64;
-    let workers = std::env::var("KG_WORKERS")
+    let workers = std::env::var("AW_WORKERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or_else(|| {
@@ -622,7 +622,7 @@ fn extract_units(
         for h in handles {
             let (units, secs) = h
                 .join()
-                .map_err(|_| KgError::Internal("parse worker panicked".to_string()))??;
+                .map_err(|_| AwError::Internal("parse worker panicked".to_string()))??;
             extract_secs_sum += secs;
             for (row, fx, shingles) in units {
                 if row.error_nodes > 0 {

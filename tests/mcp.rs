@@ -24,7 +24,7 @@ impl Drop for Server {
 }
 
 fn spawn(repo: &Path) -> Server {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(repo)
         .arg("mcp")
@@ -65,7 +65,7 @@ fn result_text(resp: &Value) -> String {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("kg-mcp-{}-{}", name, std::process::id()));
+    let dir = std::env::temp_dir().join(format!("aw-mcp-{}-{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let tail =
@@ -86,7 +86,7 @@ fn fixture(name: &str) -> PathBuf {
 fn g10_initialize_tools_list_and_parity() {
     let repo = fixture("parity");
     // Build the index before capturing CLI references.
-    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .arg("build")
@@ -94,32 +94,32 @@ fn g10_initialize_tools_list_and_parity() {
         .unwrap();
     assert_eq!(build.status.code(), Some(0));
     // CLI reference outputs, captured before the server opens the journal.
-    let cli_callers = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_callers = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["callers", "normalize"])
         .output()
         .unwrap();
     assert_eq!(cli_callers.status.code(), Some(0));
-    let cli_symbols = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_symbols = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["symbols", "utils.py"])
         .output()
         .unwrap();
-    let cli_symbols_outline = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_symbols_outline = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["symbols", "utils.py", "--outline"])
         .output()
         .unwrap();
-    let cli_search = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_search = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["search", "normalize"])
         .output()
         .unwrap();
-    let cli_dead = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_dead = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["dead"])
@@ -133,7 +133,7 @@ fn g10_initialize_tools_list_and_parity() {
         "initialize",
         json!({"protocolVersion": "2025-06-18"}),
     );
-    assert_eq!(init["result"]["serverInfo"]["name"], "kg");
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
     assert!(init["result"]["protocolVersion"].is_string());
     notification(&mut srv, "notifications/initialized");
 
@@ -223,7 +223,7 @@ fn g10_initialize_tools_list_and_parity() {
 
     // G10 parity extends to clones (Amendment 12d): the fixture's tail block
     // is duplicated across both files, so the pair line must be byte-equal.
-    let cli_clones = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_clones = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["clones"])
@@ -249,7 +249,7 @@ fn g10_initialize_tools_list_and_parity() {
 
     // min_lines above every span: both surfaces fail with the same stderr
     // text and isError semantics (Amendment 8 error contract).
-    let cli_clones_hi = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_clones_hi = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["clones", "--min-lines", "100"])
@@ -266,7 +266,7 @@ fn g10_initialize_tools_list_and_parity() {
     // R6 round-2: the empty path carries the mandatory caveat on stdout, so
     // the MCP text is caveat + the stderr reason line.
     let expected = format!(
-        "kg: clone candidates — normalized-text equality, not proof of semantic duplication\n{}",
+        "aw: clone candidates — normalized-text equality, not proof of semantic duplication\n{}",
         String::from_utf8_lossy(&cli_clones_hi.stderr).trim_end()
     );
     assert_eq!(result_text(&clones_hi).trim_end(), expected);
@@ -302,7 +302,7 @@ fn g10_initialize_tools_list_and_parity() {
         ),
         ("report", json!({}), vec!["report"]),
     ] {
-        let cli = Command::new(env!("CARGO_BIN_EXE_kg"))
+        let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
             .arg("--root")
             .arg(&repo)
             .args(&cli_args)
@@ -323,7 +323,7 @@ fn g10_initialize_tools_list_and_parity() {
     }
     // unresolved: empty-result parity (channel differs by contract: CLI stderr,
     // MCP result text; same class text).
-    let cli_unres = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_unres = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["unresolved"])
@@ -349,7 +349,7 @@ fn g10_initialize_tools_list_and_parity() {
     }
 
     // P8 no-result parity: imports on an unknown file (CLI stderr, MCP text).
-    let cli_imports_missing = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_imports_missing = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["imports", "nope.py"])
@@ -369,7 +369,7 @@ fn g10_initialize_tools_list_and_parity() {
     );
 
     // G10 parity extends to context (Amendment 17).
-    let cli_context = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_context = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["context", "normalize"])
@@ -389,7 +389,7 @@ fn g10_initialize_tools_list_and_parity() {
 
     // G10 parity extends to path (Amendment 13): hop pointers + chain line
     // byte-equal between the surfaces.
-    let cli_path = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let cli_path = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .args(["path", "caller", "normalize"])
@@ -407,7 +407,7 @@ fn g10_initialize_tools_list_and_parity() {
         String::from_utf8_lossy(&cli_path.stdout).into_owned()
     );
     assert!(
-        result_text(&path_call).starts_with("kg: path — resolved static edges only;"),
+        result_text(&path_call).starts_with("aw: path — resolved static edges only;"),
         "path caveat first: {}",
         result_text(&path_call)
     );
@@ -423,7 +423,7 @@ fn g10_initialize_tools_list_and_parity() {
         String::from_utf8_lossy(&cli_dead.stdout).into_owned()
     );
     assert!(
-        result_text(&dead).starts_with("kg: dead-code candidates —"),
+        result_text(&dead).starts_with("aw: dead-code candidates —"),
         "caveat preserved: {}",
         result_text(&dead)
     );
@@ -435,7 +435,7 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "stats", "arguments": {}}),
     );
     assert!(
-        result_text(&stats).starts_with("kg stats: files=2"),
+        result_text(&stats).starts_with("aw stats: files=2"),
         "{}",
         result_text(&stats)
     );
@@ -459,7 +459,7 @@ fn g10_initialize_tools_list_and_parity() {
     // unknown tool is rejected
     // before dispatch and journals nothing; CLI reference commands above add
     // their own surface=cli entries.
-    let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
     let mcp_lines = log
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
@@ -469,7 +469,7 @@ fn g10_initialize_tools_list_and_parity() {
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
     // CLI reference stdout's data lines (G10 parity extends to the payload).
-    let payload = fs::read_to_string(repo.join(".kg/usage-results.jsonl")).unwrap();
+    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
     let mcp_payload = payload
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
@@ -491,7 +491,7 @@ fn g10_initialize_tools_list_and_parity() {
     let e = s + callers_line[s..].find("]}").unwrap();
     let expected: String = String::from_utf8_lossy(&cli_callers.stdout)
         .lines()
-        .filter(|l| !l.starts_with("kg: "))
+        .filter(|l| !l.starts_with("aw: "))
         .map(|p| format!("\"{p}\""))
         .collect::<Vec<_>>()
         .join(",");
@@ -505,7 +505,7 @@ fn g10_usage_verify_via_mcp() {
     // Amendment 10c on the MCP surface: usage with verify=true shares the CLI
     // code path and reports the same three-state outcome.
     let repo = fixture("mcp-verify");
-    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .arg("build")
@@ -530,7 +530,7 @@ fn g10_usage_verify_via_mcp() {
     assert_eq!(verify["result"]["isError"], false);
     let text = result_text(&verify);
     assert!(
-        text.starts_with("kg usage --verify: 2 pointers sampled from 1 entries"),
+        text.starts_with("aw usage --verify: 2 pointers sampled from 1 entries"),
         "{text}"
     );
     assert!(text.contains("changed=0 fail=0"), "{text}");
@@ -550,7 +550,7 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
         "class B:\n    def process(self):\n        return 2\n",
     )
     .unwrap();
-    Command::new(env!("CARGO_BIN_EXE_kg"))
+    Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .arg("build")
@@ -578,7 +578,7 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 #[test]
 fn resolve_empty_names_and_non_strings_are_tool_errors() {
     let repo = fixture("mcp-resolve-empty");
-    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .arg("build")
@@ -631,9 +631,9 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
     );
     assert_eq!(resp["result"]["isError"], false);
     let text = result_text(&resp);
-    assert!(text.starts_with("kg: built index: files=2"), "{text}");
+    assert!(text.starts_with("aw: built index: files=2"), "{text}");
     assert!(text.contains("parse_errors=0"), "{text}");
-    let log = fs::read_to_string(repo.join(".kg/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
     assert!(
         log.contains("\"tool\":\"build\"") && log.contains("\"surface\":\"mcp\""),
         "{log}"
@@ -644,7 +644,7 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
 #[test]
 fn malformed_json_frame_returns_parse_error() {
     let repo = fixture("mcp-badjson");
-    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .arg("build")
@@ -665,7 +665,7 @@ fn missing_required_argument_returns_invalid_params() {
     // R7 L4: a schema-required string must fail at the protocol layer, not as
     // a downstream "symbol '' not in index" tool result.
     let repo = fixture("mcp-required");
-    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
         .arg("build")

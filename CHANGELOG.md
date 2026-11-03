@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to kg are documented here. Format follows
+All notable changes to aw are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [Calm SemVer](https://calver.org) 0.x — breaking contract
 changes bump the minor while 0.x is unstable.
@@ -16,19 +16,28 @@ changes bump the minor while 0.x is unstable.
 ## [Unreleased]
 
 **User impact:** faster fresh builds, broader dependency navigation, and more reliable incremental resolution.
-**Required action:** run `kg build` to replace older indexes with schema v7. Query opens on v6 exit 5.
+**Required action:** run `aw build` to replace older indexes with schema v7. Query opens on v6 exit 5.
 Consumers that parse output must review the query-shape changes listed below before upgrading.
+
+### Changed — project rename (2026-11-03)
+
+- The package is now `agent-weave` and the installed command is `aw`. The
+  index directory is `.aw/`, environment variables use the `AW_` prefix, and
+  the MCP server identifies itself as `agent-weave`. Repository and
+  documentation links move to `https://github.com/quy-doan/agent-weave`.
+- Historical benchmarks recorded before 0.3.0 used the former name `kg`; the
+  evaluation summary keeps those names only when quoting old artifacts.
 
 ### Removed — ineffective surfaces (2026-11-03)
 
-- `kg api` and its MCP tool are removed. The `symbols.exported` column and
+- `aw api` and its MCP tool are removed. The `symbols.exported` column and
   extraction remain for schema compatibility; no CLI or MCP surface reads it.
 - `search --kind`, `search --path`, and `search --exact` are removed. Base
-  `kg search <terms>` and the identity fast path remain.
+  `aw search <terms>` and the identity fast path remain.
 - The six `--exclude-generated` flags on `dead`, `clones`, `hotspots`,
   `report`, and `complexity` are removed. `files.generated`, `stats
   generated=N`, and the generated tag remain.
-- `dead` stays as a command but is no longer routed by `kg-first`; it is
+- `dead` stays as a command but is no longer routed by `aw-first`; it is
   candidate-only until a precision gate exists.
 - Package version moves to `0.3.0` for the breaking CLI/MCP contract change.
   Schema stays v7.
@@ -38,7 +47,7 @@ Consumers that parse output must review the query-shape changes listed below bef
 - Fresh builds create secondary indexes after the bulk insert
   (`schema_indexes.sql`); the final schema (index names and key order) is
   unchanged. The index file is about 4% smaller.
-- The disposable `.kg/index.db.new` connection runs with
+- The disposable `.aw/index.db.new` connection runs with
   `journal_mode=OFF`/`synchronous=OFF`; the finished file is fsynced before the
   atomic rename, so the published index stays durable.
 - Meta totals come from one scan per table; insert paths borrow rows instead
@@ -49,7 +58,7 @@ Consumers that parse output must review the query-shape changes listed below bef
 - Resolution looks up a parent symbol kind through `by_qualname` instead of a
   reverse scan.
 - No schema, stats-line, or query-semantics change. Query outputs are
-  byte-identical except `kg stats`'s `db_bytes`, which reports the smaller
+  byte-identical except `aw stats`'s `db_bytes`, which reports the smaller
   index file. Best-of-7 `build --force` on the 2,025-file synthetic corpus:
   1.87 s vs 3.61 s baseline on a heavily loaded host (interleaved A/B); details
   come from an internal optimization report (original evidence unavailable publicly).
@@ -58,8 +67,8 @@ Consumers that parse output must review the query-shape changes listed below bef
 
 - `symbols.file_path` denormalizes `files.path`; `symbols_complexity_idx`
   covers `(cyclomatic, effective_loc, qualname, file_path, line_start)` so
-  `kg complexity` tie-breaks by path, not insertion-order `file_id`.
-- v6 indexes are not migrated: query opens exit 5 and `kg build` rebuilds.
+  `aw complexity` tie-breaks by path, not insertion-order `file_id`.
+- v6 indexes are not migrated: query opens exit 5 and `aw build` rebuilds.
   Fresh inserts and carry-forward both populate the column; `probe_old`
   rejects a v7-stamped index that lacks it.
 
@@ -122,22 +131,22 @@ Consumers that parse output must review the query-shape changes listed below bef
 
 ### Added — dependency, test, and symbol queries (P8, Amendment 19, schema v6)
 
-- `kg implementers <name>`: resolved inbound `inherits` edges; Rust
+- `aw implementers <name>`: resolved inbound `inherits` edges; Rust
   `trait_item`/`function_signature_item` and TS `interface_declaration`
   extraction; same-file Rust `impl Trait for Type`; cross-file impls are a
   documented limit.
-- `kg imports <file>`: outbound resolved imports for Python plain/dotted/
+- `aw imports <file>`: outbound resolved imports for Python plain/dotted/
   relative/star, TS relative/side-effect/require, and Rust `use`/`mod`;
   unresolved imports are stored as `unresolved_calls(kind='import')`.
-- `kg tests <name|file>`: reverse call-edge test candidates with explicit
+- `aw tests <name|file>`: reverse call-edge test candidates with explicit
   static-resolution caveats and depth/truncation reporting.
-- `kg impact` gains `--edges calls,imports,inherits,all`, `--depth N`,
+- `aw impact` gains `--edges calls,imports,inherits,all`, `--depth N`,
   `--context`, and `--explain`; the default grouped output is unchanged.
-- `kg symbols <dir> --outline`, `kg files`, `kg complexity`, `kg api`, and
-  `kg resolve --stdin`.
-- `kg unresolved --names`: `path:line kind name` sites with the `kind`
+- `aw symbols <dir> --outline`, `aw files`, `aw complexity`, `aw api`, and
+  `aw resolve --stdin`.
+- `aw unresolved --names`: `path:line kind name` sites with the `kind`
   column and real site lines.
-- `kg dead` now treats inbound imports/inherits as usage, excludes
+- `aw dead` now treats inbound imports/inherits as usage, excludes
   trait/interface signature methods, and supports `--exclude-generated`;
   test exclusion uses `tests`/`test`/`__tests__` segments and filename globs.
 - Schema v6 additive: per-symbol `cyclomatic`/`branches`/`nesting`/
@@ -146,7 +155,7 @@ Consumers that parse output must review the query-shape changes listed below bef
   new column and the complexity index, and `metrics_version` invalidates
   formula changes.
 - Generated-file tagging (path suffix or first-five-line marker) surfaces
-  `generated=N` in `kg stats`.
+  `generated=N` in `aw stats`.
 - MCP tools added for `implementers`, `imports`, `tests`, `complexity`,
   `api`, `files`, and `resolve`; `impact`, `dead`, `symbols`, `search`,
   `unresolved`, `clones`, `hotspots`, and `report` gained their new flags.
@@ -164,15 +173,15 @@ Consumers that parse output must review the query-shape changes listed below bef
   namespace/inline-mod bases resolve; AMBIGUOUS and unresolved `inherit`
   rows are written; Rust impl-trait edges no longer enter `class_bases`;
   Rust impl targets resolve by full qualname and reject tuple/pointer types.
-- `kg tests` requires `function|method`, skips seed tests, normalizes `./`,
+- `aw tests` requires `function|method`, skips seed tests, normalizes `./`,
   and chunks BFS frontiers at 500 ids.
-- `kg report --path/--exclude-generated` no longer crashes on the section-4
+- `aw report --path/--exclude-generated` no longer crashes on the section-4
   alias; `complexity`, `api`, `files`, `unresolved --names`, and
   `symbols <dir>` use SQL LIMIT + COUNT; `symbols <dir>` is one query.
-- `kg api` now reads the populated `exported` flag, includes signatures,
+- `aw api` now reads the populated `exported` flag, includes signatures,
   accepts a file or directory path (root `.` stays rejected), and follows
   Python `__all__`, Rust `pub`, and TS `export` rules.
-- `kg resolve` requires `--stdin`, enforces 1,000 names / 4,096-byte lines /
+- `aw resolve` requires `--stdin`, enforces 1,000 names / 4,096-byte lines /
   1 MiB, journals count/candidate_limit, and MCP sets `isError`.
 - `search --exact` uses the untokenized input (case-sensitive); `--path`
   inputs are validated (exit 2); empty results carry their caveats.
@@ -184,7 +193,7 @@ Consumers that parse output must review the query-shape changes listed below bef
 ## [0.2.1] - 2026-11-02
 
 **User impact:** fuller signatures, better call resolution, and lower no-op build cost.
-**Required action:** run `kg build` to refresh old signatures; review pointer identity and grouped `impact` output in integrations.
+**Required action:** run `aw build` to refresh old signatures; review pointer identity and grouped `impact` output in integrations.
 
 ### Fixed — accuracy, utility, and latency hardening (R7, Amendment 18)
 
@@ -208,17 +217,17 @@ Consumers that parse output must review the query-shape changes listed below bef
   hotspots count Python `elif`/`case` and TS ternaries and exclude
   comment-only LOC; `report` warns when sampled files changed; `stats` reads
   manifest counters in O(1).
-- A no-op `kg build` skips the database write (2,201 files: 0.09-0.11 s to
+- A no-op `aw build` skips the database write (2,201 files: 0.09-0.11 s to
   0.02-0.03 s, index byte-unchanged); MCP returns `-32602` for a missing
   required argument.
 
 ## [0.2.0] - 2026-11-02
 
 **User impact:** symbol context, call paths, search, outlines, and clone candidates expand navigation beyond individual call queries.
-**Required action:** rebuild older indexes with `kg build`; query opens reject incompatible schemas with exit 5.
+**Required action:** rebuild older indexes with `aw build`; query opens reject incompatible schemas with exit 5.
 Review the output-contract changes below if scripts consume query text.
 
-### Added — `kg context <symbol>` (Amendment 17, P8)
+### Added — `aw context <symbol>` (Amendment 17, P8)
 
 - One call returns the definition line with signature, direct callers, and
   direct callees (resolved `calls` edges only), with per-section showing
@@ -227,7 +236,7 @@ Review the output-contract changes below if scripts consume query text.
   pointer lines; MCP tool `context` with G10 byte parity; contract-bump
   entry recorded in the spec.
 
-### Added — `kg path <from> <to>` (Amendment 13, F5)
+### Added — `aw path <from> <to>` (Amendment 13, F5)
 
 - Shortest call path between two symbols over resolved call edges
   (`kind = 'calls' AND dst_id IS NOT NULL`): level-batched BFS, deterministic
@@ -235,10 +244,10 @@ Review the output-contract changes below if scripts consume query text.
   multi-edges deduped to the smallest `site_line`, parent = first
   discoverer); `--depth N` (default 10, clamp 1-10).
 - Output contract (contract-bump): first-line caveat
-  `kg: path — resolved static edges only; dynamic dispatch may hide paths`,
+  `aw: path — resolved static edges only; dynamic dispatch may hide paths`,
   hop call-site pointers in path order (no cap — `path` has no limit
   surface, recorded deviation), final line
-  `kg: chain <resolved qualnames> (K hops)`. Exit 1 negatives distinguish
+  `aw: chain <resolved qualnames> (K hops)`. Exit 1 negatives distinguish
   exhaustive vs depth-cap-truncated; exit 2 ambiguity names the failing
   endpoint (`as the from|to endpoint`).
 - Journaled per Amendment 6 (`args` gains `to`; no `limit` key); payload
@@ -251,7 +260,7 @@ Review the output-contract changes below if scripts consume query text.
   8/8 frozen GT pairs, 0.6-1.4 ms in-process best-of-7 across the 85k-symbol
   synth corpus and the 26-file self-index (spawn-inclusive wall < 10 ms).
 
-### Changed — `kg search` readability (Amendment 14, P6)
+### Changed — `aw search` readability (Amendment 14, P6)
 
 - Indexed text widened with `split_ident(path)` + `split_ident(signature)`
   tokens (derived data; schema stays v4; the FTS is repopulated at build
@@ -269,10 +278,10 @@ Review the output-contract changes below if scripts consume query text.
 - PEP 420 namespace-package imports resolve (longest indexed prefix).
 - Empty `dead`/`clones` results now print the mandatory caveat on stdout.
 - MCP `initialize` negotiates the protocol version with the client.
-- Serial-vs-parallel build determinism tested via `KG_WORKERS`.
+- Serial-vs-parallel build determinism tested via `AW_WORKERS`.
 - GitHub Actions pinned by SHA in both workflows.
 
-### Reverted — `kg search` docstring indexing (attempted Amendment 16)
+### Reverted — `aw search` docstring indexing (attempted Amendment 16)
 
 - Attempted schema v6 `symbols.docstring` + FTS widening. Retrieval improved
   (prose-gap 5/6, G14 unchanged at 0.800) but the Stage 2c utility A/B failed
@@ -308,15 +317,15 @@ Review the output-contract changes below if scripts consume query text.
 
 - `tests/scripts/write_path_check.sh`: stale exclusion pattern (G5 was red
   on the committed tree after the qualified `std::fs::rename(crate::db::...)`
-  refactor); `src/journal.rs` added to the kg_dir-scoped allowlist.
+  refactor); `src/journal.rs` added to the aw_dir-scoped allowlist.
 - `db::probe_old`: a v4-stamped index from the Amendment 12 first landing
   wave (no `clone_groups` table) now disables the fast path and rebuilds
   fresh instead of failing carry-forward with
   `no such table: olddb.clone_groups`.
 
-### Added — `kg symbols --outline` (Amendment 12a, F1)
+### Added — `aw symbols --outline` (Amendment 12a, F1)
 
-- New `--outline` flag on `kg symbols <file>`: each line gains the stored
+- New `--outline` flag on `aw symbols <file>`: each line gains the stored
   one-line signature (first line of the symbol's node text, trimmed, hard
   cap 160 chars, no bodies). Default output (no flag) is byte-identical to
   the previous contract — contract-bump note: additive flag only, pointer
@@ -334,8 +343,8 @@ Review the output-contract changes below if scripts consume query text.
 
 - `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
   features distilled from the pi-sherlock reference analysis — F1
-  `kg symbols --outline` (signature column), F2 `kg search` (FTS5 symbol
-  lookup), F3 skill hardening + drift gate, F4 `kg clones` (shingle
+  `aw symbols --outline` (signature column), F2 `aw search` (FTS5 symbol
+  lookup), F3 skill hardening + drift gate, F4 `aw clones` (shingle
   candidates). Proposal spec-reviewed by an independent stateless Goldfish
   reviewer (round 1 NEEDS FIXES with 12 findings, round 2 APPROVE; record
   R4-P4, internal review unavailable publicly). OQ4a (signature text) and OQ4b
@@ -344,9 +353,9 @@ Review the output-contract changes below if scripts consume query text.
   follows (F3 -> F1 -> F2 -> F4), one schema v4 bump for whatever survives
   the gates.
 
-### Added — `kg search` (Amendment 12b, F2)
+### Added — `aw search` (Amendment 12b, F2)
 
-- New `kg search <terms>`: symbol-level FTS5 lookup — OR of prefix terms over
+- New `aw search <terms>`: symbol-level FTS5 lookup — OR of prefix terms over
   camelCase/snake_case-split identifier tokens, `bm25()`-ranked. Output
   pointers `path:line qualname` (tier position empty — search hits are symbol
   identities, not call edges), standard cap/staleness/exit-code contract;
@@ -360,9 +369,9 @@ Review the output-contract changes below if scripts consume query text.
   (pooled 24/28, Wilson 95% [0.685, 0.943]) —
   internally reported G14 evidence (original evidence unavailable publicly).
 
-### Added — `kg clones` (Amendment 12d, F4)
+### Added — `aw clones` (Amendment 12d, F4)
 
-- New `kg clones [--min-lines N]` (default 5): duplicate-block candidates —
+- New `aw clones [--min-lines N]` (default 5): duplicate-block candidates —
   normalized 5-line-window FNV-1a shingles computed during the build parse
   phase (workers already hold the bytes — no extra reads), carried forward
   with the fast path; adjacent matching windows merged per file at query
@@ -380,25 +389,25 @@ Review the output-contract changes below if scripts consume query text.
 ### Changed — performance ceiling pass (Amendment 11, G12)
 
 Four changes, all measured on a 2,025-file / 7.9 MB synthetic Python corpus
-(index 4.6 MB, same seed as the review baseline) plus the kg self-index; gates
+(index 4.6 MB, same seed as the review baseline) plus the aw self-index; gates
 `cargo test --locked` (91 tests), `cargo clippy -D warnings`, G2 self
 precision/recall PASS.
 
 - Query path: `PRAGMA quick_check` removed from `open_for_query` (full B-tree
   scan, 0.71-1.10 ms/MB measured, ran on every CLI open and every MCP tool
   call). Corruption now exits 3 via SQLITE_NOTADB/SQLITE_CORRUPT mapping with
-  the unchanged contract message; `kg doctor` keeps `integrity_check`.
-  `kg callers` best-of-7: 15.1 ms -> 7.6 ms; `kg unresolved` 13.9 -> 7.6 ms;
+  the unchanged contract message; `aw doctor` keeps `integrity_check`.
+  `aw callers` best-of-7: 15.1 ms -> 7.6 ms; `aw unresolved` 13.9 -> 7.6 ms;
   latency is now flat at spawn floor + query regardless of index size.
 - Build inserts: one transaction per build (500-row prepared statement batches
   retained; per-chunk BEGIN/COMMIT fsyncs dropped). Insert phase measured on
   identical row volume: 154 ms -> 55 ms; db phase 0.39 s -> 0.09 s.
 - Parse+extract: parallel on `std::thread::scope` workers
   (`available_parallelism`, capped 8; no new deps, no unsafe, order-preserving
-  merge). Parse phase 0.66 s -> 0.11 s; `kg build --force` wall 1.16 s ->
-  0.27 s on the corpus, 0.43 s -> 0.13 s on kg self.
+  merge). Parse phase 0.66 s -> 0.11 s; `aw build --force` wall 1.16 s ->
+  0.27 s on the corpus, 0.43 s -> 0.13 s on aw self.
 - Schema v3 (additive): `files.loc`, `files.cyclomatic` computed during the
-  build parse phase; `kg hotspots`/`kg report` read the index instead of
+  build parse phase; `aw hotspots`/`aw report` read the index instead of
   re-parsing every file per call. hotspots 409-781 ms -> 31 ms; report
   560 ms -> 44 ms. Behavior deltas: files deleted from disk are no longer
   silently skipped by hotspots; metrics are frozen at each file's last fresh
@@ -417,7 +426,7 @@ precision/recall PASS.
 
 ### Added — local call-graph navigation (P1 core, 9f75656..e72b9b0)
 
-- `kg` Rust CLI (single binary, 5 pinned deps, `#![forbid(unsafe_code)]`):
+- `aw` Rust CLI (single binary, 5 pinned deps, `#![forbid(unsafe_code)]`):
   `build`, `callers`, `callees [--depth N]`, `impact`, `doctor`, `stats`,
   `hotspots`, `report`.
 - Resolution algorithm: local module -> import alias map (with re-export
@@ -435,8 +444,8 @@ precision/recall PASS.
 
 ### Added — index statistics and repository reports (P1.5, d9951ce..5034939)
 
-- `kg stats`, `kg hotspots` (per-metric min-max normalization of
-  cyclomatic + LOC + churn-90d + fix-density), `kg report` (4 sections).
+- `aw stats`, `aw hotspots` (per-metric min-max normalization of
+  cyclomatic + LOC + churn-90d + fix-density), `aw report` (4 sections).
 - G7 rank-overlap 8/10 vs pain list (degraded: pain list provisional).
 - G8 -67% tool calls on architecture questions (via `callees --depth`).
 - `code-index` skill wrapper in the agent-skills repo (OQ2).
@@ -465,7 +474,7 @@ precision/recall PASS.
 
 - Fast path: files with any call/import/inherits edge into a changed file are
   re-extracted (transitive dirty closure). Previously their copied edges died
-  with the old destination ids and `kg callers`/`kg impact` silently lost
+  with the old destination ids and `aw callers`/`aw impact` silently lost
   results after any incremental build.
 - Schema v2 (additive): per-file `files.unresolved` column;
   `unresolved_callee_count` is now an authoritative SQL total and no longer
@@ -486,34 +495,34 @@ precision/recall PASS.
 
 ### Added — A3 observability layer 3 (Amendment 10)
 
-- Result-payload journal: `.kg/usage-results.jsonl` — one self-contained
+- Result-payload journal: `.aw/usage-results.jsonl` — one self-contained
   JSONL line per successful pointer query (callers/callees/impact/dead/
   symbols) carrying the displayed set byte-identical to the stdout data
   lines plus index `built_at`/`source_rev`. Non-pointer tools and
   empty/ambiguous/error outcomes write none. Rotation (5 MB), opt-out
-  (`KG_NO_JOURNAL` / `--no-journal`), and best-effort contract mirror
+  (`AW_NO_JOURNAL` / `--no-journal`), and best-effort contract mirror
   usage.log.
-- Session attribution: `KG_SESSION`/`KG_ARM` env tags ride every usage.log
+- Session attribution: `AW_SESSION`/`AW_ARM` env tags ride every usage.log
   and payload line as additive fields — R1/R2 A/B attribution per task
   without transcript parsing.
-- `kg usage --verify [--limit N]`: deterministic even-stride sample over
+- `aw usage --verify [--limit N]`: deterministic even-stride sample over
   payload entries; the index's staleness check separates CHANGED
   (unverifiable, never counted wrong) from OK/FAIL; unchanged files get
   structural checks (line bounds; `callers` also requires the queried
   name's bare segment on the pointer line). Report-only exit 0; exit 1 on
   an empty payload log. The MCP `usage` tool accepts optional
   verify/limit args (G10 byte parity preserved per invocation).
-- `kg usage` payload section: entries/pointers totals and top-5 queried
-  names by call count (demand map). `kg doctor` reports payload journal
+- `aw usage` payload section: entries/pointers totals and top-5 queried
+  names by call count (demand map). `aw doctor` reports payload journal
   volume or its explicit absence.
 - G11 gate (payload conformance) added to the Gate Registry: one payload
   line per successful pointer call, byte-equal pointers, verify FAIL=0 on
-  fresh builds. Conformance run on the 3 GT repos (kg self / vihap /
+  fresh builds. Conformance run on the 3 GT repos (aw self / vihap /
   finguard): 594 pointers verified, FAIL=0; byte-parity payload-vs-stdout
   confirmed. Tests 91/91; clippy -D warnings clean.
 - Support changes: index meta `built_at` now carries millisecond precision
   (the verify epoch comparison must not collide on same-second rebuilds);
-  kg-self GT rows G01/G02/G07/G09/G10 refreshed after the Amendment 10 line
+  aw-self GT rows G01/G02/G07/G09/G10 refreshed after the Amendment 10 line
   shifts (provenance in the GT file; G06 annotation corrected — the M3-era
   file mislabeled the Dead dispatch as Stats).
 
@@ -533,10 +542,10 @@ precision/recall PASS.
 
 ### Added — M3 MCP stdio server (Amendment 8, P3 activated)
 
-- `kg mcp`: newline-delimited JSON-RPC 2.0 server on stdin/stdout; 11 tools
+- `aw mcp`: newline-delimited JSON-RPC 2.0 server on stdin/stdout; 11 tools
   mapping 1:1 to CLI subcommands (doctor excluded — `--invalidate` stays a
-  human-CLI maintenance action). Spawned by the agent host; kg still spawns
-  no daemons. Zero network; writes confined to `.kg/`.
+  human-CLI maintenance action). Spawned by the agent host; aw still spawns
+  no daemons. Zero network; writes confined to `.aw/`.
 - Tool results return the CLI's byte-identical stdout text (G10 parity
   conformance is automated in tests/mcp.rs); ambiguous names carry the
   candidate list in the result text with isError (exit-2 semantics
@@ -549,9 +558,9 @@ precision/recall PASS.
   build semantics).
 - Structural refactor: `run_build` moved to shared `src/build.rs` (CLI and
   MCP share it); ambiguous-name candidates now travel in
-  `KgError::Ambiguous` instead of being printed mid-query (stdout stays a
+  `AwError::Ambiguous` instead of being printed mid-query (stdout stays a
   pure protocol/data channel on every surface).
-- kg-self GT rows G02-G10 refreshed after the M3 line shifts (provenance in
+- aw-self GT rows G02-G10 refreshed after the M3 line shifts (provenance in
   the GT file); G2 vihap 29/29 + 493/495, finguard 20/20 + 57/57 unchanged.
 - Tests 76/76 (3 new MCP conformance tests); clippy -D warnings clean.
 
@@ -565,18 +574,18 @@ precision/recall PASS.
 - Receiver typing (typed params, constructor assignments) now takes
   precedence over module interpretation for 2-segment calls: a local binding
   shadows a same-named module, matching Python scoping.
-- kg-self GT rows G02-G10 refreshed after M1's line shifts (provenance noted
+- aw-self GT rows G02-G10 refreshed after M1's line shifts (provenance noted
   in the GT file); G01 unchanged.
 
 ### Added — J1 usage journal (Amendment 6)
 
-- Every journaled subcommand appends one JSONL line to `.kg/usage.log`:
+- Every journaled subcommand appends one JSONL line to `.aw/usage.log`:
   ts, surface, tool, args summary (names/paths/scalars only — never file
   contents), result/shown/total, ambiguous count, exit code, latency, stale
-  flag, kg version. Opt-out: `KG_NO_JOURNAL=1` or `--no-journal`. Rotation
+  flag, aw version. Opt-out: `AW_NO_JOURNAL=1` or `--no-journal`. Rotation
   at 5 MB (one prior generation). Best-effort writes — journal failures can
   never alter output or exit codes.
-- `kg usage` — journal summary: calls per tool, error/empty/stale rates,
+- `aw usage` — journal summary: calls per tool, error/empty/stale rates,
   ambiguous pointer counts, p50/p95 latency. Read-only; no index required;
   exit 1 on an empty journal.
 - QueryOutput carries `stale` (header fired on the displayed set) for
@@ -584,11 +593,11 @@ precision/recall PASS.
 
 ### Added — M1 query surface (Amendment 5)
 
-- `kg dead` — dead-code CANDIDATES (zero inbound call edges, AMBIGUOUS-name
+- `aw dead` — dead-code CANDIDATES (zero inbound call edges, AMBIGUOUS-name
   aware) with a permanent first-line caveat: candidates, never proof.
-- `kg unresolved` — per-file unresolved-callee counts, descending; exit 1 on
+- `aw unresolved` — per-file unresolved-callee counts, descending; exit 1 on
   full coverage.
-- `kg symbols <file>` — one file's symbols as `path:line kind qualname`.
+- `aw symbols <file>` — one file's symbols as `path:line kind qualname`.
 - Resolution fix: `from .x import y` inside a repo-root plain module resolved
   to ".x" (stray leading dot) and the call was misclassified as dropped
   external; root-level relative imports now resolve to the sibling module

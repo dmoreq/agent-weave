@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""G18 — vocabulary-gap recall (kg Amendment 14).
+"""G18 — vocabulary-gap recall (aw Amendment 14).
 
 Runs the SAME frozen queries against two indexes built from identical source:
 the new binary against a new-built index and the pre-change binary against an
@@ -11,8 +11,8 @@ signature tokens only, so the old index misses them).
 Usage:
     python3 tests/scripts/search_gap_recall.py \
         --queries docs/baselines/search-gap-gt.jsonl \
-        --new-kg <dir> --new-vihap <dir> \
-        --old-kg <dir> --old-vihap <dir> \
+        --new-aw <dir> --new-vihap <dir> \
+        --old-aw <dir> --old-vihap <dir> \
         <new-binary> <old-binary>
 """
 from __future__ import annotations
@@ -37,9 +37,9 @@ def recall(binary: str, root: str, query: str, expect: list[str], limit: int) ->
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", required=True)
-    ap.add_argument("--new-kg", required=True)
+    ap.add_argument("--new-aw", required=True)
     ap.add_argument("--new-vihap", required=True)
-    ap.add_argument("--old-kg", required=True)
+    ap.add_argument("--old-aw", required=True)
     ap.add_argument("--old-vihap", required=True)
     ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("new_binary")
@@ -47,8 +47,8 @@ def main() -> int:
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in Path(args.queries).read_text().splitlines() if l.strip()]
-    new_roots = {"kg": args.new_kg, "vihap": args.new_vihap}
-    old_roots = {"kg": args.old_kg, "vihap": args.old_vihap}
+    new_roots = {"aw": args.new_aw, "vihap": args.new_vihap}
+    old_roots = {"aw": args.old_aw, "vihap": args.old_vihap}
 
     print("| query | repo | old recall | new recall | improved |")
     print("|-------|------|-----------|-----------|----------|")

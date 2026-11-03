@@ -8,7 +8,7 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::db;
-use crate::error::{KgError, Result};
+use crate::error::{AwError, Result};
 use crate::hash::fnv1a64;
 
 pub const DEFAULT_LIMIT: usize = 50;
@@ -17,43 +17,43 @@ pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
 
-/// Permanent honesty caveat for `kg dead` (Amendment 5): candidates, not proof.
+/// Permanent honesty caveat for `aw dead` (Amendment 5): candidates, not proof.
 const DEAD_CAVEAT: &str =
-    "kg: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, type references, attribute references, and external callers are not proven absent";
+    "aw: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, type references, attribute references, and external callers are not proven absent";
 
-/// Permanent honesty caveat for `kg clones` (Amendment 12d): candidates, not proof.
+/// Permanent honesty caveat for `aw clones` (Amendment 12d): candidates, not proof.
 const CLONES_CAVEAT: &str =
-    "kg: clone candidates — normalized-text equality, not proof of semantic duplication";
+    "aw: clone candidates — normalized-text equality, not proof of semantic duplication";
 
-/// Permanent honesty caveat for `kg path` (Amendment 13): resolved static
+/// Permanent honesty caveat for `aw path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
-const PATH_CAVEAT: &str = "kg: path — resolved static edges only; dynamic dispatch may hide paths";
+const PATH_CAVEAT: &str = "aw: path — resolved static edges only; dynamic dispatch may hide paths";
 
-/// Permanent honesty caveat for `kg context` (Amendment 17).
+/// Permanent honesty caveat for `aw context` (Amendment 17).
 const CONTEXT_CAVEAT: &str =
-    "kg: context — resolved static edges only; dynamic dispatch may hide callers or callees";
+    "aw: context — resolved static edges only; dynamic dispatch may hide callers or callees";
 
-/// Permanent honesty caveat for `kg implementers` (Amendment 19).
-const IMPLEMENTERS_CAVEAT: &str = "kg: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
+/// Permanent honesty caveat for `aw implementers` (Amendment 19).
+const IMPLEMENTERS_CAVEAT: &str = "aw: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
 
 /// `impact` caveats (Amendment 19): the default calls-only shape stays
 /// byte-identical; the extended shapes state their static-edge limit.
 const IMPACT_EDGES_CAVEAT: &str =
-    "kg: impact — resolved static edges only; unresolved imports/inherits are omitted";
+    "aw: impact — resolved static edges only; unresolved imports/inherits are omitted";
 const IMPACT_CALLS_CAVEAT: &str =
-    "kg: impact — resolved static call edges only; dynamic dispatch may hide dependents";
+    "aw: impact — resolved static call edges only; dynamic dispatch may hide dependents";
 
 /// One import statement is one site even when it resolves to both a module and
 /// a symbol edge; every non-import edge remains an individual site.
 const IMPACT_SITE_KEY: &str =
     "CASE WHEN e.kind = 'imports' THEN 'i:' || ss.id || ':' || e.site_line ELSE 'e:' || e.id END";
 
-/// `kg imports` caveat (Amendment 19): outbound resolved imports only.
+/// `aw imports` caveat (Amendment 19): outbound resolved imports only.
 const IMPORTS_CAVEAT: &str =
-    "kg: imports — resolved static imports only; external and unresolved imports are omitted";
+    "aw: imports — resolved static imports only; external and unresolved imports are omitted";
 
-/// `kg tests` caveat (Amendment 19): static candidates only.
-const TESTS_CAVEAT: &str = "kg: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed";
+/// `aw tests` caveat (Amendment 19): static candidates only.
+const TESTS_CAVEAT: &str = "aw: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed";
 /// Forward search from every test is cheaper than a reverse graph walk when
 /// the test set is bounded; larger sets keep the reverse BFS.
 const FORWARD_TEST_LIMIT: usize = 20000;
@@ -220,12 +220,12 @@ pub fn test_impact(
     } else {
         let (ids, cands) = target_ids(conn, target)?;
         if ids.is_empty() {
-            return Err(KgError::NoResults(format!(
+            return Err(AwError::NoResults(format!(
                 "symbol '{target}' not in index"
             )));
         }
         if cands.len() > 1 {
-            return Err(KgError::Ambiguous {
+            return Err(AwError::Ambiguous {
                 name: target.to_string(),
                 total: ids.len(),
                 candidates: cands,
@@ -235,13 +235,13 @@ pub fn test_impact(
         let callables = ids.iter().try_fold(0, |acc, id| {
             let kind: String =
                 conn.query_row("SELECT kind FROM symbols WHERE id = ?1", [id], |r| r.get(0))?;
-            Ok::<_, KgError>(acc + usize::from(is_callable_kind(&kind)))
+            Ok::<_, AwError>(acc + usize::from(is_callable_kind(&kind)))
         })?;
         (ids, callables)
     };
     let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
     if !has_test_candidates(conn)? {
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat: TESTS_CAVEAT,
             detail: "0 test candidates found (static call edges only)".to_string(),
         });
@@ -311,14 +311,14 @@ pub fn test_impact(
     }
     if tests.is_empty() {
         return Err(if truncated {
-            KgError::NoResultsCaveated {
+            AwError::NoResultsCaveated {
                 caveat: TESTS_CAVEAT,
                 detail: format!(
                     "no test candidate within depth {depth}; a longer route may exist (static call edges only)"
                 ),
             }
         } else {
-            KgError::NoResultsCaveated {
+            AwError::NoResultsCaveated {
                 caveat: TESTS_CAVEAT,
                 detail: "0 test candidates found (static call edges only)".to_string(),
             }
@@ -366,7 +366,7 @@ pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
         })
         .map(|c: i64| c > 0)?;
     if !exists {
-        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+        return Err(AwError::NoResults(format!("path '{file}' not indexed")));
     }
     let total: usize = conn.query_row(
         "SELECT COUNT(*) FROM edges e
@@ -376,7 +376,7 @@ pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
         |r| r.get::<_, i64>(0),
     )? as usize;
     if total == 0 {
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat: IMPORTS_CAVEAT,
             detail: "0 imports found (external and unresolved imports are omitted)".to_string(),
         });
@@ -460,7 +460,7 @@ pub struct QueryOutput {
 
 pub fn clamp_limit(limit: usize) -> Result<usize> {
     if limit == 0 {
-        return Err(KgError::Usage("--limit must be >= 1".to_string()));
+        return Err(AwError::Usage("--limit must be >= 1".to_string()));
     }
     Ok(limit.min(MAX_LIMIT))
 }
@@ -517,12 +517,12 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     let limit = clamp_limit(limit)?;
     let (ids, cands) = target_ids(conn, name)?;
     if ids.is_empty() {
-        return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
+        return Err(AwError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
         // CUJ4: no merged-silent result; name the Class.method form. The
         // candidate list travels IN the error so non-CLI surfaces render it.
-        return Err(KgError::Ambiguous {
+        return Err(AwError::Ambiguous {
             name: name.to_string(),
             total: ids.len(),
             candidates: cands,
@@ -590,10 +590,10 @@ pub fn implementers(
     let limit = clamp_limit(limit)?;
     let (ids, cands) = target_ids(conn, name)?;
     if ids.is_empty() {
-        return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
+        return Err(AwError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
-        return Err(KgError::Ambiguous {
+        return Err(AwError::Ambiguous {
             name: name.to_string(),
             total: ids.len(),
             candidates: cands,
@@ -645,7 +645,7 @@ pub fn implementers(
         } else {
             "0 implementers found (resolved inherits edges only)".to_string()
         };
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat: IMPLEMENTERS_CAVEAT,
             detail,
         });
@@ -677,10 +677,10 @@ pub fn callees(
     let depth = depth.clamp(1, 10);
     let (ids, cands) = target_ids(conn, name)?;
     if ids.is_empty() {
-        return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
+        return Err(AwError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
-        return Err(KgError::Ambiguous {
+        return Err(AwError::Ambiguous {
             name: name.to_string(),
             total: ids.len(),
             candidates: cands,
@@ -795,10 +795,10 @@ pub fn path(
     let depth = depth.clamp(1, 10);
     let (from_ids, from_cands) = target_ids(conn, from)?;
     if from_ids.is_empty() {
-        return Err(KgError::NoResults(format!("symbol '{from}' not in index")));
+        return Err(AwError::NoResults(format!("symbol '{from}' not in index")));
     }
     if from_cands.len() > 1 {
-        return Err(KgError::Ambiguous {
+        return Err(AwError::Ambiguous {
             name: from.to_string(),
             total: from_ids.len(),
             candidates: from_cands,
@@ -807,10 +807,10 @@ pub fn path(
     }
     let (to_ids, to_cands) = target_ids(conn, to)?;
     if to_ids.is_empty() {
-        return Err(KgError::NoResults(format!("symbol '{to}' not in index")));
+        return Err(AwError::NoResults(format!("symbol '{to}' not in index")));
     }
     if to_cands.len() > 1 {
-        return Err(KgError::Ambiguous {
+        return Err(AwError::Ambiguous {
             name: to.to_string(),
             total: to_ids.len(),
             candidates: to_cands,
@@ -822,18 +822,18 @@ pub fn path(
     let from_qn = from_cands[0].2.clone();
     let to_qn = to_cands[0].2.clone();
     if from_id == to_id {
-        return Err(KgError::NoResults(format!(
+        return Err(AwError::NoResults(format!(
             "'{from_qn}' and '{to_qn}' resolve to the same symbol"
         )));
     }
     let (chain_ids, hop_sites) = match path_bfs(conn, from_id, to_id, depth)? {
         PathSearch::Exhausted => {
-            return Err(KgError::NoResults(format!(
+            return Err(AwError::NoResults(format!(
                 "no call path from '{from_qn}' to '{to_qn}' at any depth <= {depth} (resolved edges only)"
             )));
         }
         PathSearch::CapTruncated => {
-            return Err(KgError::NoResults(format!(
+            return Err(AwError::NoResults(format!(
                 "no call path from '{from_qn}' to '{to_qn}' within depth {depth}; a longer path may exist (resolved edges only)"
             )));
         }
@@ -875,7 +875,7 @@ pub fn path(
     for (i, &site) in hop_sites.iter().enumerate() {
         let caller = chain_ids[i];
         let Some(f) = file.get(&caller) else {
-            return Err(KgError::Internal("path hop file missing".to_string()));
+            return Err(AwError::Internal("path hop file missing".to_string()));
         };
         pointers.push(format!("{f}:{site}"));
         hop_files.insert(f.clone());
@@ -901,19 +901,19 @@ pub fn path(
     out.push(PATH_CAVEAT.to_string());
     if stale {
         out.push(format!(
-            "kg: {changed} of {n_files} result files changed since build — run kg build"
+            "aw: {changed} of {n_files} result files changed since build — run aw build"
         ));
     }
     out.extend(pointers);
     let mut chain_names: Vec<&str> = Vec::with_capacity(chain_ids.len());
     for id in &chain_ids {
         let Some(q) = qn.get(id) else {
-            return Err(KgError::Internal("path chain qualname missing".to_string()));
+            return Err(AwError::Internal("path chain qualname missing".to_string()));
         };
         chain_names.push(q.as_str());
     }
     out.push(format!(
-        "kg: chain {} ({hops} hops)",
+        "aw: chain {} ({hops} hops)",
         chain_names.join(" -> ")
     ));
     Ok(out)
@@ -1018,7 +1018,7 @@ fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result
         let mut cur = to_id;
         while cur != from_id {
             let Some(&(p, site)) = parent.get(&cur) else {
-                return Err(KgError::Internal(
+                return Err(AwError::Internal(
                     "path reconstruction lost a parent link".to_string(),
                 ));
             };
@@ -1055,10 +1055,10 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     let limit = clamp_limit(limit)?.min(50);
     let (ids, cands) = target_ids(conn, name)?;
     if ids.is_empty() {
-        return Err(KgError::NoResults(format!("symbol '{name}' not in index")));
+        return Err(AwError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
-        return Err(KgError::Ambiguous {
+        return Err(AwError::Ambiguous {
             name: name.to_string(),
             total: ids.len(),
             candidates: cands,
@@ -1182,7 +1182,7 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     let mut out = vec![CONTEXT_CAVEAT.to_string()];
     if stale {
         out.push(format!(
-            "kg: {changed} of {n_files} result files changed since build — run kg build"
+            "aw: {changed} of {n_files} result files changed since build — run aw build"
         ));
     }
     let sig = if signature.is_empty() {
@@ -1222,26 +1222,26 @@ fn parse_edge_kinds(spec: &str) -> Result<Vec<&'static str>> {
                 out.extend(["calls", "imports", "inherits"]);
             }
             "" => {
-                return Err(KgError::Usage(
+                return Err(AwError::Usage(
                     "--edges requires calls,imports,inherits,all".to_string(),
                 ))
             }
             other => {
-                return Err(KgError::Usage(format!(
+                return Err(AwError::Usage(format!(
                     "unknown --edges value '{other}' (calls,imports,inherits,all)"
                 )))
             }
         }
     }
     if saw_all && spec.split(',').any(|p| p.trim() != "all") {
-        return Err(KgError::Usage(
+        return Err(AwError::Usage(
             "--edges all cannot be combined with explicit kinds".to_string(),
         ));
     }
     out.sort_unstable();
     out.dedup();
     if out.is_empty() {
-        return Err(KgError::Usage(
+        return Err(AwError::Usage(
             "--edges requires at least one kind".to_string(),
         ));
     }
@@ -1262,7 +1262,7 @@ pub fn validate_path_scope(path: &str, allow_root: bool) -> Result<()> {
         || p.starts_with('/')
         || p.contains('\\')
     {
-        return Err(KgError::Usage(format!(
+        return Err(AwError::Usage(format!(
             "invalid scope '{path}' (repo-relative path required)"
         )));
     }
@@ -1365,7 +1365,7 @@ pub fn impact(
         })
         .map(|c: i64| c > 0)?;
     if !exists {
-        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+        return Err(AwError::NoResults(format!("path '{file}' not indexed")));
     }
     let extended = depth > 1 || context || kinds.iter().any(|k| *k != "calls");
     let caveat = if extended {
@@ -1381,7 +1381,7 @@ pub fn impact(
     // --explain switch to per-site rows at depth 1.
     let sites = sites || (depth == 1 && (context || explain));
     if depth > 1 && sites {
-        return Err(KgError::Usage(
+        return Err(AwError::Usage(
             "--sites is only valid with --depth 1".to_string(),
         ));
     }
@@ -1400,7 +1400,7 @@ pub fn impact(
             )? as usize;
             if total_files == 0 {
                 if extended {
-                    return Err(KgError::NoResultsCaveated {
+                    return Err(AwError::NoResultsCaveated {
                         caveat,
                         detail: {
                             let has_imports = kinds.contains(&"imports");
@@ -1421,7 +1421,7 @@ pub fn impact(
                         },
                     });
                 }
-                return Err(KgError::NoResults("0 impacting files found".to_string()));
+                return Err(AwError::NoResults("0 impacting files found".to_string()));
             }
             let mut stmt = conn.prepare(&format!(
                 "SELECT sf.path, MIN(e.site_line) AS line,
@@ -1470,12 +1470,12 @@ pub fn impact(
         )? as usize;
         if total == 0 {
             if extended {
-                return Err(KgError::NoResultsCaveated {
+                return Err(AwError::NoResultsCaveated {
                     caveat,
                     detail: impact_empty_detail(&kinds),
                 });
             }
-            return Err(KgError::NoResults("0 impacting files found".to_string()));
+            return Err(AwError::NoResults("0 impacting files found".to_string()));
         }
         let sql = format!(
             "SELECT MIN(e.site_line), MIN(e.confidence), MIN(sf.path),
@@ -1527,7 +1527,7 @@ pub fn impact(
     // depth > 1: reverse BFS. R1 is the exact depth-1 edge set; deeper levels
     // expand from R1's source symbols, so deeper search is monotone.
     if total_impact_targets(conn, &rel)? == 0 {
-        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+        return Err(AwError::NoResults(format!("path '{file}' not indexed")));
     }
     let mut records = ImpactTop::new(limit);
     let detail = context || explain;
@@ -1558,7 +1558,7 @@ pub fn impact(
     }
     let (total, paths) = records.finish();
     if total == 0 {
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat,
             detail: impact_empty_detail(&kinds),
         });
@@ -1994,7 +1994,7 @@ pub fn dead(
         })
     })?;
     if total == 0 {
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat: DEAD_CAVEAT,
             detail: "0 dead-code candidates found".to_string(),
         });
@@ -2015,7 +2015,7 @@ pub fn dead(
     Ok(out)
 }
 
-/// `kg complexity` (Amendment 19): per-symbol metric ranking.
+/// `aw complexity` (Amendment 19): per-symbol metric ranking.
 #[allow(clippy::too_many_arguments)] // CLI surface; a params struct adds no value here.
 pub fn complexity(
     conn: &Connection,
@@ -2057,8 +2057,8 @@ pub fn complexity(
         )?
     };
     if total == 0 {
-        return Err(KgError::NoResultsCaveated {
-            caveat: "kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic",
+        return Err(AwError::NoResultsCaveated {
+            caveat: "aw: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic",
             detail: "0 symbols match the thresholds".to_string(),
         });
     }
@@ -2110,18 +2110,18 @@ pub fn complexity(
         .map(|(_, line)| line.clone())
         .collect();
     let mut out = vec![
-        "kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic".to_string(),
+        "aw: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic".to_string(),
     ];
     if stale {
         out.push(format!(
-            "kg: {changed} of {} result files changed since build — run kg build",
+            "aw: {changed} of {} result files changed since build — run aw build",
             displayed.len()
         ));
     }
     out.extend(data_lines.iter().cloned());
     if (total as usize) > shown {
         out.push(format!("showing {shown} of {total}"));
-        eprintln!("[kg] capped at {shown} results ({total} total)");
+        eprintln!("[aw] capped at {shown} results ({total} total)");
     }
     let built_at = db::meta_get(conn, "built_at")
         .and_then(|v| v.parse().ok())
@@ -2140,7 +2140,7 @@ pub fn complexity(
     Ok(out)
 }
 
-/// `kg resolve --stdin` (Amendment 19): batch name resolution with per-name
+/// `aw resolve --stdin` (Amendment 19): batch name resolution with per-name
 /// found/ambiguous/missing lines and a CLI exit code (0/1/2).
 pub fn resolve_names(conn: &Connection, names: &[String]) -> Result<(Vec<String>, i32)> {
     let mut out = Vec::new();
@@ -2173,7 +2173,7 @@ pub fn resolve_names(conn: &Connection, names: &[String]) -> Result<(Vec<String>
     Ok((out, exit))
 }
 
-/// `kg files` (Amendment 19): indexed file inventory, build-time values.
+/// `aw files` (Amendment 19): indexed file inventory, build-time values.
 pub fn files(conn: &Connection, path: Option<&str>, limit: usize) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     if let Some(p) = path {
@@ -2209,9 +2209,9 @@ pub fn files(conn: &Connection, path: Option<&str>, limit: usize) -> Result<Vec<
         })?
         .collect::<std::result::Result<_, _>>()?
     };
-    let files_caveat = "kg: files — build-time inventory; files created after the build are absent";
+    let files_caveat = "aw: files — build-time inventory; files created after the build are absent";
     if rows.is_empty() {
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat: files_caveat,
             detail: match scope {
                 Some(s) => format!("0 indexed files in '{s}'"),
@@ -2226,7 +2226,7 @@ pub fn files(conn: &Connection, path: Option<&str>, limit: usize) -> Result<Vec<
     }));
     if total > shown {
         out.push(format!("showing {shown} of {total}"));
-        eprintln!("[kg] capped at {shown} results ({total} total)");
+        eprintln!("[aw] capped at {shown} results ({total} total)");
     }
     crate::journal::record_result(total, shown, total, false, 0);
     Ok(out)
@@ -2253,7 +2253,7 @@ pub fn unresolved_names(
         |r| r.get(0),
     )?;
     if total == 0 {
-        return Err(KgError::NoResults(
+        return Err(AwError::NoResults(
             "0 unresolved names (external/builtin calls are not counted)".to_string(),
         ));
     }
@@ -2293,14 +2293,14 @@ pub fn unresolved_names(
         |r| r.get(0),
     )?;
     if unlocated > 0 {
-        eprintln!("[kg] {unlocated} unresolved row(s) have site_line=0 and are omitted");
+        eprintln!("[aw] {unlocated} unresolved row(s) have site_line=0 and are omitted");
     }
     let mut out = vec![format!(
-        "kg: unresolved={total} rows in {files} files (call/import/inherit)"
+        "aw: unresolved={total} rows in {files} files (call/import/inherit)"
     )];
     if stale {
         out.push(format!(
-            "kg: {changed} of {} result files changed since build — run kg build",
+            "aw: {changed} of {} result files changed since build — run aw build",
             displayed.len()
         ));
     }
@@ -2311,7 +2311,7 @@ pub fn unresolved_names(
     );
     if (total as usize) > shown {
         out.push(format!("showing {shown} of {total} rows"));
-        eprintln!("[kg] capped at {shown} results ({total} total)");
+        eprintln!("[aw] capped at {shown} results ({total} total)");
     }
     crate::journal::record_result(total as usize, shown, total as usize, stale, 0);
     Ok(out)
@@ -2331,7 +2331,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
         |r| r.get(0),
     )?;
     if total == 0 {
-        return Err(KgError::NoResults(
+        return Err(AwError::NoResults(
             "0 unresolved in indexed scope (external/builtin calls are not counted)".to_string(),
         ));
     }
@@ -2388,7 +2388,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
         |r| r.get(0),
     )?;
     let mut out = vec![format!(
-        "kg: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})"
+        "aw: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})"
     )];
     if !names.is_empty() {
         out.push("top unresolved names:".to_string());
@@ -2407,7 +2407,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
     );
     if n_files > shown {
         out.push(format!("showing {} of {}", shown, n_files));
-        eprintln!("[kg] capped at {} results ({} total)", shown, n_files);
+        eprintln!("[aw] capped at {} results ({} total)", shown, n_files);
     }
     crate::journal::record_result(n_files, shown, n_files, false, 0);
     Ok(out)
@@ -2436,7 +2436,7 @@ pub fn symbols(
         })?;
     if is_file == 0 {
         if looks_like_source_file(&rel) {
-            return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+            return Err(AwError::NoResults(format!("path '{file}' not indexed")));
         }
         return symbols_directory(conn, root, &rel, outline, metrics, limit);
     }
@@ -2469,7 +2469,7 @@ pub fn symbols(
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     if rows.is_empty() {
-        return Err(KgError::NoResults(format!("path '{file}' not indexed")));
+        return Err(AwError::NoResults(format!("path '{file}' not indexed")));
     }
     let stale = file_changed(conn, root, &rel);
     let n_symbols = rows.len();
@@ -2507,12 +2507,12 @@ pub fn symbols(
     crate::journal::record_result(n_symbols, shown, n_symbols, stale, 0);
     let mut out = Vec::new();
     if stale {
-        out.push("kg: 1 of 1 result files changed since build — run kg build".to_string());
+        out.push("aw: 1 of 1 result files changed since build — run aw build".to_string());
     }
     out.extend(data_lines);
     if n_symbols > shown {
         out.push(format!("showing {} of {}", shown, n_symbols));
-        eprintln!("[kg] capped at {} results ({} total)", shown, n_symbols);
+        eprintln!("[aw] capped at {} results ({} total)", shown, n_symbols);
     }
     Ok(out)
 }
@@ -2526,7 +2526,7 @@ fn looks_like_source_file(rel: &str) -> bool {
     )
 }
 
-/// Directory mode for `kg symbols <dir>` (Amendment 19): indexed prefix only,
+/// Directory mode for `aw symbols <dir>` (Amendment 19): indexed prefix only,
 /// grouped per file, cap counts symbol data lines.
 fn symbols_directory(
     conn: &Connection,
@@ -2545,7 +2545,7 @@ fn symbols_directory(
         |r| r.get(0),
     )?;
     if total == 0 {
-        return Err(KgError::NoResults(format!(
+        return Err(AwError::NoResults(format!(
             "0 symbols in '{dir}' (indexed)"
         )));
     }
@@ -2592,11 +2592,11 @@ fn symbols_directory(
     let mut out = Vec::new();
     if changed > 0 {
         out.push(format!(
-            "kg: {changed} of {} result files changed since build — run kg build",
+            "aw: {changed} of {} result files changed since build — run aw build",
             displayed_paths.len()
         ));
     }
-    out.push(format!("kg: dir {dir} — {n_files} files, {total} symbols"));
+    out.push(format!("aw: dir {dir} — {n_files} files, {total} symbols"));
     let mut data_lines = Vec::new();
     let mut last_path = "";
     for (path, (kind, qualname, line, signature, cyc, br, nest, loc)) in &rows {
@@ -2618,7 +2618,7 @@ fn symbols_directory(
     let shown = rows.len();
     if total as usize > shown {
         out.push(format!("showing {shown} of {total}"));
-        eprintln!("[kg] capped at {shown} results ({total} total)");
+        eprintln!("[aw] capped at {shown} results ({total} total)");
     }
     let built_at = db::meta_get(conn, "built_at")
         .and_then(|v| v.parse().ok())
@@ -2655,7 +2655,7 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     const MAX_TERMS: usize = 32;
     if toks.len() > MAX_TERMS {
         toks.truncate(MAX_TERMS);
-        eprintln!("[kg] search terms capped at {MAX_TERMS}");
+        eprintln!("[aw] search terms capped at {MAX_TERMS}");
     }
     let mut expr = toks
         .iter()
@@ -2663,7 +2663,7 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
         .collect::<Vec<_>>()
         .join(" OR ");
     if expr.is_empty() {
-        return Err(KgError::Usage("empty search terms".to_string()));
+        return Err(AwError::Usage("empty search terms".to_string()));
     }
     // Identity fast path (R7): a qualified input (`.`, `/`, `::`) matched as
     // an adjacent-token phrase preserves exact identity and avoids ranking
@@ -2942,13 +2942,13 @@ pub fn clones(
     });
     let pairs = merged_pairs;
     if pairs.is_empty() {
-        return Err(KgError::NoResultsCaveated {
+        return Err(AwError::NoResultsCaveated {
             caveat: CLONES_CAVEAT,
             detail: "0 clone candidates found".to_string(),
         });
     }
     if capped {
-        eprintln!("[kg] clone pair generation capped — result is a lower bound");
+        eprintln!("[aw] clone pair generation capped — result is a lower bound");
     }
     let shown = pairs.len().min(limit);
     let displayed = &pairs[..shown];
@@ -2968,7 +2968,7 @@ pub fn clones(
     let mut out = vec![CLONES_CAVEAT.to_string()];
     if stale {
         out.push(format!(
-            "kg: {changed} of {n_files} result files changed since build — run kg build"
+            "aw: {changed} of {n_files} result files changed since build — run aw build"
         ));
     }
     // Identity (R7 L4): a bare span forces a file read to learn what the
@@ -2999,7 +2999,7 @@ pub fn clones(
     }
     if pairs.len() > shown {
         out.push(format!("showing {} of {}", shown, pairs.len()));
-        eprintln!("[kg] capped at {} results ({} total)", shown, pairs.len());
+        eprintln!("[aw] capped at {} results ({} total)", shown, pairs.len());
     }
     Ok(out)
 }
@@ -3021,7 +3021,7 @@ fn search_lines(out: QueryOutput) -> Result<Vec<String>> {
     }
     if out.total > out.shown {
         lines.push(format!("showing {} of {}", out.shown, out.total));
-        eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
+        eprintln!("[aw] capped at {} results ({} total)", out.shown, out.total);
     }
     Ok(lines)
 }
@@ -3064,7 +3064,7 @@ fn collect_output(
     }
     let total = known_total.unwrap_or(all.len());
     if total == 0 {
-        return Err(KgError::NoResults(empty_reason.to_string()));
+        return Err(AwError::NoResults(empty_reason.to_string()));
     }
     let shown = all.len().min(limit);
     let displayed: Vec<Pointer> = all.into_iter().take(shown).collect();
@@ -3078,7 +3078,7 @@ fn collect_output(
     }
     let header = if changed > 0 {
         Some(format!(
-            "kg: {changed} of {n_result_files} result files changed since build — run kg build"
+            "aw: {changed} of {n_result_files} result files changed since build — run aw build"
         ))
     } else {
         None
@@ -3139,7 +3139,7 @@ pub fn render_output(out: &QueryOutput) -> String {
 pub fn print_output(out: &QueryOutput) {
     print!("{}", render_output(out));
     if out.total > out.shown {
-        eprintln!("[kg] capped at {} results ({} total)", out.shown, out.total);
+        eprintln!("[aw] capped at {} results ({} total)", out.shown, out.total);
     }
 }
 

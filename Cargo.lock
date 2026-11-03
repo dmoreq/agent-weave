@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "agent-kg"
+name = "agent-weave"
 version = "0.3.0"
 dependencies = [
  "clap",

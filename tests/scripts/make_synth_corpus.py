@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic corpus generator for the G17 latency leg (kg Amendment 13).
+"""Synthetic corpus generator for the G17 latency leg (aw Amendment 13).
 
 Amendment 11 measured the performance pass on a 2,025-file / 7.9 MB
 synthetic corpus whose generator was never committed; this script recreates
@@ -50,8 +50,8 @@ def main() -> int:
         (out / f"file{i:05}.py").write_text(body)
         total += len(body)
         if (i + 1) % mark == 0:
-            print(f"kg-synth: {i + 1}/{args.files} files, {total} bytes", flush=True)
-    print(f"kg-synth: done — {args.files} files, {total} bytes under {out}")
+            print(f"aw-synth: {i + 1}/{args.files} files, {total} bytes", flush=True)
+    print(f"aw-synth: done — {args.files} files, {total} bytes under {out}")
     return 0
 
 

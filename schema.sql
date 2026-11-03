@@ -1,4 +1,4 @@
--- kg schema v7 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
+-- aw schema v7 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
 -- v2 -> v3 adds files.loc/files.cyclomatic; v3 -> v4 adds symbols.signature,
 -- Amendment 12a; v4 -> v5 adds unresolved_calls, Amendment 15; v5 -> v6 adds
 -- Amendment 19 metrics/exported/generated/unresolved kind/site; v6 -> v7 adds
@@ -10,7 +10,7 @@
 -- schema_indexes.sql and are created after the bulk insert of a fresh build
 -- (the final schema is unchanged).
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
--- meta rows: kg_version, grammar_version, built_at, source_rev, file_count,
+-- meta rows: aw_version, grammar_version, built_at, source_rev, file_count,
 -- symbol_count, edge_count, parse_error_count, unresolved_callee_count
 CREATE TABLE files(
     id INTEGER PRIMARY KEY,

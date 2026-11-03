@@ -1,13 +1,13 @@
 [package]
-name = "agent-kg"
+name = "agent-weave"
 version = "0.3.0"
 edition = "2021"
 description = "Local code knowledge index: who calls this, what does this call, what is impacted by this file."
 license = "MIT OR Apache-2.0"
-publish = false  # review pending; crates.io name is prepared as `agent-kg`
-repository = "https://github.com/quy-doan/kg"
-homepage = "https://github.com/quy-doan/kg"
-documentation = "https://docs.rs/agent-kg"
+publish = false  # review pending; crates.io name is prepared as `agent-weave`
+repository = "https://github.com/quy-doan/agent-weave"
+homepage = "https://github.com/quy-doan/agent-weave"
+documentation = "https://docs.rs/agent-weave"
 readme = "README.md"
 keywords = ["code-search", "call-graph", "mcp", "tree-sitter", "sqlite"]
 categories = ["development-tools", "command-line-utilities"]
@@ -30,11 +30,11 @@ include = [
 ]
 
 [lib]
-name = "kg"
+name = "agent_weave"
 path = "src/lib.rs"
 
 [[bin]]
-name = "kg"
+name = "aw"
 path = "src/main.rs"
 
 [dependencies]

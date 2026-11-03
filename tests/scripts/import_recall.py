@@ -2,15 +2,15 @@
 """F7 real-corpus import recall gate.
 
 Reads a frozen JSONL set of source-verified import rows:
-  {"repo": "vihap"|"kg"|"finguard", "file": "...", "line": N, "target": "..."}
-and checks that `kg imports <file>` emits `file:line target`. GT was built from
-the source ASTs (Python `ast`, tree-sitter Rust/TS) before measuring kg, not
-from kg output.
+  {"repo": "vihap"|"aw"|"finguard", "file": "...", "line": N, "target": "..."}
+and checks that `aw imports <file>` emits `file:line target`. GT was built from
+the source ASTs (Python `ast`, tree-sitter Rust/TS) before measuring aw, not
+from aw output.
 
 Usage:
     python3 tests/scripts/import_recall.py \
       --pairs docs/baselines/import-gt.jsonl \
-      --kg-root <kg> --vihap-root <vihap> --finguard-root <finguard> <binary>
+      --aw-root <aw> --vihap-root <vihap> --finguard-root <finguard> <binary>
 """
 from __future__ import annotations
 
@@ -44,14 +44,14 @@ def data_lines(stdout: str) -> list[str]:
     return [
         line
         for line in stdout.splitlines()
-        if not line.startswith("kg:") and not line.startswith("showing ")
+        if not line.startswith("aw:") and not line.startswith("showing ")
     ]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pairs", required=True)
-    ap.add_argument("--kg-root", required=True)
+    ap.add_argument("--aw-root", required=True)
     ap.add_argument("--vihap-root", required=True)
     ap.add_argument("--finguard-root", default="")
     ap.add_argument("--min-recall", type=float, default=0.90)
@@ -59,7 +59,7 @@ def main() -> int:
     ap.add_argument("binary")
     args = ap.parse_args()
     roots = {
-        "kg": args.kg_root,
+        "aw": args.aw_root,
         "vihap": args.vihap_root,
         "finguard": args.finguard_root,
     }

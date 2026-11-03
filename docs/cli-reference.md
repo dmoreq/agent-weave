@@ -19,7 +19,7 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 ## Invocation and global options
 
 ```text
-kg [GLOBAL_OPTIONS] <COMMAND> [ARGUMENTS] [OPTIONS]
+aw [GLOBAL_OPTIONS] <COMMAND> [ARGUMENTS] [OPTIONS]
 ```
 
 | Option | Default | Meaning |
@@ -29,7 +29,7 @@ kg [GLOBAL_OPTIONS] <COMMAND> [ARGUMENTS] [OPTIONS]
 | `-h`, `--help` | Off | Print command help and exit successfully |
 | `-V`, `--version` | Off | Print the binary version and exit successfully; top-level option |
 
-`--root` and `--no-journal` work before or after a subcommand. `kg help` and `kg help <COMMAND>` also show help. Every subcommand supports `-h` and `--help`.
+`--root` and `--no-journal` work before or after a subcommand. `aw help` and `aw help <COMMAND>` also show help. Every subcommand supports `-h` and `--help`.
 
 Names below are exact bare names or full printed qualified names, not pointers or partial qualified names. Copy qualified names from `search`, `symbols`, or ambiguity candidates.
 
@@ -51,10 +51,10 @@ Omit `--path` for the whole index. Use a nonempty repository-relative scope with
 ### `build`
 
 ```text
-kg build [--force] [--max-parse-error-rate <FRACTION>]
+aw build [--force] [--max-parse-error-rate <FRACTION>]
 ```
 
-Build `.kg/index.db` using an atomic replacement. Reuse unchanged extraction data when possible; a fully unchanged build can leave the database untouched.
+Build `.aw/index.db` using an atomic replacement. Reuse unchanged extraction data when possible; a fully unchanged build can leave the database untouched.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -66,19 +66,19 @@ Print a build summary with file, symbol, edge, parse-error, unresolved-call, car
 ### `doctor`
 
 ```text
-kg doctor [--invalidate]
+aw doctor [--invalidate]
 ```
 
 Without options, report database integrity, versions, parse errors, changed indexed files, size, and leftover build files. This report needs an index.
 
-`--invalidate` defaults to off. When set, remove the **entire `.kg/` directory**, including journals and any other files there; no index is required. Source files and the executable remain unchanged.
+`--invalidate` defaults to off. When set, remove the **entire `.aw/` directory**, including journals and any other files there; no index is required. Source files and the executable remain unchanged.
 
 ## Inspect definitions and calls
 
 ### `context <NAME>`
 
 ```text
-kg context <NAME> [--limit <N>]
+aw context <NAME> [--limit <N>]
 ```
 
 Print a definition range, kind, qualified name, signature, direct caller sites, and direct callees. `--limit` defaults to 10 per section, maximum 50.
@@ -88,7 +88,7 @@ Resolved callees point to definitions; ambiguous callee entries can point to the
 ### `callers <NAME>`
 
 ```text
-kg callers <NAME> [--limit <N>]
+aw callers <NAME> [--limit <N>]
 ```
 
 Print sites that call the symbol, with the enclosing caller's qualified name. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target.
@@ -96,7 +96,7 @@ Print sites that call the symbol, with the enclosing caller's qualified name. `-
 ### `callees <NAME>`
 
 ```text
-kg callees <NAME> [--limit <N>] [--depth <N>]
+aw callees <NAME> [--limit <N>] [--depth <N>]
 ```
 
 Print outgoing callees; resolved rows point to definitions and include callee identity. `--depth` defaults to 1 for direct callees; larger depths follow the forward call closure. `--limit` uses the shared default and cap.
@@ -104,7 +104,7 @@ Print outgoing callees; resolved rows point to definitions and include callee id
 ### `path <FROM> <TO>`
 
 ```text
-kg path <FROM> <TO> [--depth <N>]
+aw path <FROM> <TO> [--depth <N>]
 ```
 
 Find one shortest forward route over resolved call edges. Print a static-analysis caveat, call-site pointers in hop order, and the symbol chain. `--depth` defaults to 10; there is no `--limit` option.
@@ -116,7 +116,7 @@ Swap arguments for the reverse question. Equal endpoints or no route within the 
 ### `impact <FILE>`
 
 ```text
-kg impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>]
+aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>]
     [--context] [--explain] [--limit <N>]
 ```
 
@@ -135,7 +135,7 @@ Unresolved imports and bases are omitted from extended dependency traversal. Dyn
 ### `imports <FILE>`
 
 ```text
-kg imports <FILE> [--limit <N>]
+aw imports <FILE> [--limit <N>]
 ```
 
 List outbound resolved import targets for an indexed file. External and unresolved imports are omitted. `--limit` uses the shared default and cap.
@@ -143,7 +143,7 @@ List outbound resolved import targets for an indexed file. External and unresolv
 ### `implementers <NAME>`
 
 ```text
-kg implementers <NAME> [--limit <N>]
+aw implementers <NAME> [--limit <N>]
 ```
 
 Find direct resolved inbound inheritance or implementation relationships. Dynamic inheritance and cross-file Rust implementation blocks can be missing. `--limit` uses the shared default and cap.
@@ -151,7 +151,7 @@ Find direct resolved inbound inheritance or implementation relationships. Dynami
 ### `tests <NAME_OR_FILE>`
 
 ```text
-kg tests <NAME_OR_FILE> [--depth <N>] [--limit <N>]
+aw tests <NAME_OR_FILE> [--depth <N>] [--limit <N>]
 ```
 
 Find statically reachable test candidates for a symbol or exact indexed file. `--depth` defaults to 10; `--limit` uses the shared default and cap.
@@ -163,10 +163,10 @@ Candidate names start with `test_` or `test` followed by an uppercase letter. Ru
 ### `search <TERMS>`
 
 ```text
-kg search <TERMS> [--kind <KIND>] [--path <PATH>] [--exact] [--limit <N>]
+aw search <TERMS> [--kind <KIND>] [--path <PATH>] [--exact] [--limit <N>]
 ```
 
-Rank symbols using BM25 token search over names, qualified names, file paths, and signatures. Quote multiple words as one argument, for example `kg search 'parse tree'`.
+Rank symbols using BM25 token search over names, qualified names, file paths, and signatures. Quote multiple words as one argument, for example `aw search 'parse tree'`.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -180,7 +180,7 @@ camelCase and snake_case split into tokens. Normal search uses prefix terms and 
 ### `symbols <FILE_OR_DIRECTORY>`
 
 ```text
-kg symbols <FILE_OR_DIRECTORY> [--outline] [--metrics] [--limit <N>]
+aw symbols <FILE_OR_DIRECTORY> [--outline] [--metrics] [--limit <N>]
 ```
 
 List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds per-symbol syntax metrics. Both default to off and can be combined. `--limit` uses the shared default and cap.
@@ -188,7 +188,7 @@ List indexed definitions by path and line. `--outline` adds signatures; `--metri
 ### `api <PATH>`
 
 ```text
-kg api <PATH> [--include-private] [--exclude-generated] [--limit <N>]
+aw api <PATH> [--include-private] [--exclude-generated] [--limit <N>]
 ```
 
 Inventory exported functions, methods, classes, traits, and interfaces under a file or directory. `--include-private` removes the export filter; it does not add other declaration kinds. Both boolean options default to off; `--limit` uses the shared default and cap.
@@ -198,7 +198,7 @@ Exports use language-specific static heuristics. Re-exports, module visibility, 
 ### `resolve --stdin`
 
 ```text
-kg resolve --stdin
+aw resolve --stdin
 ```
 
 Read one name per line from standard input. `--stdin` defaults to off but is required; there are no other command-specific options.
@@ -210,7 +210,7 @@ Exit 0 when all names resolve uniquely, 1 for missing names with no ambiguity or
 ### `files`
 
 ```text
-kg files [--path <PATH>] [--limit <N>]
+aw files [--path <PATH>] [--limit <N>]
 ```
 
 List indexed paths with build-time symbol counts, byte sizes, and generated tagging. `--path` defaults to absent; `--limit` uses the shared default and cap. This inventory does not check current source freshness.
@@ -220,7 +220,7 @@ List indexed paths with build-time symbol counts, byte sizes, and generated tagg
 ### `dead`
 
 ```text
-kg dead [--exclude-tests] [--exclude-generated] [--path <PATH>] [--limit <N>]
+aw dead [--exclude-tests] [--exclude-generated] [--path <PATH>] [--limit <N>]
 ```
 
 List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, or inheritance references. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
@@ -232,7 +232,7 @@ Always treat the output as candidates. Entry points, external consumers, dynamic
 ### `unresolved`
 
 ```text
-kg unresolved [--names] [--path <PATH>] [--limit <N>]
+aw unresolved [--names] [--path <PATH>] [--limit <N>]
 ```
 
 By default, summarize unresolved callees by file and include common unresolved names. `--names` lists unresolved relationship sites as `path:line kind name` instead; it defaults to off.
@@ -244,7 +244,7 @@ Summary counts are build-time data with no freshness check. Site mode checks dis
 ### `complexity`
 
 ```text
-kg complexity [--min-cyc <N>] [--min-loc <N>] [--min-branches <N>]
+aw complexity [--min-cyc <N>] [--min-loc <N>] [--min-branches <N>]
     [--min-nest <N>] [--path <PATH>] [--exclude-generated] [--limit <N>]
 ```
 
@@ -265,7 +265,7 @@ Rows label metrics `cyc`, `branches`, `nest`, and `loc`. These syntax-tree proxi
 ### `clones`
 
 ```text
-kg clones [--min-lines <N>] [--path <PATH>] [--exclude-generated] [--limit <N>]
+aw clones [--min-lines <N>] [--path <PATH>] [--exclude-generated] [--limit <N>]
 ```
 
 Find duplicate-block candidates using normalized five-line windows. Normalization removes trailing whitespace and blank lines; it does not establish semantic equivalence.
@@ -279,7 +279,7 @@ Rows identify both inclusive source ranges and enclosing symbols when available.
 ### `stats`
 
 ```text
-kg stats
+aw stats
 ```
 
 No command-specific options. Print build-time file, generated-file, symbol, edge-kind, parse-error, and unresolved-call counts, plus database size and versions. This is not a freshness check.
@@ -287,7 +287,7 @@ No command-specific options. Print build-time file, generated-file, symbol, edge
 ### `hotspots`
 
 ```text
-kg hotspots [--limit <N>] [--path <PATH>] [--exclude-generated]
+aw hotspots [--limit <N>] [--path <PATH>] [--exclude-generated]
 ```
 
 Rank indexed files by the sum of normalized file-level decision counts, LOC, 90-day change counts, and 180-day fix-related commit counts. Each metric normalizes within the selected file set; scores from different scopes are not directly comparable.
@@ -297,7 +297,7 @@ Rank indexed files by the sum of normalized file-level decision counts, LOC, 90-
 ### `report`
 
 ```text
-kg report [--path <PATH>] [--exclude-generated]
+aw report [--path <PATH>] [--exclude-generated]
 ```
 
 Print four sections: index overview, top packages by symbol count, five hotspots, and eight most-called symbols. There is no `--limit` option.
@@ -309,7 +309,7 @@ Print four sections: index overview, top packages by symbol count, five hotspots
 ### `usage`
 
 ```text
-kg usage [--verify] [--limit <N>]
+aw usage [--verify] [--limit <N>]
 ```
 
 Without `--verify`, summarize invocation counts, errors, latency, empty/stale rates, and ambiguous-pointer counts. No index is needed; an empty journal returns exit 1.
@@ -322,12 +322,12 @@ Results count `ok`, `changed`, and `fail`. Changed source or superseded-index st
 
 | Path or environment variable | Purpose |
 |---|---|
-| `.kg/index.db` | Local SQLite index |
-| `.kg/usage.log` | Invocation metadata: tool, arguments, outcome, latency, and result counts |
-| `.kg/usage-results.jsonl` | Successful pointer-query payloads, displayed pointers, and index metadata |
-| `KG_NO_JOURNAL=1` | Disable both journals; equivalent to `--no-journal` |
-| `KG_SESSION` | Optional journal attribution, trimmed and capped at 64 characters |
-| `KG_ARM` | Optional comparison-group attribution, trimmed and capped at 64 characters |
+| `.aw/index.db` | Local SQLite index |
+| `.aw/usage.log` | Invocation metadata: tool, arguments, outcome, latency, and result counts |
+| `.aw/usage-results.jsonl` | Successful pointer-query payloads, displayed pointers, and index metadata |
+| `AW_NO_JOURNAL=1` | Disable both journals; equivalent to `--no-journal` |
+| `AW_SESSION` | Optional journal attribution, trimmed and capped at 64 characters |
+| `AW_ARM` | Optional comparison-group attribution, trimmed and capped at 64 characters |
 
 Journals stay local and rotate after exceeding 5 MiB to a `.1` generation. Writes are best-effort and do not change command results on failure. They can contain repository paths, symbol names, and displayed signatures; treat them as project data.
 
@@ -338,10 +338,10 @@ The CLI does not journal `doctor`, `usage`, or the MCP server invocation itself.
 ### `mcp`
 
 ```text
-kg mcp
+aw mcp
 ```
 
-No command-specific options. Serve newline-delimited JSON-RPC 2.0 over stdin/stdout until input closes. A client starts this process; kg does not install host configuration or a background service.
+No command-specific options. Serve newline-delimited JSON-RPC 2.0 over stdin/stdout until input closes. A client starts this process; aw does not install host configuration or a background service.
 
 The tool surface exposes build, query, and usage operations, not `doctor`. Global root and journal controls apply. Frames are limited to 8 MiB. Do not send ordinary shell text or log messages into the protocol stream.
 
@@ -355,7 +355,7 @@ Locations use repository-relative paths and 1-based line numbers. Definition ran
 - Capped result lists report `showing N of M` and usually a stderr cap notice. Context reports its counts in each section heading.
 - Many pointer queries warn only about changed files in the displayed, post-cap set. They do not check every indexed file or detect every newly added file.
 - An empty result is not proof of absence. Inspect the reason, rebuild, and fall back to source search.
-- Runtime diagnostics use `kg: <class>: <detail>` on stderr. Argument-parser errors can use clap's own format. Ambiguous target candidates print on stdout, at most 50.
+- Runtime diagnostics use `aw: <class>: <detail>` on stderr. Argument-parser errors can use clap's own format. Ambiguous target candidates print on stdout, at most 50.
 - `dead` and `clones` retain their candidate caveat on stdout even for empty results; other analysis commands can also emit caveats.
 
 ### Exit codes
@@ -375,6 +375,6 @@ Exit codes describe the operation, not certainty of analysis. `context` can succ
 
 ## Static-analysis boundaries
 
-Only Python, TypeScript/TSX, JavaScript/JSX, and Rust extensions listed in [getting started](getting-started.md#know-what-is-indexed) are indexed. Source files over 1 MiB and `.kg/` are excluded; ignore rules and parse errors can reduce coverage further.
+Only Python, TypeScript/TSX, JavaScript/JSX, and Rust extensions listed in [getting started](getting-started.md#know-what-is-indexed) are indexed. Source files over 1 MiB and `.aw/` are excluded; ignore rules and parse errors can reduce coverage further.
 
 Queries operate on one local repository. Unresolved calls, runtime dispatch, external dependencies, inheritance, exports, framework discovery, and macro behavior can be incomplete. Rebuild after edits; use grep, a language server, source reading, and the normal test runner for questions the index cannot establish.

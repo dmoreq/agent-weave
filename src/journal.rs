@@ -1,7 +1,7 @@
 //! Usage journal (Amendment 6) and result-payload journal (Amendment 10):
-//! one JSONL line per journaled invocation appended to `.kg/usage.log`, plus
+//! one JSONL line per journaled invocation appended to `.aw/usage.log`, plus
 //! one self-contained pointer-payload line per successful pointer query
-//! appended to `.kg/usage-results.jsonl`. Best-effort by contract: a failed
+//! appended to `.aw/usage-results.jsonl`. Best-effort by contract: a failed
 //! journal write is silently ignored and can never alter a command's output
 //! or exit code. Zero dependencies — the JSON line is hand-serialized; the
 //! summary reader extracts only the fixed keys we write.
@@ -16,13 +16,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
 pub fn usage_log_path(root: &Path) -> PathBuf {
-    crate::db::kg_dir(root).join("usage.log")
+    crate::db::aw_dir(root).join("usage.log")
 }
 
 /// Result-payload journal (Amendment 10): rendered pointers of the displayed
 /// set, one line per successful pointer query.
 pub fn payload_log_path(root: &Path) -> PathBuf {
-    crate::db::kg_dir(root).join("usage-results.jsonl")
+    crate::db::aw_dir(root).join("usage-results.jsonl")
 }
 
 /// Session/arm attribution (Amendment 10b): R1/R2 A/B tags, sanitized.
@@ -32,7 +32,7 @@ fn env_tag(key: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Journal opt-out contract: env `KG_NO_JOURNAL=1` (checked in `begin`) or
+/// Journal opt-out contract: env `AW_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
 struct Pending {
     surface: &'static str,
@@ -60,7 +60,7 @@ thread_local! {
 /// Arm the journal for this invocation. No-op when the env opt-out is set;
 /// the `--no-journal` flag is enforced by the caller skipping `begin`.
 pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)]) {
-    if std::env::var("KG_NO_JOURNAL").as_deref() == Ok("1") {
+    if std::env::var("AW_NO_JOURNAL").as_deref() == Ok("1") {
         return;
     }
     let body = args
@@ -78,8 +78,8 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
             total: 0,
             ambiguous: 0,
             stale: false,
-            session: env_tag("KG_SESSION"),
-            arm: env_tag("KG_ARM"),
+            session: env_tag("AW_SESSION"),
+            arm: env_tag("AW_ARM"),
             name: String::new(),
             pointers: Vec::new(),
             built_at: 0,
@@ -153,7 +153,7 @@ pub fn record_payload(
 /// Serialize and append the usage line, then the payload line when pointers
 /// were captured. Called exactly once per process, after the outcome is known.
 /// All I/O failures are swallowed by contract. A `None` root (repo discovery
-/// failed) skips the write — there is no `.kg/` location.
+/// failed) skips the write — there is no `.aw/` location.
 pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
@@ -166,7 +166,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let line = format!(
-        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"args\":{},\"result_count\":{},\"shown\":{},\"total\":{},\"ambiguous\":{},\"exit_code\":{exit_code},\"latency_us\":{latency_us},\"stale\":{},\"kg_version\":\"{}\",\"session\":\"{}\",\"arm\":\"{}\"}}\n",
+        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"args\":{},\"result_count\":{},\"shown\":{},\"total\":{},\"ambiguous\":{},\"exit_code\":{exit_code},\"latency_us\":{latency_us},\"stale\":{},\"aw_version\":\"{}\",\"session\":\"{}\",\"arm\":\"{}\"}}\n",
         pending.surface,
         pending.tool,
         pending.args,
@@ -247,7 +247,7 @@ fn json_escape(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// `kg usage` summary: tolerant extraction of the fixed keys this module writes.
+// `aw usage` summary: tolerant extraction of the fixed keys this module writes.
 // ---------------------------------------------------------------------------
 
 /// Extract `"key":"value"` from a JSONL line written by this module.
@@ -305,7 +305,7 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
         }
     }
     if lines.trim().is_empty() {
-        return Err(crate::error::KgError::NoResults(
+        return Err(crate::error::AwError::NoResults(
             "no journal entries — usage.log is empty or absent".to_string(),
         ));
     }
@@ -331,7 +331,7 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
         }
     }
     let total: usize = aggs.values().map(|a| a.calls).sum();
-    let mut out = vec![format!("kg usage: {total} journaled calls")];
+    let mut out = vec![format!("aw usage: {total} journaled calls")];
     let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
     rows.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
     for (tool, agg) in rows {
@@ -386,7 +386,7 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
 }
 
 // ---------------------------------------------------------------------------
-// `kg usage --verify` (Amendment 10c): replay sampled payload pointers
+// `aw usage --verify` (Amendment 10c): replay sampled payload pointers
 // against current source; the open index separates CHANGED from OK/FAIL.
 // ---------------------------------------------------------------------------
 
@@ -467,7 +467,7 @@ pub fn verify(
         .filter_map(parse_payload_line)
         .collect();
     if entries.is_empty() {
-        return Err(crate::error::KgError::NoResults(
+        return Err(crate::error::AwError::NoResults(
             "no payload entries — usage-results.jsonl is empty or absent".to_string(),
         ));
     }
@@ -538,7 +538,7 @@ pub fn verify(
         }
     }
     let mut out = vec![format!(
-        "kg usage --verify: {} pointers sampled from {n_entries} entries: ok={ok} changed={changed} fail={fail}",
+        "aw usage --verify: {} pointers sampled from {n_entries} entries: ok={ok} changed={changed} fail={fail}",
         ok + changed + fail
     )];
     out.extend(fail_lines);
@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn rotate_moves_log_aside_past_threshold() {
-        let dir = std::env::temp_dir().join(format!("kg-journal-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aw-journal-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("usage.log");
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn extract_fields_round_trip() {
-        let line = "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"args\":{\"name\":\"a\"},\"result_count\":3,\"shown\":3,\"total\":3,\"ambiguous\":1,\"exit_code\":0,\"latency_us\":9800,\"stale\":false,\"kg_version\":\"0.1.0\"}";
+        let line = "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"args\":{\"name\":\"a\"},\"result_count\":3,\"shown\":3,\"total\":3,\"ambiguous\":1,\"exit_code\":0,\"latency_us\":9800,\"stale\":false,\"aw_version\":\"0.1.0\"}";
         assert_eq!(extract_str(line, "tool").as_deref(), Some("callers"));
         assert_eq!(extract_num(line, "result_count"), Some(3));
         assert_eq!(extract_num(line, "ambiguous"), Some(1));
@@ -625,7 +625,7 @@ mod tests {
             ambiguous: 0,
             stale: true,
             session: "r1-t1".into(),
-            arm: "kg".into(),
+            arm: "aw".into(),
             name: "a.b".into(),
             pointers: vec!["src/a.rs:7".into(), "src/b.rs:12 [ambiguous]".into()],
             built_at: 42,
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(
             line,
             "{\"ts\":7,\"surface\":\"mcp\",\"tool\":\"callers\",\"name\":\"a.b\",\
-             \"session\":\"r1-t1\",\"arm\":\"kg\",\"built_at\":42,\
+             \"session\":\"r1-t1\",\"arm\":\"aw\",\"built_at\":42,\
              \"source_rev\":\"abc\",\"stale\":true,\"shown\":2,\"total\":2,\
              \"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}\n"
         );
@@ -647,11 +647,11 @@ mod tests {
     #[test]
     fn env_tag_trims_and_caps_at_64() {
         // Safety: test-only env mutation, single-threaded test binary section.
-        std::env::set_var("KG_TEST_TAG", "  r1-task-1  ");
-        assert_eq!(env_tag("KG_TEST_TAG"), "r1-task-1");
-        std::env::set_var("KG_TEST_TAG", "x".repeat(100));
-        assert_eq!(env_tag("KG_TEST_TAG").len(), 64);
-        std::env::remove_var("KG_TEST_TAG");
-        assert_eq!(env_tag("KG_TEST_TAG"), "");
+        std::env::set_var("AW_TEST_TAG", "  r1-task-1  ");
+        assert_eq!(env_tag("AW_TEST_TAG"), "r1-task-1");
+        std::env::set_var("AW_TEST_TAG", "x".repeat(100));
+        assert_eq!(env_tag("AW_TEST_TAG").len(), 64);
+        std::env::remove_var("AW_TEST_TAG");
+        assert_eq!(env_tag("AW_TEST_TAG"), "");
     }
 }

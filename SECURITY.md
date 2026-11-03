@@ -15,7 +15,7 @@ We aim to acknowledge reports within 7 days.
 
 ## Security model
 
-- kg runs locally, reads repository files, and writes only inside `.kg/`.
+- aw runs locally, reads repository files, and writes only inside `.aw/`.
 - It performs no network I/O at runtime and spawns no long-lived processes.
 - The MCP server is a stdio JSON-RPC surface; frames are size-capped and tool
   panics are isolated.

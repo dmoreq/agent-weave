@@ -1,5 +1,5 @@
-//! `kg doctor`: 3 AM diagnosability — integrity, versions, parse coverage,
-//! stale ratio, orphan `.kg/` files, lock leftovers, DB size vs target (CUJ3).
+//! `aw doctor`: 3 AM diagnosability — integrity, versions, parse coverage,
+//! stale ratio, orphan `.aw/` files, lock leftovers, DB size vs target (CUJ3).
 
 use std::path::Path;
 
@@ -9,19 +9,19 @@ use crate::db;
 use crate::error::Result;
 
 pub fn invalidate(root: &Path) -> Result<()> {
-    let dir = db::kg_dir(root);
+    let dir = db::aw_dir(root);
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
-        println!("kg: removed {}", dir.display());
+        println!("aw: removed {}", dir.display());
     } else {
-        println!("kg: no {} present", dir.display());
+        println!("aw: no {} present", dir.display());
     }
     Ok(())
 }
 
 pub fn report(root: &Path) -> Result<()> {
     let conn = db::open_for_query(root)?;
-    println!("kg: doctor report for {}", root.display());
+    println!("aw: doctor report for {}", root.display());
 
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     println!("  integrity: {integrity}");
@@ -29,7 +29,7 @@ pub fn report(root: &Path) -> Result<()> {
     let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     println!("  schema version: {user_version}");
     for (key, label) in [
-        ("kg_version", "kg version"),
+        ("aw_version", "aw version"),
         ("grammar_version", "grammar version"),
         ("built_at", "built at"),
         ("source_rev", "source rev"),
@@ -95,11 +95,11 @@ fn stale_ratio(conn: &Connection, root: &Path) -> Result<f64> {
 }
 
 fn report_orphans(root: &Path) {
-    let dir = db::kg_dir(root);
+    let dir = db::aw_dir(root);
     let new = db::db_new_path(root);
     if new.exists() {
         println!(
-            "  orphan: {} (leftover build — rerun kg build or delete)",
+            "  orphan: {} (leftover build — rerun aw build or delete)",
             new.display()
         );
     }

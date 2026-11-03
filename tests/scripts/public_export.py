@@ -130,10 +130,10 @@ def scrub(out: Path) -> None:
     if ev.exists():
         text = ev.read_text()
         text = re.sub(
-            r"\| corpus A \|.*?\n\| kg self \|.*?\n",
+            r"\| corpus A \|.*?\n\| aw self \|.*?\n",
             "| corpora | six repositories, ~1.2k files / ~8.8k symbols / "
             "~19.2k edges total (per-corpus detail withheld) | - | - | - |\n"
-            "| kg self | this repository (Rust) | - | - | - |\n",
+            "| aw self | this repository (Rust) | - | - | - |\n",
             text, flags=re.S,
         )
         text = text.replace(
@@ -195,7 +195,7 @@ def gate(out: Path) -> int:
     if "include = [" not in cargo or "exclude = [" in cargo:
         print("Cargo.toml include allowlist is missing or exclude is still set")
         rc = 1
-    for bad in ("docs/baselines", "docs/reports", ".kg", "target", ".zcode"):
+    for bad in ("docs/baselines", "docs/reports", ".aw", "target", ".zcode"):
         p = out / bad
         if p.exists():
             print(f"forbidden path present: {bad}")

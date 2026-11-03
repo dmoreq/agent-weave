@@ -1,4 +1,4 @@
-# Kế hoạch hoàn thiện tài liệu public cho kg
+# Kế hoạch hoàn thiện tài liệu public cho aw
 
 ## Tóm tắt
 
@@ -17,7 +17,7 @@ Ngôn ngữ tài liệu sản phẩm giữ tiếng Anh theo repository; kế ho�
 ## 1. Phạm vi và mốc đối chiếu
 
 - Revision: `c3f907c973b2288f8ee2a37466a244406f2ffe8a`, ngày 2026-11-03.
-- Working tree trước khi viết kế hoạch: `AGENTS.md` và `docs/reports/2026-11-03_kg-build-force-handoff.md` chưa tracked.
+- Working tree trước khi viết kế hoạch: `AGENTS.md` và `docs/reports/2026-11-03_aw-build-force-handoff.md` chưa tracked.
 - Không coi handoff chưa tracked là tài liệu đã được duyệt hoặc được phép xuất bản.
 - Kiểm kê: 127 tài liệu Markdown, 12.483 dòng; không tính chính kế hoạch này.
 - Có thêm 235 file `.txt` thuộc prompt, transcript và artifact benchmark; đây không phải 235 trang hướng dẫn người dùng.
@@ -74,11 +74,11 @@ Không dịch hàng loạt, tạo website tài liệu, thêm framework hoặc th
 | P4/P8 và mã review đứng ở vị trí tên chức năng | `CHANGELOG.md:40–97`, `docs/designs/` | Tên dễ hiểu trước; mã tham chiếu sau |
 | F1 không có cùng nghĩa giữa các amendment | Tài liệu thiết kế P4 và P8 | Không thay thế toàn cục theo mã; luôn xác định ngữ cảnh |
 | Đề xuất P8 vẫn ghi chờ duyệt, nhưng spec chính đã ghi triển khai | Preamble thiết kế P8; Amendment 19 trong spec chính | Gắn trạng thái lịch sử và liên kết quyết định hiện hành |
-| Nhiều phép đo so sánh hai cách dùng kg, không phải kg với không dùng kg | `docs/baselines/agent-utility-2026-11-02.md:15–17`; `stage5-context-2026-11-02.md:7–8` | Ghi rõ công cụ được phép ở từng nhóm đối chứng |
+| Nhiều phép đo so sánh hai cách dùng aw, không phải aw với không dùng aw | `docs/baselines/agent-utility-2026-11-02.md:15–17`; `stage5-context-2026-11-02.md:7–8` | Ghi rõ công cụ được phép ở từng nhóm đối chứng |
 | Evaluation trộn số đo từ nhiều revision dưới lời giới thiệu “binary being shipped” | `docs/EVALUATION.md:3–7`, các mục lịch sử và schema v5/v7 | Gắn revision/ngày cho từng nhóm bằng chứng; bỏ lời khẳng định bao trùm |
 | Hướng dẫn hỗ trợ yêu cầu nguồn không truy cập trực tiếp | `SUPPORT.md:9` | Đưa giới hạn cần biết vào trang public có link thật |
 | Export xóa baseline và đổi tham chiếu thành `evidence/` | `tests/scripts/public_export.py:89,100–107` | Kiểm tra cây export; không coi đổi chuỗi là đã cung cấp bằng chứng public |
-| Báo cáo build mới có kết quả khác headline hiệu năng cũ | `docs/reports/2026-11-03_kg-build-force-optimization.md:20–43` | Ghi rõ so sánh xen kẽ, host đang tải cao và đánh đổi bộ nhớ |
+| Báo cáo build mới có kết quả khác headline hiệu năng cũ | `docs/reports/2026-11-03_aw-build-force-optimization.md:20–43` | Ghi rõ so sánh xen kẽ, host đang tải cao và đánh đổi bộ nhớ |
 | Help chứa thuật ngữ triển khai và mã amendment | `src/cli.rs` | Rà riêng; thay help phải tuân thủ hợp đồng stdout/stderr |
 
 ## 3. Chuẩn nội dung public
@@ -87,7 +87,7 @@ Không dịch hàng loạt, tạo website tài liệu, thêm framework hoặc th
 
 | Người đọc | Câu hỏi | Trang dẫn đường |
 |---|---|---|
-| Người đánh giá công cụ | kg giúp gì, khác grep/LSP ở đâu, khi nào không cần kg? | README |
+| Người đánh giá công cụ | aw giúp gì, khác grep/LSP ở đâu, khi nào không cần aw? | README |
 | Người dùng lần đầu | Cài thế nào, chạy gì đầu tiên, đầu ra có ý nghĩa gì? | Getting started |
 | Người dùng thường xuyên | Chọn lệnh nào, diễn giải kết quả rỗng/cũ/bị giới hạn thế nào? | Usage và CLI reference |
 | Người tích hợp agent | Cài skill hoặc MCP thế nào, thay đổi quy trình gì? | Agent integration |
@@ -98,7 +98,7 @@ Không dịch hàng loạt, tạo website tài liệu, thêm framework hoặc th
 
 1. Câu hỏi thực tế người dùng muốn giải quyết.
 2. Cách giải quyết khi không có tính năng đó; nêu công cụ đối chứng thực tế.
-3. Lệnh kg và ví dụ đầu ra ngắn, có thể đối chiếu.
+3. Lệnh aw và ví dụ đầu ra ngắn, có thể đối chiếu.
 4. Người dùng có thể quyết định hoặc làm gì tiếp từ kết quả.
 5. Giới hạn: kết quả thiếu, tên mơ hồ, index cũ, quan hệ động hoặc loại file chưa hỗ trợ.
 6. Bằng chứng định lượng nếu có; nếu chưa đo, chỉ mô tả chức năng.
@@ -140,7 +140,7 @@ Các trang mới dưới đây là đề xuất để chủ dự án duyệt tr�
 | `SECURITY.md`, `CODE_OF_CONDUCT.md`, `LICENSE*`, `NOTICE` | Chính sách và giấy phép; giữ đúng nội dung có thẩm quyền |
 | `docs/designs/` | Hợp đồng kỹ thuật, amendment và lịch sử quyết định có trạng thái rõ |
 | `docs/baselines/`, `docs/reports/` | Nguồn nội bộ, không nằm trong tập tài liệu public |
-| `skills/README.md`, `skills/kg-first/SKILL.md`, `AGENTS.md` | Hướng dẫn agent; dẫn tới tài liệu chính thay vì nhân bản số liệu |
+| `skills/README.md`, `skills/aw-first/SKILL.md`, `AGENTS.md` | Hướng dẫn agent; dẫn tới tài liệu chính thay vì nhân bản số liệu |
 
 Không bắt người đọc đi qua glossary để hiểu quickstart. Giải nghĩa tại chỗ trước khi cân nhắc tạo glossary riêng.
 Khi tách nội dung khỏi README, giữ một nguồn chính cho mỗi thông tin; phần còn lại dùng liên kết.
@@ -156,7 +156,7 @@ Chỉ commit sau khi được yêu cầu; ranh giới gói dưới đây cũng l
 | Thông điệp và nhập môn | `README.md`, `docs/README.md`, `docs/getting-started.md` | Cấu trúc được duyệt | Người mới đi từ clone đến kết quả thật; ví dụ không cần repo riêng | Technical writer và người dùng mới |
 | Hướng dẫn và tham chiếu | `docs/usage.md`, `docs/cli-reference.md`, `SUPPORT.md` | Nhập môn | Đủ lệnh hiện có; defaults/flags/exit codes khớp CLI; có fallback | Reviewer hiểu CLI và static analysis |
 | Bằng chứng giá trị | `docs/EVALUATION.md` và phần claim của README/skills | Phân loại public | Mỗi headline truy được đối chứng, số đo và giới hạn; không link tới file bị export loại bỏ | Reviewer benchmark độc lập |
-| Tích hợp agent | `docs/agent-integration.md`, `skills/README.md`, `skills/kg-first/SKILL.md` | Hướng dẫn và bằng chứng | Từng host ghi phiên bản và trạng thái kiểm chứng; không thay routing chỉ để làm đẹp nội dung | Reviewer CLI/MCP và agent integration |
+| Tích hợp agent | `docs/agent-integration.md`, `skills/README.md`, `skills/aw-first/SKILL.md` | Hướng dẫn và bằng chứng | Từng host ghi phiên bản và trạng thái kiểm chứng; không thay routing chỉ để làm đẹp nội dung | Reviewer CLI/MCP và agent integration |
 | Đóng góp và chính sách | `CONTRIBUTING.md`, `.github/*TEMPLATE*`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `NOTICE`, `LICENSE*`, `AGENTS.md` | Phạm vi public | Link công khai tồn tại; lệnh dev khớp CI; liên hệ và giấy phép được maintainer xác nhận | Maintainer |
 | Lịch sử và thiết kế | `CHANGELOG.md` và các thiết kế trong manifest public; baseline/review/report chỉ để đối chiếu | Bản đồ trạng thái | Proposal public cũ dẫn tới quyết định hiện hành; không phụ thuộc link nội bộ | Reviewer hợp đồng độc lập |
 | Help và export, nếu cần sửa | `src/cli.rs`, `src/mcp.rs`, `tests/scripts/public_export.py` và test liên quan | Phát hiện cụ thể từ các gói trên | Patch/test riêng; contract-bump nếu đổi output; export không bỏ sót trang mới hoặc phá link | Reviewer Rust/contract và export |
@@ -213,11 +213,11 @@ Trên checkout sạch, reviewer làm theo hướng dẫn bằng các lệnh đú
 
 ```sh
 cargo install --path . --locked
-kg --version
-kg --help
-kg build
-kg symbols src/cli.rs --outline
-kg doctor
+aw --version
+aw --help
+aw build
+aw symbols src/cli.rs --outline
+aw doctor
 ```
 
 Tiêu chí: cài thành công trên môi trường được công bố; truy vấn trả vị trí có thể mở; không cần đường dẫn riêng của tác giả.

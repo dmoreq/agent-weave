@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""G17 — call-path correctness gate (kg Amendment 13).
+"""G17 — call-path correctness gate (aw Amendment 13).
 
 Reads docs/baselines/path-gt.jsonl (frozen 2026-11-02; every reachable
 pair's hop edges were verified EXTRACTED in the index at freeze, and every
 no_path pair's negative was verified structurally — zero out-edges or zero
-cross-references) and runs `kg path <from> <to>` against the ground-truth
-repos. A pair line carries: repo ("kg" | "vihap"), from, to, and either
+cross-references) and runs `aw path <from> <to>` against the ground-truth
+repos. A pair line carries: repo ("aw" | "vihap"), from, to, and either
 expect_hops (int) or expect ("no_path").
 
 Scoring: a reachable pair agrees when the exit code is 0 and the chain line
@@ -17,7 +17,7 @@ shape is a path-feature kill.
 
 Usage:
     python3 tests/scripts/path_recall.py --pairs docs/baselines/path-gt.jsonl \
-        <kg-binary> --kg-root <path> --vihap-root <path>
+        <aw-binary> --aw-root <path> --vihap-root <path>
 """
 from __future__ import annotations
 
@@ -34,13 +34,13 @@ HOPS = re.compile(r"\((\d+) hops\)")
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pairs", required=True)
-    ap.add_argument("--kg-root", required=True)
+    ap.add_argument("--aw-root", required=True)
     ap.add_argument("--vihap-root", required=True)
     ap.add_argument("binary")
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in Path(args.pairs).read_text().splitlines() if l.strip()]
-    roots = {"kg": args.kg_root, "vihap": args.vihap_root}
+    roots = {"aw": args.aw_root, "vihap": args.vihap_root}
 
     print("| repo | from -> to | expect | got | ok |")
     print("|------|------------|--------|-----|----|")

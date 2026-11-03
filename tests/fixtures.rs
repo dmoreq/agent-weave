@@ -3,9 +3,9 @@
 //! (negative), and module-qualified constructor. Each asserts the exact
 //! resolution outcome on a minimal fixture.
 
-use kg::extract::extract_file;
-use kg::extract::resolve;
-use kg::parse::{parse_source, Lang};
+use agent_weave::extract::extract_file;
+use agent_weave::extract::resolve;
+use agent_weave::parse::{parse_source, Lang};
 
 fn edges_for(src: &str) -> Vec<(String, String, String)> {
     // (kind, confidence, dst_name) of all calls edges, single-file project.
@@ -204,8 +204,10 @@ fn root_level_relative_import_resolves_without_stray_dot() {
 fn ts_class_method_and_this_call() {
     // R2: this.m() must resolve like Python self.m() — assert the EDGE.
     let src = "export class Ledger {\n  balance = 0\n  add(n: number): number {\n    return this.normalize(n)\n  }\n  private normalize(n: number): number {\n    return Math.abs(n)\n  }\n}\n";
-    let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
-    let fx = kg::extract::extract_file(0, "apps/core/ledger.ts", src.as_bytes(), &parsed);
+    let parsed =
+        agent_weave::parse::parse_source(src.as_bytes(), agent_weave::parse::Lang::TypeScript)
+            .unwrap();
+    let fx = agent_weave::extract::extract_file(0, "apps/core/ledger.ts", src.as_bytes(), &parsed);
     let names: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
     assert!(names.contains(&"apps.core.ledger.Ledger"), "{names:?}");
     assert!(names.contains(&"apps.core.ledger.Ledger.add"), "{names:?}");
@@ -213,7 +215,7 @@ fn ts_class_method_and_this_call() {
         names.contains(&"apps.core.ledger.Ledger.normalize"),
         "{names:?}"
     );
-    let resolution = kg::extract::resolve(vec![fx], Default::default());
+    let resolution = agent_weave::extract::resolve(vec![fx], Default::default());
     let hit = resolution.edges.iter().any(|e| {
         e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Ledger.normalize")
     });
@@ -228,11 +230,15 @@ fn ts_class_method_and_this_call() {
 fn ts_new_expression_resolves_to_constructor() {
     let src1 = "export class Widget {}\n";
     let src2 = "import { Widget } from './widget'\n\nexport function make(): Widget {\n  const w = new Widget()\n  return w\n}\n";
-    let p1 = kg::parse::parse_source(src1.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
-    let p2 = kg::parse::parse_source(src2.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
-    let fx1 = kg::extract::extract_file(0, "apps/core/widget.ts", src1.as_bytes(), &p1);
-    let fx2 = kg::extract::extract_file(1, "apps/core/factory.ts", src2.as_bytes(), &p2);
-    let resolution = kg::extract::resolve(vec![fx1, fx2], Default::default());
+    let p1 =
+        agent_weave::parse::parse_source(src1.as_bytes(), agent_weave::parse::Lang::TypeScript)
+            .unwrap();
+    let p2 =
+        agent_weave::parse::parse_source(src2.as_bytes(), agent_weave::parse::Lang::TypeScript)
+            .unwrap();
+    let fx1 = agent_weave::extract::extract_file(0, "apps/core/widget.ts", src1.as_bytes(), &p1);
+    let fx2 = agent_weave::extract::extract_file(1, "apps/core/factory.ts", src2.as_bytes(), &p2);
+    let resolution = agent_weave::extract::resolve(vec![fx1, fx2], Default::default());
     let hit = resolution
         .edges
         .iter()
@@ -244,11 +250,17 @@ fn ts_new_expression_resolves_to_constructor() {
 fn ts_relative_import_resolves_by_path() {
     let src1 = "export function format(n: number): string {\n  return String(n)\n}\n";
     let src2 = "import { format } from '../lib/format'\n\nexport function run(n: number): string {\n  return format(n)\n}\n";
-    let p1 = kg::parse::parse_source(src1.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
-    let p2 = kg::parse::parse_source(src2.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
-    let fx1 = kg::extract::extract_file(0, "apps/web/src/lib/format.ts", src1.as_bytes(), &p1);
-    let fx2 = kg::extract::extract_file(1, "apps/web/src/features/run.ts", src2.as_bytes(), &p2);
-    let resolution = kg::extract::resolve(vec![fx1, fx2], Default::default());
+    let p1 =
+        agent_weave::parse::parse_source(src1.as_bytes(), agent_weave::parse::Lang::TypeScript)
+            .unwrap();
+    let p2 =
+        agent_weave::parse::parse_source(src2.as_bytes(), agent_weave::parse::Lang::TypeScript)
+            .unwrap();
+    let fx1 =
+        agent_weave::extract::extract_file(0, "apps/web/src/lib/format.ts", src1.as_bytes(), &p1);
+    let fx2 =
+        agent_weave::extract::extract_file(1, "apps/web/src/features/run.ts", src2.as_bytes(), &p2);
+    let resolution = agent_weave::extract::resolve(vec![fx1, fx2], Default::default());
     let hit = resolution
         .edges
         .iter()
@@ -263,9 +275,12 @@ fn ts_relative_import_resolves_by_path() {
 #[test]
 fn ts_external_import_calls_drop() {
     let src = "import { useState } from 'react'\n\nexport function useCount() {\n  const [n] = useState(0)\n  return n\n}\n";
-    let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::TypeScript).unwrap();
-    let fx = kg::extract::extract_file(0, "apps/web/src/useCount.ts", src.as_bytes(), &parsed);
-    let resolution = kg::extract::resolve(vec![fx], Default::default());
+    let parsed =
+        agent_weave::parse::parse_source(src.as_bytes(), agent_weave::parse::Lang::TypeScript)
+            .unwrap();
+    let fx =
+        agent_weave::extract::extract_file(0, "apps/web/src/useCount.ts", src.as_bytes(), &parsed);
+    let resolution = agent_weave::extract::resolve(vec![fx], Default::default());
     assert!(
         !resolution
             .edges
@@ -287,10 +302,12 @@ fn rust_crate_three_segment_call_resolves() {
     // modules (src/ layout without mod.rs) — the G2-self G01 gap.
     let src1 = "pub fn file_changed() -> bool {\n    true\n}\n";
     let src2 = "pub fn check() -> bool {\n    crate::query::file_changed()\n}\n";
-    let parsed1 = kg::parse::parse_source(src1.as_bytes(), kg::parse::Lang::Rust).unwrap();
-    let parsed2 = kg::parse::parse_source(src2.as_bytes(), kg::parse::Lang::Rust).unwrap();
-    let fx1 = kg::extract::extract_file(0, "src/query.rs", src1.as_bytes(), &parsed1);
-    let fx2 = kg::extract::extract_file(1, "src/doctor.rs", src2.as_bytes(), &parsed2);
+    let parsed1 =
+        agent_weave::parse::parse_source(src1.as_bytes(), agent_weave::parse::Lang::Rust).unwrap();
+    let parsed2 =
+        agent_weave::parse::parse_source(src2.as_bytes(), agent_weave::parse::Lang::Rust).unwrap();
+    let fx1 = agent_weave::extract::extract_file(0, "src/query.rs", src1.as_bytes(), &parsed1);
+    let fx2 = agent_weave::extract::extract_file(1, "src/doctor.rs", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
         resolution.edges.iter().any(|e| {
@@ -336,19 +353,19 @@ fn fts5_is_compiled_into_bundled_sqlite() {
 #[test]
 fn split_ident_splits_camel_snake_and_dotted_idents() {
     assert_eq!(
-        kg::extract::split_ident("HierarchicalAddressParser.parse"),
+        agent_weave::extract::split_ident("HierarchicalAddressParser.parse"),
         "hierarchical address parser parse"
     );
     assert_eq!(
-        kg::extract::split_ident("get_knowledge_base"),
+        agent_weave::extract::split_ident("get_knowledge_base"),
         "get knowledge base"
     );
-    assert_eq!(kg::extract::split_ident("FNV-1a"), "fnv 1a");
+    assert_eq!(agent_weave::extract::split_ident("FNV-1a"), "fnv 1a");
     assert_eq!(
-        kg::extract::split_ident("normalize_ascii"),
+        agent_weave::extract::split_ident("normalize_ascii"),
         "normalize ascii"
     );
-    assert_eq!(kg::extract::split_ident(""), "");
+    assert_eq!(agent_weave::extract::split_ident(""), "");
 }
 
 #[test]
@@ -357,8 +374,9 @@ fn rust_impl_methods_scope_to_the_impl_type() {
     // m.Bar.make; `impl Bar { fn go(&self, other: Foo) -> Foo }` must yield
     // m.Bar.go, not m.Foo.go.
     let src = "struct Foo;\nstruct Bar;\n\nimpl Foo {\n    fn make() -> Bar {\n        Bar\n    }\n    fn plain() {}\n}\n\nimpl Bar {\n    fn go(&self, other: Foo) -> Foo {\n        other\n    }\n}\n";
-    let parsed = kg::parse::parse_source(src.as_bytes(), kg::parse::Lang::Rust).unwrap();
-    let fx = kg::extract::extract_file(0, "src/m.rs", src.as_bytes(), &parsed);
+    let parsed =
+        agent_weave::parse::parse_source(src.as_bytes(), agent_weave::parse::Lang::Rust).unwrap();
+    let fx = agent_weave::extract::extract_file(0, "src/m.rs", src.as_bytes(), &parsed);
     let quals: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
     assert!(quals.contains(&"src.m.Foo.make"), "{quals:?}");
     assert!(quals.contains(&"src.m.Foo.plain"), "{quals:?}");
@@ -542,7 +560,7 @@ fn signatures_span_multiline_parameters_and_stop_before_body() {
 
 #[test]
 fn acronym_identifiers_split_at_the_case_boundary() {
-    use kg::extract::split_ident;
+    use agent_weave::extract::split_ident;
     assert_eq!(split_ident("HTTPServer"), "http server");
     assert_eq!(split_ident("getHTTPResponse"), "get http response");
     assert_eq!(split_ident("parseS3Uploader"), "parse s3 uploader");

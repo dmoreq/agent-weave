@@ -45,8 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - run: cargo install --path . --locked --root "$RUNNER_TEMP/kg-install"
-      - run: "$RUNNER_TEMP/kg-install/bin/kg" --version
+      - run: cargo install --path . --locked --root "$RUNNER_TEMP/aw-install"
+      - run: "$RUNNER_TEMP/aw-install/bin/aw" --version
 
   audit:
     runs-on: ubuntu-latest
@@ -65,9 +65,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - run: cargo build --locked --release
       - run: |
-          mkdir -p "$RUNNER_TEMP/kg-fixture"
-          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/kg-fixture/a.py"
-          bash tests/scripts/seatbelt-build.sh target/release/kg "$RUNNER_TEMP/kg-fixture"
+          mkdir -p "$RUNNER_TEMP/aw-fixture"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/aw-fixture/a.py"
+          bash tests/scripts/seatbelt-build.sh target/release/aw "$RUNNER_TEMP/aw-fixture"
 
   network-deny-linux:
     runs-on: ubuntu-latest
@@ -79,14 +79,14 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - name: network namespace denies egress (negative control first)
         run: |
-          mkdir -p "$RUNNER_TEMP/kg-fixture"
-          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/kg-fixture/a.py"
+          mkdir -p "$RUNNER_TEMP/aw-fixture"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/aw-fixture/a.py"
           if bwrap --unshare-net --dev-bind / / python3 -c \
             "import socket; socket.create_connection(('1.1.1.1',443),2)"; then
             echo "negative control reached the network — namespace not enforced" >&2
             exit 1
           fi
-          bwrap --unshare-net --dev-bind / / target/release/kg build --root "$RUNNER_TEMP/kg-fixture"
+          bwrap --unshare-net --dev-bind / / target/release/aw build --root "$RUNNER_TEMP/aw-fixture"
           echo "G5 network-namespace: build ok, egress blocked — PASS"
 
   self-gt:
@@ -97,9 +97,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: self ground truth (evidence vault only)
         run: |
-          if [ ! -f docs/baselines/ground-truth-kg-self.md ]; then
+          if [ ! -f docs/baselines/ground-truth-aw-self.md ]; then
             echo "no evidence vault in this tree — skipped"; exit 0
           fi
           cargo build --locked --release
-          target/release/kg build --force
-          python3 -I tests/scripts/precision_recall.py . target/release/kg docs/baselines/ground-truth-kg-self.md
+          target/release/aw build --force
+          python3 -I tests/scripts/precision_recall.py . target/release/aw docs/baselines/ground-truth-aw-self.md

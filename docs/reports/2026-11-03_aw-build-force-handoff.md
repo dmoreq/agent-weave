@@ -1,14 +1,14 @@
-# Handoff — tối ưu `kg build --force`
+# Handoff — tối ưu `aw build --force`
 
 - Ngày: 2026-11-03
 - Baseline: `main` @ `6dbe57a` (`fix(p8): close R12 review findings`)
-- Binary: `target/release/kg` v0.2.1, schema v7
-- Phạm vi: tối ưu fresh full build (`kg build --force`); không đổi query contract, schema, hay fast path.
+- Binary: `target/release/aw` v0.2.1, schema v7
+- Phạm vi: tối ưu fresh full build (`aw build --force`); không đổi query contract, schema, hay fast path.
 - Trạng thái handoff: chỉ ghi nhận hiện trạng; chưa sửa code trong file này.
 
 ## 1. Hiện trạng đo được
 
-Corpus chuẩn: `/tmp/kg-eval`, 2,025 file Python synth, 85,050 symbols, 164,025 edges.
+Corpus chuẩn: `/tmp/aw-eval`, 2,025 file Python synth, 85,050 symbols, 164,025 edges.
 
 Ba run `build --force` gần nhất trên host hiện tại:
 
@@ -33,9 +33,9 @@ Thứ tự trong `run_build`:
 3. Phân loại carried/fresh; dirty closure; no-op fast path.
 4. `extract_units` — đọc file, tree-sitter parse, extract, file metrics, clone shingles, hash.
 5. `resolve` — resolve symbols/edges trong bộ nhớ.
-6. `create_fresh` — tạo `.kg/index.db.new`.
+6. `create_fresh` — tạo `.aw/index.db.new`.
 7. `BEGIN`; carry-forward; `insert_files`; `insert_unresolved_calls`; `insert_symbols`; `insert_edge_rows`; `populate_symbols_fts`; `insert_clone_groups`; ghi meta counts; `COMMIT`.
-8. `rename(2)` `.new` -> `.kg/index.db`.
+8. `rename(2)` `.new` -> `.aw/index.db`.
 
 Các điểm chính:
 
@@ -78,7 +78,7 @@ Phase breakdown hiện tại:
 
 ### B. Extract/parse path
 
-1. Đo `KG_WORKERS=1,2,4,8`; xác định scaling thật của `parse` và `extract`.
+1. Đo `AW_WORKERS=1,2,4,8`; xác định scaling thật của `parse` và `extract`.
 2. `extract_units` thực hiện nhiều lượt trên cùng file: parse, `extract_file`, `decision_nodes`, `non_comment_loc`, `shingles`, hash. Tìm lượt trùng lặp.
 3. `file_code_lines` thêm một traversal toàn file. Có thể gộp comment collection vào traversal có sẵn nếu chứng minh không đổi `effective_loc`.
 4. Kiểm tra `callable_metrics` và `extract_file` trên corpus 85k; tránh tối ưu dựa trên synthetic không đại diện.
@@ -94,7 +94,7 @@ Phase breakdown hiện tại:
 - Không thêm dependency; std-only.
 - Không dùng `unsafe`.
 - Không đổi schema v7, output contract, query semantics, hay byte shape.
-- Giữ atomic swap, build lock, `.kg/` write containment.
+- Giữ atomic swap, build lock, `.aw/` write containment.
 - Giữ determinism: serial/parallel và fresh/carried phải cho rows giống nhau.
 - Không sửa `docs/baselines/p8-utility-2026-11-03/`; đây là artifact benchmark chưa commit, không liên quan.
 - Kiểm tra process benchmark còn chạy trước khi đo latency:
@@ -106,12 +106,12 @@ ps aux | grep -E 'run_p8|grok|opencode|agy|zcode' | grep -v grep
 ## 6. Quy trình đo đề nghị
 
 ```bash
-cd /Users/quy.doan/Workspace/kg
+cd /Users/quy.doan/Workspace/aw
 cargo build --locked --release
-python3 -I tests/scripts/make_synth_corpus.py /tmp/kg-build-force --files 2025
+python3 -I tests/scripts/make_synth_corpus.py /tmp/aw-build-force --files 2025
 
 for i in 1 2 3 4 5 6 7; do
-  /usr/bin/time -p target/release/kg --root /tmp/kg-build-force build --force \
+  /usr/bin/time -p target/release/aw --root /tmp/aw-build-force build --force \
     2>&1 | grep -E 'wall=|real'
 done
 ```
@@ -122,7 +122,7 @@ Ghi lại:
 - best-of-7 và median
 - peak RSS (`/usr/bin/time -l` trên macOS)
 - index size
-- `KG_WORKERS=1,2,4,8`
+- `AW_WORKERS=1,2,4,8`
 - load average trước/sau mỗi run
 
 Baseline so sánh: commit `6dbe57a`, cùng corpus, cùng host, cùng binary build flags.

@@ -1,8 +1,8 @@
-# kg Structural Graph Amendment — Dependencies, Test Candidates, and Symbol Quality (P8)
+# aw Structural Graph Amendment — Dependencies, Test Candidates, and Symbol Quality (P8)
 
 > **Current status (2026-11-03, Amendment 22).** R14 value review and the
 > owner cleanup removed three surfaces described below:
-> `kg api` (F10), the `search --kind/--path/--exact` filters (F6), and the six
+> `aw api` (F10), the `search --kind/--path/--exact` filters (F6), and the six
 > `--exclude-generated` flags (F11). The `symbols.exported` and
 > `files.generated` columns remain for index compatibility; `stats
 > generated=N`, `files`, and the generated tag remain. Sections below are the
@@ -11,7 +11,7 @@
 ## Reading status
 
 This companion preserves proposal revision 4 and its subsequent schema-v7 amendment, not a pending approval request.
-Implementation was authorized in Amendment 19 of the [canonical specification](2026-10-31_kg-rust-code-index.md); Amendments 20-22 refine it.
+Implementation was authorized in Amendment 19 of the [canonical specification](2026-10-31_agent-weave-rust-code-index.md); Amendments 20-22 refine it.
 Read those entries before interpreting original defaults, review questions, or future-tense implementation steps below.
 
 | Task | Surfaces | Impact and limit |
@@ -47,26 +47,26 @@ Original internal review and ground-truth evidence are unavailable publicly. His
   F14 (JSON output) are explicitly deferred; they are not silently dropped.
 - Evidence source: the fixture and index probes in §2, the installed
   `agent-skills` set at `~/Workspace/personal/agent-skills`, and the current
-  kg worktree. No third-party tool was cloned for this proposal.
+  aw worktree. No third-party tool was cloned for this proposal.
 
 ## 1. Problem
 
-kg answers call-graph questions. The agent-skills set asks several structural
+aw answers call-graph questions. The agent-skills set asks several structural
 questions adjacent to that graph. Some have no query surface; some have a
 surface that is incomplete for the skill's decision.
 
-| Question | kg today | Consequence |
+| Question | aw today | Consequence |
 |---|---|---|
-| who inherits/implements X | no command; `callers` filters `kind='calls'` | `kg callers Base` returns 0 although `inherits` edges exist |
+| who inherits/implements X | no command; `callers` filters `kind='calls'` | `aw callers Base` returns 0 although `inherits` edges exist |
 | what depends on this file | `impact` defaults to one row per caller file over `calls` only | import-only and inheritance-only consumers are invisible |
 | is X dead | `dead` checks inbound `calls` and AMBIGUOUS call names only | inherited base classes and imported contracts are reported dead |
 | which tests exercise X | no command | skills fall back to manual pytest/cargo selection |
 | which functions exceed CC/nesting/length | `hotspots` is file-level | `code-review` cannot answer its per-function gate |
 | what is exported | no visibility model | `code-review` and `codebase-contracts` use grep/read |
 | which files are generated | no tag | Flutter/codegen files pollute `dead`, `clones`, `hotspots` |
-| Dart/Flutter questions | no Dart grammar | seven Flutter skills plus `dart-modern-idioms` cannot use kg |
+| Dart/Flutter questions | no Dart grammar | seven Flutter skills plus `dart-modern-idioms` cannot use aw |
 
-The goal is to make kg answer these questions with the existing honesty
+The goal is to make aw answer these questions with the existing honesty
 rules: static edges only, deterministic pointers, explicit caveats, bounded
 cost, and no new safety-invariant violations.
 
@@ -74,16 +74,16 @@ cost, and no new safety-invariant violations.
 
 | # | Type | Measurement | Result | Command / source |
 |---|---|---|---|---|
-| E1 | measured | Four-file Python fixture: `Base <- Child`, `Base <- Uses`, one `from a import` consumer, one plain `import a` consumer | `kg stats`: `files=4 symbols=11 edges=14 (calls=2 imports=3 inherits=2)`. `kg callers Base` -> exit 1, `0 callers found`. `kg dead` -> `a.py:1` (Base), `a.py:5` (Child). `kg impact a.py` -> `b.py:4`, `d.py:5`; `c.py` (`import a`) and the `from a import` lines are absent | throwaway fixture, binary `target/debug/kg`, schema v5 worktree |
-| E2 | measured | Self-index edge distribution | `files=38 symbols=414 edges=1294 (calls=914 imports=4 inherits=0)` at the review snapshot. Rust `use`/impl coverage is too sparse for inheritance/import questions | `KG_NO_JOURNAL=1 kg stats` on `~/Workspace/kg`, v0.2.1 |
+| E1 | measured | Four-file Python fixture: `Base <- Child`, `Base <- Uses`, one `from a import` consumer, one plain `import a` consumer | `aw stats`: `files=4 symbols=11 edges=14 (calls=2 imports=3 inherits=2)`. `aw callers Base` -> exit 1, `0 callers found`. `aw dead` -> `a.py:1` (Base), `a.py:5` (Child). `aw impact a.py` -> `b.py:4`, `d.py:5`; `c.py` (`import a`) and the `from a import` lines are absent | throwaway fixture, binary `target/debug/aw`, schema v5 worktree |
+| E2 | measured | Self-index edge distribution | `files=38 symbols=414 edges=1294 (calls=914 imports=4 inherits=0)` at the review snapshot. Rust `use`/impl coverage is too sparse for inheritance/import questions | `AW_NO_JOURNAL=1 aw stats` on `~/Workspace/aw`, v0.2.1 |
 | E3 | measured | Plain `import x` handling | `src/extract.rs:1811-1812` comment: "Plain `import x` emits no edge; resolution happens at call time." Only symbol imports and star imports emit `imports` edges | `src/extract.rs:1809-1826` |
-| E4 | measured | Skill budget and drift gate | `skills/code-index/SKILL.md` is exactly 3000 bytes, the gate budget. The gate lives in the agent-skills repository at `tests/skill_contract_drift.py`; it passes because it checks command/flag existence only, and it skips when `KG_BIN` is unset | `wc -c`; `KG_BIN=target/debug/kg python3 tests/skill_contract_drift.py` from `~/Workspace/personal/agent-skills` |
+| E4 | measured | Skill budget and drift gate | `skills/code-index/SKILL.md` is exactly 3000 bytes, the gate budget. The gate lives in the agent-skills repository at `tests/skill_contract_drift.py`; it passes because it checks command/flag existence only, and it skips when `AW_BIN` is unset | `wc -c`; `AW_BIN=target/debug/aw python3 tests/skill_contract_drift.py` from `~/Workspace/personal/agent-skills` |
 | E5 | measured | Skill requirements that name structural checks | `code-review` uses `git grep` for callers/dangling refs; `code-simplification` requires callers; `deprecation-migration` requires internal callers, `__all__`, sibling repos; `codebase-contracts` walks directories; `python-patterns` requires module boundaries and exports; `python-testing` requires affected tests | `skills/code-review/SKILL.md:83`; `skills/code-review/references/goldfish-code-review-lenses.md:91-93,205-209`; `skills/code-simplification/SKILL.md:36-42`; `skills/deprecation-migration/SKILL.md:40,55-57`; `skills/codebase-contracts/SKILL.md:42-47`; `skills/python-patterns/SKILL.md:37-39`; `skills/python-testing/SKILL.md:36-38` |
-| E6 | measured | Language support | Grammar string `py-0.25.0+ts-0.23.2+js-0.25.0+rs-0.23.3`; no Dart | `kg stats` |
-| E7 | measured | Unresolved data model | Schema v5 stores `unresolved_calls(file_id, dst_name)` with no site line or kind. `kg unresolved` is name-level (distinct names, internal count, top-10 names), not per-file counts only | `schema.sql:56-60`, `src/query.rs:913-990` |
+| E6 | measured | Language support | Grammar string `py-0.25.0+ts-0.23.2+js-0.25.0+rs-0.23.3`; no Dart | `aw stats` |
+| E7 | measured | Unresolved data model | Schema v5 stores `unresolved_calls(file_id, dst_name)` with no site line or kind. `aw unresolved` is name-level (distinct names, internal count, top-10 names), not per-file counts only | `schema.sql:56-60`, `src/query.rs:913-990` |
 | E8 | measured | Existing performance envelope | Queries 5-11 ms best-of-7 on the self index; builds 0.06-0.46 s on 27-596-file repos and 2.33 s on the 2,025-file corpus | `docs/EVALUATION.md` |
-| E9 | measured | Canonical base | Amendment 18 is R7 hardening with Gate G22; Amendment 17 is `kg context`/G21; schema is v5; Amendment 16 was reverted after G20(iii) failed | canonical spec `:96-97,339-340`; `src/extract.rs:21`; `schema.sql:1` |
-| E10 | measured | Existing CLI surfaces that P8 must not re-propose | `dead` already has `--exclude-tests` (default includes tests); `impact` already groups one row per caller file with a site count and `--sites` restores per-site rows; `kg context` already returns definition + callers + callees; `search` already handles qualified input and exact single-token names | `src/cli.rs:57-105`; `src/query.rs:584-833`; canonical Amendment 18(d,f) |
+| E9 | measured | Canonical base | Amendment 18 is R7 hardening with Gate G22; Amendment 17 is `aw context`/G21; schema is v5; Amendment 16 was reverted after G20(iii) failed | canonical spec `:96-97,339-340`; `src/extract.rs:21`; `schema.sql:1` |
+| E10 | measured | Existing CLI surfaces that P8 must not re-propose | `dead` already has `--exclude-tests` (default includes tests); `impact` already groups one row per caller file with a site count and `--sites` restores per-site rows; `aw context` already returns definition + callers + callees; `search` already handles qualified input and exact single-token names | `src/cli.rs:57-105`; `src/query.rs:584-833`; canonical Amendment 18(d,f) |
 | E11 | measured | Existing metric decision kinds | `decision_kinds` uses Python `if_statement`, `for_statement`, `while_statement`, `boolean_operator`, `elif_clause`, `except_clause`, `match_statement`, `case_clause`, `conditional_expression`; TS/JS adds `for_in_statement`, `do_statement`, `switch_case`, `ternary_expression`; Rust includes two kinds that do not exist in tree-sitter-rust 0.23.3 (`if_let_expression`, `while_let_expression`). F9 pins the per-symbol subset and drops the phantom kinds. | `src/parse.rs:90-123`; tree-sitter-rust node-types |
 | E12 | measured | Carry-forward and partial-version guards | `carry_forward_unchanged` copies explicit column lists for `files`, `symbols`, `edges`, `clone_groups`, `unresolved_calls`; `probe_old` checks the version, `clone_groups`, `grammar_version`, and `signature_version` | `src/db.rs:156-210,426-474` |
 | E13 | measured | Current source extension allowlist | `py ts tsx js jsx mts cts mjs cjs rs`; no Go, no Dart | `src/walk.rs:16-19` |
@@ -108,27 +108,27 @@ introduced once in P8a so P8a/P8b can write `unresolved_calls.kind` and
 
 | Command | Change | Phase | Feature |
 |---|---|---|---|
-| `kg implementers <NAME>` | new | P8a | F1 |
-| `kg dead` | predicate change; existing `--exclude-tests` extended to symbol-level | P8a | F1 |
-| `kg impact` | `--depth`, `--edges`, `--context`, `--explain`; existing default grouping and `--sites` preserved | P8a | F2/F4 |
-| `kg dead`, `clones`, `hotspots`, `unresolved`, `report` | `--path` | P8a | F3 |
-| `kg files` | new | P8a | F3 |
-| `kg symbols <dir>` | directory input | P8a | F3 |
-| `kg resolve` | new, `--stdin` | P8b | F6 |
-| `kg search` | filters removed 2026-11-03 | P8b | F6 |
-| `kg imports <FILE>` | new | P8b | F7 |
-| `kg tests <NAME\|FILE>` | new | P8b | F8 |
-| `kg unresolved` | `--names`, `--path`; schema v6 `site_line` + `kind` | P8c | F5 |
-| `kg complexity` | new | P8c | F9 |
-| `kg symbols` | `--metrics` | P8c | F9 |
-| `kg api <FILE\|DIR>` | removed 2026-11-03 | P8c | F10 |
-| `kg stats` | `generated=N` | P8c | F11 |
+| `aw implementers <NAME>` | new | P8a | F1 |
+| `aw dead` | predicate change; existing `--exclude-tests` extended to symbol-level | P8a | F1 |
+| `aw impact` | `--depth`, `--edges`, `--context`, `--explain`; existing default grouping and `--sites` preserved | P8a | F2/F4 |
+| `aw dead`, `clones`, `hotspots`, `unresolved`, `report` | `--path` | P8a | F3 |
+| `aw files` | new | P8a | F3 |
+| `aw symbols <dir>` | directory input | P8a | F3 |
+| `aw resolve` | new, `--stdin` | P8b | F6 |
+| `aw search` | filters removed 2026-11-03 | P8b | F6 |
+| `aw imports <FILE>` | new | P8b | F7 |
+| `aw tests <NAME\|FILE>` | new | P8b | F8 |
+| `aw unresolved` | `--names`, `--path`; schema v6 `site_line` + `kind` | P8c | F5 |
+| `aw complexity` | new | P8c | F9 |
+| `aw symbols` | `--metrics` | P8c | F9 |
+| `aw api <FILE\|DIR>` | removed 2026-11-03 | P8c | F10 |
+| `aw stats` | `generated=N` | P8c | F11 |
 | Dart extraction | no new command | P9 | F12 |
 
 ## 4. Common contract for all new surfaces
 
-1. **Read-only.** Every query writes only `.kg/usage.log` and
-   `.kg/usage-results.jsonl` when the journal is enabled. No source writes, no
+1. **Read-only.** Every query writes only `.aw/usage.log` and
+   `.aw/usage-results.jsonl` when the journal is enabled. No source writes, no
    hooks, no daemon, no network, no child processes.
 2. **Pointer shape.** A pointer is `repo-relative/path:line`, 1-based.
    Symbol-identity results append ` qualname`; edge-kind results append
@@ -156,7 +156,7 @@ introduced once in P8a so P8a/P8b can write `unresolved_calls.kind` and
    on the displayed rows. New pointer surfaces print
    `caveat, then staleness header (if any), then data`, matching `dead`.
 5. **Empty results.** Exit 1 with the full rendered lines in §4.9; the
-   `kg: no-results:` prefix is emitted exactly once, never prepended twice.
+   `aw: no-results:` prefix is emitted exactly once, never prepended twice.
    Ambiguous symbol input exits 2 with the existing candidate list. Corrupt
    index, lock, schema skew, and internal errors keep exit codes 3-7.
 6. **Determinism.** Every ordering is pinned in the feature section.
@@ -224,16 +224,16 @@ fields. `stats` gains no argument.
 
 | Surface | Full rendered empty/no-result line | Caveat |
 |---|---|---|
-| `impact` | `kg: no-results: 0 impacting files found` (calls); add `(unresolved imports are omitted)` / `(unresolved bases are omitted)` when those edges are selected | `kg: impact — resolved static edges only; unresolved imports/inherits are omitted` when selected; for calls-only `--depth > 1`/`--context`, `kg: impact — resolved static call edges only; dynamic dispatch may hide dependents` |
-| `dead` | `kg: no-results: 0 dead-code candidates found` | `kg: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, and external callers are not proven absent` |
-| `implementers` | `kg: no-results: 0 implementers found (resolved inherits edges only)` | `kg: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted` |
-| `imports` | `kg: no-results: 0 imports found (external and unresolved imports are omitted)` | `kg: imports — resolved static imports only; external and unresolved imports are omitted` |
-| `tests` | `kg: no-results: 0 test candidates found (static call edges only)` | `kg: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed` |
-| `files` | `kg: no-results: 0 indexed files in '<path>'`; without `--path`: `kg: no-results: 0 indexed files` | `kg: files — build-time inventory; files created after the build are absent` |
-| `symbols <dir>` | `kg: no-results: 0 symbols in '<dir>' (indexed)` | none |
-| `complexity` | `kg: no-results: 0 symbols match the thresholds` | `kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic` |
-| `api` | `kg: no-results: 0 exported symbols in '<path>'` | `kg: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete` |
-| `unresolved --names` | `kg: no-results: 0 unresolved names (external/builtin calls are not counted)` | none |
+| `impact` | `aw: no-results: 0 impacting files found` (calls); add `(unresolved imports are omitted)` / `(unresolved bases are omitted)` when those edges are selected | `aw: impact — resolved static edges only; unresolved imports/inherits are omitted` when selected; for calls-only `--depth > 1`/`--context`, `aw: impact — resolved static call edges only; dynamic dispatch may hide dependents` |
+| `dead` | `aw: no-results: 0 dead-code candidates found` | `aw: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, and external callers are not proven absent` |
+| `implementers` | `aw: no-results: 0 implementers found (resolved inherits edges only)` | `aw: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted` |
+| `imports` | `aw: no-results: 0 imports found (external and unresolved imports are omitted)` | `aw: imports — resolved static imports only; external and unresolved imports are omitted` |
+| `tests` | `aw: no-results: 0 test candidates found (static call edges only)` | `aw: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed` |
+| `files` | `aw: no-results: 0 indexed files in '<path>'`; without `--path`: `aw: no-results: 0 indexed files` | `aw: files — build-time inventory; files created after the build are absent` |
+| `symbols <dir>` | `aw: no-results: 0 symbols in '<dir>' (indexed)` | none |
+| `complexity` | `aw: no-results: 0 symbols match the thresholds` | `aw: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic` |
+| `api` | `aw: no-results: 0 exported symbols in '<path>'` | `aw: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete` |
+| `unresolved --names` | `aw: no-results: 0 unresolved names (external/builtin calls are not counted)` | none |
 
 For candidate-style commands, the caveat prints on stdout even when the
 result is empty, matching `dead`/`clones` `NoResultsCaveated` behavior.
@@ -261,7 +261,7 @@ and also on an empty result.
 | `api` | P8c | new command; signature column included |
 | `stats` | P8c | `generated=N` inserted after `files=N` |
 | `dead`/`clones`/`hotspots`/`report`/`complexity` | P8c | `--exclude-generated` removed 2026-11-03; tag/stats/files remain |
-| `impact`/`callers`/`callees`/`symbols`/`imports` | P8a/P8b | `--context` only on `impact`; `callers --context` withdrawn to avoid duplicating `kg context` |
+| `impact`/`callers`/`callees`/`symbols`/`imports` | P8a/P8b | `--context` only on `impact`; `callers --context` withdrawn to avoid duplicating `aw context` |
 
 ## 5. Features
 
@@ -276,7 +276,7 @@ from or implement this symbol?
 rows, `target_ids` cannot resolve the very names the feature asks about.
 Supertrait edges (`trait A: B`) are `inherits` edges from A to B.
 
-**Surface:** new `kg implementers <NAME> [--limit N]`.
+**Surface:** new `aw implementers <NAME> [--limit N]`.
 
 - Input: `target_ids` exact bare name or full qualname. Zero -> exit 1;
   multiple -> exit 2 with candidates.
@@ -285,7 +285,7 @@ Supertrait edges (`trait A: B`) are `inherits` edges from A to B.
 - Deduplication: one row per `symbols.id`; `M = COUNT(DISTINCT s.id)`;
   order `path, line_start, qualname`.
 - Output:
-  - first line: `kg: implementers — resolved static inherits edges only; dynamic inheritance may hide implementers`;
+  - first line: `aw: implementers — resolved static inherits edges only; dynamic inheritance may hide implementers`;
   - data: `path:line qualname` at the inheriting symbol's declaration line;
   - `showing N of M` only when capped.
 - Inherits confidence: exactly one destination -> `EXTRACTED`; more than one
@@ -329,7 +329,7 @@ Supertrait edges (`trait A: B`) are `inherits` edges from A to B.
   says so.
 - `impact` gains inbound `inherits`/`imports` through F4, not by changing
   `dead`.
-- Routing status: `dead` is not in the `kg-first` routing table; the command remains candidate-only until a precision gate exists.
+- Routing status: `dead` is not in the `aw-first` routing table; the command remains candidate-only until a precision gate exists.
 - Gate G23.
 
 ### F2 — Impact caller context (P8a)
@@ -339,7 +339,7 @@ site?
 
 **Surface:** `--context` on `impact` only.
 
-- `callers` and `callees` do not gain `--context`: `kg context <symbol>`
+- `callers` and `callees` do not gain `--context`: `aw context <symbol>`
   already returns the one-call symbol view (definition + callers + callees).
 - Output line: `path:line [in qualname]` when the site is inside a
   function/method; module-level sites keep `path:line`. With `--sites`, each
@@ -364,7 +364,7 @@ scope a repo-wide analysis to it?
      prefix; totals count only those pairs.
    - `unresolved --path`: `--names` and the default counts are scoped;
      header totals are scoped.
-2. New `kg files [--path P] [--limit N]`:
+2. New `aw files [--path P] [--limit N]`:
    - one line per indexed file: `path symbols=N bytes=N`;
    - `symbols` includes the module symbol; `bytes` is build-time
      `files.size`; files skipped by the >1 MB cap or parse-status filters
@@ -374,14 +374,14 @@ scope a repo-wide analysis to it?
      filesystem stat; `files` is a report shape with no staleness pass;
    - `generated=0|1` is appended after `bytes=N` when F11 lands;
    - empty scope: exit 1 with the §4.9 string.
-3. `kg symbols <dir> [--outline] [--limit N]`:
+3. `aw symbols <dir> [--outline] [--limit N]`:
    - precedence: an exact indexed file path uses file mode and keeps the
      existing byte-identical output; otherwise a prefix match uses directory
      mode; otherwise exit 1 with the §4.9 string;
    - directory detection is index-based: files whose path starts with
      `dir + "/"`; the filesystem is not walked;
    - exact sequence: staleness header (if any), then
-     `kg: dir <dir> — F files, S symbols`, then per file `path`, then
+     `aw: dir <dir> — F files, S symbols`, then per file `path`, then
      `path:line kind qualname [signature]`, then `showing N of S` only when
      capped;
    - `F` and `S` count indexed files and symbol rows in scope; `M = S`;
@@ -431,7 +431,7 @@ base and records it as the P8a contract.
 - `--edges imports` includes module and symbol import edges. `--edges
   inherits` includes inbound inherits into symbols in the target file.
 - Caveat when `--edges` contains imports or inherits:
-  `kg: impact — resolved static edges only; unresolved imports/inherits are omitted`.
+  `aw: impact — resolved static edges only; unresolved imports/inherits are omitted`.
   It prints on stdout before data and on empty results. Empty strings:
   - calls only: `0 impacting files found`;
   - with imports: `0 impacting files found (unresolved imports are omitted)`;
@@ -441,7 +441,7 @@ base and records it as the P8a contract.
   the number of distinct dependent files reachable within depth N; the
   closure is traversed fully. A cap hit prints `showing N of M`; a depth-cap
   stop with a non-empty result prints
-  `kg: depth cap D reached; deeper dependents may exist`.
+  `aw: depth cap D reached; deeper dependents may exist`.
 - Gate G23.
 
 ### F5 — Unresolved names with locations and edge kind (P8c, uses v6)
@@ -457,12 +457,12 @@ and where?
 - Extraction stores unresolved calls, imports, and inheritance bases with
   their site line. The fast-path gap query extends from calls to all three
   kinds, so a new module/base class heals carried importers/subclasses.
-- `kg unresolved --names [--path P]`:
-  - the default `kg unresolved` report stays byte-identical:
-    `kg: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})`,
+- `aw unresolved --names [--path P]`:
+  - the default `aw unresolved` report stays byte-identical:
+    `aw: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})`,
     followed by the existing top-10 names; `total` remains call-only
     (`files.unresolved`), not the sum of all kinds;
-  - `--names` uses `kg: unresolved=N rows in M files (call/import/inherit)`;
+  - `--names` uses `aw: unresolved=N rows in M files (call/import/inherit)`;
     `N` = located rows in scope, `M` = distinct files with located rows;
   - data: `path:line kind name`, sorted by path, site_line, kind, name;
   - cap line for `--names`: `showing N of M rows`;
@@ -474,12 +474,12 @@ and where?
   - rows with `site_line=0` are not printed; a stderr line reports the count
     of unlocated rows (expected zero on fresh builds; controlled build error
     if a fresh row is 0).
-- Default `kg unresolved` stays byte-identical.
+- Default `aw unresolved` stays byte-identical.
 - Gate G26.
 
 ### F6 — Batch resolve and search filters (P8b)
 
-1. `kg resolve --stdin`:
+1. `aw resolve --stdin`:
    - one name per line; trim surrounding whitespace; skip blank lines and
      lines whose first non-space byte is `#`; names are case-sensitive;
    - each name uses `target_ids`; output per input line:
@@ -503,7 +503,7 @@ and where?
      mangle successful per-name lines.
    - Journal `args`: `count` and `candidate_limit=50`; never the names.
    - MCP `names` uses the same 4096-byte per-name and 1 MiB total bounds.
-2. `kg search <terms>` (filter flags removed 2026-11-03; historical text:
+2. `aw search <terms>` (filter flags removed 2026-11-03; historical text:
    `--kind` filtered symbol kind, `--path` used §4 item 9, `--exact` matched
    the full qualname or bare name);
      exact hits first, then path, line, qualname; the signature column stays
@@ -558,14 +558,14 @@ and where?
 - Unresolved modules are stored as `unresolved_calls(kind='import',
   site_line=<import line>)` for fast-path healing; they do not emit edges.
 
-**Query:** new `kg imports <FILE> [--limit N]`.
+**Query:** new `aw imports <FILE> [--limit N]`.
 
 - Output: `path:line target`, where `path` is the importing file, `line` is
   the import statement, and `target` is the resolved destination qualname;
   one row per `(line, target)`; sorted by line, target; standard cap.
 - Output order: caveat, then staleness header (if any), then data.
-- First line: `kg: imports — resolved static imports only; external and unresolved imports are omitted`.
-- Inbound direction is `kg impact <FILE> --edges imports`.
+- First line: `aw: imports — resolved static imports only; external and unresolved imports are omitted`.
+- Inbound direction is `aw impact <FILE> --edges imports`.
 - MCP/journal/payload per §4.7/§4.8.
 - Known limits: `export *`/`export { X } from` do not mark re-exported
   symbols in the current file (F10); external packages are unresolved; a
@@ -576,7 +576,7 @@ and where?
 
 **Question answered:** which tests reach this symbol or file?
 
-**Surface:** new `kg tests <NAME|FILE> [--depth N] [--limit N]`.
+**Surface:** new `aw tests <NAME|FILE> [--depth N] [--limit N]`.
 
 - Input: an indexed file path uses every symbol in that file; otherwise
   `target_ids`. Zero/ambiguous follow the standard exits.
@@ -586,7 +586,7 @@ and where?
   `function` or `method` and its name matches `^test_` or `^test[A-Z]`
   (pytest/unittest style). Helpers inside test files do not match.
 - Path classification is a separate policy used only by
-  `dead --exclude-tests`, not by `kg tests`:
+  `dead --exclude-tests`, not by `aw tests`:
   - directory segments (not substrings) are `tests`, `test`, or
     `__tests__`;
   - filename matches `test_*.py`, `*_test.py`, `*.test.*`, `*.spec.*`, or
@@ -602,7 +602,7 @@ and where?
   `no test candidate within depth D; a longer route may exist (static call
   edges only)`. An exhausted search uses
   `0 test candidates found (static call edges only)`. A depth-cap stop with
-  non-empty results prints `kg: depth cap D reached; deeper tests may exist`.
+  non-empty results prints `aw: depth cap D reached; deeper tests may exist`.
 - Gate G25.
 
 ### F9 — Per-symbol metrics (P8c, schema v6)
@@ -654,7 +654,7 @@ length ceilings?
   nodes, or to the symbol's docstring (the first `expression_statement`
   containing a `string` in the body). Inline trailing comments do not make a
   line comment-only.
-- Non-callable symbols store 0 and are excluded from `kg complexity`.
+- Non-callable symbols store 0 and are excluded from `aw complexity`.
 - Metrics are computed in the existing parse walk. The spec pins a single
   pre-order walk with a callable stack; if the implementation needs a second
   subtree walk, the 1.25x build budget in §7.5 must be re-measured.
@@ -665,8 +665,8 @@ length ceilings?
 
 **Surfaces:**
 
-- `kg symbols <file> --metrics` appends ` cyc=N branches=N nest=N loc=N`.
-- `kg complexity [--path P] [--min-cyc N] [--min-loc N] [--min-branches N]
+- `aw symbols <file> --metrics` appends ` cyc=N branches=N nest=N loc=N`.
+- `aw complexity [--path P] [--min-cyc N] [--min-loc N] [--min-branches N]
   [--min-nest N] [--limit N]`:
   - output `path:line cyc=N branches=N nest=N loc=N qualname`;
   - filters are AND; defaults `min_cyc=1`, others 0; `min_cyc=1` includes
@@ -675,7 +675,7 @@ length ceilings?
     `line_start`;
   - `M` = callables matching the filters; `COUNT(*)` is a separate statement;
   - default cap 50; caveat line unconditional:
-  `kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic`.
+  `aw: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic`.
 - Gate G26.
 
 ### F10 — Public API/export inventory (P8c, schema v6; REMOVED 2026-11-03)
@@ -717,8 +717,8 @@ surface are gone, and `symbols.exported` remains only for index compatibility.
 - Generated files are included by default; `--exclude-generated` removes them.
   `--include-private` adds private symbols. The two flags are independent.
 - `DIR` is recursive over indexed paths under §4 item 9. Search filter combinations (`--kind`, `--path`, `--exact`) are experimental: the P8 journal recorded no filtered search, and no utility task exists.
-- First line: `kg: api — static export heuristics; re-exports, module visibility, non-callable declarations (const/static/type aliases/variables), and dynamic exports may be incomplete`.
-- Routing status: experimental. `kg api` is not in the `kg-first` routing table; its single utility task was negative on three hosts.
+- First line: `aw: api — static export heuristics; re-exports, module visibility, non-callable declarations (const/static/type aliases/variables), and dynamic exports may be incomplete`.
+- Routing status: experimental. `aw api` is not in the `aw-first` routing table; its single utility task was negative on three hosts.
 - Gate G26.
 
 ### F11 — Generated-file tagging (P8c, schema v6)
@@ -748,7 +748,7 @@ must exclude them?
   generated files when `--exclude-generated` is passed; default output is unchanged.
 - `callers`, `callees`, `path`, `impact`, `symbols`, `imports` keep
   generated files navigable.
-- `kg stats` gains `generated=N` after `files=N`; contract bump. The six `--exclude-generated` filters were removed on 2026-11-03 after zero journal use and no utility task. The tag, `files` inventory, and `stats` count remain supported.
+- `aw stats` gains `generated=N` after `files=N`; contract bump. The six `--exclude-generated` filters were removed on 2026-11-03 after zero journal use and no utility task. The tag, `files` inventory, and `stats` count remain supported.
 - Gate G26.
 
 ### F12 — Dart/Flutter support (P9)
@@ -819,7 +819,7 @@ CREATE INDEX symbols_complexity_idx
 
 - `PRAGMA user_version = 6`; `src/extract.rs:21` `SCHEMA_VERSION` is the single
   stamp site. A fresh `schema.sql` carries the columns and index.
-- Query opens exit 5 with the rebuild hint on a v5 index. `kg build` ignores
+- Query opens exit 5 with the rebuild hint on a v5 index. `aw build` ignores
   the old index and rebuilds fresh (it does not abort on version mismatch).
 - `probe_old` must verify the complete v6 column set (`PRAGMA table_info`
   for `symbols`, `files`, `unresolved_calls`) plus `clone_groups`,
@@ -853,7 +853,7 @@ CREATE INDEX symbols_complexity_idx
 ```
 
 - `PRAGMA user_version = 7`; `SCHEMA_VERSION = 7`. Query opens on v6 exit 5
-  with the rebuild hint; `kg build` rebuilds fresh.
+  with the rebuild hint; `aw build` rebuilds fresh.
 - `probe_old` adds `("symbols", "file_path")` to the required column set. A
   v7-stamped index missing the column or the index rebuilds fresh.
 - `insert_symbols` fills `file_path` from the aligned fresh file paths;
@@ -887,7 +887,7 @@ CREATE INDEX symbols_complexity_idx
   `COUNT(*)` for output, bounded visited set; measure at 1M edges.
 - Tests in the target file: seeds are visited, so a test symbol that is also
   a target is not reported. This is a documented limitation of
-  `kg tests <FILE>`.
+  `aw tests <FILE>`.
 
 ### 7.2 Import resolution
 
@@ -953,7 +953,7 @@ The implementation phase must commit these before any gate can pass:
 
 - `tests/scripts/import_recall.py` and internal import ground truth (unavailable publicly)
   (40 hand-verified import pairs, independent oracle, freeze commit; report
-  recall/precision with Wilson 95% intervals; local `--kg-root` and
+  recall/precision with Wilson 95% intervals; local `--aw-root` and
   `--vihap-root` arguments, private-corpus gate);
 - `tests/scripts/tests_recall.py` and internal test ground truth (unavailable publicly)
   (20 test symbols across direct/indirect/negative cases and one real repo;
@@ -965,20 +965,20 @@ The implementation phase must commit these before any gate can pass:
   inheritance pairs, precision >= 80% / recall >= 70%, Wilson intervals.
 
 Every gate also runs MCP byte parity for its new tools and the
-`code-index`/`kg-first` skill drift check. The drift check must parse fenced
+`code-index`/`aw-first` skill drift check. The drift check must parse fenced
 code blocks, not only inline backticks, and must assert consumer-skill lines;
-when `KG_BIN` is unset it runs a static command/flag manifest instead of
+when `AW_BIN` is unset it runs a static command/flag manifest instead of
 skipping the whole check.
 
 ## 8. Gate registry
 
 | Gate | Phase | Bar | Pass command | Kill / withdrawal |
 |---|---|---|---|---|
-| G23 | P8a | `implementers` 100% exact bytes on the inheritance fixture (Rust trait, TS interface, Python multiple inheritance, negative controls); `dead` 0 false positives on inherited/imported symbols, positive dead fixture, no AMBIGUOUS-call regression; `impact` default byte-identity plus `--edges/--depth/--context` exact bytes and depth-monotonicity; `--path` boundary tests; `symbols <dir>` exact bytes; v6 migration/partial-index tests; MCP parity; query bytes equal across fresh/carried and serial/parallel builds | `cargo test p8a_` + `cargo test --test mcp` + `KG_WORKERS=1` equality + `bash tests/scripts/timing_assert.sh 7 implementers 20 <binary> ...` | Revert P8a and schema v6; remove `implementers`, v6 columns, flags, MCP tools, journal/payload rows, and skill lines |
-| G24 | P8b | Import edges: >= 90% recall and >= 90% precision on 40 frozen pairs over kg + vihap, Wilson 95% reported; Python plain/dotted/relative/star, TS relative/side-effect/require, Rust use/mod fixtures exact; unresolved-import gap-healing; `require`/`import()` add no unresolved call; MCP parity; import-only build overhead <= 1.15x | `python3 tests/scripts/import_recall.py --pairs <internal-import-ground-truth> --kg-root <repo> --vihap-root <repo2> <binary>` (internal input unavailable publicly) + `cargo test import_` | Remove import extraction and `kg imports`; withdraw `--edges imports`, unresolved kind rows, MCP tool, journal/payload rows, and skill lines |
-| G25 | P8b | 10 seeded tests plus 20 real-repo test symbols; >= 90% recall and 0 non-test false positives under the name-only candidate rule; helper-in-test-file negative control; truncated-depth footer; exact bytes; MCP parity; timing | `cargo test tests_impact_seed` + `python3 tests/scripts/tests_recall.py ...` + `timing_assert.sh` | Remove `kg tests`; withdraw MCP/journal/payload rows and skill lines |
+| G23 | P8a | `implementers` 100% exact bytes on the inheritance fixture (Rust trait, TS interface, Python multiple inheritance, negative controls); `dead` 0 false positives on inherited/imported symbols, positive dead fixture, no AMBIGUOUS-call regression; `impact` default byte-identity plus `--edges/--depth/--context` exact bytes and depth-monotonicity; `--path` boundary tests; `symbols <dir>` exact bytes; v6 migration/partial-index tests; MCP parity; query bytes equal across fresh/carried and serial/parallel builds | `cargo test p8a_` + `cargo test --test mcp` + `AW_WORKERS=1` equality + `bash tests/scripts/timing_assert.sh 7 implementers 20 <binary> ...` | Revert P8a and schema v6; remove `implementers`, v6 columns, flags, MCP tools, journal/payload rows, and skill lines |
+| G24 | P8b | Import edges: >= 90% recall and >= 90% precision on 40 frozen pairs over aw + vihap, Wilson 95% reported; Python plain/dotted/relative/star, TS relative/side-effect/require, Rust use/mod fixtures exact; unresolved-import gap-healing; `require`/`import()` add no unresolved call; MCP parity; import-only build overhead <= 1.15x | `python3 tests/scripts/import_recall.py --pairs <internal-import-ground-truth> --aw-root <repo> --vihap-root <repo2> <binary>` (internal input unavailable publicly) + `cargo test import_` | Remove import extraction and `aw imports`; withdraw `--edges imports`, unresolved kind rows, MCP tool, journal/payload rows, and skill lines |
+| G25 | P8b | 10 seeded tests plus 20 real-repo test symbols; >= 90% recall and 0 non-test false positives under the name-only candidate rule; helper-in-test-file negative control; truncated-depth footer; exact bytes; MCP parity; timing | `cargo test tests_impact_seed` + `python3 tests/scripts/tests_recall.py ...` + `timing_assert.sh` | Remove `aw tests`; withdraw MCP/journal/payload rows and skill lines |
 | G26 | P8c | Per-feature sub-verdicts: (a) metrics exact on Python/TS/Rust fixtures incl. `elif`, ternary, lambda/arrow, comprehension, comment, nested-class cases; (b) `api` exact for `__all__`, `pub`/`pub(crate)`, local/default/re-export/type-only exports, module-symbol limit; (c) generated `--exclude-generated` 10/10 markers, 0/10 false positives incl. `gen/` and bare `DO NOT EDIT`; (d) unresolved `--names` exact, `site_line>=1`, kind, header scoping; (e) `complexity` ranking exact and `EXPLAIN QUERY PLAN` accepted; (f) v6 full-column carry-forward, deterministic order, no `metrics_version` carry; MCP parity | `cargo test p8c_` + `EXPLAIN` probe + `timing_assert.sh` | Remove the failed feature's command/flags before v6 release; withdraw every consumer flag/filter, MCP tool, journal/payload row, and skill line |
-| G27 | P8b | `resolve --stdin` bytes and exit codes for found/ambiguous/missing; 1000-name/4096-byte/1MiB caps; empty input; no partial output on fatal error; MCP `isError` carrier; search filters exact; skill drift gate parses fenced blocks and consumer lines; static manifest passes without `KG_BIN` | `cargo test resolve_batch` + `KG_BIN=<binary> python3 ~/Workspace/personal/agent-skills/tests/skill_contract_drift.py` | Remove `resolve` and search filters; withdraw MCP/journal rows and skill lines |
+| G27 | P8b | `resolve --stdin` bytes and exit codes for found/ambiguous/missing; 1000-name/4096-byte/1MiB caps; empty input; no partial output on fatal error; MCP `isError` carrier; search filters exact; skill drift gate parses fenced blocks and consumer lines; static manifest passes without `AW_BIN` | `cargo test resolve_batch` + `AW_BIN=<binary> python3 ~/Workspace/personal/agent-skills/tests/skill_contract_drift.py` | Remove `resolve` and search filters; withdraw MCP/journal rows and skill lines |
 | G28 | P9 | P9 addendum approved with pinned grammar crate/version, licenses, node kinds, pubspec containment; Dart fixture 20/20 call sites, 10/10 inheritance pairs, imports/parts exact; Flutter GT precision >= 80%, recall >= 70%, Wilson reported; build overhead <= 1.25x; no crash on the 2,025-file corpus; allowlist and write-path checks green | `cargo test dart_` + `python3 tests/scripts/dart_recall.py --pairs <internal-dart-ground-truth> ...` (internal input unavailable publicly) + `bash tests/scripts/timing_assert.sh ...` + `bash tests/scripts/allowlist_check.sh Cargo.lock` + `bash tests/scripts/write_path_check.sh` | Remove Dart grammar/extraction/walk extension, allowlist entry, generated suffix activation, MCP/journal rows, and skill lines |
 
 Gate numbers are provisional until the owner merges Amendment 18. Each gate
@@ -998,7 +998,7 @@ withdrawal list in §4.10 is the authority for what must be removed.
    fresh with exit 0; query opens still exit 5 on a v5 DB.
 4. **MCP.** Byte-parity fixtures for every new tool; malformed JSON and
    oversized frame tests remain green; `resolve` `isError` behavior pinned.
-5. **Journal/payload.** `kg usage --verify` replays `implementers`,
+5. **Journal/payload.** `aw usage --verify` replays `implementers`,
    `imports`, `tests`, `api`, `complexity`, and `symbols <dir>` where
    applicable; report shapes produce no payload.
 6. **Skill drift.** `tests/skill_contract_drift.py` extended to the new
@@ -1014,7 +1014,7 @@ withdrawal list in §4.10 is the authority for what must be removed.
 
 ## 10. Skill contract changes
 
-The kg repository ships `skills/kg-first/SKILL.md`; the agent-skills
+The aw repository ships `skills/aw-first/SKILL.md`; the agent-skills
 repository ships `skills/code-index/SKILL.md`. This amendment requires both,
 plus one-line pointers in the consumer skills.
 
@@ -1024,23 +1024,23 @@ Add the new commands only after they land. The table is at budget, so prune
 older prose; one line per command:
 
 ```bash
-kg context X               # definition + direct callers + direct callees
-kg implementers X          # who inherits/implements X?
-kg impact file.py --edges calls,imports,inherits --depth 3
-kg imports file.py         # what does this file import (outbound)?
-kg tests X                 # which tests reach X? (candidates)
-kg complexity --min-cyc 10 # functions over the ceiling
-kg files --path src        # indexed files in a directory
-kg symbols src/ --outline  # directory structure with signatures
-kg unresolved --names      # unresolved callees with lines
-kg resolve --stdin         # batch name resolution
+aw context X               # definition + direct callers + direct callees
+aw implementers X          # who inherits/implements X?
+aw impact file.py --edges calls,imports,inherits --depth 3
+aw imports file.py         # what does this file import (outbound)?
+aw tests X                 # which tests reach X? (candidates)
+aw complexity --min-cyc 10 # functions over the ceiling
+aw files --path src        # indexed files in a directory
+aw symbols src/ --outline  # directory structure with signatures
+aw unresolved --names      # unresolved callees with lines
+aw resolve --stdin         # batch name resolution
 ```
 
-Correct the current `search` caveat: `kg search` matches symbol names,
+Correct the current `search` caveat: `aw search` matches symbol names,
 path tokens, and signature tokens (Amendment 14); it does not index
 docstrings, bodies, comments, config, or strings. Amendment 16 was reverted.
 
-### 10.2 `kg-first` (kg repo)
+### 10.2 `aw-first` (aw repo)
 
 Add routing rows for the same commands. Keep the existing staleness, exit-2,
 cap, and grep-fallback rules. Add one calibration sentence: `implementers`,
@@ -1058,19 +1058,19 @@ table:
 | `code-simplification` | Get callers and file metrics from `code-index` before changing a symbol; `dead` is a candidate list, not proof. |
 | `code-minimalism` | Use `code-index callers` before declaring a helper local; use `imports`/`impact --edges imports` for cross-package consumers. |
 | `deprecation-migration` | Use `code-index callers`/`impact --edges` for internal consumers; `__all__`, sibling repos, and external consumers still require grep/manual audit. |
-| `codebase-contracts` | Use `kg symbols <dir> --outline` and `kg files` for directory inventory; resolve claims in batch with `kg resolve`. |
-| `python-patterns` | Use `kg imports` for module boundaries; call-graph traces use `callers`/`path`. |
-| `python-testing` | Use `kg tests` as a candidate test set, then run the decisive targeted pytest command. |
-| `doubt-driven-development` | Use `kg path` and `kg impact --depth` for blast-radius probes; state the static-resolution caveat. |
+| `codebase-contracts` | Use `aw symbols <dir> --outline` and `aw files` for directory inventory; resolve claims in batch with `aw resolve`. |
+| `python-patterns` | Use `aw imports` for module boundaries; call-graph traces use `callers`/`path`. |
+| `python-testing` | Use `aw tests` as a candidate test set, then run the decisive targeted pytest command. |
+| `doubt-driven-development` | Use `aw path` and `aw impact --depth` for blast-radius probes; state the static-resolution caveat. |
 
 Flutter skills get no pointer until P9 lands; before that, the correct
-instruction is "kg has no Dart index; use analyzer/grep".
+instruction is "aw has no Dart index; use analyzer/grep".
 
 ### 10.4 Drift gate
 
 Extend `tests/skill_contract_drift.py`:
 
-- all new commands and flags exist in `kg --help`/subcommand help;
+- all new commands and flags exist in `aw --help`/subcommand help;
 - the `code-index` byte budget still passes;
 - a behavior probe asserts the search claim against the current binary
   (identifier/path/signature hit; docstring-only query does not match).
@@ -1110,8 +1110,8 @@ default edge set.
 ## 13. Implementation plan (post-approval)
 
 1. **Canonical merge.** Add Amendment 18 and G23-G28 to
-   `docs/designs/2026-10-31_kg-rust-code-index.md`. Do not implement before
-   this merge; kg is spec-first. Resolve the in-flight `impact` grouping ID
+   `docs/designs/2026-10-31_agent-weave-rust-code-index.md`. Do not implement before
+   this merge; aw is spec-first. Resolve the in-flight `impact` grouping ID
    first.
 2. **P8a (schema v6 + query + symbol extraction).** `schema.sql`,
    `src/db.rs` (v6 columns, index, partial probe, carry-forward),
@@ -1134,7 +1134,7 @@ default edge set.
    grammar dependency and node kinds before code. It is not part of this
    amendment's implementation approval.
 6. **Docs.** README usage block, CHANGELOG entries, EVALUATION updates for
-   every measured gate, `skills/kg-first/SKILL.md`.
+   every measured gate, `skills/aw-first/SKILL.md`.
 7. **Gates.** Run each gate on the shipped binary with the command recorded.
    A failing gate blocks the phase; no partial release.
 
@@ -1143,12 +1143,12 @@ default edge set.
 | Alternative | Why rejected |
 |---|---|
 | LSP or language-server integration | Long-lived servers violate the no-child-process invariant; static pointers plus grep fallback are the existing honest boundary |
-| Lexical reference index (`kg refs`) over source, docs, and config | Grep already wins on cost and completeness for lexical search; kg's value is resolved structure, not token search |
+| Lexical reference index (`aw refs`) over source, docs, and config | Grep already wins on cost and completeness for lexical search; aw's value is resolved structure, not token search |
 | Cross-repo index | Explicitly out of scope; per-repo qualnames and safety boundaries would change |
 | Framework route mapping (`go_router`, React Router) | Framework-specific semantics, not a code-index concern; remains a skill/manual task |
-| Runtime test execution or coverage | kg is static and read-only; `tests` is a candidate surface only |
+| Runtime test execution or coverage | aw is static and read-only; `tests` is a candidate surface only |
 | PageRank or semantic ranking for `complexity` | Unmeasured at this scale; deterministic threshold ranking is sufficient |
-| Separate `kg dependents` command | `impact --edges` covers the same question and keeps one surface |
+| Separate `aw dependents` command | `impact --edges` covers the same question and keeps one surface |
 | JSON output now | LLM consumers use text; JSON expands the contract; defer until a machine gate needs it |
 | Revision-aware index now | Source materialization and storage are a separate phase; grep at a revision covers the current review workflow |
 | Cognitive complexity in v1 | No pinned formula; adds a metric-definition debate without a gate |
@@ -1166,13 +1166,13 @@ default edge set.
   has a positive dead fixture, and preserves the AMBIGUOUS-call suppression.
 - `impact --edges` returns import-only and inheritance-only consumers;
   default impact bytes are unchanged; depth > 1 is monotone with depth 1.
-- `kg tests`, `complexity`, and `api` meet their gate criteria (exact bytes,
+- `aw tests`, `complexity`, and `api` meet their gate criteria (exact bytes,
   candidate precision/recall, metric formulas), not a vague "answer the
   skill question".
 - Schema v6 is additive, carries forward every new column, recomputes the new
   columns on fresh and fast-path builds, rebuilds a partial v6 index, and
   exits 5 on v5 query opens.
-- README, CHANGELOG, EVALUATION, `skills/kg-first/SKILL.md`, the agent-skills
+- README, CHANGELOG, EVALUATION, `skills/aw-first/SKILL.md`, the agent-skills
   `code-index` skill, and the consumer lines in §10.3 are updated.
 - The gate harness files in §7.6 exist and run; `timing_assert.sh` exits
   non-zero on budget overrun.

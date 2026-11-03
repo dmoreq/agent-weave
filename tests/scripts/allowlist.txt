@@ -1,3 +1,4 @@
+agent-weave
 aho-corasick
 anstream
 anstyle
@@ -28,7 +29,6 @@ ignore
 indexmap
 is_terminal_polyfill
 itoa
-kg
 libsqlite3-sys
 log
 memchr

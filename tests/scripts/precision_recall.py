@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""G2 — precision + recall of `kg callers` against the 30 frozen GT rows.
+"""G2 — precision + recall of `aw callers` against the 30 frozen GT rows.
 
-Recall: a GT row hits when kg's caller pointers for the row's callee qualname
-contain the row's caller file:line; when kg exits 2 (ambiguous symbol), the
+Recall: a GT row hits when aw's caller pointers for the row's callee qualname
+contain the row's caller file:line; when aw exits 2 (ambiguous symbol), the
 row hits only if the true callee qualname appears in the candidate list
 (tasks.md scoring contract). Dynamic rows (G28) are excluded from both
 denominators per spec.
@@ -10,11 +10,11 @@ denominators per spec.
 Precision: every emitted pointer for the queried callees is verified against
 the vihap working tree — the source line must contain the callee's short name
 followed by "(" (a real call site). EXTRACTED-tier precision uses the same
-verification (kg emits only EXTRACTED-tier pointers for these queries).
+verification (aw emits only EXTRACTED-tier pointers for these queries).
 
 Wilson 95% intervals are computed from the binomial standard formulas.
 
-Usage: precision_recall.py <vihap-root> <kg-binary> <ground-truth.md>
+Usage: precision_recall.py <vihap-root> <aw-binary> <ground-truth.md>
 Exit 0 always; prints the gate verdict.
 """
 import math
@@ -50,15 +50,15 @@ def parse_gt(path):
     return rows
 
 
-def kg_callers(kg, root, qualname):
+def aw_callers(aw, root, qualname):
     proc = subprocess.run(
-        [kg, "callers", qualname, "--limit", "10000", "--root", root],
+        [aw, "callers", qualname, "--limit", "10000", "--root", root],
         capture_output=True, text=True,
     )
     if proc.returncode == 0:
         pointers = set()
         for line in proc.stdout.splitlines():
-            if line.startswith("kg:") or line.startswith("showing "):
+            if line.startswith("aw:") or line.startswith("showing "):
                 continue
             # R7 pointer lines may carry an identity detail after the
             # pointer ("src/query.rs:1499 src.query.collect_output"); parse
@@ -77,7 +77,7 @@ def kg_callers(kg, root, qualname):
 
 
 def main():
-    root, kg, gt_path = sys.argv[1], sys.argv[2], sys.argv[3]
+    root, aw, gt_path = sys.argv[1], sys.argv[2], sys.argv[3]
     rows = parse_gt(gt_path)
     scored = [r for r in rows if not r[2].startswith("(dynamic)")]
     dynamic = [r for r in rows if r[2].startswith("(dynamic)")]
@@ -90,7 +90,7 @@ def main():
             targets.append(callee[: -len(".__init__")])
         for t in targets:
             if t not in callee_pointers:
-                callee_pointers[t] = kg_callers(kg, root, t)
+                callee_pointers[t] = aw_callers(aw, root, t)
 
     hits = 0
     misses = []

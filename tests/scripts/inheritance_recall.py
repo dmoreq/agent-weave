@@ -3,7 +3,7 @@
 
 Reads frozen JSONL rows:
   {"repo": "vihap"|"finguard", "base": "...", "child": "..."}
-and checks `kg implementers <base>` lists the child qualname. Python
+and checks `aw implementers <base>` lists the child qualname. Python
 same-file and cross-file inheritance plus TS same-file interface extension are
 covered; cross-file Rust impls and tsconfig path aliases are excluded by the
 pinned F1 limits.
@@ -62,7 +62,7 @@ def main() -> int:
         found = proc.returncode == 0 and any(
             row["child"] in line
             for line in proc.stdout.splitlines()
-            if not line.startswith("kg:") and not line.startswith("showing ")
+            if not line.startswith("aw:") and not line.startswith("showing ")
         )
         if found:
             hits += 1

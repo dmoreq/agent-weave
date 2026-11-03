@@ -2,8 +2,8 @@
 //! build inserts under one caller-owned transaction (Amendment 11b; 500-row
 //! prepared batches), and the full-atomic-replacement build policy.
 //!
-//! Build semantics (spec, single rule): `kg build` always produces a full
-//! atomic replacement — extract into `.kg/index.db.new` (fresh schema), close,
+//! Build semantics (spec, single rule): `aw build` always produces a full
+//! atomic replacement — extract into `.aw/index.db.new` (fresh schema), close,
 //! then rename(2) onto `index.db`. A concurrent reader sees the old or the new
 //! DB, never a missing one. There is no delete step; orphan sidecars are
 //! cleaned at build start and by `doctor`.
@@ -16,13 +16,13 @@ use std::time::UNIX_EPOCH;
 
 use rusqlite::{Connection, OpenFlags};
 
-use crate::error::{KgError, Result};
+use crate::error::{AwError, Result};
 use crate::extract::{CarriedIndex, CarriedSymbol, NewSymbol, SCHEMA_VERSION};
 
 /// Compile-time grammar identity, derived from the Cargo.lock-pinned grammar
 /// crate versions by build.rs (R6d A8: a hand-maintained string had already
 /// drifted from the lock). The identity gates the fast path.
-pub const GRAMMAR_VERSION: &str = env!("KG_GRAMMAR_VERSION");
+pub const GRAMMAR_VERSION: &str = env!("AW_GRAMMAR_VERSION");
 /// Signature-capture revision (R7/Amendment 18): indexes whose stored
 /// signatures predate the multi-line capture are fully re-extracted once.
 /// This is not a schema change — the table shape is unchanged.
@@ -30,23 +30,23 @@ pub const SIGNATURE_VERSION: &str = "2";
 /// Per-symbol metric-rule version (Amendment 19); a mismatch disables the fast path.
 pub const METRICS_VERSION: &str = "1";
 
-pub fn kg_dir(root: &Path) -> PathBuf {
-    root.join(".kg")
+pub fn aw_dir(root: &Path) -> PathBuf {
+    root.join(".aw")
 }
 
 pub fn db_path(root: &Path) -> PathBuf {
-    kg_dir(root).join("index.db")
+    aw_dir(root).join("index.db")
 }
 
 pub fn db_new_path(root: &Path) -> PathBuf {
-    kg_dir(root).join("index.db.new")
+    aw_dir(root).join("index.db.new")
 }
 
-/// Write the tool-owned `.kg/.gitignore` (`*`) on first build: the whole
+/// Write the tool-owned `.aw/.gitignore` (`*`) on first build: the whole
 /// directory disappears from `git status` without touching the repo's own
 /// .gitignore (allowed write path per invariant 3's constant list).
-pub fn ensure_kg_gitignore(root: &Path) -> Result<()> {
-    let dir = kg_dir(root);
+pub fn ensure_aw_gitignore(root: &Path) -> Result<()> {
+    let dir = aw_dir(root);
     fs::create_dir_all(&dir)?;
     let marker = dir.join(".gitignore");
     if !marker.exists() {
@@ -55,14 +55,14 @@ pub fn ensure_kg_gitignore(root: &Path) -> Result<()> {
     Ok(())
 }
 
-///Exclusive flock over `.kg/build.lock` for the whole build (CUJ6).
+///Exclusive flock over `.aw/build.lock` for the whole build (CUJ6).
 pub struct BuildLock {
     file: File,
 }
 
 impl BuildLock {
     pub fn acquire(root: &Path) -> Result<BuildLock> {
-        let dir = kg_dir(root);
+        let dir = aw_dir(root);
         fs::create_dir_all(&dir)?;
         let lock_path = dir.join("build.lock");
         let file = fs::OpenOptions::new()
@@ -84,7 +84,7 @@ impl BuildLock {
                         })
                     })
                     .unwrap_or(0);
-                return Err(KgError::Locked(pid));
+                return Err(AwError::Locked(pid));
             }
             Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
         }
@@ -114,13 +114,13 @@ impl Drop for BuildLock {
 /// linear in DB size, on every open (CLI and per-MCP-tool-call). Corruption
 /// still exits 3: SQLITE_NOTADB surfaces on the first statement against a
 /// non-SQLite file, SQLITE_CORRUPT when a query hits a malformed page, and
-/// both map to the contract message via `KgError::from(rusqlite::Error)`.
-/// Deep integrity remains `kg doctor` (`PRAGMA integrity_check`).
+/// both map to the contract message via `AwError::from(rusqlite::Error)`.
+/// Deep integrity remains `aw doctor` (`PRAGMA integrity_check`).
 pub fn open_for_query(root: &Path) -> Result<Connection> {
     let path = db_path(root);
     if !path.exists() {
-        return Err(KgError::NoResults(format!(
-            "no .kg/index.db under {} — run kg build",
+        return Err(AwError::NoResults(format!(
+            "no .aw/index.db under {} — run aw build",
             root.display()
         )));
     }
@@ -132,7 +132,7 @@ pub fn open_for_query(root: &Path) -> Result<Connection> {
 pub fn check_schema_version(conn: &Connection) -> Result<()> {
     let have: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if have != SCHEMA_VERSION {
-        return Err(KgError::SchemaMismatch {
+        return Err(AwError::SchemaMismatch {
             have,
             want: SCHEMA_VERSION,
         });
@@ -140,11 +140,11 @@ pub fn check_schema_version(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Fresh DB at `.kg/index.db.new` with tables, FTS, and user_version stamped.
+/// Fresh DB at `.aw/index.db.new` with tables, FTS, and user_version stamped.
 /// Secondary indexes are created later by `create_secondary_indexes` (after
 /// the bulk insert) so each index is sorted once instead of maintained per row.
 pub fn create_fresh(root: &Path) -> Result<Connection> {
-    ensure_kg_gitignore(root)?;
+    ensure_aw_gitignore(root)?;
     let path = db_new_path(root);
     let _ = fs::remove_file(&path);
     let conn = Connection::open(&path)?;
@@ -182,7 +182,7 @@ pub fn publish_new_index(root: &Path) -> Result<()> {
     fs::rename(&new, db_path(root))?;
     // Best-effort directory fsync: makes the rename durable. If it fails, a
     // crash can revert to the previous index, never expose a missing one.
-    if let Ok(dir) = File::open(kg_dir(root)) {
+    if let Ok(dir) = File::open(aw_dir(root)) {
         let _ = dir.sync_all();
     }
     Ok(())
@@ -463,7 +463,7 @@ pub fn insert_unresolved_calls(
     rows: &[(i64, &str, &'static str, usize)],
 ) -> Result<()> {
     if rows.iter().any(|(_, _, _, site_line)| *site_line == 0) {
-        return Err(crate::error::KgError::Internal(
+        return Err(crate::error::AwError::Internal(
             "unresolved edge row has site_line 0".to_string(),
         ));
     }
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn fresh_db_has_schema_v2() {
-        let dir = std::env::temp_dir().join(format!("kg-db-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aw-db-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let conn = create_fresh(&dir).unwrap();
@@ -861,7 +861,7 @@ mod tests {
 
     #[test]
     fn missing_index_is_exit1_not_panic() {
-        let dir = std::env::temp_dir().join(format!("kg-db-missing-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aw-db-missing-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let err = open_for_query(&dir).unwrap_err();
@@ -871,9 +871,9 @@ mod tests {
 
     #[test]
     fn corrupted_index_is_exit3() {
-        let dir = std::env::temp_dir().join(format!("kg-db-corrupt-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aw-db-corrupt-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(dir.join(".kg")).unwrap();
+        fs::create_dir_all(dir.join(".aw")).unwrap();
         fs::write(db_path(&dir), b"this is not sqlite at all").unwrap();
         let err = open_for_query(&dir).unwrap_err();
         assert_eq!(err.exit_code(), 3);
@@ -882,7 +882,7 @@ mod tests {
 
     #[test]
     fn schema_skew_is_exit5() {
-        let dir = std::env::temp_dir().join(format!("kg-db-skew-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aw-db-skew-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         {

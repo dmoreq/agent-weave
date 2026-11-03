@@ -27,7 +27,7 @@ use error::Result;
 
 fn main() {
     // git read-only commands must not refresh/rewrite `.git/index` — the
-    // safety invariant says no writes outside `.kg/` (R6d A8).
+    // safety invariant says no writes outside `.aw/` (R6d A8).
     std::env::set_var("GIT_OPTIONAL_LOCKS", "0");
     // A downstream pipe close is not an internal error; keep stderr quiet
     // and let the catch_unwind arm exit 0 (R6 finding).
@@ -70,11 +70,11 @@ fn main() {
             }
             // Contract: dead/clones always carry their caveat on stdout,
             // even for an empty result.
-            if let error::KgError::NoResultsCaveated { caveat, .. } = &e {
+            if let error::AwError::NoResultsCaveated { caveat, .. } = &e {
                 println!("{caveat}");
             }
             // CUJ4: ambiguous-name candidates belong on stdout, message on stderr.
-            if let error::KgError::Ambiguous { candidates, .. } = &e {
+            if let error::AwError::Ambiguous { candidates, .. } = &e {
                 for (path, line, qualname) in candidates {
                     println!("{path}:{line} {qualname}");
                 }
@@ -83,7 +83,7 @@ fn main() {
             std::process::exit(e.exit_code());
         }
         Err(panic) => {
-            // A closed downstream pipe (e.g. `kg callers x | head -1`) is not
+            // A closed downstream pipe (e.g. `aw callers x | head -1`) is not
             // an internal failure: exit quietly like a POSIX filter (R6d A8).
             let msg = panic
                 .downcast_ref::<String>()
@@ -99,7 +99,7 @@ fn main() {
             if journaled {
                 journal::finalize(root.as_deref(), 6, latency_us);
             }
-            eprintln!("kg: internal: unexpected panic — no output written");
+            eprintln!("aw: internal: unexpected panic — no output written");
             std::process::exit(6);
         }
     }
@@ -467,7 +467,7 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
                 ("candidate_limit", "50".to_string()),
             ]);
             if !stdin {
-                return Err(crate::error::KgError::Usage(
+                return Err(crate::error::AwError::Usage(
                     "resolve requires --stdin".to_string(),
                 ));
             }
@@ -478,14 +478,14 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
                 .take(1024 * 1024 + 1)
                 .read_to_string(&mut input)?;
             if input.len() > 1024 * 1024 {
-                return Err(crate::error::KgError::Usage(
+                return Err(crate::error::AwError::Usage(
                     "resolve input exceeds 1 MiB".to_string(),
                 ));
             }
             let mut names = Vec::new();
             for line in input.lines() {
                 if line.len() > 4096 {
-                    return Err(crate::error::KgError::Usage(
+                    return Err(crate::error::AwError::Usage(
                         "resolve line exceeds 4096 bytes".to_string(),
                     ));
                 }
@@ -495,12 +495,12 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
                 }
             }
             if names.len() > 1000 {
-                return Err(crate::error::KgError::Usage(
+                return Err(crate::error::AwError::Usage(
                     "resolve accepts at most 1000 names".to_string(),
                 ));
             }
             if names.is_empty() {
-                return Err(crate::error::KgError::NoResults(
+                return Err(crate::error::AwError::NoResults(
                     "no names on stdin".to_string(),
                 ));
             }

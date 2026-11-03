@@ -2,7 +2,7 @@
 //! computed during the build parse phase — workers already hold the file
 //! bytes, so the pass adds no extra reads. Rows are (line_start, line_end,
 //! shingle_hash) per fresh file; grouping/merging into clone pairs happens at
-//! query time (`kg clones`, src/query.rs).
+//! query time (`aw clones`, src/query.rs).
 
 /// One shingle row: (line_start, line_end, FNV-1a window hash), 1-based
 /// inclusive file line numbers.

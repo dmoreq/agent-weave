@@ -1,5 +1,5 @@
 //! Repository walk: `ignore` WalkBuilder from the git root discovered upward,
-//! `.kg/` skipped unconditionally, per-file size cap 1 MB (skipped + counted),
+//! `.aw/` skipped unconditionally, per-file size cap 1 MB (skipped + counted),
 //! extension allowlist per language generation.
 
 use std::collections::HashSet;
@@ -8,7 +8,7 @@ use std::time::UNIX_EPOCH;
 
 use ignore::WalkBuilder;
 
-use crate::error::{KgError, Result};
+use crate::error::{AwError, Result};
 
 pub const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
@@ -39,7 +39,7 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
     match explicit {
         Some(p) => {
             if !p.is_dir() {
-                return Err(KgError::Usage(format!(
+                return Err(AwError::Usage(format!(
                     "--root {} is not a directory",
                     p.display()
                 )));
@@ -48,9 +48,9 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
         }
         None => {
             let cwd = std::env::current_dir()
-                .map_err(|e| KgError::Internal(format!("cannot read cwd: {e}")))?;
+                .map_err(|e| AwError::Internal(format!("cannot read cwd: {e}")))?;
             find_git_root(&cwd).ok_or_else(|| {
-                KgError::Usage("no git root ancestor found — pass --root <path>".to_string())
+                AwError::Usage("no git root ancestor found — pass --root <path>".to_string())
             })
         }
     }
@@ -73,9 +73,9 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     let mut builder = WalkBuilder::new(root);
     // Respect .gitignore/.ignore (node_modules and build dirs vanish here).
     // Hidden files are kept so dot-directories are governed solely by the
-    // explicit .kg/ filter below, not by ignore's hidden heuristic.
+    // explicit .aw/ filter below, not by ignore's hidden heuristic.
     builder.hidden(false);
-    builder.filter_entry(|entry| entry.file_name() != std::ffi::OsStr::new(".kg"));
+    builder.filter_entry(|entry| entry.file_name() != std::ffi::OsStr::new(".aw"));
 
     // The ignore crate applies gitignore rules textually and skips
     // TRACKED-but-gitignored files, which git itself still versions. Query the
@@ -106,7 +106,7 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     let mut files = Vec::new();
     let mut skipped_large = 0usize;
     for entry in builder.build() {
-        let entry = entry.map_err(|e| KgError::Internal(format!("walk error: {e}")))?;
+        let entry = entry.map_err(|e| AwError::Internal(format!("walk error: {e}")))?;
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
@@ -190,13 +190,13 @@ mod tests {
     }
 
     #[test]
-    fn walk_skips_kg_dir_and_large_files_and_filters_ext() {
-        let dir = std::env::temp_dir().join(format!("kg-walk-test-{}", std::process::id()));
+    fn walk_skips_aw_dir_and_large_files_and_filters_ext() {
+        let dir = std::env::temp_dir().join(format!("aw-walk-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         write(&dir.join("a.py"), b"x = 1\n");
         write(&dir.join("sub/b.py"), b"y = 2\n");
         write(&dir.join("sub/c.txt"), b"not indexed\n");
-        write(&dir.join(".kg/index.db"), b"stale");
+        write(&dir.join(".aw/index.db"), b"stale");
         write(
             &dir.join("sub/huge.py"),
             &[b'a'; MAX_FILE_SIZE as usize + 1],

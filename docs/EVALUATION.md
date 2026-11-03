@@ -1,4 +1,8 @@
-# kg evaluation
+# aw evaluation
+
+## Former name
+
+Historical benchmarks recorded before version 0.3.0 used the former project and command name `kg`. Quoted artifacts keep that name; current commands are `aw` from the `agent-weave` package.
 
 ## Corrections to earlier claims
 
@@ -8,31 +12,31 @@ The earlier search table also conflated two metrics from `search_recall.py`. Mea
 
 ## Summary
 
-Historical experiments found better navigation recall with kg and lower input-token use with query-first routing on one host. Feature-specific savings varied by task and host; test lookup and API inventory did not show savings in the measured tasks.
+Historical experiments found better navigation recall with aw and lower input-token use with query-first routing on one host. Feature-specific savings varied by task and host; test lookup and API inventory did not show savings in the measured tasks.
 
 | Question | Reported finding | Scope |
 |---|---|---|
 | Can pointers be checked against source? | 777/777 sampled pointers matched source locations | Six private corpora, 2026-11-01; not repository-wide recall |
-| Can kg improve agent answers? | Mean navigation recall 81.9% without kg versus 98.6% with kg | Three tasks, six runs per arm, Grok Build |
-| Does kg reduce tokens automatically? | No: unrouted kg increased tool calls 73%; input tokens fell only 2.8% | Same navigation experiment |
-| Can routing reduce tokens? | Query-first input tokens fell 27.3% versus no kg | Ten runs per arm on that host |
+| Can aw improve agent answers? | Mean navigation recall 81.9% without aw versus 98.6% with aw | Three tasks, six runs per arm, Grok Build |
+| Does aw reduce tokens automatically? | No: unrouted aw increased tool calls 73%; input tokens fell only 2.8% | Same navigation experiment |
+| Can routing reduce tokens? | Query-first input tokens fell 27.3% versus no aw | Ten runs per arm on that host |
 | Which feature had repeatable savings? | `path` reduced calls on all four tested host/model pairs | Small, frozen route-task sets; not a general guarantee |
-| Does kg understand program behavior? | No: these results concern static relationships and lexical retrieval | Dynamic and semantic questions still need source inspection |
+| Does aw understand program behavior? | No: these results concern static relationships and lexical retrieval | Dynamic and semantic questions still need source inspection |
 
 All measurements below are **historical results reported from private evidence**. Raw corpora, frozen answers, agent transcripts, and some runners are unavailable in the public distribution. Public source tests can check behavior, but cannot reproduce these private numbers.
 
 ## 1. How to interpret the comparisons
 
-Two different controls answer different questions. Do not interpret a feature comparison as evidence for kg versus no kg.
+Two different controls answer different questions. Do not interpret a feature comparison as evidence for aw versus no aw.
 
 | Experiment | Control | Treatment |
 |---|---|---|
-| Navigation, 2026-11-01 | No kg: grep/rg/find and file reads | Same tools plus kg, either unrouted or query-first |
-| Feature utility, 2026-11-02 | kg available, target feature forbidden | Same binary, target feature first |
-| Structural-command utility, initial 2026-11-03 battery | kg available, target command forbidden | Same binary, target command first |
-| Imports/dependency replication, later 2026-11-03 | No kg commands permitted | Target kg command required |
+| Navigation, 2026-11-01 | No aw: grep/rg/find and file reads | Same tools plus aw, either unrouted or query-first |
+| Feature utility, 2026-11-02 | aw available, target feature forbidden | Same binary, target feature first |
+| Structural-command utility, initial 2026-11-03 battery | aw available, target command forbidden | Same binary, target command first |
+| Imports/dependency replication, later 2026-11-03 | No aw commands permitted | Target aw command required |
 
-Reported agent metrics use host-recorded counters, not agent estimates. Tool calls count host tool invocations; kg calls count executed kg commands. A single shell invocation can contain multiple kg commands, so those totals are not interchangeable.
+Reported agent metrics use host-recorded counters, not agent estimates. Tool calls count host tool invocations; aw calls count executed aw commands. A single shell invocation can contain multiple aw commands, so those totals are not interchangeable.
 
 Recall means average the fraction of expected answers found per task or query. Pooled recall divides all matched expected items by all expected items. Pointer authenticity checks source locations; it does **not** measure missing relationships or semantic correctness.
 
@@ -49,32 +53,32 @@ Neutral labels A–F identify the private corpora referenced below. Individual p
 | E | Map-search service | Python |
 | F | Data-science pipeline | Python |
 
-The public kg-self corpus used an earlier Rust snapshot of this repository: 37 indexed files, 380 symbols, and 1,171 edges. These are historical counts, not current repository sizes.
+The public aw-self corpus used an earlier Rust snapshot of this repository: 37 indexed files, 380 symbols, and 1,171 edges. These are historical counts, not current repository sizes.
 
-## 2. Agent navigation: kg versus no kg
+## 2. Agent navigation: aw versus no aw
 
 The main comparison used corpus A and five frozen tasks: hub callers, state-hub callers, signature impact, flow tracing, and transitive callees. Answers were mechanically scored against frozen expected sets; the private task collection included 60 verified call-site rows.
 
 The 2026-11-01 run used Grok Build 1.0.70, model `grok-4.7-build`, and a post-optimization snapshot recorded as `82d0b02`. It used `grok --always-approve --max-turns 40`, two runs per task and arm, then ten additional query-first runs. Exact prompts, session IDs, scorer inputs, and accounting scripts are private.
 
-| Metric | No kg | kg, unrouted | kg, query-first | Sample |
+| Metric | No aw | aw, unrouted | aw, query-first | Sample |
 |---|---:|---:|---:|---|
 | Mean recall, first three tasks | 81.9% | 98.6% | 98.6% | Six answers per arm |
 | Input tokens, mean/run | 1,058,613 | 1,028,665 | 769,306 | Ten runs per arm |
 | Tool calls, mean/run | 20.6 | 35.7 | 24.9 | Ten runs per arm |
-| kg calls, mean/run | 0 | 3.7 | 8.8 | Ten runs per arm |
+| aw calls, mean/run | 0 | 3.7 | 8.8 | Ten runs per arm |
 | Output tokens, recorded mean/run | 13,773 | 13,403 | 10,850 | Nine-run accounting summaries; ten-run means unavailable |
 | Model calls, recorded mean/run | 20.2 | 19.9 | 17.2 | Nine-run accounting summaries; ten-run means unavailable |
 
-Query-first input tokens were 27.3% below the no-kg control, but tool calls remained higher. Merely making kg available did not reproduce an earlier scripted comparison's 50% call reduction or 67% byte reduction.
+Query-first input tokens were 27.3% below the no-aw control, but tool calls remained higher. Merely making aw available did not reproduce an earlier scripted comparison's 50% call reduction or 67% byte reduction.
 
-The state-hub task improved from 50% to 100% recall in both kg runs. Flow tracing succeeded in zero of two no-kg runs, one of two unrouted runs, and both query-first runs. These are small samples, not per-task guarantees.
+The state-hub task improved from 50% to 100% recall in both aw runs. Flow tracing succeeded in zero of two no-aw runs, one of two unrouted runs, and both query-first runs. These are small samples, not per-task guarantees.
 
 The native Grok query-first transitive-callees runs scored 0% and 40% recall. A failed initial run was retried; a separate OpenCode `openai/gpt-6-luna` alternate scored 100%, while `gpt-6.1-terra` scored 40%. These alternates are not included in Grok token means.
 
 ### Host/model dependence
 
-A ten-run OpenCode `openai/gpt-6-luna` query-first replication scored 85.9% mean recall on the first three tasks, versus Grok's 98.6%. It retained 100% recall on the state-hub and transitive-callees tasks, but had no same-host no-kg economics control.
+A ten-run OpenCode `openai/gpt-6-luna` query-first replication scored 85.9% mean recall on the first three tasks, versus Grok's 98.6%. It retained 100% recall on the state-hub and transitive-callees tasks, but had no same-host no-aw economics control.
 
 The primary collection contained 40 runs across the navigation arms and hosts, plus two alternate fills. Token counters differ between hosts; no cross-host token comparison is valid.
 
@@ -86,9 +90,9 @@ The primary collection contained 40 runs across the navigation arms and hosts, p
 - Flow and transitive-callees tasks were recall-only, not part of the three-task headline mean.
 - The deep navigation comparison covered corpus A, not every corpus in the table above.
 
-## 3. Feature utility: kg with and without one command
+## 3. Feature utility: aw with and without one command
 
-The 2026-11-02 experiments used sanitized source-only corpora and frozen answers outside the queried tree. Controls could use other kg commands or grep. Treatments had to call the target feature first; both arms used the same binary within each experiment.
+The 2026-11-02 experiments used sanitized source-only corpora and frozen answers outside the queried tree. Controls could use other aw commands or grep. Treatments had to call the target feature first; both arms used the same binary within each experiment.
 
 The first two hosts were Grok Build 1.0.70 (`grok-4.7-build`) and OpenCode CLI (`openai/gpt-6-sol`). The records identify feature-era builds rather than one common commit. Deltas below compare mean tool calls and mean input tokens **within each host**.
 
@@ -102,7 +106,7 @@ The first two hosts were Grok Build 1.0.70 (`grok-4.7-build`) and OpenCode CLI (
 
 Each task/arm/host had two runs. The search retest followed an index upgrade that added path/signature tokens. It still failed the experiment's requirement for at least 20% call reduction on both hosts.
 
-Clone utility covered a 12-file fixture with four seeded exact pairs, a renamed near-duplicate, and decoys. Controls happened to use no kg commands. This does not establish utility for semantic duplication or arbitrary real repositories.
+Clone utility covered a 12-file fixture with four seeded exact pairs, a renamed near-duplicate, and decoys. Controls happened to use no aw commands. This does not establish utility for semantic duplication or arbitrary real repositories.
 
 ### Two additional hosts
 
@@ -115,13 +119,13 @@ The same feature-control design was run with agy 1.4.12 (`gemini-3.8-flash-high`
 | `search` | -38% / -47% | -29% / +10% | 1 |
 | `clones` | -22% / -18% | -6% / -2% | 1 |
 
-Search increased kg calls on both additional hosts. Clone and context results are directional at one run per cell. Five agy path controls exceeded the 25-tool budget and were retained; one hung control was rerun.
+Search increased aw calls on both additional hosts. Clone and context results are directional at one run per cell. Five agy path controls exceeded the 25-tool budget and were retained; one hung control was rerun.
 
 Two contaminated smoke runs were discarded before valid measurement. One context task used a dated host-specific answer overlay containing two additional source-verified sites; it did not use exactly the earlier shared oracle.
 
 ### Structural commands, 2026-11-03
 
-The initial experiment used kg `6dbe57a`, schema v7: five tasks, two arms, four hosts, and two runs per cell. Grok, agy, and zcode used the models named above. OpenCode was excluded after workspace-isolation failures; its exact model is not established here.
+The initial experiment used aw `6dbe57a`, schema v7: five tasks, two arms, four hosts, and two runs per cell. Grok, agy, and zcode used the models named above. OpenCode was excluded after workspace-isolation failures; its exact model is not established here.
 
 | Task | Grok mean tool calls | agy mean tool calls | zcode mean tool calls |
 |---|---:|---:|---:|
@@ -137,14 +141,14 @@ A later audit found that blanket OpenCode exclusion could bias the comparison: s
 
 ### Replication with a different control
 
-A later replication prohibited **all kg commands in controls**, unlike the initial feature-control battery. It tested imports on kg corpus `bc292ba` and direct dependency impact on corpus A `d060ace`, using the same three valid host/model pairs. The report does not pin a separate common binary revision.
+A later replication prohibited **all aw commands in controls**, unlike the initial feature-control battery. It tested imports on aw corpus `bc292ba` and direct dependency impact on corpus A `d060ace`, using the same three valid host/model pairs. The report does not pin a separate common binary revision.
 
 | Task | Grok median tool calls | agy median tool calls | zcode median tool calls |
 |---|---:|---:|---:|
 | Imports | 6 → 3 (-50.0%) | 21 → 5 (-76.2%) | 7 → 3 (-57.1%) |
 | Direct import impact | 6 → 5 (-16.7%) | 18 → 6 (-66.7%) | 15 → 7 (-53.3%) |
 
-The target was five runs per arm/host. The agy imports control instead reports the median of six correct runs, excluding one wrong answer and one forbidden-kg run. Other cells report five correct runs per arm; no token-saving claim accompanies this replication.
+The target was five runs per arm/host. The agy imports control instead reports the median of six correct runs, excluding one wrong answer and one forbidden-aw run. Other cells report five correct runs per arm; no token-saving claim accompanies this replication.
 
 Concurrent journals were contaminated, so control validity was checked from transcripts. Imports savings appeared on all three tested hosts; dependency-impact savings remained host-dependent. The small initial battery does not justify removing features that lacked savings on one task shape.
 
@@ -161,13 +165,13 @@ The following results are historical source/fixture checks, not agent-answer sco
 | Search, 20 queries / 28 expected symbols | Mean recall 0.850 → 0.800 → 0.775; pooled hits 24/28 → 23/28 → 22/28 | Schema v4 then two schema-v5 snapshots, 2026-11-01/02; `search_recall.py`, top 10 |
 | Clone quality fixture | 10/10 seeded pairs, zero spurious pairs, eight distractors and one near-duplicate | 2026-11-01 feature build; `clones_seed_gate` |
 | Path quality | Ten exact-output fixtures; 8/8 frozen route pairs agreed | 2026-11-02 feature build; `path_seed_gate` and `path_recall.py` |
-| Outline utility | Seven calls versus 12 with grep, but six with kg without outline; bytes -62.7% versus grep | kg `fe1fcc0`, schema v4; private five-task scripted replay, not a free-running agent A/B |
+| Outline utility | Seven calls versus 12 with grep, but six with aw without outline; bytes -62.7% versus grep | aw `fe1fcc0`, schema v4; private five-task scripted replay, not a free-running agent A/B |
 
 Search ranking improved some signature-only lookups while reducing mean recall on the frozen query set. For example, one wrapped-parameter query moved from outside the top 50 to rank 2 after signature extraction changed. This is a trade-off, not a universal retrieval improvement.
 
 ### Imports, tests, and inheritance
 
-The source-derived expected sets were frozen on 2026-11-02 at kg `342ebc3`, corpus A `efcd310`, and corpus B `dddfe07`. A 2026-11-03 rerun used corpus A `d060ace` and refreshed one moved self-source line. The harnesses are public, but their frozen inputs and private working trees are not.
+The source-derived expected sets were frozen on 2026-11-02 at aw `342ebc3`, corpus A `efcd310`, and corpus B `dddfe07`. A 2026-11-03 rerun used corpus A `d060ace` and refreshed one moved self-source line. The harnesses are public, but their frozen inputs and private working trees are not.
 
 | Relationship | Expected-row recall | Reported precision | Wilson 95% interval for recall | Public harness |
 |---|---:|---:|---|---|
@@ -175,7 +179,7 @@ The source-derived expected sets were frozen on 2026-11-02 at kg `342ebc3`, corp
 | Test reachability | 20/20 | 2,679/2,679 | 0.839–1.000 | [tests_recall.py](../tests/scripts/tests_recall.py) |
 | Inheritance | 17/17 | Not measured | 0.816–1.000 | [inheritance_recall.py](../tests/scripts/inheritance_recall.py) |
 
-Imports comprised 25 corpus-A rows and 15 kg-self rows. Test recall covered 20 corpus-A symbols across 20 files. Inheritance covered 15 Python rows, including five cross-file rows, and two TypeScript rows, including one cross-file row.
+Imports comprised 25 corpus-A rows and 15 aw-self rows. Test recall covered 20 corpus-A symbols across 20 files. Inheritance covered 15 Python rows, including five cross-file rows, and two TypeScript rows, including one cross-file row.
 
 Import precision checks whether emitted source blocks are import-shaped and name the target leaf. Test precision checks test-shaped qualnames, not runtime execution or proof that a test validates the target. These are narrower metrics than semantic precision.
 
@@ -189,21 +193,21 @@ The schema-v5 record used macOS 27.0.0 arm64, eight CPUs, and 16 GB RAM on 2026-
 
 | Scenario | Reported measurement | Historical command/method |
 |---|---|---|
-| Schema-v5 fresh build | 2.33 s; peak RSS 183,222,272 B; index 57,393,152 B | `kg build --force --root <synth>`; repetition count unspecified |
-| Schema-v5 no-op rebuild | 1.65 s; peak RSS 88,997,888 B | `kg build --root <synth>`; repetition count unspecified |
+| Schema-v5 fresh build | 2.33 s; peak RSS 183,222,272 B; index 57,393,152 B | `aw build --force --root <synth>`; repetition count unspecified |
+| Schema-v5 no-op rebuild | 1.65 s; peak RSS 88,997,888 B | `aw build --root <synth>`; repetition count unspecified |
 | Schema-v5 common queries | Under 10 ms on the synthetic corpus | `callers`, `callees --depth 3`, `path`, `search`, `clones --limit 5`; repetition count unspecified |
-| Later schema-v5 no-op, 2,201 files | 0.02–0.03 s; index byte-unchanged | `/usr/bin/time -p kg build`, hash/mtime comparison |
-| Schema-v7 fresh build, same 2,025-file generator | 2.70–2.79 s, best-of-seven summaries | `kg build --force`; pre-later-build-optimization snapshot |
-| Schema-v7 dead candidates, 85,050 symbols | 147.5 ms, best of seven | `kg dead --limit 50`, `timing_assert.sh` |
-| Schema-v7 complexity, 85k / 987k symbols | 19.3 / 6.9 ms | `kg complexity --limit 1`, `timing_assert.sh`; best-of-seven reported for 85k |
-| Schema-v7 path-filtered complexity, 85k / 987k symbols | 26.2 / 201 ms | `kg complexity --path synth`, `timing_assert.sh` |
-| Schema-v7 symbols, 85k symbols | 21.9 ms, best of seven | `kg symbols synth --limit 50`, `timing_assert.sh` |
+| Later schema-v5 no-op, 2,201 files | 0.02–0.03 s; index byte-unchanged | `/usr/bin/time -p aw build`, hash/mtime comparison |
+| Schema-v7 fresh build, same 2,025-file generator | 2.70–2.79 s, best-of-seven summaries | `aw build --force`; pre-later-build-optimization snapshot |
+| Schema-v7 dead candidates, 85,050 symbols | 147.5 ms, best of seven | `aw dead --limit 50`, `timing_assert.sh` |
+| Schema-v7 complexity, 85k / 987k symbols | 19.3 / 6.9 ms | `aw complexity --limit 1`, `timing_assert.sh`; best-of-seven reported for 85k |
+| Schema-v7 path-filtered complexity, 85k / 987k symbols | 26.2 / 201 ms | `aw complexity --path synth`, `timing_assert.sh` |
+| Schema-v7 symbols, 85k symbols | 21.9 ms, best of seven | `aw symbols synth --limit 50`, `timing_assert.sh` |
 
 The later query records do not consistently pin binary hashes or complete host metadata. Do not merge these rows into one current-performance claim. Early schema-v3 optimization ratios are omitted because later schemas materially changed index contents and build costs.
 
 ### Later build comparison and memory trade-off
 
-A 2026-11-03 interleaved comparison used kg 0.2.1/schema v7 at `6dbe57a` versus `968e160`. It used the same 2,025-file synthetic corpus and macOS host specification above. Seven baseline/final pairs ran under heavy external load, with load averages 41.66–53.89 on eight CPUs.
+A 2026-11-03 interleaved comparison used aw 0.2.1/schema v7 at `6dbe57a` versus `968e160`. It used the same 2,025-file synthetic corpus and macOS host specification above. Seven baseline/final pairs ran under heavy external load, with load averages 41.66–53.89 on eight CPUs.
 
 | Metric | Baseline | Optimized | Delta |
 |---|---:|---:|---:|
@@ -212,7 +216,7 @@ A 2026-11-03 interleaved comparison used kg 0.2.1/schema v7 at `6dbe57a` versus 
 | Peak RSS | 155,370,048 B | 194,839,104 B | +25.4% |
 | Index size | 69,103,616 B | 66,404,352 B | -3.9% |
 
-Measurement used interleaved `kg build --force` invocations and resource accounting recorded privately. The speed gain came with approximately 40 MB higher peak RSS. A quiet-host remeasurement is needed before presenting 1.87 s as a typical absolute build time.
+Measurement used interleaved `aw build --force` invocations and resource accounting recorded privately. The speed gain came with approximately 40 MB higher peak RSS. A quiet-host remeasurement is needed before presenting 1.87 s as a typical absolute build time.
 
 ### Large or adversarial indexes
 
@@ -220,11 +224,11 @@ These historical stress results are not representative-repository averages. Thei
 
 | Scenario | Reported result | Historical command/method |
 |---|---|---|
-| Approximately 1.09M matching symbols, schema v5 | Search 0.49 s, 18.9 MB RSS | `kg search a` |
-| 700 files sharing a five-line header, schema v5 | Clone candidates capped; 6.3 MB RSS | `kg clones`; lower-bound output, not exhaustive enumeration |
-| 4,000-file chain, one tail edit, schema v5 | Incremental rebuild 0.20 s versus 42.5 s before the fix | `kg build` after edit |
-| 1.37M-edge hub, schema v7 | Impact 97.1–144.3 ms across best-of-seven summaries | `kg impact synth/core.py --depth 3`, `timing_assert.sh` |
-| Same hub with 10,000 tests | 63.0–113.2 ms, depending on seed | `kg tests <seed> --depth 10`, best of seven |
+| Approximately 1.09M matching symbols, schema v5 | Search 0.49 s, 18.9 MB RSS | `aw search a` |
+| 700 files sharing a five-line header, schema v5 | Clone candidates capped; 6.3 MB RSS | `aw clones`; lower-bound output, not exhaustive enumeration |
+| 4,000-file chain, one tail edit, schema v5 | Incremental rebuild 0.20 s versus 42.5 s before the fix | `aw build` after edit |
+| 1.37M-edge hub, schema v7 | Impact 97.1–144.3 ms across best-of-seven summaries | `aw impact synth/core.py --depth 3`, `timing_assert.sh` |
+| Same hub with 10,000 tests | 63.0–113.2 ms, depending on seed | `aw tests <seed> --depth 10`, best of seven |
 | 3.1M-edge stress hub | Impact 254.3 ms; tests 363.4 ms | Same command shapes, best of five; exceeded the smaller graph's budgets |
 
 The hub measurements did not cover the reverse-search branch used above 20,000 test-shaped symbols. Display caps and bounded collectors do not imply constant query time: traversal and matching still depend on graph shape and match count.

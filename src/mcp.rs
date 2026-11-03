@@ -1,5 +1,5 @@
 //! MCP stdio server (Amendment 8): newline-delimited JSON-RPC 2.0 over
-//! stdin/stdout, spawned by the agent host — kg still spawns no daemons.
+//! stdin/stdout, spawned by the agent host — aw still spawns no daemons.
 //! Tools map 1:1 to CLI subcommands and return the CLI's byte-identical
 //! stdout text. Every tool call journals with `surface:"mcp"` (J2). The
 //! process itself is not journaled.
@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use crate::error::KgError;
+use crate::error::AwError;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -26,7 +26,7 @@ fn tools() -> Value {
     };
     let limit = json!({"type": "integer", "minimum": 1, "maximum": 10000});
     json!([
-        {"name": "build", "description": "Index the repository into .kg/index.db (full atomic replacement)",
+        {"name": "build", "description": "Index the repository into .aw/index.db (full atomic replacement)",
          "inputSchema": schema_obj(json!({
              "force": {"type": "boolean", "description": "Re-extract everything (disable the fast path)"},
              "max_parse_error_rate": {"type": "number", "description": "Abort above this fraction of parse-error files (default 0.05)"}
@@ -81,7 +81,7 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
     let root = crate::walk::discover_root(root_arg)?;
     if no_journal {
         // Amendment 6 opt-out must hold on the MCP surface too (R6d A7).
-        std::env::set_var("KG_NO_JOURNAL", "1");
+        std::env::set_var("AW_NO_JOURNAL", "1");
     }
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
@@ -149,7 +149,7 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
                 let result = json!({
                     "protocolVersion": requested,
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "kg", "version": env!("CARGO_PKG_VERSION")},
+                    "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
                 });
                 write_result(&mut out, id, result)?;
             }
@@ -201,7 +201,7 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
                     })) {
                         Ok(v) => v,
                         Err(_) => (
-                            "kg: internal: tool panicked — server still running\n".to_string(),
+                            "aw: internal: tool panicked — server still running\n".to_string(),
                             true,
                             6,
                         ),
@@ -299,14 +299,14 @@ fn call_tool(root: &Path, tool: &str, args: &Value) -> (String, bool, i32) {
     let outcome: crate::error::Result<String> = dispatch_tool(root, tool, args);
     match outcome {
         Ok(text) => (text, false, 0),
-        Err(KgError::BatchOutput { text, code }) => (text, true, code),
+        Err(AwError::BatchOutput { text, code }) => (text, true, code),
         Err(e) => {
             let mut text = String::new();
-            if let KgError::NoResultsCaveated { caveat, .. } = &e {
+            if let AwError::NoResultsCaveated { caveat, .. } = &e {
                 text.push_str(caveat);
                 text.push('\n');
             }
-            if let KgError::Ambiguous { candidates, .. } = &e {
+            if let AwError::Ambiguous { candidates, .. } = &e {
                 for (path, line, qualname) in candidates {
                     text.push_str(&format!("{path}:{line} {qualname}\n"));
                 }
@@ -495,12 +495,12 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 .get("names")
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| {
-                    crate::error::KgError::Usage("resolve requires a names array".to_string())
+                    crate::error::AwError::Usage("resolve requires a names array".to_string())
                 })?;
             let mut names: Vec<String> = Vec::new();
             for value in arr {
                 let name = value.as_str().ok_or_else(|| {
-                    crate::error::KgError::Usage("resolve names must be strings".to_string())
+                    crate::error::AwError::Usage("resolve names must be strings".to_string())
                 })?;
                 names.push(name.to_string());
             }
@@ -508,7 +508,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 || names.iter().any(|n| n.len() > 4096)
                 || names.iter().map(|n| n.len()).sum::<usize>() > 1024 * 1024
             {
-                return Err(crate::error::KgError::Usage(
+                return Err(crate::error::AwError::Usage(
                     "resolve accepts at most 1000 names, 4096 bytes each, 1 MiB total".to_string(),
                 ));
             }
@@ -516,7 +516,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 let t = n.trim();
                 t.is_empty() || t.starts_with('#')
             }) {
-                return Err(crate::error::KgError::NoResults(
+                return Err(crate::error::AwError::NoResults(
                     "no names on stdin".to_string(),
                 ));
             }
@@ -524,7 +524,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             crate::journal::record_result(lines.len(), lines.len(), lines.len(), false, 0);
             let text = join_lines(&lines);
             if exit != 0 {
-                return Err(crate::error::KgError::BatchOutput { text, code: exit });
+                return Err(crate::error::AwError::BatchOutput { text, code: exit });
             }
             Ok(text)
         }
@@ -583,7 +583,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 Ok(join_lines(&crate::journal::summary(root)?))
             }
         }
-        _ => Err(KgError::Usage(format!("unknown tool '{tool}'"))),
+        _ => Err(AwError::Usage(format!("unknown tool '{tool}'"))),
     }
 }
 

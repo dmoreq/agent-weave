@@ -1,16 +1,16 @@
-# kg Agent-Tooling Amendment — Outlines, Search, Skills, and Clone Candidates (P4)
+# aw Agent-Tooling Amendment — Outlines, Search, Skills, and Clone Candidates (P4)
 
 ## Reading status
 
 This approved design companion records the original outline, search, skill, and clone-candidate decisions.
-The [canonical specification](2026-10-31_kg-rust-code-index.md) governs later changes, including signature capture in Amendment 18.
+The [canonical specification](2026-10-31_agent-weave-rust-code-index.md) governs later changes, including signature capture in Amendment 18.
 
 | Task | Surface | Impact and limit |
 |---|---|---|
-| Inspect declarations before reading bodies | `kg symbols <file> --outline` (F1) | Adds bounded signatures, not source bodies |
-| Find symbols by vocabulary | `kg search <terms>` (F2) | Searches indexed symbol text, not arbitrary content |
+| Inspect declarations before reading bodies | `aw symbols <file> --outline` (F1) | Adds bounded signatures, not source bodies |
+| Find symbols by vocabulary | `aw search <terms>` (F2) | Searches indexed symbol text, not arbitrary content |
 | Keep agent guidance aligned | Skill hardening (F3) | Companion-repository drift checks have limited enforcement |
-| Investigate repeated blocks | `kg clones` (F4) | Returns candidates, never proof of semantic duplication |
+| Investigate repeated blocks | `aw clones` (F4) | Returns candidates, never proof of semantic duplication |
 
 Read [usage](../usage.md) for workflows and [evaluation](../EVALUATION.md) for the public evidence summary.
 Original internal review records and harness evidence are unavailable publicly; session-dated observations below are not fresh measurements.
@@ -21,12 +21,12 @@ Original internal review records and harness evidence are unavailable publicly; 
   round 2 APPROVE (0 open Critical + Important). Record:
   internal review R4-P4 (original evidence unavailable publicly).
 - Date: 2026-11-01
-- Canonical location: `docs/designs/2026-10-31_kg-rust-code-index.md`
+- Canonical location: `docs/designs/2026-10-31_agent-weave-rust-code-index.md`
   (Amendment 12 + Gate Registry G13-G16). This file is the self-contained
   historical design companion, not a complete public evidence archive.
 - Golden references: `dmoreq/pi-sherlock` v0.1.0 (clone analyzed at commit
   57b6071, 2026-05-27), ast-grep CLI (local), semgrep 1.157.0 (local).
-- Measured evidence: session 2026-10-31/11-01 on repo `~/Workspace/kg` at an
+- Measured evidence: session 2026-10-31/11-01 on repo `~/Workspace/aw` at an
   unstated pre-review tree revision. Session-temp commands are NOT re-runnable
   from this document alone except where re-measured and noted. Reviewer
   re-measurement note (2026-11-01, current tree): E3 re-run — ast-grep returns
@@ -38,10 +38,10 @@ Original internal review records and harness evidence are unavailable publicly; 
 
 | # | Measurement | Result | Command / reproducibility |
 |---|-------------|--------|---------------------------|
-| E1 | Skeleton-read byte savings across kg src+tests (session-dated) | 37.3% aggregate (197,549B -> 123,856B); per-file range -44.4% (`src/error.rs`) to +85.6% (`src/query.rs`). Aggregate includes negative files; it is not a per-file mean and implies nothing about any specific file class | bun script invoking `pi-sherlock/src/smart-reader.ts` (session-temp, not committed) |
+| E1 | Skeleton-read byte savings across aw src+tests (session-dated) | 37.3% aggregate (197,549B -> 123,856B); per-file range -44.4% (`src/error.rs`) to +85.6% (`src/query.rs`). Aggregate includes negative files; it is not a per-file mean and implies nothing about any specific file class | bun script invoking `pi-sherlock/src/smart-reader.ts` (session-temp, not committed) |
 | E2 | Skeleton output includes FULL function bodies (mechanism verified in-clone by reviewer: `src/read-router.ts:173` pattern `fn $NAME($$$PARAMS) $$$` captures the body) | `error.rs` 2,860B input -> 4,129B output; output text shows complete `match` bodies | session script + reviewer in-clone verification |
 | E3 | ast-grep captures multiline call chains in one roundtrip (session-dated; re-measured at review, see preamble) | `$STMT.query_map($$$ARGS)` returned complete call expressions incl. closure bodies; `rg` returned 15 bare line-hits | `ast-grep run -p '$STMT.query_map($$$ARGS)' -l rust src`; `rg -c query_map src` |
-| E4 | semgrep latency floor (session-dated) | `--version` alone: 1.74s wall (Python startup); 2-rule scan of kg src: 1.92s, 28 findings, 0 errors | `time semgrep --version`; `time semgrep scan --config <rules.yml> --json src` — rules.yml attached below (session-temp) |
+| E4 | semgrep latency floor (session-dated) | `--version` alone: 1.74s wall (Python startup); 2-rule scan of aw src: 1.92s, 28 findings, 0 errors | `time semgrep --version`; `time semgrep scan --config <rules.yml> --json src` — rules.yml attached below (session-temp) |
 | E5 | semgrep AST-rule precision (session-dated, same rules.yml) | `$X.unwrap()` -> 24 findings vs 26 fixed-string rg matches (2 outside AST); the `dynamic-sql-format` pattern-regex rule found 4 findings, byte-identical in count and sites to `rg -U 'format!\(\s*"(SELECT|INSERT|UPDATE|DELETE)' -c src` (4) | `rg -F -c ".unwrap(" src`; `rg -U <regex> -c src`; findings JSON cross-check |
 | E6 | pi-sherlock SmartRouter is dead code at runtime (verified in-clone) | `route()` called only at `src/plugin.ts:101` with constant `"routing readiness ping"`; result discarded; no consumer | `grep -rn "smartRouter\.\|\.route(" src/` |
 | E7 | Routing-hot-path defect (verified in-clone) | `src/routing/context-analyzer.ts:166` — `if` with no body; line 167 swallowed as its consequent; glob patternType branch never returns | source inspection |
@@ -69,12 +69,12 @@ rules:
 
 ## 2. Proposed features (each names the golden reference it improves on)
 
-### F1 — `kg symbols <file> --outline` : signature column on the existing surface (schema v4, additive) — APPROVED
+### F1 — `aw symbols <file> --outline` : signature column on the existing surface (schema v4, additive) — APPROVED
 
 - Golden reference: pi-sherlock `read_enhanced` skeleton mode (E1 aggregate
   savings) and its verified defect (E2: bodies returned; E9: skill text
   drifts from behavior). F1 takes the demand signal and drops the defect.
-- Surface: NO new subcommand. Amendment 5's `kg symbols <file>` already emits
+- Surface: NO new subcommand. Amendment 5's `aw symbols <file>` already emits
   `path:line kind qualname` ordered by `line_start` with the single-file
   staleness header. F1 extends it with an `--outline` flag that appends a
   signature column. Default output (no flag) stays byte-identical; the
@@ -98,11 +98,11 @@ rules:
   `check.py`) over a new `transcripts/kgoutlinearm/` arm. Fail -> schema v4
   ships without the signature column (collapse-before-release rule).
 
-### F2 — `kg search <terms>` : symbol-level FTS5 lookup (additive; deferral lifted) — APPROVED
+### F2 — `aw search <terms>` : symbol-level FTS5 lookup (additive; deferral lifted) — APPROVED
 
 - Golden reference: pi-sherlock `concept_search` — demand for NL discovery is
   real; the implementation is defective (E10: silent 200-file cap, per-call
-  reindex, file-level granularity, no camelCase tokenization). kg improves on
+  reindex, file-level granularity, no camelCase tokenization). aw improves on
   it because the index is the corpus (no collection step, no cap cliff) and
   granularity is the symbol, not the file.
 - Deferral handling (OQ4b — approved 2026-11-01): the Non-Goals deferral of
@@ -129,14 +129,14 @@ rules:
 - Gate G14 (kill-able): recall >= 70% on a frozen 20-query NL-navigation list
   (internal search ground truth, frozen BEFORE implementation; unavailable publicly), FPR
   surfaced alongside with Wilson 95% interval (G-A conventions). Pass
-  historical command: `python3 tests/scripts/search_recall.py --queries <internal-search-ground-truth> <kg-binary> --kg-root <kg-repo> --vihap-root <vihap-worktree>` (requires unavailable internal inputs). Fail -> F2 dropped before
+  historical command: `python3 tests/scripts/search_recall.py --queries <internal-search-ground-truth> <aw-binary> --aw-root <aw-repo> --vihap-root <vihap-worktree>` (requires unavailable internal inputs). Fail -> F2 dropped before
   release (schema v4 ships without `symbols_fts`).
 
 ### F3 — Skill wrapper hardening (OQ2; CI conformance check, not a kill-able gate) — APPROVED
 
 - Golden reference: pi-sherlock ships 14 skills + 14 prompt files (E8:
   40,440 chars of injected guidance) whose router is dead code (E6, E7) and
-  whose skill text drifted from behavior (E9). The lesson for kg: routing
+  whose skill text drifted from behavior (E9). The lesson for aw: routing
   lives in ONE honest, static decision table, and skill text must be gated
   against implementation.
 - Scope update (post-exploration): the `code-index` skill ALREADY exists in
@@ -149,27 +149,27 @@ rules:
   '## Related Skills' handoff section with >= 2 outgoing + >= 2 incoming
   links; repo schema bound 12KB/250 lines unchanged).
 - Drift gate: `tests/skill_contract_drift.py` in the agent-skills repo —
-  env `KG_BIN` points at a kg binary; renders `kg --help` + each
+  env `AW_BIN` points at a aw binary; renders `aw --help` + each
   subcommand's `--help`; asserts every subcommand/flag mentioned in the
-  skill text exists in the binary's help output; skips when `KG_BIN` is
-  unset (the agent-skills CI cannot build the private kg repo — enforcement
+  skill text exists in the binary's help output; skips when `AW_BIN` is
+  unset (the agent-skills CI cannot build the private aw repo — enforcement
   is the owner's local pre-commit check when editing the skill; this
-  limitation is recorded here). Pass command (local): `KG_BIN=<path-to-kg>
+  limitation is recorded here). Pass command (local): `AW_BIN=<path-to-aw>
   python3 tests/skill_contract_drift.py`.
 
-### F4 — `kg clones` : duplicate-block candidates (optional, last; schema v4 shared) — APPROVED
+### F4 — `aw clones` : duplicate-block candidates (optional, last; schema v4 shared) — APPROVED
 
 - Golden reference: pi-sherlock `find_duplicates` (jscpd) — validated demand
   for copy-paste detection in refactor workflows. jscpd itself is a Node
-  tool with its own report stack; kg implements token-shingle hashing
+  tool with its own report stack; aw implements token-shingle hashing
   (FNV-1a already in-crate, `src/hash.rs`) over normalized line windows, no
   new dependency.
 - Mechanism: schema v4 additional table `clone_groups(shingle_hash, file_id,
   line_start, line_end)` computed at build for fresh files and carried
-  forward with the fast path; `kg clones [--min-lines N]` (default 5) emits
+  forward with the fast path; `aw clones [--min-lines N]` (default 5) emits
   pointer pairs under the standard cap/staleness contract. Candidate-list
-  semantics identical to `kg dead`: mandatory first-line caveat
-  "kg: clone candidates — normalized-text equality, not proof of semantic
+  semantics identical to `aw dead`: mandatory first-line caveat
+  "aw: clone candidates — normalized-text equality, not proof of semantic
   duplication".
 - Wiring: new subcommand -> Amendment 6 journal list (`args` gains
   `min_lines`), Amendment 8 MCP tool mapping (`clones` tool); G10 parity
@@ -192,13 +192,13 @@ rules:
 
 | Rejected | Golden reference | Reason |
 |----------|------------------|--------|
-| semgrep-class audit surface | semgrep 1.157.0 (E4, E5) | Out of charter (three navigation questions); 1.74s Python startup floor per call; registry rule packs require network — kg's zero-network invariant (G-D/G-E) forbids wrapping it. Agents can run semgrep themselves when a task warrants it. |
+| semgrep-class audit surface | semgrep 1.157.0 (E4, E5) | Out of charter (three navigation questions); 1.74s Python startup floor per call; registry rule packs require network — aw's zero-network invariant (G-D/G-E) forbids wrapping it. Agents can run semgrep themselves when a task warrants it. |
 | tokei-class LOC tool | tokei via pi-sherlock `count_lines` (`src/tokei.ts:29`) | Already covered: `files.loc` + `files.cyclomatic` stored at build (Amendment 11), surfaced by `stats`/`hotspots`. |
-| fd/fzf/rg/bat/nu/broot/jq/yq wrappers | pi-sherlock 12-binary surface | kg must remain a single binary with the pinned dependency set (G-E as amended: five original + `serde_json` = six, Amendment 8); these are agent-side tools outside kg's charter. pi-sherlock's own fallback-chain metadata (`method`, `fallbacks[]` — `src/read-render.ts:31,38`) is the only pattern worth keeping, and kg's tier tags + staleness headers already provide it. |
-| write/edit/shell enhanced tools, incl. `ast_editor` | pi-sherlock enhanced core + `src/ast-editor.ts`, `src/ast-editor/` | kg is consultative and read-only over source (safety invariant 3) — inviolable. Additionally `shell_enhanced`'s POSIX->Nushell translation is verified broken for `git log` (E11). |
-| Smart-routing layer | pi-sherlock `src/routing/` (1,365 lines) | Dead code at runtime (E6) with a verified defect (E7). kg's routing is the static decision table in F3 — exactly what actually worked in the golden reference. |
+| fd/fzf/rg/bat/nu/broot/jq/yq wrappers | pi-sherlock 12-binary surface | aw must remain a single binary with the pinned dependency set (G-E as amended: five original + `serde_json` = six, Amendment 8); these are agent-side tools outside aw's charter. pi-sherlock's own fallback-chain metadata (`method`, `fallbacks[]` — `src/read-render.ts:31,38`) is the only pattern worth keeping, and aw's tier tags + staleness headers already provide it. |
+| write/edit/shell enhanced tools, incl. `ast_editor` | pi-sherlock enhanced core + `src/ast-editor.ts`, `src/ast-editor/` | aw is consultative and read-only over source (safety invariant 3) — inviolable. Additionally `shell_enhanced`'s POSIX->Nushell translation is verified broken for `git log` (E11). |
+| Smart-routing layer | pi-sherlock `src/routing/` (1,365 lines) | Dead code at runtime (E6) with a verified defect (E7). aw's routing is the static decision table in F3 — exactly what actually worked in the golden reference. |
 | File-topology listing | pi-sherlock `ls_enhanced` (broot, `src/broot/`) | Outside navigation charter; agent's own ls/find covers it. |
-| Char/line truncation markers | pi-sherlock `shared/truncate.ts` | kg already bounds output (cap contract, `showing N of M`, stderr note). The pointer format keeps results short by construction. |
+| Char/line truncation markers | pi-sherlock `shared/truncate.ts` | aw already bounds output (cap contract, `showing N of M`, stderr note). The pointer format keeps results short by construction. |
 
 ## 4. Acceptance criteria carried into implementation (R4b review will gate on these)
 

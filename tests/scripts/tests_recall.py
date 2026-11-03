@@ -60,7 +60,7 @@ def main() -> int:
             found = any(
                 line.startswith(prefix)
                 for line in proc.stdout.splitlines()
-                if not line.startswith("kg:") and not line.startswith("showing ")
+                if not line.startswith("aw:") and not line.startswith("showing ")
             )
         if found:
             hits += 1
@@ -68,7 +68,7 @@ def main() -> int:
             missed.add((row["test_file"], row["test_line"]))
         if proc.returncode == 0:
             for line in proc.stdout.splitlines():
-                if line.startswith("kg:") or line.startswith("showing "):
+                if line.startswith("aw:") or line.startswith("showing "):
                     continue
                 parts = line.split(" ", 1)
                 if len(parts) != 2 or ":" not in parts[0]:

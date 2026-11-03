@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # G5 invariant 4: no agent-config references; write/delete primitives only in
-# kg_dir-scoped helpers. walk.rs is allowed ONLY inside #[cfg(test)].
+# aw_dir-scoped helpers. walk.rs is allowed ONLY inside #[cfg(test)].
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/../.." && pwd)/src"
 FORBIDDEN='(\.claude|\.codex|AGENTS\.md|CLAUDE\.md|settings\.json|keychain|credentials|hook_file|pre-commit)'
@@ -57,7 +57,7 @@ if [ -n "$VIOLATIONS" ]; then
 fi
 probe="$(mktemp -d)"; trap 'rm -rf "$probe"' EXIT
 cp -R "$SRC" "$probe/src"
-printf 'fn evil() { let _ = std::fs::File::create("/tmp/kg-write-probe"); }\n' > "$probe/src/evil.rs"
+printf 'fn evil() { let _ = std::fs::File::create("/tmp/aw-write-probe"); }\n' > "$probe/src/evil.rs"
 printf '#[cfg(test)]\nmod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n\npub fn leaky() { std::fs::write("/tmp/z", b"w").unwrap(); }\n' > "$probe/src/walk.rs"
 printf 'fn t() { std::fs::File::options().write(true).create(true).open("/tmp/y").unwrap(); }\n' >> "$probe/src/query.rs"
 probe_bad="$(check "$probe/src")"
@@ -70,4 +70,4 @@ fi
 if ! echo "$probe_bad" | grep -q "src/evil.rs"; then
   echo "G5 write-path: negative control missed evil.rs" >&2; exit 1
 fi
-echo "G5 write-path: writes confined to kg_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"
+echo "G5 write-path: writes confined to aw_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"

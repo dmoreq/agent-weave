@@ -33,15 +33,15 @@ Reviewer session identifiers make the review exchanges traceable without copying
 | `docs/EVALUATION.md` | APPROVE, final check after fingerprint removal | `ses_e5f5d6af5ffeONEEsfgdkQq1L6` |
 | `docs/agent-integration.md` | APPROVE | `ses_e5f5e3d39ffeC70KQmJ4JrhWvK` |
 | `skills/README.md` | APPROVE | `ses_e5f5d2194ffeDsE92pY8Q3U0V2` |
-| `skills/kg-first/SKILL.md` | APPROVE | `ses_e5f5d2194ffeDsE92pY8Q3U0V2` |
+| `skills/aw-first/SKILL.md` | APPROVE | `ses_e5f5d2194ffeDsE92pY8Q3U0V2` |
 | `CONTRIBUTING.md` | APPROVE | `ses_e5f5db1d1ffeI1ndi1C2r03tHn` |
 | `SUPPORT.md` | APPROVE | `ses_e5f5db1d1ffeI1ndi1C2r03tHn` |
 | `.github/ISSUE_TEMPLATE/bug_report.md` | APPROVE | `ses_e5f5db1d1ffeI1ndi1C2r03tHn` |
 | `.github/ISSUE_TEMPLATE/feature_request.md` | APPROVE, final wording recheck | `ses_e5f5db1d1ffeI1ndi1C2r03tHn` |
 | `.github/PULL_REQUEST_TEMPLATE.md` | APPROVE | `ses_e5f5db1d1ffeI1ndi1C2r03tHn` |
 | `CHANGELOG.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
-| `docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
-| `docs/designs/2026-10-31_kg-rust-code-index.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
+| `docs/designs/2026-10-31_concepts-brief_agent-weave-rust-code-index.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
+| `docs/designs/2026-10-31_agent-weave-rust-code-index.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
 | `docs/designs/2026-11-01_p4-agent-tooling_amendment.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
 | `docs/designs/2026-11-01_p5-call-chain_amendment.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
 | `docs/designs/2026-11-02_p8-structural-graph_amendment.md` | APPROVE | `ses_e5f5739bdffeOhXHftlEKzj441` |
@@ -78,7 +78,7 @@ That reviewer reused the 3/3 test result instead of repeating the same checks.
 | Commit | Conventional subject |
 |---|---|
 | `46ba0fa` | `fix(export): exclude internal reports from public distributions` |
-| `52e9ddd` | `docs(guides): explain kg through practical navigation workflows` |
+| `52e9ddd` | `docs(guides): explain aw through practical navigation workflows` |
 | `e09fc2a` | `docs(cli): document commands limits and result interpretation` |
 | `e7bdbf8` | `docs(evaluation): distinguish measured benefits and evidence limits` |
 | `72ad5e6` | `docs(agents): separate tool access routing and verification` |

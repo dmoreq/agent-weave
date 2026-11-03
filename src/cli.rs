@@ -5,10 +5,10 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "kg",
+    name = "aw",
     version,
     about = "Local code knowledge index: who calls this, what does this call, what is impacted by this file.",
-    long_about = "kg indexes a repository's symbols and call/inheritance edges into a local\nSQLite index. It is consultative only: no hooks, no daemon, no network,\nno writes outside .kg/."
+    long_about = "aw indexes a repository's symbols and call/inheritance edges into a local\nSQLite index. It is consultative only: no hooks, no daemon, no network,\nno writes outside .aw/."
 )]
 pub struct Cli {
     /// Repository root (default: nearest git root ancestor of cwd).
@@ -26,7 +26,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Cmd {
-    /// Index the repository into .kg/index.db (full atomic replacement)
+    /// Index the repository into .aw/index.db (full atomic replacement)
     Build {
         /// Re-extract everything (disable the unchanged-file fast path)
         #[arg(long)]
@@ -138,7 +138,7 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Per-file unresolved-callee counts (where kg could not resolve calls)
+    /// Per-file unresolved-callee counts (where aw could not resolve calls)
     Unresolved {
         /// List unresolved edge sites with file:line instead of per-file counts
         #[arg(long)]

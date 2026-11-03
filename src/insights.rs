@@ -13,7 +13,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::db;
-use crate::error::{KgError, Result};
+use crate::error::{AwError, Result};
 
 pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
     let q = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
@@ -55,8 +55,8 @@ pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
     let size = std::fs::metadata(db::db_path(root))
         .map(|m| m.len())
         .unwrap_or(0);
-    let kg_version: String = conn
-        .query_row("SELECT value FROM meta WHERE key = 'kg_version'", [], |r| {
+    let aw_version: String = conn
+        .query_row("SELECT value FROM meta WHERE key = 'aw_version'", [], |r| {
             r.get(0)
         })
         .unwrap_or_else(|_| "?".into());
@@ -68,7 +68,7 @@ pub fn stats(conn: &Connection, root: &Path) -> Result<String> {
         )
         .unwrap_or_else(|_| "?".into());
     Ok(format!(
-        "kg stats: files={files} generated={generated} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} kg={kg_version} grammar={grammar}"
+        "aw stats: files={files} generated={generated} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} aw={aw_version} grammar={grammar}"
     ))
 }
 
@@ -140,7 +140,7 @@ pub fn hotspots(
     path: Option<&str>,
 ) -> Result<Vec<String>> {
     if limit == 0 {
-        return Err(KgError::Usage("--limit must be >= 1".to_string()));
+        return Err(AwError::Usage("--limit must be >= 1".to_string()));
     }
     if let Some(p) = path {
         crate::query::validate_path_scope(p, false)?;
@@ -161,7 +161,7 @@ pub fn hotspots(
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     if rows.is_empty() {
-        return Err(KgError::NoResults("no indexed files".to_string()));
+        return Err(AwError::NoResults("no indexed files".to_string()));
     }
     let (churn, fixes) = git_counts(root)?;
 
@@ -239,7 +239,7 @@ pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<
         .count();
     if changed > 0 {
         out.push(format!(
-            "kg: {changed} of {} sampled files changed since build — run kg build",
+            "aw: {changed} of {} sampled files changed since build — run aw build",
             paths.len()
         ));
     }
