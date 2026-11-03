@@ -691,7 +691,7 @@ directory?
 - Generated files are included by default; `--exclude-generated` removes them.
   `--include-private` adds private symbols. The two flags are independent.
 - `DIR` is recursive over indexed paths under §4 item 9.
-- First line: `kg: api — export rules are static heuristics; re-exports, module visibility, and dynamic exports may be incomplete`.
+- First line: `kg: api — static export heuristics; re-exports, module visibility, non-callable declarations (const/static/type aliases/variables), and dynamic exports may be incomplete`.
 - Gate G26.
 
 ### F11 — Generated-file tagging (P8c, schema v6)

@@ -47,7 +47,7 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
         {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; sites=true lists every call site; edges/depth extend the dependency set",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "sites": {"type": "boolean"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "edges": {"type": "string"}, "context": {"type": "boolean"}, "explain": {"type": "boolean"}, "limit": limit}), &["file"])},
-        {"name": "dead", "description": "Dead-code candidates (zero inbound call edges) — candidates, never proof; exclude_tests/generated and path scope filters",
+        {"name": "dead", "description": "Dead-code candidates (no resolved inbound calls/imports/inherits) — candidates, never proof; exclude_tests/generated and path scope filters",
          "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "exclude_generated": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
         {"name": "unresolved", "description": "Per-file unresolved-callee counts, or names=true for path:line kind name sites",
          "inputSchema": schema_obj(json!({"names": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},

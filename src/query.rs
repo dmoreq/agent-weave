@@ -35,6 +35,8 @@ const CONTEXT_CAVEAT: &str =
 
 /// Permanent honesty caveat for `kg implementers` (Amendment 19).
 const IMPLEMENTERS_CAVEAT: &str = "kg: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
+/// Permanent honesty caveat for `kg api`.
+const API_CAVEAT: &str = "kg: api — static export heuristics; re-exports, module visibility, non-callable declarations (const/static/type aliases/variables), and dynamic exports may be incomplete";
 
 /// `impact` caveats (Amendment 19): the default calls-only shape stays
 /// byte-identical; the extended shapes state their static-edge limit.
@@ -2197,7 +2199,7 @@ pub fn api(
             format!("0 exported symbols in '{path}'")
         };
         return Err(KgError::NoResultsCaveated {
-            caveat: "kg: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete",
+            caveat: API_CAVEAT,
             detail,
         });
     }
@@ -2236,9 +2238,7 @@ pub fn api(
             .next()
             .is_some_and(|p| file_changed(conn, root, p))
     });
-    let mut out = vec![
-        "kg: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete".to_string(),
-    ];
+    let mut out = vec![API_CAVEAT.to_string()];
     if stale {
         out.push("kg: result files changed since build — run kg build".to_string());
     }

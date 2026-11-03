@@ -92,8 +92,8 @@ candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
 ## Agent integration
 
 - **MCP**: `kg mcp` serves every query subcommand except `doctor` as
-  JSON-RPC tools over stdio; tool results are byte-identical to CLI stdout
-  (conformance-tested).
+  JSON-RPC tools over stdio; successful tool text matches CLI stdout, and
+  error text appends the CLI stderr detail (conformance-tested).
 - **Skill**: [`skills/kg-first/SKILL.md`](skills/kg-first/SKILL.md) is the
   measured routing policy for code agents — when to query kg first, how to
   handle ambiguous names and result caps, and when to fall back to grep.

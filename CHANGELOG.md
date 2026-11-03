@@ -144,8 +144,8 @@ changes bump the minor while 0.x is unstable.
   alias; `complexity`, `api`, `files`, `unresolved --names`, and
   `symbols <dir>` use SQL LIMIT + COUNT; `symbols <dir>` is one query.
 - `kg api` now reads the populated `exported` flag, includes signatures,
-  supports repo-root `.`, and follows Python `__all__`, Rust `pub`, and TS
-  `export` rules.
+  accepts a file or directory path (root `.` stays rejected), and follows
+  Python `__all__`, Rust `pub`, and TS `export` rules.
 - `kg resolve` requires `--stdin`, enforces 1,000 names / 4,096-byte lines /
   1 MiB, journals count/candidate_limit, and MCP sets `isError`.
 - `search --exact` uses the untokenized input (case-sensitive); `--path`

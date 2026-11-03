@@ -125,7 +125,7 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Dead-code candidates: indexed symbols with zero inbound call edges.
+    /// Dead-code candidates: indexed symbols with no resolved inbound calls, imports, or inherits.
     /// Candidates only — dynamic dispatch and entry points are not proven absent.
     Dead {
         /// Exclude tests/ paths and test_* symbols (policy filter)
