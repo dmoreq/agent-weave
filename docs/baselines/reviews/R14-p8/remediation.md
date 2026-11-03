@@ -35,11 +35,14 @@ what changed; it does not vote.
 - Direct impact level groups by caller path when `--context`/`--explain` are
   absent.
 - BFS stops when all reachable files (impact) or all callable symbols
-  (`tests`) are covered; the impact universe is a symbol-table upper bound.
+  (`tests`) are covered. The impact universe is read from exact per-kind
+  source-file meta counters (module-level callers included); `tests` returns
+  no-results immediately when no test-shaped symbol exists.
 - Measurements on the 1.37M-edge hub corpus (`/tmp/kg-r13-l3/edges1m-sub`):
-  `impact --depth 3` 117.1 ms best-of-7 (budget 150 ms); `tests --depth 10`
-  162.6 ms best-of-7 (budget 200 ms).
-- 3.1M stress: 254.3 ms / 363.4 ms (outside the 1M budget).
+  `impact --depth 3` 110.0-144.3 ms best-of-7 (budget 150 ms);
+  `impact --edges all` 146.9 ms; `tests --depth 10` 9.3-9.9 ms via the
+  no-test fast path (budget 200 ms).
+- 3.1M stress: 269.4 ms / 391.8 ms (outside the 1M budget).
 - 987k-symbol representative: 5.1 ms / 5.6 ms.
 - Raw method: `docs/baselines/p8-latency-2026-11-03.md`.
 

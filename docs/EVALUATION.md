@@ -301,7 +301,7 @@ one Critical and six Important findings are closed with regression tests.
 | `kg tests --depth 10`, 1.37M-edge hub | **163.4 ms** best-of-7 (budget 200 ms) | same |
 | `kg impact <file> --depth 10` | **5.1 ms** best-of-5 | same |
 | Flutter corpus build smoke | 124 indexed files, 735 symbols, 0 parse errors, 3.46 s | `kg build --root <flutter>` |
-| test suite | 197 tests (25 lib + 25 bin + 114 CLI + 26 fixture + 7 MCP) | `cargo test --locked` |
+| test suite | 198 tests (25 lib + 25 bin + 115 CLI + 26 fixture + 7 MCP) | `cargo test --locked` |
 
 Real-corpus gates are local-only and frozen at kg `342ebc3`, vihap `efcd310`,
 finguard `dddfe07`, Flutter `20f82749394`:

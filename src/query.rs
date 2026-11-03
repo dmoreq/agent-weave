@@ -179,7 +179,7 @@ pub fn test_impact(
         for chunk in current.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!(
-                "SELECT DISTINCT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
+                "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
                  FROM edges e JOIN symbols s ON s.id = e.src_id
                  WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
             );
