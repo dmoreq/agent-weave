@@ -460,7 +460,7 @@ pub fn gap_files_for_new_names(
 /// Insert unresolved edge sites for the fresh rows (schema v6, Amendment 19).
 pub fn insert_unresolved_calls(
     conn: &Connection,
-    rows: &[(i64, String, &'static str, usize)],
+    rows: &[(i64, &str, &'static str, usize)],
 ) -> Result<()> {
     if rows.iter().any(|(_, _, _, site_line)| *site_line == 0) {
         return Err(crate::error::KgError::Internal(
@@ -614,11 +614,11 @@ pub struct FilesRow {
 /// batches remain (statement reuse), the per-chunk BEGIN/COMMIT fsyncs do not.
 pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(rows.len());
+    let mut stmt = conn.prepare(
+        "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )?;
     for chunk in rows.chunks(500) {
-        let mut stmt = conn.prepare(
-            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        )?;
         for r in chunk {
             stmt.execute(rusqlite::params![
                 r.rel,
@@ -640,23 +640,23 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
 
 pub fn insert_symbols(
     conn: &Connection,
-    symbols: &[NewSymbol],
+    symbols: &[&NewSymbol],
     file_ids: &[i64],
     file_paths: &[String],
 ) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
+    let mut stmt = conn.prepare(
+        "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+    )?;
     for chunk in symbols.chunks(500) {
-        let mut stmt = conn.prepare(
-            "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        )?;
         for s in chunk {
             stmt.execute(rusqlite::params![
                 s.kind,
                 s.name,
                 s.qualname,
                 file_ids[s.file_idx],
-                file_paths[s.file_idx].clone(),
+                file_paths[s.file_idx].as_str(),
                 s.line_start as i64,
                 s.line_end as i64,
                 s.signature,
@@ -675,10 +675,10 @@ pub fn insert_symbols(
 /// Fully resolved edge row: endpoint ids already mapped (fresh -> inserted id,
 /// carried -> previous row id).
 #[derive(Debug)]
-pub struct EdgeRow {
+pub struct EdgeRow<'a> {
     pub src_id: i64,
     pub dst_id: Option<i64>,
-    pub dst_name: String,
+    pub dst_name: &'a str,
     pub kind: &'static str,
     pub confidence: &'static str,
     pub site_line: usize,
@@ -707,12 +707,12 @@ pub fn insert_clone_groups(
     Ok(())
 }
 
-pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
+pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow<'_>]) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO edges(src_id, dst_id, dst_name, kind, confidence, site_line)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
     for chunk in rows.chunks(500) {
-        let mut stmt = conn.prepare(
-            "INSERT INTO edges(src_id, dst_id, dst_name, kind, confidence, site_line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )?;
         for e in chunk {
             stmt.execute(rusqlite::params![
                 e.src_id,

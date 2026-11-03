@@ -261,13 +261,13 @@ pub fn run_build(
     // Schema v6 / Amendment 19: unresolved edge sites per fresh file, so a
     // later build can re-extract exactly the files whose gaps a new symbol
     // could heal.
-    let unresolved_rows: Vec<(i64, String, &'static str, usize)> = resolution
+    let unresolved_rows: Vec<(i64, &str, &'static str, usize)> = resolution
         .unresolved_calls
         .iter()
         .map(|u| {
             (
                 fresh_file_ids[u.file_idx],
-                u.name.clone(),
+                u.name.as_str(),
                 u.kind,
                 u.site_line,
             )
@@ -281,12 +281,12 @@ pub fn run_build(
         .iter()
         .filter(|e| e.is_none())
         .count();
-    let mut fresh_symbols: Vec<crate::extract::NewSymbol> = Vec::with_capacity(fresh_sym_count);
+    let mut fresh_symbols: Vec<&crate::extract::NewSymbol> = Vec::with_capacity(fresh_sym_count);
     let mut fresh_pos: Vec<Option<usize>> = Vec::with_capacity(resolution.symbols.len());
     for (sym, existing) in resolution.symbols.iter().zip(&resolution.existing_ids) {
         if existing.is_none() {
             fresh_pos.push(Some(fresh_symbols.len()));
-            fresh_symbols.push(sym.clone());
+            fresh_symbols.push(sym);
         } else {
             fresh_pos.push(None);
         }
@@ -296,7 +296,7 @@ pub fn run_build(
         crate::db::insert_symbols(&conn, &fresh_symbols, &fresh_file_ids, &fresh_paths)?;
 
     // Edges: endpoints map fresh -> inserted id, carried -> previous row id.
-    let mut edge_rows: Vec<crate::db::EdgeRow> = Vec::with_capacity(resolution.edges.len());
+    let mut edge_rows: Vec<crate::db::EdgeRow<'_>> = Vec::with_capacity(resolution.edges.len());
     for e in &resolution.edges {
         let src_id = match resolve_sym_id(e.src_idx, &fresh_pos, &fresh_sym_ids, &resolution) {
             Some(id) => id,
@@ -311,7 +311,7 @@ pub fn run_build(
         edge_rows.push(crate::db::EdgeRow {
             src_id,
             dst_id,
-            dst_name: e.dst_name.clone(),
+            dst_name: e.dst_name.as_str(),
             kind: e.kind,
             confidence: e.confidence,
             site_line: e.site_line,
@@ -350,31 +350,58 @@ pub fn run_build(
             .unwrap_or_else(|_| "0".into()),
     )?;
     crate::db::set_meta(&conn, "source_rev", &crate::db::source_rev(&root))?;
-    let sql_count = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
-    let sym_total = sql_count("SELECT COUNT(*) FROM symbols")?;
-    let callable_total = sql_count(
-        "SELECT COUNT(*) FROM symbols
-         WHERE kind IN ('function','method') AND cyclomatic > 0",
+    // One scan per table instead of one query per count (A3).
+    let (sym_total, callable_total) = conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM(kind IN ('function','method') AND cyclomatic > 0), 0)
+         FROM symbols",
+        [],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
     )?;
     crate::db::set_meta(&conn, "callable_count", &callable_total.to_string())?;
-    let edge_total = sql_count("SELECT COUNT(*) FROM edges")?;
-    let file_total = sql_count("SELECT COUNT(*) FROM files")?;
-    let perr_total = sql_count("SELECT COALESCE(SUM(parse_status != 'ok'), 0) FROM files")?;
+    let (edge_total, calls_total, imports_total, inherits_total) = conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM(kind = 'calls'), 0),
+                COALESCE(SUM(kind = 'imports'), 0),
+                COALESCE(SUM(kind = 'inherits'), 0)
+         FROM edges",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        },
+    )?;
+    let (file_total, perr_total, unres_total) = conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM(parse_status != 'ok'), 0),
+                COALESCE(SUM(unresolved), 0)
+         FROM files",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
+    )?;
     crate::db::set_meta(&conn, "file_count", &file_total.to_string())?;
     crate::db::set_meta(&conn, "symbol_count", &sym_total.to_string())?;
     crate::db::set_meta(&conn, "edge_count", &edge_total.to_string())?;
     crate::db::set_meta(&conn, "parse_error_count", &perr_total.to_string())?;
     // Unresolved total is the authoritative SQL sum of per-file counts, stable
     // across fast-path builds (carried rows keep their stored count).
-    for (key, kind) in [
-        ("edge_calls", "calls"),
-        ("edge_imports", "imports"),
-        ("edge_inherits", "inherits"),
+    for (key, n) in [
+        ("edge_calls", calls_total),
+        ("edge_imports", imports_total),
+        ("edge_inherits", inherits_total),
     ] {
-        let n = sql_count(&format!("SELECT COUNT(*) FROM edges WHERE kind = '{kind}'"))?;
         crate::db::set_meta(&conn, key, &n.to_string())?;
     }
-    let unres_total = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
     conn.close()
