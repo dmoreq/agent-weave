@@ -140,17 +140,52 @@ pub fn check_schema_version(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Fresh DB at `.kg/index.db.new` with schema + user_version stamped.
+/// Fresh DB at `.kg/index.db.new` with tables, FTS, and user_version stamped.
+/// Secondary indexes are created later by `create_secondary_indexes` (after
+/// the bulk insert) so each index is sorted once instead of maintained per row.
 pub fn create_fresh(root: &Path) -> Result<Connection> {
     ensure_kg_gitignore(root)?;
     let path = db_new_path(root);
     let _ = fs::remove_file(&path);
     let conn = Connection::open(&path)?;
+    // Build-only pragmas (A2): `.new` is disposable until publish_new_index
+    // renames it, so this connection drops the rollback journal (no double
+    // writes) and per-commit fsyncs. publish_new_index fsyncs the finished file
+    // before the atomic rename, so the published index is durable.
+    conn.execute_batch(
+        "PRAGMA journal_mode = OFF;
+         PRAGMA synchronous = OFF;
+         PRAGMA locking_mode = EXCLUSIVE;
+         PRAGMA cache_size = -32768;",
+    )?;
     conn.execute_batch(include_str!("../schema.sql"))?;
     // The version contract lives here alone: schema.sql declares no PRAGMA,
     // and this pragma_update stamps the compiled SCHEMA_VERSION.
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(conn)
+}
+
+/// Create the secondary indexes after every bulk insert. The final schema is
+/// identical to the historical schema.sql layout; only the creation order moves.
+pub fn create_secondary_indexes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(include_str!("../schema_indexes.sql"))?;
+    Ok(())
+}
+
+/// Fsync the finished `.new` index and atomically publish it onto `index.db`.
+/// The build connection must already be closed (SQLite flushes its pager on
+/// close). A crash before the rename leaves only a disposable `.new`; the next
+/// build's lock holder removes it, and the previous `index.db` stays readable.
+pub fn publish_new_index(root: &Path) -> Result<()> {
+    let new = db_new_path(root);
+    File::open(&new)?.sync_all()?;
+    fs::rename(&new, db_path(root))?;
+    // Best-effort directory fsync: makes the rename durable. If it fails, a
+    // crash can revert to the previous index, never expose a missing one.
+    if let Ok(dir) = File::open(kg_dir(root)) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 /// Fast path gate: a usable previous index under the SAME schema AND grammar
@@ -425,7 +460,7 @@ pub fn gap_files_for_new_names(
 /// Insert unresolved edge sites for the fresh rows (schema v6, Amendment 19).
 pub fn insert_unresolved_calls(
     conn: &Connection,
-    rows: &[(i64, String, &'static str, usize)],
+    rows: &[(i64, &str, &'static str, usize)],
 ) -> Result<()> {
     if rows.iter().any(|(_, _, _, site_line)| *site_line == 0) {
         return Err(crate::error::KgError::Internal(
@@ -579,11 +614,11 @@ pub struct FilesRow {
 /// batches remain (statement reuse), the per-chunk BEGIN/COMMIT fsyncs do not.
 pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(rows.len());
+    let mut stmt = conn.prepare(
+        "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )?;
     for chunk in rows.chunks(500) {
-        let mut stmt = conn.prepare(
-            "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, loc, cyclomatic, generated)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        )?;
         for r in chunk {
             stmt.execute(rusqlite::params![
                 r.rel,
@@ -605,23 +640,23 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
 
 pub fn insert_symbols(
     conn: &Connection,
-    symbols: &[NewSymbol],
+    symbols: &[&NewSymbol],
     file_ids: &[i64],
     file_paths: &[String],
 ) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
+    let mut stmt = conn.prepare(
+        "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+    )?;
     for chunk in symbols.chunks(500) {
-        let mut stmt = conn.prepare(
-            "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        )?;
         for s in chunk {
             stmt.execute(rusqlite::params![
                 s.kind,
                 s.name,
                 s.qualname,
                 file_ids[s.file_idx],
-                file_paths[s.file_idx].clone(),
+                file_paths[s.file_idx].as_str(),
                 s.line_start as i64,
                 s.line_end as i64,
                 s.signature,
@@ -640,10 +675,10 @@ pub fn insert_symbols(
 /// Fully resolved edge row: endpoint ids already mapped (fresh -> inserted id,
 /// carried -> previous row id).
 #[derive(Debug)]
-pub struct EdgeRow {
+pub struct EdgeRow<'a> {
     pub src_id: i64,
     pub dst_id: Option<i64>,
-    pub dst_name: String,
+    pub dst_name: &'a str,
     pub kind: &'static str,
     pub confidence: &'static str,
     pub site_line: usize,
@@ -672,12 +707,12 @@ pub fn insert_clone_groups(
     Ok(())
 }
 
-pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
+pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow<'_>]) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO edges(src_id, dst_id, dst_name, kind, confidence, site_line)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
     for chunk in rows.chunks(500) {
-        let mut stmt = conn.prepare(
-            "INSERT INTO edges(src_id, dst_id, dst_name, kind, confidence, site_line)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )?;
         for e in chunk {
             stmt.execute(rusqlite::params![
                 e.src_id,
@@ -697,6 +732,20 @@ pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow]) -> Result<()> {
 /// inside the build transaction after `insert_edge_rows`. Amendment 14
 /// widens the indexed text with path and signature tokens — the two
 /// haystacks grep already matches and a name-only index could not.
+/// FTS text for one symbol (Amendment 12b/14/R7): qualname and name repeat so
+/// bm25 ranks identity matches above signature-only matches now that signatures
+/// carry full parameter lists. Shared by the SELECT and in-memory paths so the
+/// indexed bytes cannot drift.
+fn fts_text(qualname: &str, name: &str, path: &str, signature: &str) -> String {
+    format!(
+        "{q} {q} {n} {n} {p} {s}",
+        q = crate::extract::split_ident(qualname),
+        n = crate::extract::split_ident(name),
+        p = crate::extract::split_ident(path),
+        s = crate::extract::split_ident(signature)
+    )
+}
+
 pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT s.id, s.qualname, s.name, f.path, s.signature
@@ -709,17 +758,27 @@ pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
     for (id, qualname, name, path, signature) in rows {
-        // Name/qualname tokens repeat so bm25 ranks identity matches above
-        // signature-only matches now that signatures carry full parameter
-        // lists (R7: richer signatures otherwise crowded out name hits).
-        let text = format!(
-            "{q} {q} {n} {n} {p} {s}",
-            q = crate::extract::split_ident(&qualname),
-            n = crate::extract::split_ident(&name),
-            p = crate::extract::split_ident(&path),
-            s = crate::extract::split_ident(&signature)
-        );
-        ins.execute(rusqlite::params![id, text])?;
+        ins.execute(rusqlite::params![
+            id,
+            fts_text(&qualname, &name, &path, &signature)
+        ])?;
+    }
+    Ok(())
+}
+
+/// Populate FTS from in-memory rows (force path): one row is
+/// `(symbol id, qualname, name, file path, signature)`. Avoids the SELECT +
+/// JOIN over every inserted symbol. The indexed bytes match `fts_text` exactly.
+pub fn populate_symbols_fts_rows(
+    conn: &Connection,
+    rows: &[(i64, &str, &str, &str, &str)],
+) -> Result<()> {
+    let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
+    for &(id, qualname, name, path, signature) in rows {
+        ins.execute(rusqlite::params![
+            id,
+            fts_text(qualname, name, path, signature)
+        ])?;
     }
     Ok(())
 }

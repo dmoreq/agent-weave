@@ -6,6 +6,9 @@
 -- complexity ordering).
 -- The binary opens a DB only when PRAGMA user_version equals its own compiled
 -- schema version; older AND newer both exit 5. The DB is never migrated in place.
+-- Tables and the FTS table live here; secondary indexes live in
+-- schema_indexes.sql and are created after the bulk insert of a fresh build
+-- (the final schema is unchanged).
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
 -- meta rows: kg_version, grammar_version, built_at, source_rev, file_count,
 -- symbol_count, edge_count, parse_error_count, unresolved_callee_count
@@ -59,12 +62,6 @@ CREATE TABLE edges(
     confidence TEXT NOT NULL,
     site_line INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX edges_dst ON edges(dst_id, kind);
-CREATE INDEX edges_src ON edges(src_id, kind);
-CREATE INDEX symbols_file ON symbols(file_id);
-CREATE INDEX symbols_qualname ON symbols(qualname);
-CREATE INDEX symbols_complexity_idx
-    ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_path, line_start);
 -- Symbol search (Amendment 12b): standalone FTS5 over split identifier
 -- tokens; repopulated by one pass from symbols at the end of every build
 -- (the build replaces the whole DB, so no incremental maintenance exists).
@@ -78,8 +75,6 @@ CREATE TABLE unresolved_calls(
     kind TEXT NOT NULL DEFAULT 'call',
     site_line INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX unresolved_calls_file ON unresolved_calls(file_id);
-CREATE INDEX unresolved_calls_kind ON unresolved_calls(kind, dst_name);
 -- Clone candidates (Amendment 12d): normalized 5-line-window FNV-1a shingles
 -- computed during the build parse phase for fresh files and carried forward
 -- with the fast path; grouping/pairing happens at query time.
@@ -89,5 +84,3 @@ CREATE TABLE clone_groups(
     line_start INTEGER NOT NULL,
     line_end INTEGER NOT NULL
 );
-CREATE INDEX clone_groups_hash ON clone_groups(shingle_hash, file_id, line_start);
-CREATE INDEX symbols_name ON symbols(name);

@@ -44,7 +44,7 @@ pub fn run_build(
     let mut mtime_updates: HashMap<String, i64> = HashMap::new();
     let mut fresh: Vec<crate::walk::WalkedFile> = Vec::new();
     for f in &stats.files {
-        let mtime = crate::db::stat_mtime(&f.abs).unwrap_or(0);
+        let mtime = f.mtime;
         match old_map.get(&f.rel) {
             Some((om, osz, _oh)) if *om == mtime && *osz == f.size as i64 => {
                 carried.insert(f.rel.clone());
@@ -61,12 +61,14 @@ pub fn run_build(
                     abs: f.abs.clone(),
                     rel: f.rel.clone(),
                     size: f.size,
+                    mtime,
                 }),
             },
             _ => fresh.push(crate::walk::WalkedFile {
                 abs: f.abs.clone(),
                 rel: f.rel.clone(),
                 size: f.size,
+                mtime,
             }),
         }
     }
@@ -95,6 +97,7 @@ pub fn run_build(
                             abs: f.abs.clone(),
                             rel: f.rel.clone(),
                             size: f.size,
+                            mtime: f.mtime,
                         });
                     }
                 }
@@ -184,6 +187,7 @@ pub fn run_build(
                             abs: f.abs.clone(),
                             rel: f.rel.clone(),
                             size: f.size,
+                            mtime: f.mtime,
                         });
                     }
                 }
@@ -261,13 +265,13 @@ pub fn run_build(
     // Schema v6 / Amendment 19: unresolved edge sites per fresh file, so a
     // later build can re-extract exactly the files whose gaps a new symbol
     // could heal.
-    let unresolved_rows: Vec<(i64, String, &'static str, usize)> = resolution
+    let unresolved_rows: Vec<(i64, &str, &'static str, usize)> = resolution
         .unresolved_calls
         .iter()
         .map(|u| {
             (
                 fresh_file_ids[u.file_idx],
-                u.name.clone(),
+                u.name.as_str(),
                 u.kind,
                 u.site_line,
             )
@@ -281,12 +285,12 @@ pub fn run_build(
         .iter()
         .filter(|e| e.is_none())
         .count();
-    let mut fresh_symbols: Vec<crate::extract::NewSymbol> = Vec::with_capacity(fresh_sym_count);
+    let mut fresh_symbols: Vec<&crate::extract::NewSymbol> = Vec::with_capacity(fresh_sym_count);
     let mut fresh_pos: Vec<Option<usize>> = Vec::with_capacity(resolution.symbols.len());
     for (sym, existing) in resolution.symbols.iter().zip(&resolution.existing_ids) {
         if existing.is_none() {
             fresh_pos.push(Some(fresh_symbols.len()));
-            fresh_symbols.push(sym.clone());
+            fresh_symbols.push(sym);
         } else {
             fresh_pos.push(None);
         }
@@ -296,7 +300,7 @@ pub fn run_build(
         crate::db::insert_symbols(&conn, &fresh_symbols, &fresh_file_ids, &fresh_paths)?;
 
     // Edges: endpoints map fresh -> inserted id, carried -> previous row id.
-    let mut edge_rows: Vec<crate::db::EdgeRow> = Vec::with_capacity(resolution.edges.len());
+    let mut edge_rows: Vec<crate::db::EdgeRow<'_>> = Vec::with_capacity(resolution.edges.len());
     for e in &resolution.edges {
         let src_id = match resolve_sym_id(e.src_idx, &fresh_pos, &fresh_sym_ids, &resolution) {
             Some(id) => id,
@@ -311,14 +315,46 @@ pub fn run_build(
         edge_rows.push(crate::db::EdgeRow {
             src_id,
             dst_id,
-            dst_name: e.dst_name.clone(),
+            dst_name: e.dst_name.as_str(),
             kind: e.kind,
             confidence: e.confidence,
             site_line: e.site_line,
         });
     }
     crate::db::insert_edge_rows(&conn, &edge_rows)?;
-    crate::db::populate_symbols_fts(&conn)?;
+    // FTS (A4): a forced rebuild has every symbol in memory, so insert the FTS
+    // rows directly instead of re-reading all symbols with a SELECT + JOIN.
+    // Any other build keeps the SELECT path (carried rows are not in memory).
+    let all_fresh = old.is_none() && fresh_sym_count == resolution.symbols.len();
+    if all_fresh {
+        let mut fts_rows: Vec<(i64, &str, &str, &str, &str)> =
+            Vec::with_capacity(resolution.symbols.len());
+        let mut complete = true;
+        for (sym, pos) in resolution.symbols.iter().zip(&fresh_pos) {
+            let Some(pos) = pos else {
+                complete = false;
+                break;
+            };
+            let Some(path) = fresh_paths.get(sym.file_idx) else {
+                complete = false;
+                break;
+            };
+            fts_rows.push((
+                fresh_sym_ids[*pos],
+                sym.qualname.as_str(),
+                sym.name.as_str(),
+                path.as_str(),
+                sym.signature.as_str(),
+            ));
+        }
+        if complete {
+            crate::db::populate_symbols_fts_rows(&conn, &fts_rows)?;
+        } else {
+            crate::db::populate_symbols_fts(&conn)?;
+        }
+    } else {
+        crate::db::populate_symbols_fts(&conn)?;
+    }
     // Clone-candidate shingles (Amendment 12d): fresh-file windows keyed by
     // the just-inserted file ids; carried files' rows were copied above.
     if !fresh_shingles.is_empty() {
@@ -329,6 +365,9 @@ pub fn run_build(
             .collect();
         crate::db::insert_clone_groups(&conn, &pairs)?;
     }
+    // Deferred indexes (A1): sort each secondary index once, after every row is
+    // in place. The final schema is unchanged; queries only see the published DB.
+    crate::db::create_secondary_indexes(&conn)?;
 
     // Meta manifest; counts are authoritative SQL totals over the whole index.
     crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;
@@ -347,38 +386,66 @@ pub fn run_build(
             .unwrap_or_else(|_| "0".into()),
     )?;
     crate::db::set_meta(&conn, "source_rev", &crate::db::source_rev(&root))?;
-    let sql_count = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
-    let sym_total = sql_count("SELECT COUNT(*) FROM symbols")?;
-    let callable_total = sql_count(
-        "SELECT COUNT(*) FROM symbols
-         WHERE kind IN ('function','method') AND cyclomatic > 0",
+    // One scan per table instead of one query per count (A3).
+    let (sym_total, callable_total) = conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM(kind IN ('function','method') AND cyclomatic > 0), 0)
+         FROM symbols",
+        [],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
     )?;
     crate::db::set_meta(&conn, "callable_count", &callable_total.to_string())?;
-    let edge_total = sql_count("SELECT COUNT(*) FROM edges")?;
-    let file_total = sql_count("SELECT COUNT(*) FROM files")?;
-    let perr_total = sql_count("SELECT COALESCE(SUM(parse_status != 'ok'), 0) FROM files")?;
+    let (edge_total, calls_total, imports_total, inherits_total) = conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM(kind = 'calls'), 0),
+                COALESCE(SUM(kind = 'imports'), 0),
+                COALESCE(SUM(kind = 'inherits'), 0)
+         FROM edges",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        },
+    )?;
+    let (file_total, perr_total, unres_total) = conn.query_row(
+        "SELECT COUNT(*),
+                COALESCE(SUM(parse_status != 'ok'), 0),
+                COALESCE(SUM(unresolved), 0)
+         FROM files",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
+    )?;
     crate::db::set_meta(&conn, "file_count", &file_total.to_string())?;
     crate::db::set_meta(&conn, "symbol_count", &sym_total.to_string())?;
     crate::db::set_meta(&conn, "edge_count", &edge_total.to_string())?;
     crate::db::set_meta(&conn, "parse_error_count", &perr_total.to_string())?;
     // Unresolved total is the authoritative SQL sum of per-file counts, stable
     // across fast-path builds (carried rows keep their stored count).
-    for (key, kind) in [
-        ("edge_calls", "calls"),
-        ("edge_imports", "imports"),
-        ("edge_inherits", "inherits"),
+    for (key, n) in [
+        ("edge_calls", calls_total),
+        ("edge_imports", imports_total),
+        ("edge_inherits", inherits_total),
     ] {
-        let n = sql_count(&format!("SELECT COUNT(*) FROM edges WHERE kind = '{kind}'"))?;
         crate::db::set_meta(&conn, key, &n.to_string())?;
     }
-    let unres_total = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
-    drop(conn);
+    conn.close()
+        .map_err(|(_, e)| crate::error::KgError::from(e))?;
 
-    // Atomic swap: rename(2) onto index.db — readers see old or new, never
-    // missing (no delete step exists).
-    std::fs::rename(crate::db::db_new_path(&root), crate::db::db_path(&root))?;
+    // Atomic swap: fsync the finished `.new`, then rename(2) onto index.db —
+    // readers see old or new, never missing (no delete step exists).
+    crate::db::publish_new_index(&root)?;
     let db_secs = t0.elapsed().as_secs_f64();
     crate::journal::record_result(total_files, total_files, total_files, false, 0);
 
@@ -460,34 +527,41 @@ fn extract_units(
                     move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
                         let mut units = Vec::with_capacity(chunk.len());
                         let mut secs = 0f64;
+                        let mut parser = crate::parse::ParserSlot::new();
                         for (local, f) in chunk.into_iter().enumerate() {
                             let idx = base_idx + chunk_no * chunk_len + local;
                             let bytes = std::fs::read(&f.abs)?;
                             let lang = crate::parse::Lang::from_rel(&f.rel);
-                            let parsed = crate::parse::parse_source(&bytes, lang)?;
+                            let tree = parser.parse(&bytes, lang)?;
+                            let crate::parse::SyntaxStats {
+                                error_nodes,
+                                status,
+                                decisions,
+                                loc,
+                                code_lines,
+                            } = crate::parse::syntax_stats(tree.root_node(), &bytes, lang);
                             let e0 = Instant::now();
-                            let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
+                            let fx = crate::extract::extract_file_with_code_lines(
+                                idx,
+                                &f.rel,
+                                &bytes,
+                                tree.root_node(),
+                                code_lines,
+                            );
                             secs += e0.elapsed().as_secs_f64();
-                            let cyclomatic = crate::parse::decision_nodes(
-                                parsed.tree.root_node(),
-                                crate::parse::decision_kinds(lang),
-                            ) as i64;
                             let shingles = crate::clones::shingles(&bytes);
                             let generated = i64::from(crate::walk::is_generated(&f.rel, &bytes));
                             units.push((
                                 crate::db::FilesRow {
                                     rel: f.rel,
                                     size: f.size as i64,
-                                    mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
+                                    mtime: f.mtime,
                                     content_hash: crate::hash::fnv1a64(&bytes) as i64,
-                                    parse_status: parsed.status,
-                                    error_nodes: parsed.error_nodes,
+                                    parse_status: status,
+                                    error_nodes,
                                     unresolved: 0,
-                                    loc: crate::parse::non_comment_loc(
-                                        &bytes,
-                                        parsed.tree.root_node(),
-                                    ),
-                                    cyclomatic,
+                                    loc,
+                                    cyclomatic: decisions as i64,
                                     generated,
                                 },
                                 fx,

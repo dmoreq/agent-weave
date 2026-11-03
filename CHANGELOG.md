@@ -7,6 +7,27 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Changed — build performance (2026-11-03)
+
+- Fresh builds create secondary indexes after the bulk insert
+  (`schema_indexes.sql`); the final schema (index names and key order) is
+  unchanged. The index file is about 4% smaller.
+- The disposable `.kg/index.db.new` connection runs with
+  `journal_mode=OFF`/`synchronous=OFF`; the finished file is fsynced before the
+  atomic rename, so the published index stays durable.
+- Meta totals come from one scan per table; insert paths borrow rows instead
+  of cloning them; forced builds populate FTS from the in-memory extraction.
+- Parse/extract collects error, decision, comment, LOC, and code-mask data in
+  one tree walk, shares line bounds and metric tables across callables, and
+  reuses one parser per worker.
+- Resolution looks up a parent symbol kind through `by_qualname` instead of a
+  reverse scan.
+- No schema, stats-line, or query-semantics change. Query outputs are
+  byte-identical except `kg stats`'s `db_bytes`, which reports the smaller
+  index file. Best-of-7 `build --force` on the 2,025-file synthetic corpus:
+  1.87 s vs 3.61 s baseline on a heavily loaded host (interleaved A/B); details
+  in `docs/reports/2026-11-03_kg-build-force-optimization.md`.
+
 ### Changed — schema v7 (Amendment 20)
 
 - `symbols.file_path` denormalizes `files.path`; `symbols_complexity_idx`

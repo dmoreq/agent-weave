@@ -193,7 +193,8 @@ src/query.rs    callers/callees/impact; staleness check (result-set scope); caps
 src/doctor.rs   integrity, versions, parse coverage, orphans, lock state
 src/hash.rs     FNV-1a 64 (raw bytes, no normalization)
 src/error.rs    KgError enum, stable stderr prefix `kg: <class>: <detail>`
-schema.sql      embedded via include_str!
+schema.sql      embedded via include_str! (tables + FTS)
+schema_indexes.sql  embedded via include_str! (secondary indexes; created after bulk insert)
 ```
 
 Dependencies (pinned, complete): `clap` (derive), `tree-sitter` + `tree-sitter-python` (P1) + `tree-sitter-typescript`/`tree-sitter-javascript` (P2; tsx grammar ships in the typescript crate) + `tree-sitter-rust` (P2.5, optional), `rusqlite` (bundled), `ignore`. No rayon (single-threaded P1; add only if G-B fails, then <= 4 workers). No serde. `#![forbid(unsafe_code)]` at crate root.
@@ -310,8 +311,11 @@ Runtime crate and all grammar crates upgrade together in one commit. Golden fixt
 - Rationale: reproducible builds; supply-chain audit surface.
 
 #### schema.sql
-- Scope: embedded DDL above; user_version = 1.
-- Rationale: schema is a contract; single readable source.
+- Scope: embedded table + FTS DDL above; `schema_indexes.sql` holds the secondary
+  indexes, created after the bulk insert; `user_version` is stamped from
+  `SCHEMA_VERSION`.
+- Rationale: schema is a contract; a fresh build's final schema is the union of
+  both files, unchanged from the pre-split layout.
 
 #### src/main.rs, src/cli.rs
 - Scope: clap subcommands (build, callers, callees, impact, doctor [+ --invalidate], build --force); exit-code mapping; help texts stating direction semantics (impact = "files that call into <file>").

@@ -766,7 +766,9 @@ is a charter until that addendum is approved.
 
 One additive bump carries F5, F9, F10, and F11. The `ALTER` statements below
 are the logical delta; `schema.sql` expresses the same columns in the
-fresh-build `CREATE TABLE` statements and must also create the index.
+fresh-build `CREATE TABLE` statements, and `schema_indexes.sql` holds the
+secondary-index DDL, applied after the bulk insert. The final schema is
+unchanged from the pre-split layout.
 
 ```sql
 ALTER TABLE symbols ADD COLUMN cyclomatic INTEGER NOT NULL DEFAULT 0;

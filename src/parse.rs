@@ -46,20 +46,69 @@ impl Lang {
     }
 }
 
+/// Lib API used by tests and fixtures; the bin uses parse_tree/syntax_stats.
+#[allow(dead_code)]
 pub struct ParsedFile {
     pub tree: Tree,
     pub error_nodes: usize,
     pub status: &'static str,
 }
 
+/// One-pass per-file syntax stats (B1): error/missing nodes, decision nodes
+/// (the file-level cyclomatic proxy), comment ranges, and the derived
+/// comment mask + non-comment LOC. The build previously walked the tree once
+/// per metric; this collapses those passes into one.
+pub struct SyntaxStats {
+    pub error_nodes: usize,
+    pub status: &'static str,
+    pub decisions: usize,
+    pub loc: i64,
+    pub code_lines: Vec<bool>,
+}
+
+/// Worker-local parser (B3): one `Parser` per build worker instead of one per
+/// file; the language is reset only when the chunk changes language.
+pub struct ParserSlot {
+    parser: Parser,
+    lang: Option<Lang>,
+}
+
+impl Default for ParserSlot {
+    fn default() -> ParserSlot {
+        ParserSlot::new()
+    }
+}
+
+impl ParserSlot {
+    pub fn new() -> ParserSlot {
+        ParserSlot {
+            parser: Parser::new(),
+            lang: None,
+        }
+    }
+
+    pub fn parse(&mut self, src: &[u8], lang: Lang) -> Result<Tree> {
+        if self.lang != Some(lang) {
+            self.parser
+                .set_language(&lang.grammar()?)
+                .map_err(|e| KgError::Internal(format!("grammar load failed: {e}")))?;
+            self.lang = Some(lang);
+        }
+        self.parser
+            .parse(src, None)
+            .ok_or_else(|| KgError::Internal("tree-sitter returned no tree".to_string()))
+    }
+}
+
+/// Parse without counting error nodes; `syntax_stats` supplies the count from
+/// the same walk that counts decisions and collects comments.
+pub fn parse_tree(src: &[u8], lang: Lang) -> Result<Tree> {
+    ParserSlot::new().parse(src, lang)
+}
+
+#[allow(dead_code)]
 pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&lang.grammar()?)
-        .map_err(|e| KgError::Internal(format!("grammar load failed: {e}")))?;
-    let tree = parser
-        .parse(src, None)
-        .ok_or_else(|| KgError::Internal("tree-sitter returned no tree".to_string()))?;
+    let tree = parse_tree(src, lang)?;
     let error_nodes = count_error_nodes(tree.root_node());
     let status = if error_nodes == 0 { "ok" } else { "partial" };
     Ok(ParsedFile {
@@ -69,6 +118,50 @@ pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
     })
 }
 
+/// Single tree walk producing every per-file syntax metric. Comment ranges
+/// feed the same two line algorithms the separate passes used, so `loc` and
+/// `code_lines` stay byte-identical.
+pub fn syntax_stats(root: Node<'_>, src: &[u8], lang: Lang) -> SyntaxStats {
+    let kinds = decision_kinds(lang);
+    let has_marker = src.windows(2).any(|w| w == b"//")
+        || src.windows(2).any(|w| w == b"/*")
+        || src.contains(&b'#');
+    let mut error_nodes = 0usize;
+    let mut decisions = 0usize;
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.is_error() || node.is_missing() {
+            error_nodes += 1;
+        }
+        if kinds.contains(&node.kind()) {
+            decisions += 1;
+        }
+        if is_comment_kind(node.kind()) {
+            ranges.push((node.start_byte(), node.end_byte()));
+        }
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            stack.push(child);
+        }
+    }
+    ranges.sort_unstable();
+    let loc = non_comment_loc_from_ranges(src, &ranges);
+    let code_lines = if has_marker {
+        code_lines_from_ranges(src, &ranges)
+    } else {
+        blank_code_lines(src)
+    };
+    SyntaxStats {
+        error_nodes,
+        status: if error_nodes == 0 { "ok" } else { "partial" },
+        decisions,
+        loc,
+        code_lines,
+    }
+}
+
+#[allow(dead_code)]
 fn count_error_nodes(root: Node<'_>) -> usize {
     // Explicit stack: source nesting depth is attacker-controlled, and a
     // recursive walk aborts the process on pathological files (R6d Blocker 1).
@@ -126,6 +219,7 @@ pub fn decision_kinds(lang: Lang) -> &'static [&'static str] {
 /// Hotspots' LOC term previously counted every physical line, so a
 /// comment-heavy file outranked dense logic (R7 L4). Comment nodes are
 /// language-uniform (`comment`) and already in the parse tree.
+#[allow(dead_code)]
 pub fn non_comment_loc(bytes: &[u8], root: Node<'_>) -> i64 {
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut stack = vec![root];
@@ -169,6 +263,7 @@ pub fn non_comment_loc(bytes: &[u8], root: Node<'_>) -> i64 {
 }
 
 /// Count decision nodes of the given kinds in the subtree.
+#[allow(dead_code)]
 pub fn decision_nodes(root: Node<'_>, kinds: &[&str]) -> usize {
     // Explicit stack — same depth-safety rationale as count_error_nodes.
     let mut n = 0usize;
@@ -181,6 +276,99 @@ pub fn decision_nodes(root: Node<'_>, kinds: &[&str]) -> usize {
         }
     }
     n
+}
+
+fn is_comment_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "comment" | "line_comment" | "block_comment" | "doc_comment"
+    )
+}
+
+/// `non_comment_loc` over already-collected, sorted comment ranges.
+fn non_comment_loc_from_ranges(bytes: &[u8], ranges: &[(usize, usize)]) -> i64 {
+    let mut ri = 0usize;
+    let mut offset = 0usize;
+    let mut loc = 0i64;
+    for line in bytes.split(|b| *b == b'\n') {
+        let first = line.iter().position(|b| !b.is_ascii_whitespace());
+        let Some(first) = first else {
+            offset += line.len() + 1;
+            continue;
+        };
+        let first = offset + first;
+        let line_end = offset + line.len();
+        // Advance past comments that ended before this line's first byte.
+        while ri < ranges.len() && ranges[ri].1 <= first {
+            ri += 1;
+        }
+        let comment_only = ranges
+            .get(ri)
+            .is_some_and(|(s, e)| first >= *s && line_end <= *e);
+        if !comment_only {
+            loc += 1;
+        }
+        offset += line.len() + 1;
+    }
+    loc
+}
+
+/// File-wide per-line code flag over already-collected comment ranges. Merges
+/// touching ranges first, exactly like the old `file_code_lines` pass.
+fn code_lines_from_ranges(src: &[u8], ranges: &[(usize, usize)]) -> Vec<bool> {
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for &(start, end) in ranges {
+        match merged.last_mut() {
+            Some((_, last_end)) if start <= *last_end => *last_end = (*last_end).max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let bounds = line_byte_bounds(src);
+    let mut flags = Vec::with_capacity(bounds.len());
+    for (start, end) in bounds {
+        let mut code = false;
+        for (i, byte) in src[start..end].iter().enumerate() {
+            if !byte.is_ascii_whitespace() {
+                let pos = start + i;
+                if !merged.iter().any(|(s, e)| pos >= *s && pos < *e) {
+                    code = true;
+                    break;
+                }
+            }
+        }
+        flags.push(code);
+    }
+    flags
+}
+
+/// Per-line `(start, end)` byte bounds, excluding the newline.
+pub(crate) fn line_byte_bounds(src: &[u8]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    for (i, byte) in src.iter().enumerate() {
+        if *byte == b'\n' {
+            out.push((start, i));
+            start = i + 1;
+        }
+    }
+    out.push((start, src.len()));
+    out
+}
+
+/// Blank-only LOC flags: a line is code when it has any non-whitespace byte.
+fn blank_code_lines(src: &[u8]) -> Vec<bool> {
+    let mut flags = Vec::new();
+    let mut code = false;
+    for byte in src {
+        if *byte == b'\n' {
+            flags.push(code);
+            code = false;
+        } else if !byte.is_ascii_whitespace() {
+            code = true;
+        }
+    }
+    flags.push(code);
+    flags
 }
 
 #[cfg(test)]
