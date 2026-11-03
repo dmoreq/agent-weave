@@ -161,8 +161,11 @@ Each phase ends with an independent expert review before the next phase starts:
   (g) journal readers parse JSONL with `serde_json` (quoted/escaped arguments
   and pointers survive); `stats`, `hotspots`, and `report` journal result
   counts, and `resolve` records real latency on its early exit; `doctor`
-  reports a build lock only when another process still holds it. No schema
-  change, no new dependency (serde_json is already pinned).
+  reports a build lock only when another process still holds it. (h) `aw mcp`
+  exposes the eight core navigation tools (`build`, `callers`, `callees`,
+  `path`, `context`, `imports`, `impact`, `symbols`) by default; `--all-tools`
+  restores the full 21-tool surface. No schema change, no new dependency
+  (serde_json is already pinned).
 - Amendment 21 (2026-11-03, R11 fixes and budget amendment, schema v7): (a)
   Python `import a.b` keeps every ancestor module edge; the redundant-parent
   suppression applies only to `from pkg import ...`. Rust `main.rs`/repo-root
