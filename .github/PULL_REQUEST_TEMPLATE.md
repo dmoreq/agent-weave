@@ -4,34 +4,50 @@
   edge outcome — including what must NOT resolve.
 -->
 
-## What
+## Change and motivation
 
 <!-- One paragraph: the change and why it is needed. -->
 
-## Spec conformance
+## Specification and compatibility
 
 - [ ] No spec deviation, or an Amendment entry exists in
-      `docs/designs/2026-10-31_kg-rust-code-index.md` (in-repo, canonical)
-- [ ] Response contract unchanged, or contract-bump note + wrapper update
-      included
-- [ ] Safety invariants untouched (network / processes / read-only / no
-      hijack)
+      `docs/designs/2026-10-31_kg-rust-code-index.md` before implementation
+- [ ] Output formats and exit codes unchanged, or specification contract-bump
+      note and affected integration updates included
+- [ ] Runtime safety preserved: no network, long-lived child processes, writes
+      outside `.kg/`, or agent-configuration writes; enforcement tests not weakened
+- [ ] Schema changes are additive, if applicable
 
 ## Verification
 
-<!-- Paste actual command output. Numbers only from the binary being shipped. -->
+<!-- Record commands and actual results, including failures and checks not run.
+     For prose-only changes, check links/examples and git diff --check; skip runtime tests.
+     The block below lists the main CI checks for runtime changes, not executed results. -->
 
-```
-cargo clippy --all-targets -- -D warnings   # result
-cargo test --locked                          # result
+```sh
+cargo fmt --all -- --check
+cargo build --locked --release
+cargo clippy --all-targets -- -D warnings
+cargo test --locked
 bash tests/scripts/allowlist_check.sh Cargo.lock
 bash tests/scripts/write_path_check.sh
 ```
 
-- [ ] Gate numbers re-measured if gates are touched (command attached)
-- [ ] No new dependencies (allowlist green)
+- [ ] Resolution changes include fixtures for exact outcomes, including what must not resolve (or not applicable)
+- [ ] Changed accuracy/performance claims include commands, revision, binary, inputs, environment, and limitations (or not applicable)
+- [ ] No new dependencies beyond the pinned set; allowlist check passes for dependency changes
+- [ ] No `unsafe` code introduced
+
+Results and checks not run:
 
 ## Review
 
-- [ ] Independent review verdict recorded in `docs/baselines/reviews/`
-      (large/phase changes; <= 2 fix cycles)
+<!-- Required for specification changes and changes to acceptance checks or thresholds.
+     Give the independent reviewer changed files and acceptance criteria, not author reasoning.
+     Record APPROVE or NEEDS FIXES here with severity and readable evidence for findings.
+     Resolve Critical and Important findings. After at most two fix-and-review cycles,
+     escalate unresolved findings to the maintainer. No private review archive is required. -->
+
+- Review required or not applicable (explain):
+- Independent reviewer and verdict:
+- Findings, resolutions, and unresolved blockers:
