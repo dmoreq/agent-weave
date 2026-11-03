@@ -180,7 +180,7 @@ camelCase and snake_case split into tokens. Normal search uses prefix terms and 
 aw symbols <FILE_OR_DIRECTORY> [--outline] [--metrics] [--limit <N>]
 ```
 
-List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds per-symbol syntax metrics. Both default to off and can be combined. `--limit` uses the shared default and cap.
+List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds per-symbol syntax metrics. Both default to off and can be combined. `--limit` uses the shared default and cap. Accept `.` or `./` as the repository root.
 
 ### `resolve --stdin`
 
@@ -210,7 +210,7 @@ List indexed paths with build-time symbol counts, byte sizes, and generated tagg
 aw dead [--exclude-tests] [--path <PATH>] [--limit <N>]
 ```
 
-List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, or inheritance references. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
+List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, or inheritance references. Rows render `path:line qualname`. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
 
 `--exclude-tests` applies path and name heuristics, not test-runner discovery. All switches default to off, `--path` defaults to absent, and `--limit` uses the shared default and cap.
 

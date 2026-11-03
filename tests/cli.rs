@@ -3579,3 +3579,164 @@ fn build_does_not_descend_unreadable_gitignored_tree() {
         "build took {elapsed:?}"
     );
 }
+
+#[test]
+fn class_method_suffix_lookup_finds_callers_and_ambiguity() {
+    let repo = temp_repo("suffix");
+    write(
+        &repo,
+        "a.py",
+        "class Pointer:\n    def render(self):\n        return 1\n\ndef go(p: Pointer):\n    return p.render()\n\ndef make():\n    return Pointer().render()\n",
+    );
+    build(&repo);
+    let out = aw(&repo)
+        .args(["callers", "Pointer.render"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("a.go"), "{stdout}");
+    assert!(stdout.contains("a.make"), "{stdout}");
+
+    // Two same-suffix methods stay ambiguous (exit 2 + candidates).
+    let repo2 = temp_repo("suffix-ambiguous");
+    write(
+        &repo2,
+        "m1.py",
+        "class Pointer:\n    def render(self):\n        return 1\n",
+    );
+    write(
+        &repo2,
+        "m2.py",
+        "class Pointer:\n    def render(self):\n        return 2\n",
+    );
+    build(&repo2);
+    let out = aw(&repo2)
+        .args(["callers", "Pointer.render"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{stdout} {stderr}");
+    assert!(stdout.contains("m1.Pointer.render"), "{stdout}");
+    assert!(stdout.contains("m2.Pointer.render"), "{stdout}");
+}
+
+#[test]
+fn search_keeps_prefix_matches_after_an_exact_symbol() {
+    let repo = temp_repo("search-prefix");
+    write(
+        &repo,
+        "a.py",
+        "def run():\n    return 1\n\ndef run_build():\n    return 2\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["search", "run"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    let exact = stdout.find("a.run ").or_else(|| stdout.find("a.run\n"));
+    let prefix = stdout.find("a.run_build");
+    assert!(exact.is_some(), "exact run missing: {stdout}");
+    assert!(prefix.is_some(), "run_build dropped: {stdout}");
+    assert!(
+        exact.unwrap() < prefix.unwrap(),
+        "exact must rank first: {stdout}"
+    );
+}
+
+#[test]
+fn ambiguous_pointer_keeps_space_before_the_tag() {
+    let repo = temp_repo("ambiguous-render");
+    write(
+        &repo,
+        "a.py",
+        "class A:\n    def m(self):\n        return 1\n\nclass B(A):\n    def m(self):\n        return 2\n\nclass C(A):\n    def m(self):\n        return 3\n\nclass D(B, C):\n    def go(self):\n        return self.m()\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["callees", "D.go"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains(" [ambiguous] a.D.m"), "{stdout}");
+    assert!(!stdout.contains(":15[ambiguous]"), "{stdout}");
+}
+
+#[test]
+fn dead_rows_carry_the_qualname_and_root_symbols_work() {
+    let repo = temp_repo("dead-qualname");
+    write(&repo, "a.py", "def orphan():\n    return 1\n");
+    build(&repo);
+    let out = aw(&repo).args(["dead"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("a.py:1 a.orphan"), "{stdout}");
+
+    let root = aw(&repo).args(["symbols", "."]).output().unwrap();
+    let root_stdout = String::from_utf8_lossy(&root.stdout);
+    assert_eq!(root.status.code(), Some(0), "{root_stdout}");
+    assert!(root_stdout.contains("aw: dir . —"), "{root_stdout}");
+    let dotted = aw(&repo).args(["symbols", "./"]).output().unwrap();
+    assert_eq!(dotted.status.code(), Some(0));
+}
+
+#[test]
+fn complexity_path_scope_filters_files() {
+    let repo = temp_repo("complexity-path");
+    write(
+        &repo,
+        "src/a.py",
+        "def a(n):\n    if n:\n        return 1\n    return 2\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "def b(n):\n    if n:\n        return 1\n    return 2\n",
+    );
+    build(&repo);
+    let out = aw(&repo)
+        .args(["complexity", "--path", "src"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("src/a.py"), "{stdout}");
+    assert!(!stdout.contains("b.py"), "{stdout}");
+}
+
+#[test]
+fn stats_hotspots_and_report_are_not_journaled_as_empty() {
+    let repo = temp_repo("journal-results");
+    write(&repo, "a.py", "def a():\n    return 1\n");
+    build(&repo);
+    for cmd in ["stats", "hotspots", "report"] {
+        let out = aw(&repo)
+            .arg(cmd)
+            .env_remove("AW_NO_JOURNAL")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{cmd}");
+    }
+    let usage = aw(&repo).args(["usage"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&usage.stdout);
+    assert_eq!(usage.status.code(), Some(0), "{stdout}");
+    for tool in ["stats", "hotspots", "report"] {
+        let line = stdout
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{tool}:")))
+            .unwrap_or_else(|| panic!("{tool} missing from journal: {stdout}"));
+        assert!(
+            !line.contains("empty=1"),
+            "{tool} misreported empty: {line}"
+        );
+    }
+}
+
+#[test]
+fn doctor_does_not_warn_about_a_released_build_lock() {
+    let repo = temp_repo("doctor-lock");
+    write(&repo, "a.py", "def a():\n    return 1\n");
+    build(&repo);
+    let out = aw(&repo).args(["doctor"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(!stdout.contains("lock file:"), "{stdout}");
+}

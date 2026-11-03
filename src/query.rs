@@ -438,13 +438,7 @@ impl Pointer {
         if self.detail.is_empty() {
             format!("{}:{}{}", self.file, self.line, self.tag)
         } else {
-            format!(
-                "{}:{}{} {}",
-                self.file,
-                self.line,
-                self.tag.trim_start(),
-                self.detail
-            )
+            format!("{}:{}{} {}", self.file, self.line, self.tag, self.detail)
         }
     }
 }
@@ -484,7 +478,36 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>
             r.get::<_, String>(5)?,
         ))
     })?;
-    let all: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
+    let mut all: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
+    // `Class.method` suffix form: the full qualname is `pkg.Class.method`, so
+    // an exact name/qualname match misses it. Fall back to a suffix scan and
+    // confirm the exact suffix in Rust (LIKE alone treats `_` and `%` as
+    // wildcards). Multiple matches stay ambiguous through the caller.
+    if all.is_empty() && name.contains('.') {
+        let pattern = format!("%.{name}");
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.qualname, s.name, f.path, s.line_start, s.kind
+             FROM symbols s JOIN files f ON f.id = s.file_id
+             WHERE s.qualname LIKE ?1
+             ORDER BY s.qualname, f.path",
+        )?;
+        let rows = stmt.query_map([&pattern], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        })?;
+        let suffix = format!(".{name}");
+        all = rows
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|r| r.1.ends_with(&suffix))
+            .collect();
+    }
     // A module shares the bare name of classes/functions (`button` vs
     // `Button`); when a callable candidate exists, module symbols must not
     // create a false ambiguity (R7 F1).
@@ -711,7 +734,7 @@ pub fn callees(
             "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
                 MAX(e.confidence) AS confidence,
                 MAX(COALESCE(df.path, sf.path)) AS path,
-                COALESCE(ds.qualname, '') AS qn
+                COALESCE(ds.qualname, e.dst_name) AS qn
          FROM edges e
          JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
@@ -733,7 +756,7 @@ pub fn callees(
         );
         let select = format!(
             "SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
-                COALESCE(df.path, sf.path) AS path, COALESCE(ds.qualname, '') AS qn
+                COALESCE(df.path, sf.path) AS path, COALESCE(ds.qualname, e.dst_name) AS qn
          FROM reach r
          -- CROSS JOIN + WHERE lets SQLite drive from the recursive set and
          -- use edges_src, instead of scanning the whole edge table (R7).
@@ -1269,35 +1292,47 @@ pub fn validate_path_scope(path: &str, allow_root: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn path_scope_sql_pub(alias: &str, path: Option<&str>) -> String {
-    path_scope_sql(alias, path)
+pub fn path_scope_sql_pub(
+    alias: &str,
+    path: Option<&str>,
+    param: usize,
+) -> (String, Option<String>) {
+    path_scope_sql(alias, path, param)
 }
 
-fn path_scope_sql(alias: &str, path: Option<&str>) -> String {
+/// Scope clause over `alias.path` with one bound parameter at `param`.
+fn path_scope_sql(alias: &str, path: Option<&str>, param: usize) -> (String, Option<String>) {
     match path {
-        None => String::new(),
+        None => (String::new(), None),
         Some(path) => {
-            let escaped = path
+            let scope = path
                 .trim_start_matches("./")
                 .trim_end_matches('/')
-                .replace('\'', "''");
-            format!(
-                " AND ({alias}.path = '{escaped}' OR substr({alias}.path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
+                .to_string();
+            (
+                format!(
+                    " AND ({alias}.path = ?{param} OR substr({alias}.path, 1, length(?{param}) + 1) = ?{param} || '/')"
+                ),
+                Some(scope),
             )
         }
     }
 }
 
-fn file_path_scope_sql(alias: &str, path: Option<&str>) -> String {
+/// Scope clause over `alias.file_path` with one bound parameter at `param`.
+fn file_path_scope_sql(alias: &str, path: Option<&str>, param: usize) -> (String, Option<String>) {
     match path {
-        None => String::new(),
+        None => (String::new(), None),
         Some(path) => {
-            let escaped = path
+            let scope = path
                 .trim_start_matches("./")
                 .trim_end_matches('/')
-                .replace('\'', "''");
-            format!(
-                " AND ({alias}.file_path = '{escaped}' OR substr({alias}.file_path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
+                .to_string();
+            (
+                format!(
+                    " AND ({alias}.file_path = ?{param} OR substr({alias}.file_path, 1, length(?{param}) + 1) = ?{param} || '/')"
+                ),
+                Some(scope),
             )
         }
     }
@@ -1959,21 +1994,21 @@ pub fn dead(
               AND s.name NOT GLOB 'test[A-Z]*'",
         );
     }
+    let mut params: Vec<String> = Vec::new();
     if let Some(path) = path {
-        let escaped = path
-            .trim_start_matches("./")
-            .trim_end_matches('/')
-            .replace('\'', "''");
-        predicate.push_str(&format!(
-            " AND (f.path = '{escaped}' OR substr(f.path, 1, length('{escaped}') + 1) = '{escaped}' || '/')"
-        ));
+        predicate.push_str(" AND (f.path = ?1 OR substr(f.path, 1, length(?1) + 1) = ?1 || '/')");
+        params.push(
+            path.trim_start_matches("./")
+                .trim_end_matches('/')
+                .to_string(),
+        );
     }
     let predicate = predicate.as_str();
     let total: usize = conn.query_row(
         &format!(
             "{referenced} SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {predicate}"
         ),
-        [],
+        rusqlite::params_from_iter(params.iter()),
         |r| r.get::<_, i64>(0),
     )? as usize;
     let sql = format!(
@@ -1983,14 +2018,14 @@ pub fn dead(
          ORDER BY f.path, s.line_start LIMIT {limit}"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
         let path: String = r.get(1)?;
         let line: i64 = r.get(2)?;
         Ok(Pointer {
             file: path,
             line,
             tag: "",
-            detail: String::new(),
+            detail: r.get::<_, String>(0)?,
         })
     })?;
     if total == 0 {
@@ -2031,7 +2066,16 @@ pub fn complexity(
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
-    let gen_filter = file_path_scope_sql("s", path);
+    let (gen_filter, scope_value) = file_path_scope_sql("s", path, 5);
+    let mut params: Vec<rusqlite::types::Value> = vec![
+        rusqlite::types::Value::from(min_cyc as i64),
+        rusqlite::types::Value::from(min_loc as i64),
+        rusqlite::types::Value::from(min_branches as i64),
+        rusqlite::types::Value::from(min_nest as i64),
+    ];
+    if let Some(scope) = scope_value {
+        params.push(rusqlite::types::Value::from(scope));
+    }
     let default_filters =
         min_cyc <= 1 && min_loc == 0 && min_branches == 0 && min_nest == 0 && path.is_none();
     let total: i64 = if default_filters {
@@ -2047,12 +2091,7 @@ pub fn complexity(
                    AND s.effective_loc >= ?2 AND s.branches >= ?3
                    AND s.nesting >= ?4 {gen_filter}"
             ),
-            rusqlite::params![
-                min_cyc as i64,
-                min_loc as i64,
-                min_branches as i64,
-                min_nest as i64
-            ],
+            rusqlite::params_from_iter(params.iter()),
             |r| r.get(0),
         )?
     };
@@ -2062,10 +2101,17 @@ pub fn complexity(
             detail: "0 symbols match the thresholds".to_string(),
         });
     }
+    // A path scope is most selective through symbols_file_path; forcing the
+    // complexity index would defeat that plan.
+    let index_hint = if path.is_some() {
+        ""
+    } else {
+        " INDEXED BY symbols_complexity_idx"
+    };
     let mut stmt = conn.prepare(&format!(
         "SELECT s.file_path, s.line_start, s.cyclomatic, s.branches, s.nesting,
                 s.effective_loc, s.qualname
-         FROM symbols s INDEXED BY symbols_complexity_idx
+         FROM symbols s{index_hint}
          WHERE s.kind IN ('function','method')
            AND s.cyclomatic > 0 AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
            AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}
@@ -2073,29 +2119,21 @@ pub fn complexity(
                   s.file_path, s.line_start LIMIT {limit}"
     ))?;
     let rows: Vec<(String, String)> = stmt
-        .query_map(
-            rusqlite::params![
-                min_cyc as i64,
-                min_loc as i64,
-                min_branches as i64,
-                min_nest as i64
-            ],
-            |r| {
-                Ok((
+        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                format!(
+                    "{}:{} cyc={} branches={} nest={} loc={} {}",
                     r.get::<_, String>(0)?,
-                    format!(
-                        "{}:{} cyc={} branches={} nest={} loc={} {}",
-                        r.get::<_, String>(0)?,
-                        r.get::<_, i64>(1)?,
-                        r.get::<_, i64>(2)?,
-                        r.get::<_, i64>(3)?,
-                        r.get::<_, i64>(4)?,
-                        r.get::<_, i64>(5)?,
-                        r.get::<_, String>(6)?
-                    ),
-                ))
-            },
-        )?
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, String>(6)?
+                ),
+            ))
+        })?
         .collect::<std::result::Result<_, _>>()?;
     let shown = rows.len().min(limit);
     let displayed: BTreeSet<&str> = rows.iter().take(shown).map(|(p, _)| p.as_str()).collect();
@@ -2244,12 +2282,16 @@ pub fn unresolved_names(
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
-    let scope = path_scope_sql("f", path);
+    let (scope, scope_value) = path_scope_sql("f", path, 1);
+    let scope_params: Vec<rusqlite::types::Value> = scope_value
+        .map(rusqlite::types::Value::from)
+        .into_iter()
+        .collect();
     let total: i64 = conn.query_row(
         &format!(
             "SELECT COUNT(*) FROM unresolved_calls u JOIN files f ON f.id = u.file_id WHERE u.site_line > 0 {scope}"
         ),
-        [],
+        rusqlite::params_from_iter(scope_params.iter()),
         |r| r.get(0),
     )?;
     if total == 0 {
@@ -2261,7 +2303,7 @@ pub fn unresolved_names(
         &format!(
             "SELECT COUNT(DISTINCT u.file_id) FROM unresolved_calls u JOIN files f ON f.id = u.file_id WHERE u.site_line > 0 {scope}"
         ),
-        [],
+        rusqlite::params_from_iter(scope_params.iter()),
         |r| r.get(0),
     )?;
     let mut stmt = conn.prepare(&format!(
@@ -2271,7 +2313,9 @@ pub fn unresolved_names(
          ORDER BY f.path, u.site_line, u.kind, u.dst_name LIMIT {limit}"
     ))?;
     let rows: Vec<(String, i64, String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?
         .collect::<std::result::Result<_, _>>()?;
     let shown = rows.len().min(limit);
     let displayed: BTreeSet<&str> = rows
@@ -2289,7 +2333,7 @@ pub fn unresolved_names(
             "SELECT COUNT(*) FROM unresolved_calls u JOIN files f ON f.id = u.file_id
              WHERE u.site_line = 0 {scope}"
         ),
-        [],
+        rusqlite::params_from_iter(scope_params.iter()),
         |r| r.get(0),
     )?;
     if unlocated > 0 {
@@ -2324,10 +2368,14 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
-    let scope = path_scope_sql("f", path);
+    let (scope, scope_value) = path_scope_sql("f", path, 1);
+    let scope_params: Vec<rusqlite::types::Value> = scope_value
+        .map(rusqlite::types::Value::from)
+        .into_iter()
+        .collect();
     let total: i64 = conn.query_row(
         &format!("SELECT COALESCE(SUM(unresolved), 0) FROM files f WHERE 1=1 {scope}"),
-        [],
+        rusqlite::params_from_iter(scope_params.iter()),
         |r| r.get(0),
     )?;
     if total == 0 {
@@ -2340,7 +2388,9 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
          ORDER BY f.unresolved DESC, f.path"
     ))?;
     let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let n_files = rows.len();
     let shown = n_files.min(limit);
@@ -2430,6 +2480,9 @@ pub fn symbols(
         .trim_start_matches("./")
         .trim_end_matches('/')
         .to_string();
+    // `.` and `./` mean the repository root; the empty prefix matches every
+    // indexed file without generating a "/" prefix.
+    let rel = if rel == "." { String::new() } else { rel };
     let is_file: i64 =
         conn.query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| {
             r.get(0)
@@ -2537,7 +2590,12 @@ fn symbols_directory(
     limit: usize,
 ) -> Result<Vec<String>> {
     validate_path_scope(dir, true)?;
-    let prefix = format!("{dir}/");
+    let display = if dir.is_empty() { "." } else { dir };
+    let prefix = if dir.is_empty() {
+        String::new()
+    } else {
+        format!("{dir}/")
+    };
     let total: i64 = conn.query_row(
         "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE substr(f.path, 1, length(?1)) = ?1",
@@ -2596,7 +2654,9 @@ fn symbols_directory(
             displayed_paths.len()
         ));
     }
-    out.push(format!("aw: dir {dir} — {n_files} files, {total} symbols"));
+    out.push(format!(
+        "aw: dir {display} — {n_files} files, {total} symbols"
+    ));
     let mut data_lines = Vec::new();
     let mut last_path = "";
     for (path, (kind, qualname, line, signature, cyc, br, nest, loc)) in &rows {
@@ -2746,18 +2806,11 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
             },
         })
     })?;
-    let out = collect_output(
-        conn,
-        root,
-        terms,
-        rows,
-        limit,
-        &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
-        Some(total),
-    )?;
+    let fts_ptrs: Vec<Pointer> = rows.collect::<std::result::Result<_, _>>()?;
     // Exact-identity path (R7): a single token that is an exact symbol name
-    // or qualname returns those identities directly (top-1 measured 90-92%
-    // through bm25; ~100% here). Fuzzy FTS order stays for other queries.
+    // or qualname returns those identities first. The FTS matches stay
+    // appended (deduplicated) so `search run` still finds `run_build` after
+    // an exact `run` symbol, instead of discarding every prefix match.
     if toks.len() == 1 {
         let exact_name = toks.join(" ");
         let exact_total: usize = conn.query_row(
@@ -2773,32 +2826,59 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
                  WHERE (s.name = ?1 OR s.qualname = ?1)
                  ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
             ))?;
-            let rows = stmt.query_map([exact_name.as_str()], |r| {
-                let qualname: String = r.get(2)?;
-                let signature: String = r.get(3)?;
-                Ok(Pointer {
-                    file: r.get::<_, String>(0)?,
-                    line: r.get::<_, i64>(1)?,
-                    tag: "",
-                    detail: if signature.is_empty() {
-                        qualname
-                    } else {
-                        format!("{qualname} {signature}")
-                    },
-                })
-            })?;
+            let exact_ptrs: Vec<Pointer> = stmt
+                .query_map([exact_name.as_str()], |r| {
+                    let qualname: String = r.get(2)?;
+                    let signature: String = r.get(3)?;
+                    Ok(Pointer {
+                        file: r.get::<_, String>(0)?,
+                        line: r.get::<_, i64>(1)?,
+                        tag: "",
+                        detail: if signature.is_empty() {
+                            qualname
+                        } else {
+                            format!("{qualname} {signature}")
+                        },
+                    })
+                })?
+                .collect::<std::result::Result<_, _>>()?;
+            let mut seen: std::collections::HashSet<(String, i64, String)> =
+                std::collections::HashSet::new();
+            let mut merged = Vec::with_capacity(exact_ptrs.len() + fts_ptrs.len());
+            for p in exact_ptrs {
+                seen.insert((p.file.clone(), p.line, p.detail.clone()));
+                merged.push(p);
+            }
+            let mut overlap = 0usize;
+            for p in fts_ptrs {
+                if seen.insert((p.file.clone(), p.line, p.detail.clone())) {
+                    merged.push(p);
+                } else {
+                    overlap += 1;
+                }
+            }
+            let merged_total = exact_total + total.saturating_sub(overlap);
             let out = collect_output(
                 conn,
                 root,
                 terms,
-                rows,
+                merged.into_iter().map(Ok::<_, rusqlite::Error>),
                 limit,
                 &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
-                Some(exact_total),
+                Some(merged_total),
             )?;
             return search_lines(out);
         }
     }
+    let out = collect_output(
+        conn,
+        root,
+        terms,
+        fts_ptrs.into_iter().map(Ok::<_, rusqlite::Error>),
+        limit,
+        &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
+        Some(total),
+    )?;
     search_lines(out)
 }
 

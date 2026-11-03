@@ -28,6 +28,25 @@ Consumers that parse output must review the query-shape changes listed below bef
 - Historical benchmarks recorded before 0.3.0 used the former name `kg`; the
   evaluation summary keeps those names only when quoting old artifacts.
 
+### Fixed — query edge cases and diagnostics (2026-11-03)
+
+- `Class.method` names now resolve as a qualname suffix when the exact name is
+  absent (for example `aw callers Pointer.render`); several suffix matches
+  still exit 2 with the candidate list.
+- A single-token `aw search` keeps exact matches first and appends
+  deduplicated prefix/compound matches, so `search run` still returns
+  `run_build` after an exact `run` symbol.
+- Ambiguous pointers keep the space before `[ambiguous]`, and `callees`
+  renders the recorded target name for unresolved/ambiguous rows.
+- `dead` rows carry the qualified name; `symbols .` and `symbols ./` cover the
+  repository root without a `/` prefix.
+- Path-scoped SQL binds its scope instead of escaping string literals, and
+  `complexity --path` lets SQLite choose `symbols_file_path`.
+- Usage and payload journal lines parse through `serde_json`, so quoted
+  queries and escaped pointers survive. `stats`, `hotspots`, and `report`
+  record real result counts, `resolve` records latency on its early exit, and
+  `doctor` reports a build lock only while another process holds it.
+
 ### Fixed — Rust receiver and module resolution (2026-11-03)
 
 - Rust method calls on `self`, typed parameters, and constructor-typed locals

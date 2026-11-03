@@ -247,35 +247,31 @@ fn json_escape(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// `aw usage` summary: tolerant extraction of the fixed keys this module writes.
+// `aw usage` summary: tolerant parsing of the fixed keys this module writes.
 // ---------------------------------------------------------------------------
 
-/// Extract `"key":"value"` from a JSONL line written by this module.
-fn extract_str(line: &str, key: &str) -> Option<String> {
-    let needle = format!("\"{key}\":\"");
-    let start = line.find(&needle)? + needle.len();
-    let rest = &line[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+/// Parsed usage line. Queries and signatures can contain quotes, backslashes,
+/// and control characters, so this must go through serde_json rather than
+/// slicing the raw text between quote characters.
+struct UsageFields {
+    tool: String,
+    exit_code: i64,
+    result_count: i64,
+    stale: bool,
+    ambiguous: i64,
+    latency_us: Option<i64>,
 }
 
-/// Extract `"key":<number|bool>` from a JSONL line written by this module.
-/// Booleans map to 1/0 so the `stale` flag aggregates like a counter.
-fn extract_num(line: &str, key: &str) -> Option<i64> {
-    let needle = format!("\"{key}\":");
-    let start = line.find(&needle)? + needle.len();
-    let rest = line[start..].trim_start();
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if let Ok(n) = digits.parse() {
-        return Some(n);
-    }
-    if rest.starts_with("true") {
-        return Some(1);
-    }
-    if rest.starts_with("false") {
-        return Some(0);
-    }
-    None
+fn parse_usage_line(line: &str) -> Option<UsageFields> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    Some(UsageFields {
+        tool: v.get("tool")?.as_str()?.to_string(),
+        exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
+        result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
+        stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
+        ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
+        latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
+    })
 }
 
 #[derive(Default)]
@@ -311,22 +307,22 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
     }
     let mut aggs: std::collections::BTreeMap<String, ToolAgg> = Default::default();
     for line in lines.lines().filter(|l| !l.trim().is_empty()) {
-        let Some(tool) = extract_str(line, "tool") else {
+        let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        let agg = aggs.entry(tool).or_default();
+        let agg = aggs.entry(fields.tool).or_default();
         agg.calls += 1;
-        if extract_num(line, "exit_code").unwrap_or(0) != 0 {
+        if fields.exit_code != 0 {
             agg.errors += 1;
         }
-        if extract_num(line, "result_count").unwrap_or(0) == 0 {
+        if fields.result_count == 0 {
             agg.empty += 1;
         }
-        if extract_num(line, "stale").unwrap_or(0) == 1 {
+        if fields.stale {
             agg.stale += 1;
         }
-        agg.ambiguous += extract_num(line, "ambiguous").unwrap_or(0).max(0) as usize;
-        if let Some(us) = extract_num(line, "latency_us") {
+        agg.ambiguous += fields.ambiguous.max(0) as usize;
+        if let Some(us) = fields.latency_us {
             agg.latencies.push(us.max(0) as u64);
         }
     }
@@ -392,24 +388,20 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
 
 /// One parsed payload line: (tool, name, built_at, pointers).
 fn parse_payload_line(line: &str) -> Option<(String, String, u64, Vec<String>)> {
-    let tool = extract_str(line, "tool")?;
-    let name = extract_str(line, "name").unwrap_or_default();
-    let built_at = extract_num(line, "built_at").unwrap_or(0).max(0) as u64;
-    let marker = "\"pointers\":[";
-    let start = line.find(marker)? + marker.len();
-    let end = line.rfind(']')?;
-    if end < start {
-        return None;
-    }
-    let inner = &line[start..end];
-    let pointers = if inner.is_empty() {
-        Vec::new()
-    } else {
-        inner
-            .split("\",\"")
-            .map(|s| s.trim_matches('"').to_string())
-            .collect()
-    };
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let tool = v.get("tool")?.as_str()?.to_string();
+    let name = v
+        .get("name")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let built_at = v.get("built_at").and_then(|x| x.as_u64()).unwrap_or(0);
+    let pointers = v
+        .get("pointers")?
+        .as_array()?
+        .iter()
+        .filter_map(|p| p.as_str().map(str::to_string))
+        .collect();
     Some((tool, name, built_at, pointers))
 }
 
@@ -600,17 +592,19 @@ mod tests {
     #[test]
     fn extract_fields_round_trip() {
         let line = "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"args\":{\"name\":\"a\"},\"result_count\":3,\"shown\":3,\"total\":3,\"ambiguous\":1,\"exit_code\":0,\"latency_us\":9800,\"stale\":false,\"aw_version\":\"0.1.0\"}";
-        assert_eq!(extract_str(line, "tool").as_deref(), Some("callers"));
-        assert_eq!(extract_num(line, "result_count"), Some(3));
-        assert_eq!(extract_num(line, "ambiguous"), Some(1));
-        assert_eq!(extract_num(line, "latency_us"), Some(9800));
-        assert_eq!(extract_num(line, "stale"), Some(0));
-        // Amendment 10 additive keys stay extractable.
-        assert_eq!(
-            extract_str(line, "session"),
-            None,
-            "pre-Amendment-10 lines have no session key"
-        );
+        let f = parse_usage_line(line).unwrap();
+        assert_eq!(f.tool, "callers");
+        assert_eq!(f.result_count, 3);
+        assert_eq!(f.ambiguous, 1);
+        assert_eq!(f.latency_us, Some(9800));
+        assert!(!f.stale);
+        // Lines without optional keys keep working.
+        let legacy = parse_usage_line(
+            "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"result_count\":1,\"exit_code\":0}",
+        )
+        .unwrap();
+        assert_eq!(legacy.tool, "callers");
+        assert_eq!(legacy.latency_us, None);
     }
 
     #[test]
@@ -639,9 +633,27 @@ mod tests {
              \"source_rev\":\"abc\",\"stale\":true,\"shown\":2,\"total\":2,\
              \"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}\n"
         );
-        assert_eq!(extract_str(&line, "session").as_deref(), Some("r1-t1"));
-        assert_eq!(extract_num(&line, "built_at"), Some(42));
-        assert_eq!(extract_num(&line, "stale"), Some(1));
+        let (tool, name, built_at, pointers) = parse_payload_line(&line).unwrap();
+        assert_eq!(tool, "callers");
+        assert_eq!(name, "a.b");
+        assert_eq!(built_at, 42);
+        assert_eq!(pointers.len(), 2);
+    }
+
+    #[test]
+    fn usage_and_payload_parsing_unescapes_quoted_text() {
+        let line = r#"{"tool":"search","args":{"terms":"say \"run\" \\ now"},"result_count":2,"exit_code":0,"latency_us":1200,"stale":true,"ambiguous":3}"#;
+        let f = parse_usage_line(line).unwrap();
+        assert_eq!(f.tool, "search");
+        assert_eq!(f.result_count, 2);
+        assert_eq!(f.latency_us, Some(1200));
+        assert!(f.stale);
+        assert_eq!(f.ambiguous, 3);
+
+        let payload =
+            r#"{"tool":"callers","name":"a","built_at":1,"pointers":["src/a.rs:1 C.\"m\" \\ ok"]}"#;
+        let (_, _, _, pointers) = parse_payload_line(payload).unwrap();
+        assert_eq!(pointers, vec![r#"src/a.rs:1 C."m" \ ok"#.to_string()]);
     }
 
     #[test]

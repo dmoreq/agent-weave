@@ -147,12 +147,16 @@ pub fn hotspots(
     }
     // Amendment 11d: loc/cyclomatic are stored per file at build time —
     // hotspots is a single scan + git log, not a whole-repo re-parse.
-    let scope = crate::query::path_scope_sql_pub("f", path);
+    let (scope, scope_value) = crate::query::path_scope_sql_pub("f", path, 1);
+    let scope_params: Vec<rusqlite::types::Value> = scope_value
+        .map(rusqlite::types::Value::from)
+        .into_iter()
+        .collect();
     let mut stmt = conn.prepare(&format!(
         "SELECT f.path, f.loc, f.cyclomatic FROM files f WHERE 1=1 {scope}"
     ))?;
     let rows: Vec<(String, i64, i64)> = stmt
-        .query_map([], |r| {
+        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, i64>(1)?,
@@ -226,12 +230,18 @@ pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<
     let mut out = Vec::new();
     // Freshness (R7 L4): the report is a build snapshot, but agents read it
     // as current. Check a bounded sample of indexed files and say so.
-    let scope = crate::query::path_scope_sql_pub("f", path);
+    let (scope, scope_value) = crate::query::path_scope_sql_pub("f", path, 1);
+    let scope_params: Vec<rusqlite::types::Value> = scope_value
+        .map(rusqlite::types::Value::from)
+        .into_iter()
+        .collect();
     let mut stmt = conn.prepare(&format!(
         "SELECT f.path FROM files f WHERE 1=1 {scope} LIMIT 5000"
     ))?;
     let paths = stmt
-        .query_map([], |r| r.get::<_, String>(0))?
+        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
+            r.get::<_, String>(0)
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let changed = paths
         .iter()
@@ -245,23 +255,17 @@ pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<
     }
     // Section 1: index overview.
     out.push(format!("## 1. index overview\n{}", stats(conn, root)?));
-    if let Some(scope) = path {
-        let scope = scope
-            .trim_start_matches("./")
-            .trim_end_matches('/')
-            .replace('\'', "''");
+    if path.is_some() {
         let scoped_files: i64 = conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM files f WHERE f.path = '{scope}' OR substr(f.path, 1, length('{scope}') + 1) = '{scope}' || '/'"
-            ),
-            [],
+            &format!("SELECT COUNT(*) FROM files f WHERE 1=1 {scope}"),
+            rusqlite::params_from_iter(scope_params.iter()),
             |r| r.get(0),
         )?;
         let scoped_symbols: i64 = conn.query_row(
             &format!(
-                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = '{scope}' OR substr(f.path, 1, length('{scope}') + 1) = '{scope}' || '/'"
+                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE 1=1 {scope}"
             ),
-            [],
+            rusqlite::params_from_iter(scope_params.iter()),
             |r| r.get(0),
         )?;
         out.push(format!(
@@ -277,7 +281,9 @@ pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<
          GROUP BY pkg ORDER BY n DESC LIMIT 8"
     ))?;
     let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     for (pkg, n) in rows {
         out.push(format!("  {pkg}: {n} symbols"));
@@ -289,7 +295,11 @@ pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<
     }
     // Section 4: most-called symbols (fan-in top 8).
     out.push("## 4. most-called symbols (fan-in top 8)".to_string());
-    let fan_scope = crate::query::path_scope_sql_pub("df", path);
+    let (fan_scope, fan_value) = crate::query::path_scope_sql_pub("df", path, 1);
+    let fan_params: Vec<rusqlite::types::Value> = fan_value
+        .map(rusqlite::types::Value::from)
+        .into_iter()
+        .collect();
     let mut stmt = conn.prepare(&format!(
         "SELECT ds.qualname, COUNT(*) AS n
          FROM edges e JOIN symbols ds ON ds.id = e.dst_id
@@ -298,7 +308,9 @@ pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<
          GROUP BY e.dst_id ORDER BY n DESC LIMIT 8"
     ))?;
     let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map(rusqlite::params_from_iter(fan_params.iter()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     for (qn, n) in rows {
         out.push(format!("  {qn}: {n} callers"));

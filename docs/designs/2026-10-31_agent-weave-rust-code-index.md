@@ -134,6 +134,35 @@ Each phase ends with an independent expert review before the next phase starts:
   exported; (e) `probe_old` requires `meta.callable_count`, so a pre-manifest
   v7 index rebuilds instead of returning an empty default `complexity` result.
   No schema or output-shape change beyond the corrected rows.
+- Amendment 23 (2026-11-03, Rust resolution and query-edge contracts): (a)
+  Rust receiver calls: `field_expression` receivers become call sites, and
+  `self.m()`, typed parameters (`x: T`, `&T`, `&mut T`), and constructor-typed
+  locals (`let x: T`, `let x = T::new()`, `let x = T { .. }`) type the receiver;
+  `Self::assoc()`, `self::f()`, and `super::f()` resolve through the enclosing
+  impl target or module tree; free functions inside inline `mod` keep kind
+  `function` (supersedes Amendment 22(c)'s "even when stored as method").
+  Unknown receivers fall back only to a unique same-file method name; common
+  stdlib/trait names and multi-match names stay unresolved instead of emitting
+  AMBIGUOUS fan-out. (b) `target_ids` adds a `Class.method` suffix fallback
+  when the exact name/qualname lookup is empty (supersedes the "full printed
+  qualname only" clause of Amendment 13 for this form); several suffix matches
+  still exit 2 with the candidate list, and `path` endpoint roles are
+  unchanged. (c) `dead` rows render `path:line qualname`; pointer rendering
+  keeps the tag's leading space, so an ambiguous callee renders
+  `path:line [ambiguous] detail`; `callees` falls back to
+  `COALESCE(ds.qualname, e.dst_name)`, so unresolved/ambiguous rows name the
+  recorded target instead of an empty detail. (d) single-token `search`
+  returns exact name/qualname hits first, then appends deduplicated FTS
+  prefix/compound matches up to `--limit` instead of discarding them. (e)
+  `symbols .` and `symbols ./` scope the repository root without generating a
+  `/` prefix. (f) path-scoped SQL uses bound parameters (`?N`) instead of
+  string-escaped literals, and `complexity --path` omits
+  `INDEXED BY symbols_complexity_idx` so SQLite can use `symbols_file_path`.
+  (g) journal readers parse JSONL with `serde_json` (quoted/escaped arguments
+  and pointers survive); `stats`, `hotspots`, and `report` journal result
+  counts, and `resolve` records real latency on its early exit; `doctor`
+  reports a build lock only when another process still holds it. No schema
+  change, no new dependency (serde_json is already pinned).
 - Amendment 21 (2026-11-03, R11 fixes and budget amendment, schema v7): (a)
   Python `import a.b` keeps every ancestor module edge; the redundant-parent
   suppression applies only to `from pkg import ...`. Rust `main.rs`/repo-root

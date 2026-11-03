@@ -55,7 +55,9 @@ fn main() {
         journal::begin("cli", tool_name(&cli.cmd), &journal_args(&cli.cmd));
     }
     let started = Instant::now();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cli, no_journal)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(cli, no_journal, started)
+    }));
     let latency_us = started.elapsed().as_micros() as u64;
     let root = walk::discover_root(root_arg.as_deref()).ok();
     match result {
@@ -257,7 +259,7 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
     }
 }
 
-fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
+fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
     let root_arg = cli.root.as_deref();
     match cli.cmd {
         cli::Cmd::Build {
@@ -514,7 +516,8 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             }
             journal::record_result(lines.len(), lines.len(), lines.len(), false, 0);
             if exit != 0 {
-                journal::finalize(Some(&root), exit, 0);
+                let latency_us = started.elapsed().as_micros() as u64;
+                journal::finalize(Some(&root), exit, latency_us);
                 std::process::exit(exit);
             }
             Ok(())
@@ -551,22 +554,27 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
             println!("{}", insights::stats(&conn, &root)?);
+            journal::record_result(1, 1, 1, false, 0);
             Ok(())
         }
         cli::Cmd::Hotspots { limit, path } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in insights::hotspots(&conn, &root, limit, path.as_deref())? {
+            let lines = insights::hotspots(&conn, &root, limit, path.as_deref())?;
+            for line in &lines {
                 println!("{line}");
             }
+            journal::record_result(lines.len(), lines.len(), lines.len(), false, 0);
             Ok(())
         }
         cli::Cmd::Report { path } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in insights::report(&conn, &root, path.as_deref())? {
+            let lines = insights::report(&conn, &root, path.as_deref())?;
+            for line in &lines {
                 println!("{line}");
             }
+            journal::record_result(lines.len(), lines.len(), lines.len(), false, 0);
             Ok(())
         }
         cli::Cmd::Doctor { invalidate } => {
