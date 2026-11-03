@@ -527,11 +527,12 @@ fn extract_units(
                     move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
                         let mut units = Vec::with_capacity(chunk.len());
                         let mut secs = 0f64;
+                        let mut parser = crate::parse::ParserSlot::new();
                         for (local, f) in chunk.into_iter().enumerate() {
                             let idx = base_idx + chunk_no * chunk_len + local;
                             let bytes = std::fs::read(&f.abs)?;
                             let lang = crate::parse::Lang::from_rel(&f.rel);
-                            let tree = crate::parse::parse_tree(&bytes, lang)?;
+                            let tree = parser.parse(&bytes, lang)?;
                             let crate::parse::SyntaxStats {
                                 error_nodes,
                                 status,

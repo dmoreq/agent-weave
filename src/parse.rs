@@ -66,16 +66,38 @@ pub struct SyntaxStats {
     pub code_lines: Vec<bool>,
 }
 
+/// Worker-local parser (B3): one `Parser` per build worker instead of one per
+/// file; the language is reset only when the chunk changes language.
+pub struct ParserSlot {
+    parser: Parser,
+    lang: Option<Lang>,
+}
+
+impl ParserSlot {
+    pub fn new() -> ParserSlot {
+        ParserSlot {
+            parser: Parser::new(),
+            lang: None,
+        }
+    }
+
+    pub fn parse(&mut self, src: &[u8], lang: Lang) -> Result<Tree> {
+        if self.lang != Some(lang) {
+            self.parser
+                .set_language(&lang.grammar()?)
+                .map_err(|e| KgError::Internal(format!("grammar load failed: {e}")))?;
+            self.lang = Some(lang);
+        }
+        self.parser
+            .parse(src, None)
+            .ok_or_else(|| KgError::Internal("tree-sitter returned no tree".to_string()))
+    }
+}
+
 /// Parse without counting error nodes; `syntax_stats` supplies the count from
 /// the same walk that counts decisions and collects comments.
 pub fn parse_tree(src: &[u8], lang: Lang) -> Result<Tree> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&lang.grammar()?)
-        .map_err(|e| KgError::Internal(format!("grammar load failed: {e}")))?;
-    parser
-        .parse(src, None)
-        .ok_or_else(|| KgError::Internal("tree-sitter returned no tree".to_string()))
+    ParserSlot::new().parse(src, lang)
 }
 
 #[allow(dead_code)]
