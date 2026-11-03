@@ -63,7 +63,8 @@ No code edits in this audit.
 
 ## Provenance (recorded 2026-11-03)
 
-Final code commit: `bc292ba` (implementation through `cd00e5d`).
+Final code commit: `bc292ba` (implementation through `cd00e5d`). Owner routing
+decisions: `7579646`; evaluation corrections: `b89cea1`.
 
 | artifact | baseline |
 |---|---|
