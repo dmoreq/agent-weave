@@ -329,6 +329,9 @@ pub fn run_build(
             .collect();
         crate::db::insert_clone_groups(&conn, &pairs)?;
     }
+    // Deferred indexes (A1): sort each secondary index once, after every row is
+    // in place. The final schema is unchanged; queries only see the published DB.
+    crate::db::create_secondary_indexes(&conn)?;
 
     // Meta manifest; counts are authoritative SQL totals over the whole index.
     crate::db::set_meta(&conn, "kg_version", env!("CARGO_PKG_VERSION"))?;

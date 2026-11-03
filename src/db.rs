@@ -140,7 +140,9 @@ pub fn check_schema_version(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Fresh DB at `.kg/index.db.new` with schema + user_version stamped.
+/// Fresh DB at `.kg/index.db.new` with tables, FTS, and user_version stamped.
+/// Secondary indexes are created later by `create_secondary_indexes` (after
+/// the bulk insert) so each index is sorted once instead of maintained per row.
 pub fn create_fresh(root: &Path) -> Result<Connection> {
     ensure_kg_gitignore(root)?;
     let path = db_new_path(root);
@@ -151,6 +153,13 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
     // and this pragma_update stamps the compiled SCHEMA_VERSION.
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(conn)
+}
+
+/// Create the secondary indexes after every bulk insert. The final schema is
+/// identical to the historical schema.sql layout; only the creation order moves.
+pub fn create_secondary_indexes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(include_str!("../schema_indexes.sql"))?;
+    Ok(())
 }
 
 /// Fast path gate: a usable previous index under the SAME schema AND grammar
