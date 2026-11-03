@@ -1,0 +1,3 @@
+I'll list any pending handoff first, then find the test that calls `exact_text_key` from source.The listed handoffs belong to other sessions and do not change this task. Next I will locate direct test callers of `exact_text_key` in the repository.Wrote `/tmp/p8-utility-answers-2026-11-03/grok-kgc-r1-T1.json`.
+
+`tests/test_centralized_grammar_patterns.py:19 test_exact_text_key` is the only direct test caller. It calls `exact_text_key` imported from `vihap.cleaners`, which re-exports `vihap.cleaners.text_utils.exact_text_key`.

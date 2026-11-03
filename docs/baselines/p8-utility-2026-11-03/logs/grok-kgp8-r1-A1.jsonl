@@ -1,0 +1,21 @@
+I'll list the exported symbols in `packages/core-ledger/src/types.ts` with `kg api`, then keep only the exported interfaces.`kg` needs a repository root. I'll rerun it with the finguard root and keep only exported interfaces.Wrote `/tmp/p8-utility-answers-2026-11-03/grok-kgp8-r1-A1.json` with 15 exported interfaces from `packages/core-ledger/src/types.ts`.
+
+| Line | Interface |
+|---:|---|
+| 3 | Account |
+| 17 | Posting |
+| 35 | Transaction |
+| 52 | Category |
+| 59 | Fund |
+| 69 | BalanceSnapshot |
+| 79 | ExchangeRate |
+| 90 | AuditLogEntry |
+| 101 | CreateTransactionPayload |
+| 109 | CreateAccountPayload |
+| 117 | UpdateAccountPayload |
+| 123 | CreateFundPayload |
+| 130 | CreateBalanceSnapshotPayload |
+| 147 | TransactionProposal |
+| 168 | BreakdownItem |
+
+`kg api` listed these 15 exported interfaces. Exported type aliases were left out.

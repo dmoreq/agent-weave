@@ -1,0 +1,1 @@
+{"task":"I1","items":["10 src.db","11 src.error","12 src.hash"],"answer":"src/query.rs directly imports the crate-internal modules db, error, and hash. External crates and imported symbols are excluded."}

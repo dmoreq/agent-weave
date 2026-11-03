@@ -1,0 +1,14 @@
+Task H1 (vihap corpus)
+
+List the classes that directly inherit from `vihap.exceptions.VihapError`. Report each as `<path>:<line> <qualname>` in `items`. Include only direct subclasses; omit grandchildren.
+
+Run `kg implementers vihap.exceptions.VihapError` FIRST. It prints resolved direct inheritors. Read source only to resolve ambiguity. Do not use `kg imports`, `kg tests`, `kg resolve`, `kg api`, `kg complexity`, or `kg impact --edges`.
+
+Write exactly one JSON object to `{{ANSWER_PATH}}` with this shape:
+
+```json
+{"task": "H1", "items": [], "answer": ""}
+```
+
+`items` must contain `<path>:<line> <qualname>` strings.. The `answer` field must contain one or two
+sentences. Do not write any other file.

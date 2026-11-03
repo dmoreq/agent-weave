@@ -1,0 +1,1 @@
+{"ts":1793672042,"surface":"cli","tool":"impact","args":{"file":"vihap/reform/temporal.py","sites":"false","depth":"1","edges":"imports","context":"false","explain":"true","limit":"10000"},"result_count":3,"shown":3,"total":3,"ambiguous":0,"exit_code":0,"latency_us":6911,"stale":false,"kg_version":"0.2.1","session":"grok-kgp8-r2-D1","arm":"grok-kgp8-r2-D1"}

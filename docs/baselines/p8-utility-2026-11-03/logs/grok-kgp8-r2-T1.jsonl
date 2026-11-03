@@ -1,0 +1,3 @@
+I'll run the kg test-caller query first, then keep only the direct test that calls `exact_text_key`.`kg` needs a repository root. I'll rerun it against this workspace and keep the direct test caller.One static candidate is a test function. I'll write that direct caller into the answer file.`tests/test_centralized_grammar_patterns.py:19 tests.test_centralized_grammar_patterns.test_exact_text_key` is the only direct test caller of `vihap.cleaners.text_utils.exact_text_key`.
+
+Wrote that result to `/tmp/p8-utility-answers-2026-11-03/grok-kgp8-r2-T1.json`.

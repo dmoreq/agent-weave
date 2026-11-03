@@ -1,0 +1,7 @@
+{
+  "task": "T1",
+  "items": [
+    "tests/test_centralized_grammar_patterns.py:19 tests.test_centralized_grammar_patterns.test_exact_text_key"
+  ],
+  "answer": "The test function `test_exact_text_key` in `tests/test_centralized_grammar_patterns.py` directly calls `vihap.cleaners.text_utils.exact_text_key`. No other test function in the repository calls it directly."
+}

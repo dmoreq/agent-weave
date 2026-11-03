@@ -1,0 +1,19 @@
+{
+  "date": "2026-11-03",
+  "kg_revision": "6dbe57a",
+  "vihap_revision": "d060ace",
+  "finguard_revision": "dddfe07",
+  "kg_binary_sha256": "d9afa1b1993f91625b8bcef186a3aa0901001e6cda43370591eaec18f0c362c4",
+  "corpora": {
+    "kg": "/tmp/p8-utility-corpus-2026-11-03/kg",
+    "vihap": "/tmp/p8-utility-corpus-2026-11-03/vihap",
+    "finguard": "/tmp/p8-utility-corpus-2026-11-03/finguard"
+  },
+  "oracle_counts": {
+    "I1": 3,
+    "T1": 1,
+    "H1": 4,
+    "D1": 3,
+    "A1": 15
+  }
+}

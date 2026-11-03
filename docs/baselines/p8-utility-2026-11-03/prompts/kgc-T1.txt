@@ -1,0 +1,14 @@
+Task T1 (vihap corpus)
+
+Which test function directly calls `vihap.cleaners.text_utils.exact_text_key`? Report the test as `<path>:<line> <qualname>` in `items`. Include only direct test callers; omit indirect helpers and non-test symbols.
+
+This run does NOT include the `kg tests` command. Determine the answer from source reads and grep; do not use `kg tests`, `kg imports`, `kg resolve`, `kg api`, `kg implementers`, `kg complexity`, or `kg impact --edges`.
+
+Write exactly one JSON object to `{{ANSWER_PATH}}` with this shape:
+
+```json
+{"task": "T1", "items": [], "answer": ""}
+```
+
+`items` must contain `<path>:<line> <qualname>` strings.. The `answer` field must contain one or two
+sentences. Do not write any other file.

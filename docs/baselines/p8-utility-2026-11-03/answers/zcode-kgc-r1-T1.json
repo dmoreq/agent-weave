@@ -1,0 +1,1 @@
+{"task": "T1", "items": ["tests/test_centralized_grammar_patterns.py:19 test_exact_text_key"], "answer": "The only direct test caller is test_exact_text_key in tests/test_centralized_grammar_patterns.py. It imports exact_text_key through the vihap.cleaners re-export, which resolves to vihap.cleaners.text_utils.exact_text_key."}

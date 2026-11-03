@@ -1,0 +1,160 @@
+[start] grok-kgc-r1-I1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/kg 08:56:06
+[done] grok-kgc-r1-I1 exit=0 tools=7 kg=0 dur=76.1s 08:57:22
+[start] grok-kgp8-r1-I1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/kg 08:57:23
+[done] grok-kgp8-r1-I1 exit=0 tools=4 kg=2 dur=71.9s 08:58:35
+[start] grok-kgp8-r2-I1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/kg 08:58:35
+[done] grok-kgp8-r2-I1 exit=0 tools=4 kg=1 dur=73.7s 08:59:49
+[start] grok-kgc-r2-I1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/kg 08:59:49
+[done] grok-kgc-r2-I1 exit=0 tools=21 kg=0 dur=117.2s 09:01:46
+[start] grok-kgc-r1-T1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:02:09
+[done] grok-kgc-r1-T1 exit=0 tools=6 kg=0 dur=56.7s 09:03:05
+[start] grok-kgp8-r1-T1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:03:36
+[done] grok-kgp8-r1-T1 exit=0 tools=6 kg=1 dur=66.7s 09:04:43
+[start] grok-kgp8-r2-T1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:04:55
+[done] grok-kgp8-r2-T1 exit=0 tools=3 kg=1 dur=30.6s 09:05:25
+[start] grok-kgc-r2-T1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:05:38
+[done] grok-kgc-r2-T1 exit=0 tools=5 kg=0 dur=53.9s 09:06:32
+[start] grok-kgc-r1-H1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:06:44
+[done] grok-kgc-r1-H1 exit=0 tools=5 kg=0 dur=36.6s 09:07:20
+[start] grok-kgp8-r1-H1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:07:34
+[done] grok-kgp8-r1-H1 exit=0 tools=4 kg=1 dur=44.8s 09:08:18
+[start] grok-kgp8-r2-H1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:08:31
+[done] grok-kgp8-r2-H1 exit=0 tools=5 kg=1 dur=53.1s 09:09:24
+[start] grok-kgc-r2-H1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:09:43
+[done] grok-kgc-r2-H1 exit=0 tools=6 kg=0 dur=62.8s 09:10:46
+[start] grok-kgc-r1-D1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:11:08
+[done] grok-kgc-r1-D1 exit=0 tools=9 kg=0 dur=52.1s 09:12:00
+[start] grok-kgp8-r1-D1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:12:16
+[done] grok-kgp8-r1-D1 exit=0 tools=7 kg=1 dur=52.4s 09:13:09
+[start] grok-kgp8-r2-D1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:13:29
+[done] grok-kgp8-r2-D1 exit=0 tools=5 kg=1 dur=61.3s 09:14:30
+[start] grok-kgc-r2-D1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:14:47
+[done] grok-kgc-r2-D1 exit=0 tools=8 kg=0 dur=49.7s 09:15:37
+[start] grok-kgc-r1-A1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/finguard 09:15:37
+[done] grok-kgc-r1-A1 exit=0 tools=4 kg=0 dur=36.9s 09:16:14
+[start] grok-kgp8-r1-A1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/finguard 09:16:14
+[done] grok-kgp8-r1-A1 exit=0 tools=4 kg=1 dur=47.3s 09:17:02
+[start] grok-kgp8-r2-A1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/finguard 09:17:03
+[done] grok-kgp8-r2-A1 exit=0 tools=4 kg=1 dur=39.2s 09:17:42
+[start] grok-kgc-r2-A1 host=grok repo=/tmp/p8-utility-corpus-2026-11-03/finguard 09:17:42
+[done] grok-kgc-r2-A1 exit=0 tools=3 kg=0 dur=33.0s 09:18:15
+[start] agy-kgc-r1-I1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/kg 09:34:27
+[done] agy-kgc-r1-I1 exit=0 tools=24 kg=1 dur=210.2s 09:37:57
+[start] agy-kgp8-r1-I1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/kg 09:37:57
+[done] agy-kgp8-r1-I1 exit=0 tools=19 kg=2 dur=117.6s 09:39:55
+[start] agy-kgp8-r2-I1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/kg 09:39:55
+[done] agy-kgp8-r2-I1 exit=0 tools=10 kg=2 dur=91.6s 09:41:27
+[start] agy-kgc-r2-I1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/kg 09:41:27
+[done] agy-kgc-r2-I1 exit=0 tools=18 kg=0 dur=122.1s 09:43:29
+[start] agy-kgc-r1-T1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:43:43
+[done] agy-kgc-r1-T1 exit=0 tools=4 kg=0 dur=42.3s 09:44:25
+[start] agy-kgp8-r1-T1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:44:38
+[done] agy-kgp8-r1-T1 exit=0 tools=10 kg=2 dur=67.8s 09:45:46
+[start] agy-kgp8-r2-T1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:46:03
+[done] agy-kgp8-r2-T1 exit=0 tools=7 kg=2 dur=60.6s 09:47:04
+[start] agy-kgc-r2-T1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:47:22
+[done] agy-kgc-r2-T1 exit=0 tools=5 kg=0 dur=57.2s 09:48:20
+[start] agy-kgc-r1-H1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:48:32
+[done] agy-kgc-r1-H1 exit=0 tools=24 kg=12 dur=154.2s 09:51:06
+[start] agy-kgp8-r1-H1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:51:18
+[done] agy-kgp8-r1-H1 exit=0 tools=6 kg=2 dur=55.0s 09:52:13
+[start] agy-kgp8-r2-H1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:52:26
+[done] agy-kgp8-r2-H1 exit=0 tools=8 kg=2 dur=60.3s 09:53:26
+[start] agy-kgc-r2-H1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:53:38
+[done] agy-kgc-r2-H1 exit=0 tools=18 kg=7 dur=126.7s 09:55:44
+[start] agy-kgc-r1-D1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:55:59
+[done] agy-kgc-r1-D1 exit=0 tools=22 kg=0 dur=134.4s 09:58:14
+[start] agy-kgp8-r1-D1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 09:58:48
+[done] agy-kgp8-r1-D1 exit=0 tools=16 kg=2 dur=110.7s 10:00:39
+[start] agy-kgp8-r2-D1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:00:51
+[done] agy-kgp8-r2-D1 exit=0 tools=10 kg=2 dur=81.2s 10:02:13
+[start] agy-kgc-r2-D1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:02:28
+[done] agy-kgc-r2-D1 exit=0 tools=19 kg=0 dur=117.5s 10:04:26
+[start] agy-kgc-r1-A1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:04:26
+[done] agy-kgc-r1-A1 exit=0 tools=2 kg=0 dur=43.8s 10:05:10
+[start] agy-kgp8-r1-A1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:05:10
+[done] agy-kgp8-r1-A1 exit=0 tools=4 kg=2 dur=58.7s 10:06:09
+[start] agy-kgp8-r2-A1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:06:09
+[done] agy-kgp8-r2-A1 exit=0 tools=5 kg=2 dur=54.9s 10:07:04
+[start] agy-kgc-r2-A1 host=agy repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:07:04
+[done] agy-kgc-r2-A1 exit=0 tools=2 kg=0 dur=60.4s 10:08:04
+[start] zcode-kgp8-r1-I1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/kg 10:18:06
+[done] zcode-kgp8-r1-I1 exit=0 tools=4 kg=2 dur=381.8s 10:24:28
+[start] zcode-kgp8-r2-I1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/kg 10:24:28
+[done] zcode-kgp8-r2-I1 exit=0 tools=4 kg=2 dur=11.2s 10:24:39
+[start] zcode-kgc-r2-I1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/kg 10:24:39
+[done] zcode-kgc-r2-I1 exit=0 tools=4 kg=0 dur=13.2s 10:24:52
+[start] zcode-kgc-r1-T1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:25:05
+[done] zcode-kgc-r1-T1 exit=0 tools=3 kg=0 dur=15.6s 10:25:21
+[start] zcode-kgp8-r1-T1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:25:34
+[done] zcode-kgp8-r1-T1 exit=0 tools=6 kg=2 dur=16.6s 10:25:50
+[start] zcode-kgp8-r2-T1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:26:08
+[done] zcode-kgp8-r2-T1 exit=0 tools=7 kg=2 dur=21.9s 10:26:30
+[start] zcode-kgc-r2-T1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:26:42
+[done] zcode-kgc-r2-T1 exit=0 tools=9 kg=0 dur=21.8s 10:27:04
+[start] zcode-kgc-r1-H1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:27:27
+[done] zcode-kgc-r1-H1 exit=0 tools=6 kg=0 dur=16.0s 10:27:43
+[start] zcode-kgp8-r1-H1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:28:03
+[done] zcode-kgp8-r1-H1 exit=0 tools=6 kg=2 dur=29.6s 10:28:32
+[start] zcode-kgp8-r2-H1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:28:45
+[done] zcode-kgp8-r2-H1 exit=0 tools=4 kg=3 dur=23.8s 10:29:09
+[start] zcode-kgc-r2-H1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:29:27
+[done] zcode-kgc-r2-H1 exit=0 tools=4 kg=0 dur=20.0s 10:29:47
+[start] zcode-kgc-r1-D1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:29:59
+[done] zcode-kgc-r1-D1 exit=0 tools=11 kg=0 dur=46.5s 10:30:46
+[start] zcode-kgp8-r1-D1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:31:00
+[done] zcode-kgp8-r1-D1 exit=0 tools=6 kg=3 dur=22.3s 10:31:22
+[start] zcode-kgp8-r2-D1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:31:40
+[done] zcode-kgp8-r2-D1 exit=0 tools=5 kg=2 dur=319.9s 10:37:00
+[start] zcode-kgc-r2-D1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 10:37:29
+[done] zcode-kgc-r2-D1 exit=0 tools=9 kg=0 dur=135.8s 10:39:45
+[start] zcode-kgc-r1-A1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:39:45
+[done] zcode-kgc-r1-A1 exit=0 tools=4 kg=0 dur=11.6s 10:39:57
+[start] zcode-kgp8-r1-A1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:39:57
+[done] zcode-kgp8-r1-A1 exit=0 tools=4 kg=2 dur=14.6s 10:40:12
+[start] zcode-kgp8-r2-A1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:40:12
+[done] zcode-kgp8-r2-A1 exit=0 tools=5 kg=2 dur=15.3s 10:40:27
+[start] zcode-kgc-r2-A1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 10:40:27
+[done] zcode-kgc-r2-A1 exit=0 tools=3 kg=0 dur=11.5s 10:40:39
+[start] zcode-kgc-r1-I1 host=zcode repo=/tmp/p8-utility-corpus-2026-11-03/kg 11:05:16
+[done] zcode-kgc-r1-I1 exit=0 tools=4 kg=0 dur=23.7s 11:05:40
+[start] oc-kgc-r1-I1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/kg 11:06:27
+[done] oc-kgc-r1-I1 exit=0 tools=3 kg=0 dur=33.5s 11:07:00
+[start] oc-kgp8-r1-I1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/kg 11:07:00
+[done] oc-kgp8-r1-I1 exit=0 tools=2 kg=1 dur=12.3s 11:07:13
+[start] oc-kgp8-r2-I1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/kg 11:07:13
+[done] oc-kgp8-r2-I1 exit=0 tools=2 kg=1 dur=15.2s 11:07:28
+[start] oc-kgc-r2-I1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/kg 11:07:28
+[done] oc-kgc-r2-I1 exit=0 tools=3 kg=0 dur=22.2s 11:07:50
+[start] oc-kgc-r1-T1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:08:08
+[done] oc-kgc-r1-T1 exit=0 tools=3 kg=0 dur=27.8s 11:08:36
+[start] oc-kgp8-r1-T1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:08:50
+[done] oc-kgp8-r1-T1 exit=0 tools=4 kg=1 dur=29.0s 11:09:19
+[start] oc-kgp8-r2-T1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:09:30
+[done] oc-kgp8-r2-T1 exit=0 tools=5 kg=1 dur=23.0s 11:09:53
+[start] oc-kgc-r2-T1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:10:13
+[done] oc-kgc-r2-T1 exit=0 tools=4 kg=0 dur=34.3s 11:10:48
+[start] oc-kgc-r1-H1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:11:00
+[done] oc-kgc-r1-H1 exit=0 tools=6 kg=0 dur=28.7s 11:11:29
+[start] oc-kgp8-r1-H1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:11:38
+[done] oc-kgp8-r1-H1 exit=0 tools=6 kg=1 dur=31.5s 11:12:10
+[start] oc-kgp8-r2-H1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:12:21
+[done] oc-kgp8-r2-H1 exit=0 tools=7 kg=2 dur=26.4s 11:12:48
+[start] oc-kgc-r2-H1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:12:58
+[done] oc-kgc-r2-H1 exit=0 tools=5 kg=0 dur=29.0s 11:13:27
+[start] oc-kgc-r1-D1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:13:37
+[done] oc-kgc-r1-D1 exit=0 tools=6 kg=0 dur=32.9s 11:14:10
+[start] oc-kgp8-r1-D1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:14:21
+[done] oc-kgp8-r1-D1 exit=0 tools=7 kg=1 dur=26.2s 11:14:47
+[start] oc-kgp8-r2-D1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:14:58
+[done] oc-kgp8-r2-D1 exit=0 tools=4 kg=1 dur=24.6s 11:15:23
+[start] oc-kgc-r2-D1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/vihap 11:15:36
+[done] oc-kgc-r2-D1 exit=0 tools=4 kg=0 dur=22.6s 11:15:59
+[start] oc-kgc-r1-A1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 11:15:59
+[done] oc-kgc-r1-A1 exit=0 tools=6 kg=0 dur=34.9s 11:16:34
+[start] oc-kgp8-r1-A1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 11:16:34
+[done] oc-kgp8-r1-A1 exit=0 tools=6 kg=2 dur=33.1s 11:17:07
+[start] oc-kgp8-r2-A1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 11:17:07
+[done] oc-kgp8-r2-A1 exit=0 tools=6 kg=2 dur=23.3s 11:17:31
+[start] oc-kgc-r2-A1 host=opencode repo=/tmp/p8-utility-corpus-2026-11-03/finguard 11:17:31
+[done] oc-kgc-r2-A1 exit=0 tools=8 kg=0 dur=39.9s 11:18:11

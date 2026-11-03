@@ -22,7 +22,7 @@ source:
 | who inherits/implements a type | `kg implementers <name>` — resolved `inherits` edges only; cross-file impls omitted |
 | which tests reach this symbol/file | `kg tests <name|file>` — static call-edge candidates only |
 | what does this file import | `kg imports <file>` — outbound resolved imports |
-| which files depend on a file | `kg impact <file>`; add `--edges calls,imports,inherits --depth N` for the dependency closure |
+| which files depend on a file | `kg impact <file>`; add `--edges calls,imports,inherits --depth N` for the dependency closure — direct import/inherit impact cut agent tool calls 29-45% on 3 hosts (P8 A/B) |
 | what is the public surface | `kg api <file|dir>` — static export heuristics |
 | which functions exceed complexity/length | `kg complexity --min-cyc 11` — cyclomatic/branches/nesting/effective LOC, not cognitive complexity |
 | what is in this directory | `kg symbols <dir> --outline`; `kg files --path <dir>` for the file inventory |

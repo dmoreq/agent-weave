@@ -1,0 +1,11 @@
+I'll run `kg imports` on `src/query.rs` first and use those module rows as the evidence for the answer file.The import listing mixes module rows with symbol rows on the same lines. I'll read the `crate::` imports in `src/query.rs` to separate them.Wrote `/tmp/p8-utility-answers-2026-11-03/grok-kgp8-r2-I1.json`.
+
+`kg imports` reports three crate-internal module rows for `src/query.rs`. The source imports match those rows.
+
+| Line | Module |
+|---|---|
+| 10 | `src.db` |
+| 11 | `src.error` |
+| 12 | `src.hash` |
+
+`items`: `10 src.db`, `11 src.error`, `12 src.hash`.
