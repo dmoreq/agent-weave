@@ -377,11 +377,12 @@ pub fn run_build(
     let unres_total = sql_count("SELECT COALESCE(SUM(unresolved), 0) FROM files")?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
-    drop(conn);
+    conn.close()
+        .map_err(|(_, e)| crate::error::KgError::from(e))?;
 
-    // Atomic swap: rename(2) onto index.db — readers see old or new, never
-    // missing (no delete step exists).
-    std::fs::rename(crate::db::db_new_path(&root), crate::db::db_path(&root))?;
+    // Atomic swap: fsync the finished `.new`, then rename(2) onto index.db —
+    // readers see old or new, never missing (no delete step exists).
+    crate::db::publish_new_index(&root)?;
     let db_secs = t0.elapsed().as_secs_f64();
     crate::journal::record_result(total_files, total_files, total_files, false, 0);
 

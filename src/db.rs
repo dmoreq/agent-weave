@@ -148,6 +148,16 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
     let path = db_new_path(root);
     let _ = fs::remove_file(&path);
     let conn = Connection::open(&path)?;
+    // Build-only pragmas (A2): `.new` is disposable until publish_new_index
+    // renames it, so this connection drops the rollback journal (no double
+    // writes) and per-commit fsyncs. publish_new_index fsyncs the finished file
+    // before the atomic rename, so the published index is durable.
+    conn.execute_batch(
+        "PRAGMA journal_mode = OFF;
+         PRAGMA synchronous = OFF;
+         PRAGMA locking_mode = EXCLUSIVE;
+         PRAGMA cache_size = -32768;",
+    )?;
     conn.execute_batch(include_str!("../schema.sql"))?;
     // The version contract lives here alone: schema.sql declares no PRAGMA,
     // and this pragma_update stamps the compiled SCHEMA_VERSION.
@@ -159,6 +169,22 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
 /// identical to the historical schema.sql layout; only the creation order moves.
 pub fn create_secondary_indexes(conn: &Connection) -> Result<()> {
     conn.execute_batch(include_str!("../schema_indexes.sql"))?;
+    Ok(())
+}
+
+/// Fsync the finished `.new` index and atomically publish it onto `index.db`.
+/// The build connection must already be closed (SQLite flushes its pager on
+/// close). A crash before the rename leaves only a disposable `.new`; the next
+/// build's lock holder removes it, and the previous `index.db` stays readable.
+pub fn publish_new_index(root: &Path) -> Result<()> {
+    let new = db_new_path(root);
+    File::open(&new)?.sync_all()?;
+    fs::rename(&new, db_path(root))?;
+    // Best-effort directory fsync: makes the rename durable. If it fails, a
+    // crash can revert to the previous index, never expose a missing one.
+    if let Ok(dir) = File::open(kg_dir(root)) {
+        let _ = dir.sync_all();
+    }
     Ok(())
 }
 
