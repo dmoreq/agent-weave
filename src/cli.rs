@@ -1,5 +1,5 @@
 //! clap definitions and help texts. Impact direction semantics are stated in
-//! the help: impact = "files that call into <file>" (spec response contract).
+//! the help: impact = "files that call into <file>".
 
 use clap::{Parser, Subcommand};
 
@@ -16,7 +16,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub root: Option<std::path::PathBuf>,
 
-    /// Disable the usage journal for this invocation (Amendment 6).
+    /// Disable the usage journal for this invocation.
     #[arg(long, global = true)]
     pub no_journal: bool,
 
@@ -154,10 +154,10 @@ pub enum Cmd {
     Symbols {
         /// Repo-relative path of the indexed file or directory
         file: String,
-        /// Append the one-line signature column (Amendment 12a)
+        /// Append the one-line signature column
         #[arg(long)]
         outline: bool,
-        /// Append per-symbol metrics (Amendment 19)
+        /// Append per-symbol metrics
         #[arg(long)]
         metrics: bool,
         /// Maximum results shown (default 50, max 10000)
@@ -242,13 +242,17 @@ pub enum Cmd {
     /// Summarize the usage journal: calls, errors, latency, empty/stale rates.
     /// --verify replays sampled payload pointers against current source.
     Usage {
-        /// Replay-verify sampled payload pointers (Amendment 10c)
+        /// Replay-verify sampled payload pointers
         #[arg(long)]
         verify: bool,
         /// Verify sample size (deterministic even stride over payload entries)
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
-    /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0; Amendment 8)
-    Mcp {},
+    /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0)
+    Mcp {
+        /// Expose every tool instead of the core navigation set
+        #[arg(long)]
+        all_tools: bool,
+    },
 }

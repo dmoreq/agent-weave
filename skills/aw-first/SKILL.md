@@ -1,6 +1,6 @@
 ---
 name: aw-first
-description: Routing policy for code agents with the aw code index available. Use when locating callers, callees, impact of a change, symbol definitions, file structure, or the call route between two symbols. Query aw first; use source reads and grep to verify results or investigate gaps, ambiguity, result caps, and staleness.
+description: Routing policy for code agents with the aw code index available. Use when locating callers, callees, the impact of a change, the call route between two symbols, a symbol's surroundings, or a file's imports. Query aw first for those questions; use source reads and grep to verify results or investigate gaps, ambiguity, result caps, and staleness.
 ---
 
 # aw-first navigation
@@ -17,26 +17,41 @@ source before making behavioral claims or edits; the index is not a substitute f
 
 | question | command |
 |----------|---------|
+| is there a current index | `aw build` — rebuild after source edits before trusting pointers |
 | who calls this symbol | `aw callers <name>` — lines are `path:line qualname` (the call-site identity) |
 | what does this call (transitive) | `aw callees <name> --depth N` |
 | does A reach B, via which call sites | `aw path <from> <to>` — one shortest route; reverse question = swap the arguments |
-| what surrounds this symbol (callers + callees + signature) | `aw context <name>` — one call replaces composing callers/callees/symbols |
-| who inherits/implements a type | `aw implementers <name>` — resolved `inherits` edges only; cross-file impls omitted |
-| which tests reach this symbol/file | `aw tests <name|file>` — static call-edge candidates only |
-| what does this file import | `aw imports <file>` — outbound resolved imports |
+| what surrounds this symbol (callers + callees + signature) | `aw context <name>` — one call replaces composing callers/callees by hand |
 | which files depend on a file | `aw impact <file>` lists files that call into it; add `--edges calls,imports,inherits --depth N` for the resolved dependency closure |
-| which functions exceed complexity/length | `aw complexity --min-cyc 11` — cyclomatic/branches/nesting/effective LOC, not cognitive complexity |
-| what is in this directory | `aw symbols <dir> --outline`; `aw files --path <dir>` for the file inventory |
-| find a symbol by (partial) name, qualified path, or signature vocabulary | `aw search <terms>` — qualified input matches the exact phrase; exact names rank first; plurals fall back to stems |
-| resolve many names at once | `aw resolve --stdin < names.txt` — one `found`/`ambiguous`/`missing` line per name |
-| what is in this file / its signatures | `aw symbols <file> [--outline]` |
-| is this logic duplicated elsewhere | `aw clones [--min-lines N]` — candidates only, never proof; spans name the enclosing symbol per side |
-| what is risky / unresolved | `aw hotspots`, `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
+| what does this file import | `aw imports <file>` — outbound resolved imports |
+
+These seven commands are the measured, validated routing set. Other aw commands
+exist, but they are not mandatory agent routing; use them only as described below.
 
 Avoid repeating a complete lookup with grep when a current, unambiguous aw result
 already answers it. Use source reads or grep for focused verification, missing
 relationships, unsupported syntax, or conflicting evidence. Verification required
 for correctness, safety, or review takes precedence over avoiding duplicate navigation.
+
+## Secondary tools (optional)
+
+Reach for these when the seven routed commands do not answer the question. They are
+diagnostic or inventory surfaces: their precision and utility vary by repository, so
+verify their output before acting on it.
+
+| question | command |
+|----------|---------|
+| what is in this file / its signatures | `aw symbols <file> [--outline]` — deterministic inventory of one indexed file |
+| find a symbol by (partial) name or signature vocabulary | `aw search <terms>` — token search over names, paths, and signatures; exact names rank first |
+| who inherits/implements a type | `aw implementers <name>` — resolved `inherits` edges only; cross-file impls omitted |
+| which tests reach this symbol/file | `aw tests <name|file>` — static call-edge candidates only, never a test plan |
+| what is in this directory | `aw symbols <dir> --outline`; `aw files --path <dir>` for the file inventory |
+| resolve many names at once | `aw resolve --stdin < names.txt` — one `found`/`ambiguous`/`missing` line per name |
+| is this logic duplicated elsewhere | `aw clones [--min-lines N]` — candidates only, never proof |
+| which functions exceed complexity/length | `aw complexity --min-cyc 11` — syntax proxies, not cognitive complexity |
+| what is risky / unresolved | `aw hotspots`, `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
+| repository totals and structure | `aw stats`, `aw report` — build-time summaries, not freshness checks |
+| dead-code candidates | `aw dead` — candidate list only, never proof of deadness |
 
 ## Handling the contract behaviors
 
@@ -60,11 +75,11 @@ for correctness, safety, or review takes precedence over avoiding duplicate navi
    edge is unresolved. No path in the resolved graph does not prove no runtime
    connection. Inspect `callees`/`callers` and source or grep for missing hops
    instead of repeating an unchanged `path` query.
-4. **Static-surface caveats**: `implementers`, `imports`, `tests`, and
-   `complexity` are static. Successful evaluation cases do not establish complete
-   repository coverage; a negative is not proof. `tests` misses Rust `#[test]` names outside `test_*`, TS
-   `describe`/`it` callbacks, and function-local imports. `dead` is a
-   candidate list, not proof.
+4. **Static-surface caveats**: every aw result covers the indexed, resolved
+   subset only. Successful cases do not establish complete repository coverage;
+   a negative is not proof. Secondary tools inherit the same limit: `tests`
+   misses Rust `#[test]` names outside `test_*`, TS `describe`/`it` callbacks,
+   and function-local imports; `dead` and `clones` are candidate lists.
 
 ## Staleness discipline
 
@@ -90,6 +105,4 @@ file that could change the answer. No warning does not prove the index is curren
   open only the lines you need (`sed -n`), not whole files, when the pointer
   answers the question.
 - `aw symbols <file> --outline` replaces most "read the file to see its
-  structure" reads.
-- `aw stats` / `aw report` answer repo-shape questions (totals, top packages,
-  fan-in, hotspots) in one call — do not assemble them from grep.
+  structure" reads when you only need the definition inventory.

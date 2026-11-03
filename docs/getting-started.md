@@ -47,12 +47,12 @@ File arguments in queries remain relative to the selected root, even when you in
 
 ```sh
 aw symbols src/cli.rs --outline
-aw search run_build --exact
+aw search run_build
 aw context run_build
 ```
 
 - `symbols` lists definitions in `src/cli.rs`, with one-line signatures when available.
-- `search --exact` finds definitions whose bare name or full qualified name equals `run_build`.
+- `search` ranks identifier matches and accepts either a bare name or a qualified name.
 - `context` combines the definition range, direct callers, and direct callees. It does not print function bodies.
 
 Open a returned `path:line` in your editor. Lines are 1-based and paths are repository-relative.

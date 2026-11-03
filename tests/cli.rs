@@ -3449,3 +3449,87 @@ fn search_stem_fallback_handles_ion_nouns() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("a.rotate"), "{stdout}");
 }
+
+/// Split a documented command line into shell-like words, honoring single and
+/// double quotes. Keeps the docs test dependency-free.
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    for ch in line.chars() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => cur.push(ch),
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_whitespace() => {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            }
+            None => cur.push(ch),
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+}
+
+/// Every `aw ...` invocation shown in README.md and docs/*.md must parse with
+/// the real clap definition, so documentation cannot drift from `src/cli.rs`.
+#[test]
+fn documented_aw_commands_parse() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut docs = vec![root.join("README.md")];
+    for entry in fs::read_dir(root.join("docs")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            docs.push(path);
+        }
+    }
+    let mut checked = 0usize;
+    let mut errors = Vec::new();
+    for path in docs {
+        let text = fs::read_to_string(&path).unwrap();
+        let mut fenced = false;
+        for (n, line) in text.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") {
+                fenced = !fenced;
+                continue;
+            }
+            if !fenced || !trimmed.starts_with("aw ") {
+                continue;
+            }
+            // Skip placeholders, alternations, pipes, redirects, comments, and
+            // help/version probes: these are templates, not literal invocations.
+            if trimmed.contains('<')
+                || trimmed.contains('[')
+                || trimmed.contains('|')
+                || trimmed.contains('>')
+                || trimmed.contains('#')
+                || trimmed.contains('$')
+                || trimmed.contains('\\')
+                || trimmed.contains("...")
+                || trimmed.contains("--help")
+                || trimmed.contains("--version")
+            {
+                continue;
+            }
+            let argv = shell_words(trimmed);
+            match <agent_weave::cli::Cli as clap::Parser>::try_parse_from(&argv) {
+                Ok(_) => checked += 1,
+                Err(e) => errors.push(format!("{}:{}: `{trimmed}` -> {e}", path.display(), n + 1)),
+            }
+        }
+    }
+    assert!(
+        errors.is_empty(),
+        "documented commands failed:\n{}",
+        errors.join("\n")
+    );
+    assert!(
+        checked >= 25,
+        "only {checked} literal aw invocations checked; docs test lost coverage"
+    );
+}

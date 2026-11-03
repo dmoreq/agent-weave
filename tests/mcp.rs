@@ -24,10 +24,15 @@ impl Drop for Server {
 }
 
 fn spawn(repo: &Path) -> Server {
+    spawn_with(repo, true)
+}
+
+fn spawn_with(repo: &Path, all_tools: bool) -> Server {
     let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(repo)
         .arg("mcp")
+        .args(all_tools.then_some("--all-tools"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -696,4 +701,44 @@ fn missing_required_argument_returns_invalid_params() {
     );
     assert_eq!(resp["error"]["code"], -32602, "{resp}");
     let _ = fs::remove_dir_all(&repo);
+}
+
+/// Default MCP profile: only the eight core navigation tools. The full
+/// inventory/analysis surface stays available behind `--all-tools`.
+#[test]
+fn default_mcp_exposes_core_navigation_tools() {
+    let repo = fixture("core");
+    let mut srv = spawn_with(&repo, false);
+    let init = rpc(
+        &mut srv,
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18"}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    notification(&mut srv, "notifications/initialized");
+
+    let list = rpc(&mut srv, 2, "tools/list", json!({}));
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["build", "callers", "callees", "path", "context", "imports", "impact", "symbols",]
+    );
+
+    let denied = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({"name": "search", "arguments": {"terms": "normalize"}}),
+    );
+    assert_eq!(denied["error"]["code"], -32602);
+    assert!(denied["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown tool 'search'"));
 }

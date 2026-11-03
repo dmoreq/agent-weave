@@ -9,7 +9,7 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 | Create or refresh an index | `build` |
 | Inspect a definition and its neighbors | `context`, `callers`, `callees`, `path` |
 | Inspect dependencies | `impact`, `imports`, `implementers`, `tests` |
-| Find definitions and files | `search`, `symbols`, `api`, `resolve`, `files` |
+| Find definitions and files | `search`, `symbols`, `resolve`, `files` |
 | Investigate cleanup candidates | `dead`, `clones`, `complexity` |
 | Read repository summaries | `stats`, `hotspots`, `report` |
 | Diagnose or remove local data | `doctor` |
@@ -35,7 +35,7 @@ Names below are exact bare names or full printed qualified names, not pointers o
 
 File arguments use root-relative paths with `/`, not paths relative to the invoking subdirectory. Where `--path <PATH>` is offered, it selects an exact file or a directory and descendants, not an arbitrary string prefix.
 
-Omit `--path` for the whole index. Use a nonempty repository-relative scope without `..` components, backslashes, or an absolute prefix; `api` also rejects a root-only path.
+Omit `--path` for the whole index. Use a nonempty repository-relative scope without `..` components, backslashes, or an absolute prefix.
 
 ### Shared limits and switches
 
@@ -43,8 +43,8 @@ Omit `--path` for the whole index. Use a nonempty repository-relative scope with
 - `context --limit` defaults to **10** and clamps at **50**, independently for callers and callees.
 - `hotspots --limit` defaults to **10** and clamps at **100**. Zero is a usage error.
 - `--depth <N>` clamps to **1–10**, including clamping zero to one. Defaults differ by command.
-- Boolean switches default to off. Optional filters default to absent; generated files are included unless excluded explicitly.
-- `--exclude-generated` filters build-time generated-file tags. Tags use recognized suffixes or markers in the first five lines, not a general generated-code classifier.
+- Boolean switches default to off. Optional filters default to absent.
+- Generated-file tags use recognized suffixes or markers in the first five lines, not a general generated-code classifier. They remain in inventories and summaries but do not have a query switch.
 
 ## Build and maintain the index
 
@@ -163,16 +163,13 @@ Candidate names start with `test_` or `test` followed by an uppercase letter. Ru
 ### `search <TERMS>`
 
 ```text
-aw search <TERMS> [--kind <KIND>] [--path <PATH>] [--exact] [--limit <N>]
+aw search <TERMS> [--limit <N>]
 ```
 
 Rank symbols using BM25 token search over names, qualified names, file paths, and signatures. Quote multiple words as one argument, for example `aw search 'parse tree'`.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--kind <KIND>` | None | Exact symbol-kind filter, such as `function`, `method`, `class`, `module`, `trait`, or `interface` |
-| `--path <PATH>` | None | Restrict the file or directory scope |
-| `--exact` | Off | Match the entire bare or qualified name; bypass token ranking |
 | `--limit <N>` | `50` | Maximum displayed matches, cap 10000 |
 
 camelCase and snake_case split into tokens. Normal search uses prefix terms and keeps at most 32 tokens, with a warning when truncated. It does not search bodies, comments, or docstrings. Rows carry a location, qualified name, and available signature.
@@ -184,16 +181,6 @@ aw symbols <FILE_OR_DIRECTORY> [--outline] [--metrics] [--limit <N>]
 ```
 
 List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds per-symbol syntax metrics. Both default to off and can be combined. `--limit` uses the shared default and cap.
-
-### `api <PATH>`
-
-```text
-aw api <PATH> [--include-private] [--exclude-generated] [--limit <N>]
-```
-
-Inventory exported functions, methods, classes, traits, and interfaces under a file or directory. `--include-private` removes the export filter; it does not add other declaration kinds. Both boolean options default to off; `--limit` uses the shared default and cap.
-
-Exports use language-specific static heuristics. Re-exports, module visibility, dynamic exports, constants, statics, aliases, and variables are not a complete part of this inventory.
 
 ### `resolve --stdin`
 
@@ -220,7 +207,7 @@ List indexed paths with build-time symbol counts, byte sizes, and generated tagg
 ### `dead`
 
 ```text
-aw dead [--exclude-tests] [--exclude-generated] [--path <PATH>] [--limit <N>]
+aw dead [--exclude-tests] [--path <PATH>] [--limit <N>]
 ```
 
 List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, or inheritance references. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
@@ -245,7 +232,7 @@ Summary counts are build-time data with no freshness check. Site mode checks dis
 
 ```text
 aw complexity [--min-cyc <N>] [--min-loc <N>] [--min-branches <N>]
-    [--min-nest <N>] [--path <PATH>] [--exclude-generated] [--limit <N>]
+    [--min-nest <N>] [--path <PATH>] [--limit <N>]
 ```
 
 Rank functions and methods by descending cyclomatic proxy, then effective lines of code. All thresholds must hold.
@@ -257,7 +244,6 @@ Rank functions and methods by descending cyclomatic proxy, then effective lines 
 | `--min-branches <N>` | `0` | Minimum branch-node count |
 | `--min-nest <N>` | `0` | Minimum nesting metric |
 | `--path <PATH>` | None | Restrict file or directory scope |
-| `--exclude-generated` | Off | Omit generated-tagged files |
 | `--limit <N>` | `50` | Maximum displayed callables, cap 10000 |
 
 Rows label metrics `cyc`, `branches`, `nest`, and `loc`. These syntax-tree proxies are not cognitive complexity and are not comparable to the file-level metric used by hotspots. Effective LOC excludes blank lines, comment-only lines, and Python docstrings.
@@ -265,12 +251,12 @@ Rows label metrics `cyc`, `branches`, `nest`, and `loc`. These syntax-tree proxi
 ### `clones`
 
 ```text
-aw clones [--min-lines <N>] [--path <PATH>] [--exclude-generated] [--limit <N>]
+aw clones [--min-lines <N>] [--path <PATH>] [--limit <N>]
 ```
 
 Find duplicate-block candidates using normalized five-line windows. Normalization removes trailing whitespace and blank lines; it does not establish semantic equivalence.
 
-`--min-lines` defaults to 5 and clamps smaller values to 5. `--path` requires both regions under the selected scope and defaults to absent. `--exclude-generated` defaults to off; `--limit` uses the shared default and cap and counts displayed pairs.
+`--min-lines` defaults to 5 and clamps smaller values to 5. `--path` requires both regions under the selected scope and defaults to absent. `--limit` uses the shared default and cap and counts displayed pairs.
 
 Rows identify both inclusive source ranges and enclosing symbols when available. Pair generation retains at most 64 merged regions per window-hash group and 20000 candidate pairs; a warning indicates a lower-bound result when capped.
 
@@ -287,22 +273,22 @@ No command-specific options. Print build-time file, generated-file, symbol, edge
 ### `hotspots`
 
 ```text
-aw hotspots [--limit <N>] [--path <PATH>] [--exclude-generated]
+aw hotspots [--limit <N>] [--path <PATH>]
 ```
 
 Rank indexed files by the sum of normalized file-level decision counts, LOC, 90-day change counts, and 180-day fix-related commit counts. Each metric normalizes within the selected file set; scores from different scopes are not directly comparable.
 
-`--limit` defaults to 10, cap 100; `--path` defaults to absent; `--exclude-generated` defaults to off. Git failures or absent history yield zero change and fix signals. Rows contain score, path, `loc`, `cyc`, `churn90`, and `fix180`; these are prioritization heuristics, not measured defect risk.
+`--limit` defaults to 10, cap 100; `--path` defaults to absent. Git failures or absent history yield zero change and fix signals. Rows contain score, path, `loc`, `cyc`, `churn90`, and `fix180`; these are prioritization heuristics, not measured defect risk.
 
 ### `report`
 
 ```text
-aw report [--path <PATH>] [--exclude-generated]
+aw report [--path <PATH>]
 ```
 
 Print four sections: index overview, top packages by symbol count, five hotspots, and eight most-called symbols. There is no `--limit` option.
 
-`--path` defaults to absent and scopes the map, hotspots, and fan-in sections; the overview retains global totals and adds scoped counts. `--exclude-generated` defaults to off and filters those analysis sections, not the global totals. Freshness checking samples at most 5000 scoped indexed files.
+`--path` defaults to absent and scopes the map, hotspots, and fan-in sections; the overview retains global totals and adds scoped counts. Freshness checking samples at most 5000 scoped indexed files.
 
 ## Journal and environment
 
@@ -338,12 +324,14 @@ The CLI does not journal `doctor`, `usage`, or the MCP server invocation itself.
 ### `mcp`
 
 ```text
-aw mcp
+aw mcp [--all-tools]
 ```
 
-No command-specific options. Serve newline-delimited JSON-RPC 2.0 over stdin/stdout until input closes. A client starts this process; aw does not install host configuration or a background service.
+Serve newline-delimited JSON-RPC 2.0 over stdin/stdout until input closes. A client starts this process; aw does not install host configuration or a background service.
 
-The tool surface exposes build, query, and usage operations, not `doctor`. Global root and journal controls apply. Frames are limited to 8 MiB. Do not send ordinary shell text or log messages into the protocol stream.
+By default the tool list is the eight core navigation tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols`. `--all-tools` defaults to off; when set, it exposes the full surface of 21 tools, including inventory, analysis, and usage operations.
+
+`doctor` is never exposed as a tool. Global root and journal controls apply. Frames are limited to 8 MiB. Do not send ordinary shell text or log messages into the protocol stream.
 
 See [agent integration](agent-integration.md) for host setup and fallback guidance.
 

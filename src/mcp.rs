@@ -14,9 +14,15 @@ use crate::error::AwError;
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// Tools that answer navigation questions. `aw mcp` exposes only these by
+/// default; `--all-tools` adds inventory, analysis, and maintenance tools.
+const CORE_TOOLS: &[&str] = &[
+    "build", "path", "context", "callers", "callees", "impact", "imports", "symbols",
+];
+
 /// Tool registry: (name, description, inputSchema). `doctor` is deliberately
-/// absent (Amendment 8): `--invalidate` is reserved for the human CLI.
-fn tools() -> Value {
+/// absent: `--invalidate` is reserved for the human CLI.
+fn tools(all: bool) -> Value {
     let schema_obj = |props: Value, required: &[&str]| {
         json!({
             "type": "object",
@@ -25,7 +31,7 @@ fn tools() -> Value {
         })
     };
     let limit = json!({"type": "integer", "minimum": 1, "maximum": 10000});
-    json!([
+    let mut v = json!([
         {"name": "build", "description": "Index the repository into .aw/index.db (full atomic replacement)",
          "inputSchema": schema_obj(json!({
              "force": {"type": "boolean", "description": "Re-extract everything (disable the fast path)"},
@@ -70,14 +76,28 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "path": {"type": "string"}}), &[])},
         {"name": "report", "description": "Four-section architecture report",
          "inputSchema": schema_obj(json!({"path": {"type": "string"}}), &[])},
-        {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates; verify=true replays sampled payload pointers (Amendment 10)",
+        {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates; verify=true replays sampled payload pointers",
          "inputSchema": schema_obj(json!({"verify": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10000}}), &[])},
-    ])
+    ]);
+    if !all {
+        if let Some(list) = v.as_array_mut() {
+            list.retain(|tool| {
+                tool["name"]
+                    .as_str()
+                    .is_some_and(|name| CORE_TOOLS.contains(&name))
+            });
+        }
+    }
+    v
 }
 
 /// Serve until stdin closes. All protocol output goes to stdout; the only
 /// stdout bytes ever written are complete JSON-RPC messages.
-pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<()> {
+pub fn serve(
+    root_arg: Option<&Path>,
+    no_journal: bool,
+    all_tools: bool,
+) -> crate::error::Result<()> {
     let root = crate::walk::discover_root(root_arg)?;
     if no_journal {
         // Amendment 6 opt-out must hold on the MCP surface too (R6d A7).
@@ -155,7 +175,7 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
             }
             "notifications/initialized" => {}
             "ping" => write_result(&mut out, id, json!({}))?,
-            "tools/list" => write_result(&mut out, id, json!({"tools": tools()}))?,
+            "tools/list" => write_result(&mut out, id, json!({"tools": tools(all_tools)}))?,
             "tools/call" => {
                 let params = msg.get("params").cloned().unwrap_or(Value::Null);
                 let tool_name = params
@@ -168,7 +188,7 @@ pub fn serve(root_arg: Option<&Path>, no_journal: bool) -> crate::error::Result<
                     }
                     continue;
                 };
-                if !tools()
+                if !tools(all_tools)
                     .as_array()
                     .map(|t| t.iter().any(|t| t["name"] == tool_name))
                     .unwrap_or(false)

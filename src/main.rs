@@ -49,7 +49,7 @@ fn main() {
     let journaled = !no_journal
         && !matches!(
             cli.cmd,
-            cli::Cmd::Doctor { .. } | cli::Cmd::Usage { .. } | cli::Cmd::Mcp {}
+            cli::Cmd::Doctor { .. } | cli::Cmd::Usage { .. } | cli::Cmd::Mcp { .. }
         );
     if journaled {
         journal::begin("cli", tool_name(&cli.cmd), &journal_args(&cli.cmd));
@@ -129,7 +129,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Report { .. } => "report",
         cli::Cmd::Doctor { .. } => "doctor",
         cli::Cmd::Usage { .. } => "usage",
-        cli::Cmd::Mcp {} => "mcp",
+        cli::Cmd::Mcp { .. } => "mcp",
     }
 }
 
@@ -253,7 +253,7 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
         cli::Cmd::Report { path } => vec![("path", path.clone().unwrap_or_default())],
         cli::Cmd::Doctor { invalidate } => vec![("invalidate", invalidate.to_string())],
         cli::Cmd::Usage { .. } => vec![],
-        cli::Cmd::Mcp {} => vec![],
+        cli::Cmd::Mcp { .. } => vec![],
     }
 }
 
@@ -410,7 +410,7 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Mcp {} => mcp::serve(root_arg, no_journal),
+        cli::Cmd::Mcp { all_tools } => mcp::serve(root_arg, no_journal, all_tools),
         cli::Cmd::Unresolved { names, path, limit } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;

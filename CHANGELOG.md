@@ -63,7 +63,7 @@ Consumers that parse output must review the query-shape changes listed below bef
   1.87 s vs 3.61 s baseline on a heavily loaded host (interleaved A/B); details
   come from an internal optimization report (original evidence unavailable publicly).
 
-### Changed — schema v7 (Amendment 20)
+### Changed — schema v7
 
 - `symbols.file_path` denormalizes `files.path`; `symbols_complexity_idx`
   covers `(cyclomatic, effective_loc, qualname, file_path, line_start)` so
@@ -72,7 +72,7 @@ Consumers that parse output must review the query-shape changes listed below bef
   Fresh inserts and carry-forward both populate the column; `probe_old`
   rejects a v7-stamped index that lacks it.
 
-### Fixed — incremental resolution and index validation (P8 review cycle 3, R12, Amendment 22)
+### Fixed — incremental resolution and index validation
 
 - Incremental Rust `impl Trait for T` resolves against carried
   traits/interfaces; qualified `crate::Trait` impl targets resolve.
@@ -82,7 +82,7 @@ Consumers that parse output must review the query-shape changes listed below bef
 - A pre-manifest v7 index rebuilds instead of reporting an empty default
   `complexity` result.
 
-### Fixed — import resolution and query consistency (P8 review cycle 2, R11, Amendment 21)
+### Fixed — import resolution and query consistency
 
 - Python dotted imports keep every ancestor module edge; Rust crate roots,
   wildcard use trees, and single-segment module/symbol imports resolve; star
@@ -95,11 +95,11 @@ Consumers that parse output must review the query-shape changes listed below bef
   --names` has the standard staleness header and unlocated-row count.
 - `effective_loc` uses comment-node byte coverage; TS `protected` is private;
   Rust trait and trait-impl methods of an exported type are exported.
-- P8 gate commands select real tests; GT harnesses report Wilson precision.
+- Gate commands select real tests; GT harnesses report Wilson precision.
 - 1M-symbol `complexity` default is 6.9 ms via `meta.callable_count`;
   path scope is amended to a 250 ms budget (201 ms measured).
 
-### Fixed — structural graph correctness and latency (P8 review cycle, R10)
+### Fixed — structural graph correctness and latency
 
 - Rust imports: structural `use` trees (grouped, alias, `self`/`super`,
   wildcard, single-segment), `mod.rs`/`lib.rs`/`index.*` module mapping, and
@@ -126,10 +126,10 @@ Consumers that parse output must review the query-shape changes listed below bef
   2,025-file corpus (budget 2.91 s).
 - Gates: committed real-corpus ground truth and harnesses for imports
   (40 pairs), tests (20 symbols), and inheritance (11 pairs), plus a
-  Flutter-corpus build smoke; P8 determinism dumps include schema-v7 columns
+  Flutter-corpus build smoke; determinism dumps include schema-v7 columns
   and `unresolved_calls`.
 
-### Added — dependency, test, and symbol queries (P8, Amendment 19, schema v6)
+### Added — dependency, test, and symbol queries (schema v6)
 
 - `aw implementers <name>`: resolved inbound `inherits` edges; Rust
   `trait_item`/`function_signature_item` and TS `interface_declaration`
@@ -160,7 +160,7 @@ Consumers that parse output must review the query-shape changes listed below bef
   `api`, `files`, and `resolve`; `impact`, `dead`, `symbols`, `search`,
   `unresolved`, `clones`, `hotspots`, and `report` gained their new flags.
 
-### Fixed — bounded queries and structural analysis (P8 implementation review, R9)
+### Fixed — bounded queries and structural analysis
 
 - `dead` trait/interface parent exclusion is materialized and indexable:
   2,025-file corpus 15.57 s -> 0.14 s; 1M-symbol COUNT no longer scans
@@ -195,7 +195,7 @@ Consumers that parse output must review the query-shape changes listed below bef
 **User impact:** fuller signatures, better call resolution, and lower no-op build cost.
 **Required action:** run `aw build` to refresh old signatures; review pointer identity and grouped `impact` output in integrations.
 
-### Fixed — accuracy, utility, and latency hardening (R7, Amendment 18)
+### Fixed — accuracy, utility, and latency hardening
 
 - Signatures capture the full multi-line parameter list (collapsed, capped
   160), stopping before the body; 500/3,039 truncated Python signatures on
@@ -227,7 +227,7 @@ Consumers that parse output must review the query-shape changes listed below bef
 **Required action:** rebuild older indexes with `aw build`; query opens reject incompatible schemas with exit 5.
 Review the output-contract changes below if scripts consume query text.
 
-### Added — `aw context <symbol>` (Amendment 17, P8)
+### Added — `aw context <symbol>`
 
 - One call returns the definition line with signature, direct callers, and
   direct callees (resolved `calls` edges only), with per-section showing
@@ -236,7 +236,7 @@ Review the output-contract changes below if scripts consume query text.
   pointer lines; MCP tool `context` with G10 byte parity; contract-bump
   entry recorded in the spec.
 
-### Added — `aw path <from> <to>` (Amendment 13, F5)
+### Added — `aw path <from> <to>`
 
 - Shortest call path between two symbols over resolved call edges
   (`kind = 'calls' AND dst_id IS NOT NULL`): level-batched BFS, deterministic
@@ -250,30 +250,30 @@ Review the output-contract changes below if scripts consume query text.
   `aw: chain <resolved qualnames> (K hops)`. Exit 1 negatives distinguish
   exhaustive vs depth-cap-truncated; exit 2 ambiguity names the failing
   endpoint (`as the from|to endpoint`).
-- Journaled per Amendment 6 (`args` gains `to`; no `limit` key); payload
-  per Amendment 10 (`name` = the `from` argument; `usage --verify` unchanged).
+- Journaled (`args` gains `to`; no `limit` key); payload
+  per result line (`name` = the `from` argument; `usage --verify` unchanged).
   MCP tool `path` with G10 byte parity.
 - Spec review: six independent Goldfish reviewers, 73 findings consolidated
   to 20, 2 fix cycles, round-2 APPROVE
-   (internal review R5-P5, unavailable publicly); internally reported G17 gate
+   (internal review unavailable publicly); internally reported G17 gate
    evidence (original evidence unavailable publicly): 10/10 exact-byte fixtures,
   8/8 frozen GT pairs, 0.6-1.4 ms in-process best-of-7 across the 85k-symbol
   synth corpus and the 26-file self-index (spawn-inclusive wall < 10 ms).
 
-### Changed — `aw search` readability (Amendment 14, P6)
+### Changed — `aw search` readability
 
 - Indexed text widened with `split_ident(path)` + `split_ident(signature)`
   tokens (derived data; schema stays v4; the FTS is repopulated at build
   end). Signature-only vocabulary ("usize", "option path", "any", "i64 vec")
   now retrieves the symbols that carry it — frozen gap set 6/6 improved,
-  frozen G14 recall unchanged at 0.850 pre-rebuild; the shipped P6 index
-  measures 0.800 (23/28) — the G18(i) premise is corrected in the R6
-  remediation (R6c F2).
+  frozen G14 recall unchanged at 0.850 pre-rebuild; the shipped index
+  measures 0.800 (23/28) — the G18(i) premise is corrected in the
+  remediation.
 - Search hit lines gain the stored one-line signature:
   `path:line qualname signature` (contract bump; empty signature keeps the
   12b byte shape). Payload/G10 parity unchanged.
 
-### Changed — R6 residual closures (2026-11-02)
+### Changed — residual closures (2026-11-02)
 
 - PEP 420 namespace-package imports resolve (longest indexed prefix).
 - Empty `dead`/`clones` results now print the mandatory caveat on stdout.
@@ -281,14 +281,14 @@ Review the output-contract changes below if scripts consume query text.
 - Serial-vs-parallel build determinism tested via `AW_WORKERS`.
 - GitHub Actions pinned by SHA in both workflows.
 
-### Reverted — `aw search` docstring indexing (attempted Amendment 16)
+### Reverted — `aw search` docstring indexing (attempted)
 
 - Attempted schema v6 `symbols.docstring` + FTS widening. Retrieval improved
   (prose-gap 5/6, G14 unchanged at 0.800) but the Stage 2c utility A/B failed
   (Grok tool calls +12%, OpenCode −9%) — reverted under gate G20's kill rule.
   Evidence retained internally; original Stage 2c evidence is unavailable publicly.
 
-### Fixed — R6 remediation (Amendment 15, schema v5)
+### Fixed — remediation (schema v5)
 
 - Build abort on deeply nested source replaced by an explicit depth guard
   (8,192) and 64 MB worker stacks; 2,000-20,000 nesting now builds cleanly.
@@ -309,7 +309,7 @@ Review the output-contract changes below if scripts consume query text.
   closure (4,000-chain edit 42.5 s -> 0.26 s), search terms cap 32,
   ambiguity render cap 50 with true total.
 - Claims corrected: unresolved rate inverted (coverage 10-48% / unresolved
-  52-90%), G14 0.800 on the shipped index (was 0.850 pre-P6), G13 -62.7%
+  52-90%), G14 0.800 on the shipped index (was 0.850 before), G13 -62.7%
   (was -64.8%), denominators (40 primary runs + 2 fills; 10-run second host),
   test count 105, self-index epoch-labeled.
 
@@ -318,12 +318,12 @@ Review the output-contract changes below if scripts consume query text.
 - `tests/scripts/write_path_check.sh`: stale exclusion pattern (G5 was red
   on the committed tree after the qualified `std::fs::rename(crate::db::...)`
   refactor); `src/journal.rs` added to the aw_dir-scoped allowlist.
-- `db::probe_old`: a v4-stamped index from the Amendment 12 first landing
+- `db::probe_old`: a v4-stamped index from the first landing
   wave (no `clone_groups` table) now disables the fast path and rebuilds
   fresh instead of failing carry-forward with
   `no such table: olddb.clone_groups`.
 
-### Added — `aw symbols --outline` (Amendment 12a, F1)
+### Added — `aw symbols --outline`
 
 - New `--outline` flag on `aw symbols <file>`: each line gains the stored
   one-line signature (first line of the symbol's node text, trimmed, hard
@@ -334,12 +334,12 @@ Review the output-contract changes below if scripts consume query text.
   captured during the build parse phase at zero extra passes; carried
   forward by the fast path. Old indexes exit 5 with the rebuild hint
   (single normative version policy).
-- Journal `args` for `symbols` gains the `outline` key (Amendment 6
+- Journal `args` for `symbols` gains the `outline` key (journal
   extension); MCP `symbols` tool gains the optional `outline` arg with G10
   byte-parity coverage.
 
 
-### Added — agent-tooling design companion (P4 roadmap, Amendment 12, docs)
+### Added — agent-tooling design companion (docs)
 
 - `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
   features distilled from the pi-sherlock reference analysis — F1
@@ -347,13 +347,13 @@ Review the output-contract changes below if scripts consume query text.
   lookup), F3 skill hardening + drift gate, F4 `aw clones` (shingle
   candidates). Proposal spec-reviewed by an independent stateless Goldfish
   reviewer (round 1 NEEDS FIXES with 12 findings, round 2 APPROVE; record
-  R4-P4, internal review unavailable publicly). OQ4a (signature text) and OQ4b
+  internal review unavailable publicly). OQ4a (signature text) and OQ4b
   (symbol-slice `search` deferral lift) approved by the owner 2026-11-01.
   Gates G13-G16 registered in the spec's Gate Registry. Implementation
   follows (F3 -> F1 -> F2 -> F4), one schema v4 bump for whatever survives
   the gates.
 
-### Added — `aw search` (Amendment 12b, F2)
+### Added — `aw search`
 
 - New `aw search <terms>`: symbol-level FTS5 lookup — OR of prefix terms over
   camelCase/snake_case-split identifier tokens, `bm25()`-ranked. Output
@@ -363,13 +363,13 @@ Review the output-contract changes below if scripts consume query text.
 - Schema v4 (same bump as F1): standalone virtual table `symbols_fts`,
   repopulated by one pass from `symbols` at the end of every build (covers
   fresh and carried rows). No new dependencies (FTS5 is SQLite builtin).
-- Journal `args` gains the `terms` key (Amendment 6 extension); `search`
-  joins the Amendment 10 payload list; MCP `search` tool with G10 byte-parity.
+- Journal `args` gains the `terms` key (journal extension); `search`
+  joins the payload list; MCP `search` tool with G10 byte-parity.
 - G14 gate PASS: mean per-query recall 0.850 on 20 frozen queries
   (pooled 24/28, Wilson 95% [0.685, 0.943]) —
   internally reported G14 evidence (original evidence unavailable publicly).
 
-### Added — `aw clones` (Amendment 12d, F4)
+### Added — `aw clones`
 
 - New `aw clones [--min-lines N]` (default 5): duplicate-block candidates —
   normalized 5-line-window FNV-1a shingles computed during the build parse
@@ -377,7 +377,7 @@ Review the output-contract changes below if scripts consume query text.
   with the fast path; adjacent matching windows merged per file at query
   time; pair lines `pathA:startA-endA pathB:startB-endB` under the standard
   cap/staleness contract. Mandatory caveat first line: candidates, never
-  proof. NOT payload-journaled (Amendment 12 deviation: pair lines are not
+  proof. NOT payload-journaled (deviation: pair lines are not
   single pointers, `usage --verify` structural checks do not apply).
 - Schema v4 (same bump as F1/F2): `clone_groups` + `clone_groups_hash`
   index. No new dependencies.
@@ -386,7 +386,7 @@ Review the output-contract changes below if scripts consume query text.
   to 25% with INSERT-I/O attribution on record
   (internally reported G16 evidence; original evidence unavailable publicly).
 
-### Changed — performance ceiling pass (Amendment 11, G12)
+### Changed — performance ceiling pass
 
 Four changes, all measured on a 2,025-file / 7.9 MB synthetic Python corpus
 (index 4.6 MB, same seed as the review baseline) plus the aw self-index; gates
@@ -424,7 +424,7 @@ precision/recall PASS.
   (premise not weak).
 - R0 independent review record (APPROVE after 1 fix cycle).
 
-### Added — local call-graph navigation (P1 core, 9f75656..e72b9b0)
+### Added — local call-graph navigation (9f75656..e72b9b0)
 
 - `aw` Rust CLI (single binary, 5 pinned deps, `#![forbid(unsafe_code)]`):
   `build`, `callers`, `callees [--depth N]`, `impact`, `doctor`, `stats`,
@@ -440,21 +440,21 @@ precision/recall PASS.
 - 54 tests; clippy `-D warnings` clean.
 - Gate results on vihap (~102k LOC): G1 1.91s/21.4MB/1.9MB; G2 recall 29/29,
   precision 493/495; G3 p95 10.1ms; G6 -50% tool calls, -67% bytes.
-- R1 independent review record (APPROVE after 2 fix cycles).
+- Independent review record (APPROVE after 2 fix cycles).
 
-### Added — index statistics and repository reports (P1.5, d9951ce..5034939)
+### Added — index statistics and repository reports (d9951ce..5034939)
 
 - `aw stats`, `aw hotspots` (per-metric min-max normalization of
   cyclomatic + LOC + churn-90d + fix-density), `aw report` (4 sections).
 - G7 rank-overlap 8/10 vs pain list (degraded: pain list provisional).
 - G8 -67% tool calls on architecture questions (via `callees --depth`).
 - `code-index` skill wrapper in the agent-skills repo (OQ2).
-- R1.5 independent review record (APPROVE after 1 fix cycle).
+- Independent review record (APPROVE after 1 fix cycle).
 
-### Added — TypeScript, JavaScript, and Rust indexing (P2, 2aeeb9d..7a99343)
+### Added — TypeScript, JavaScript, and Rust indexing (2aeeb9d..7a99343)
 
 - TypeScript/TSX and JavaScript/JSX grammars (one-commit upgrade rule);
-  Rust grammar (P2.5, rs-0.24.2).
+  Rust grammar (rs-0.24.2).
 - TS/TSX extraction: classes, methods, arrow-const components/hooks,
   `new` -> constructor redirect, `this`/`super` MRO calls, ESM imports
   (default/named/namespace/type), directory-based relative resolution
@@ -463,14 +463,14 @@ precision/recall PASS.
   declarations, `crate::` call paths, scoped identifiers.
 - G2-finguard: 20/20 recall, 57/57 precision. G2-self (dogfooding): 9/10,
   14/14. Python regression green throughout.
-- R2 independent review record (APPROVE after 2 fix cycles).
+- Independent review record (APPROVE after 2 fix cycles).
 
 ### Added — docs
 
 - In-repo canonical spec + concepts brief under `docs/designs/` (cross-repo
   references retired); GitHub community health files.
 
-### Fixed — post-R2 review (Amendment 4)
+### Fixed — post-review
 
 - Fast path: files with any call/import/inherits edge into a changed file are
   re-extracted (transitive dirty closure). Previously their copied edges died
@@ -490,10 +490,10 @@ precision/recall PASS.
   filters over all source extensions, not `.py` only.
 - `callers`/`callees`: no false ambiguous match when a symbol's bare name
   equals its qualname; `--max-parse-error-rate` is validated to [0, 1].
-- README review-records table corrected (R0/R1 in-tree; R1.5/R2 cycles live in
+- README review-records table corrected (early cycles in-tree; later cycles live in
   commit history).
 
-### Added — A3 observability layer 3 (Amendment 10)
+### Added — usage observability layer
 
 - Result-payload journal: `.aw/usage-results.jsonl` — one self-contained
   JSONL line per successful pointer query (callers/callees/impact/dead/
@@ -503,7 +503,7 @@ precision/recall PASS.
   (`AW_NO_JOURNAL` / `--no-journal`), and best-effort contract mirror
   usage.log.
 - Session attribution: `AW_SESSION`/`AW_ARM` env tags ride every usage.log
-  and payload line as additive fields — R1/R2 A/B attribution per task
+  and payload line as additive fields — A/B attribution per task
   without transcript parsing.
 - `aw usage --verify [--limit N]`: deterministic even-stride sample over
   payload entries; the index's staleness check separates CHANGED
@@ -522,11 +522,11 @@ precision/recall PASS.
   confirmed. Tests 91/91; clippy -D warnings clean.
 - Support changes: index meta `built_at` now carries millisecond precision
   (the verify epoch comparison must not collide on same-second rebuilds);
-  aw-self GT rows G01/G02/G07/G09/G10 refreshed after the Amendment 10 line
+  aw-self GT rows G01/G02/G07/G09/G10 refreshed after the journal line
   shifts (provenance in the GT file; G06 annotation corrected — the M3-era
   file mislabeled the Dead dispatch as Stats).
 
-### Added — M4 prebuilt index artifacts (Amendment 9)
+### Added — prebuilt index artifacts
 
 - Dual-key fast path: (mtime, size) match carries as before; a (mtime,
   size) mismatch with same size AND matching FNV-1a content hash also
@@ -540,9 +540,9 @@ precision/recall PASS.
   files, queries byte-correct, no stale flags, and a subsequent real edit
   still re-resolves via the dirty closure.
 
-### Added — M3 MCP stdio server (Amendment 8, P3 activated)
+### Added — MCP stdio server
 
-- `aw mcp`: newline-delimited JSON-RPC 2.0 server on stdin/stdout; 11 tools
+- `aw mcp`: newline-delimited JSON-RPC 2.0 server on stdin/stdout; 21 tools
   mapping 1:1 to CLI subcommands (doctor excluded — `--invalidate` stays a
   human-CLI maintenance action). Spawned by the agent host; aw still spawns
   no daemons. Zero network; writes confined to `.aw/`.
@@ -550,9 +550,9 @@ precision/recall PASS.
   conformance is automated in tests/mcp.rs); ambiguous names carry the
   candidate list in the result text with isError (exit-2 semantics
   preserved); unknown tools rejected with -32602.
-- J2: every tool call journals with `surface:"mcp"` (same Amendment 6
+- J2: every tool call journals with `surface:"mcp"` (same journal
   schema); the server process itself is not journaled.
-- Dependency policy (additive, recorded in Amendment 8): `serde_json = "1"`
+- Dependency policy (additive): `serde_json = "1"`
   joins the pinned set — the MCP boundary parses untrusted client JSON;
   `rmcp` rejected (tokio runtime tree contradicts minimal-dependency/no-daemon
   build semantics).
@@ -564,7 +564,7 @@ precision/recall PASS.
   the GT file); G2 vihap 29/29 + 493/495, finguard 20/20 + 57/57 unchanged.
 - Tests 76/76 (3 new MCP conformance tests); clippy -D warnings clean.
 
-### Added — M2 resolution recall (Amendment 7)
+### Added — resolution recall
 
 - `crate::a::b` calls now resolve when intermediate segments are plain
   namespaces (src/ layout without mod.rs): module-chain attempt first, then a
@@ -577,7 +577,7 @@ precision/recall PASS.
 - aw-self GT rows G02-G10 refreshed after M1's line shifts (provenance noted
   in the GT file); G01 unchanged.
 
-### Added — J1 usage journal (Amendment 6)
+### Added — usage journal
 
 - Every journaled subcommand appends one JSONL line to `.aw/usage.log`:
   ts, surface, tool, args summary (names/paths/scalars only — never file
@@ -591,7 +591,7 @@ precision/recall PASS.
 - QueryOutput carries `stale` (header fired on the displayed set) for
   journaling; `unresolved`/`symbols` record their own result counts.
 
-### Added — M1 query surface (Amendment 5)
+### Added — query surface
 
 - `aw dead` — dead-code CANDIDATES (zero inbound call edges, AMBIGUOUS-name
   aware) with a permanent first-line caveat: candidates, never proof.
@@ -619,12 +619,12 @@ precision/recall PASS.
 
 ### Skipped
 
-- P3 stdio MCP server (original trigger): "CLI discoverability measurably
+- Stdio MCP server (original trigger): "CLI discoverability measurably
   fails" never occurred — the phase was skipped per its trigger rule, then
-  ACTIVATED as M3 by owner decision (MCP-native demand), recorded as
-  Amendment 8.
+  ACTIVATED by owner decision (MCP-native demand), recorded as
+  an additive dependency change.
 - M5 additional languages (Go/Java/C#): trigger "real workload demand" not
-  met — no such workload identified. Re-evaluable on request; the P2
+  met — no such workload identified. Re-evaluable on request; the
   per-language template (grammar pin -> extraction -> fixtures -> GT -> G2)
   remains the playbook.
 

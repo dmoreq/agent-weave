@@ -17,7 +17,7 @@ The examples below use aw's repository after `aw build`. They show commands, not
 | Inspect dependent files | `aw impact src/hash.rs` | Search references and imports across files |
 | Find possible tests | `aw tests src/hash.rs` | Read test files and the test runner's discovery rules |
 | Inspect imports | `aw imports src/build.rs` | Read import declarations and resolve targets |
-| Inspect public definitions | `aw api src` | Inspect visibility and export declarations |
+| Find implementations of a type | `aw implementers <name>` | Read the type hierarchy and implementation blocks |
 
 See the [CLI reference](cli-reference.md) for all options and maintenance commands.
 
@@ -62,18 +62,17 @@ Open each hop before changing behavior. Dynamic dispatch, callbacks, and macros 
 ## Find definitions and read structure
 
 ```sh
-aw search 'parse tree' --path src --kind function
-aw search run_build --exact
+aw search 'parse tree'
+aw search run_build
 aw symbols src --outline
 aw files --path src
-aw api src --exclude-generated
 ```
 
 Quote multiword search terms: the CLI accepts one positional search string. Search ranks identifier, path, and signature tokens; it does not search source bodies, comments, or docstrings.
 
 `symbols` lists definitions by path and line. Signatures are whitespace-collapsed and capped at 160 characters, so open the source for full declarations and bodies.
 
-`files` reports build-time file inventory and counts. `api` applies language-specific export heuristics to functions, methods, classes, traits, and interfaces; it is not a full public-API audit.
+`files` reports build-time file inventory and counts.
 
 For inheritance questions, query a class, trait, or interface name discovered in your own index with `aw implementers`. It follows resolved inheritance relationships, not arbitrary runtime implementations.
 
@@ -90,8 +89,8 @@ Rust `#[test]` functions with other names, TypeScript `describe`/`it` callbacks,
 ## Investigate cleanup candidates
 
 ```sh
-aw dead --path src --exclude-tests --exclude-generated
-aw clones --path src --min-lines 10 --exclude-generated
+aw dead --path src --exclude-tests
+aw clones --path src --min-lines 10
 aw complexity --path src --min-cyc 11
 ```
 

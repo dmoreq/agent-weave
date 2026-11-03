@@ -43,7 +43,7 @@ It is not an HTTP server. The host starts the process; no separate background se
 1. Find the installed aw executable's absolute path. Confirm the host can execute it.
 2. In your host's documented MCP registration interface, add a local stdio server.
 3. Set the executable to that absolute path. Set separate arguments to `--root`, the target repository's absolute path, and `mcp`.
-4. Let the host start the server. Confirm initialization succeeds and the tool list includes `symbols` and `callers`.
+4. Let the host start the server. Confirm initialization succeeds and the tool list includes the core navigation tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols`.
 5. Call the `symbols` tool with `file` set to the known source file and `outline` set to `true`.
 6. Compare the returned locations with the CLI query and current source. Confirm the repository root matches.
 
@@ -57,6 +57,7 @@ Running this command in a terminal waits for protocol input; it is not a host-re
 The repository root is selected when the server starts. Restart or re-register the server to target another repository.
 
 MCP argument names come from the tool schemas, not CLI spelling: for example, `symbols` uses `file` and `outline`.
+The default tool list is the eight core navigation tools. Add `--all-tools` to the server arguments to expose the full inventory and analysis surface (21 tools); see the [CLI reference](cli-reference.md#mcp).
 The `doctor` command is CLI-only. MCP tool errors use `isError`; inspect the returned text before treating results as successful.
 
 ## Host verification status
