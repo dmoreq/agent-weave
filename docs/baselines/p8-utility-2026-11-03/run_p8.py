@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Four-host agent-utility A/B runner for the P8 surfaces.
+"""Agent-utility A/B runner for the P8 surfaces.
 
 Cells: 5 tasks x 2 arms x 4 hosts x 2 runs = 80.
 Usage:
@@ -7,6 +7,10 @@ Usage:
   python3 -I run_p8.py --smoke        # one task pair per host (8 cells)
   python3 -I run_p8.py --max N
   python3 -I run_p8.py --cell HOST ARM TASK RUN
+
+Claude Code pilot (see protocol-claude-extension.md):
+  python3 -I run_p8.py --hosts claude --suffix=-claude \\
+      --kg /tmp/kg-p8-baseline-6dbe57a/target/release/kg
 """
 from __future__ import annotations
 
@@ -30,6 +34,9 @@ GROK = Path.home() / ".grok/bin/grok"
 OPENCODE = Path.home() / ".opencode/bin/opencode"
 AGY = Path.home() / ".local/bin/agy"
 ZCODE = Path("/opt/homebrew/bin/zcode")
+CLAUDE = Path.home() / ".local/bin/claude"
+CLAUDE_MODEL = "deepseek-flash"
+CLAUDE_BASE_URL = "https://api.deepseek.com/anthropic"
 ANSWERS = Path("/tmp/p8-utility-answers-2026-11-03")
 CORPORA = {
     "I1": Path("/tmp/p8-utility-corpus-2026-11-03/kg"),
@@ -47,7 +54,9 @@ FEATURE_TOOL = {
 }
 TASKS = ("I1", "T1", "H1", "D1", "A1")
 ARMS = ("kgc", "kgp8")
-HOST_TAGS = {"grok": "grok", "opencode": "oc", "agy": "agy", "zcode": "zcode"}
+DEFAULT_HOSTS = ("grok", "opencode", "agy", "zcode")
+HOST_TAGS = {"grok": "grok", "opencode": "oc", "agy": "agy",
+             "zcode": "zcode", "claude": "claude"}
 KG_SUBCOMMANDS = (
     "build", "callers", "callees", "path", "context", "implementers",
     "imports", "tests", "impact", "dead", "unresolved", "symbols",
@@ -61,13 +70,27 @@ KG_RE = re.compile(
 STATUS = HERE / "status.txt"
 MANIFEST = HERE / "manifest.txt"
 METRICS = HERE / "metrics-p8.jsonl"
+LOGS = HERE / "logs"
+ANSWERS_COPY = HERE / "answers"
 KILL_SECS = 600
 OC_DB = Path.home() / ".local/share/opencode/opencode.db"
 
 
-def runids(smoke: bool = False) -> list[tuple[str, str, str, int]]:
+def configure_paths(suffix: str) -> None:
+    """Redirect artifacts so a new host never overwrites frozen evidence."""
+    global STATUS, MANIFEST, METRICS, LOGS, ANSWERS, ANSWERS_COPY
+    STATUS = HERE / f"status{suffix}.txt"
+    MANIFEST = HERE / f"manifest{suffix}.txt"
+    METRICS = HERE / f"metrics-p8{suffix}.jsonl"
+    LOGS = HERE / f"logs{suffix}"
+    ANSWERS = Path(f"/tmp/p8-utility-answers-2026-11-03{suffix}")
+    ANSWERS_COPY = HERE / f"answers{suffix}"
+
+
+def runids(smoke: bool = False,
+           hosts: tuple[str, ...] = DEFAULT_HOSTS) -> list[tuple[str, str, str, int]]:
     cells: list[tuple[str, str, str, int]] = []
-    for host in ("grok", "opencode", "agy", "zcode"):
+    for host in hosts:
         tasks = ("I1",) if smoke else TASKS
         runs = (0,) if smoke else (1, 2)
         for task in tasks:
@@ -82,12 +105,12 @@ def runids(smoke: bool = False) -> list[tuple[str, str, str, int]]:
     return cells
 
 
-def kg_build(repo: Path) -> None:
+def kg_build(repo: Path, kg: Path = KG) -> None:
     env = dict(os.environ)
     env.pop("KG_ARM", None)
     env.pop("KG_SESSION", None)
     subprocess.run(
-        [str(KG), "build", "--force", "--root", str(repo)],
+        [str(kg), "build", "--force", "--root", str(repo)],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         timeout=300, check=False,
     )
@@ -95,7 +118,7 @@ def kg_build(repo: Path) -> None:
 
 def journal(runid: str) -> dict:
     out = {"kg_calls": 0, "kg_tools": {}, "latencies_us": []}
-    log = HERE / "logs" / f"{runid}.usage.log"
+    log = LOGS / f"{runid}.usage.log"
     if not log.exists():
         return out
     for line in log.read_text(errors="replace").splitlines():
@@ -130,7 +153,7 @@ def transcript_commands(host: str, path: Path, sid: str | None = None) -> list[s
     cmds: list[str] = []
     if not path.exists():
         return cmds
-    if host in {"agy", "zcode"}:
+    if host in {"agy", "zcode", "claude"}:
         for line in path.read_text(errors="replace").splitlines():
             try:
                 rec = json.loads(line)
@@ -144,7 +167,7 @@ def transcript_commands(host: str, path: Path, sid: str | None = None) -> list[s
                         "CommandLine")
                     if isinstance(cmd, str):
                         cmds.append(cmd)
-            elif host == "zcode" and rec.get("type") == "assistant":
+            elif host in {"zcode", "claude"} and rec.get("type") == "assistant":
                 for part in (rec.get("message") or {}).get("content") or []:
                     if (part.get("type") == "tool_use"
                             and part.get("name") == "Bash"):
@@ -294,21 +317,22 @@ def opencode_parse(sid: str) -> dict:
     return out
 
 
-def run_cell(host: str, arm: str, task: str, run: int) -> None:
+def run_cell(host: str, arm: str, task: str, run: int, kg: Path = KG) -> None:
     hosttag = HOST_TAGS[host]
     runid = f"{hosttag}-{arm}-r{run}-{task}"
     if STATUS.exists() and f"[done] {runid} " in STATUS.read_text():
         print(f"[skip] {runid}", flush=True)
         return
     repo = CORPORA[task]
-    kg_build(repo)
+    kg_build(repo, kg)
     for pattern in ("usage.log*", "usage-results.jsonl*"):
         for path in (repo / ".kg").glob(pattern):
             path.unlink(missing_ok=True)
     ANSWERS.mkdir(parents=True, exist_ok=True)
+    LOGS.mkdir(parents=True, exist_ok=True)
     answer = ANSWERS / f"{runid}.json"
     answer.unlink(missing_ok=True)
-    prompt_path = HERE / "logs" / f"{runid}.prompt.txt"
+    prompt_path = LOGS / f"{runid}.prompt.txt"
     prompt_path.write_text(
         (HERE / "prompts" / f"{arm}-{task}.txt").read_text().replace(
             "{ANSWER_PATH}", str(answer)
@@ -321,8 +345,8 @@ def run_cell(host: str, arm: str, task: str, run: int) -> None:
           "- Use at most 25 tool calls. Stop immediately after writing the answer.\n",
         encoding="utf-8",
     )
-    log = HERE / "logs" / f"{runid}.jsonl"
-    err = HERE / "logs" / f"{runid}.err"
+    log = LOGS / f"{runid}.jsonl"
+    err = LOGS / f"{runid}.err"
     if host == "grok":
         sid = str(uuid.uuid4()).lower()
         cmd = [str(GROK), "--always-approve", "--max-turns", "40",
@@ -339,19 +363,44 @@ def run_cell(host: str, arm: str, task: str, run: int) -> None:
                "--model", "gemini-3.8-flash-high",
                "--print-timeout", f"{KILL_SECS}s",
                f"-p={prompt_path.read_text()}"]
-    else:
+    elif host == "zcode":
         sid = None
         cmd = [str(ZCODE), "--permission-mode", "yolo",
                "--output-format", "stream-json", "--verbose", "-p",
                prompt_path.read_text()]
+    else:
+        sid = None
+        cmd = [str(CLAUDE), "-p", prompt_path.read_text(),
+               "--output-format", "stream-json", "--verbose",
+               "--dangerously-skip-permissions",
+               "--model", CLAUDE_MODEL,
+               "--add-dir", str(ANSWERS)]
     manifest_row = f"{runid}|{host}|{arm}|{task}|{sid or ''}"
     with STATUS.open("a") as status:
         status.write(f"[start] {runid} host={host} repo={repo} "
                      f"{time.strftime('%H:%M:%S')}\n")
     env = dict(os.environ)
+    if host == "claude":
+        key = env.get("DEEPSEEK_API_KEY", "").strip()
+        if not key:
+            raise RuntimeError("DEEPSEEK_API_KEY is not set")
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        env.update({
+            "ANTHROPIC_BASE_URL": CLAUDE_BASE_URL,
+            "ANTHROPIC_AUTH_TOKEN": key,
+            "ANTHROPIC_MODEL": CLAUDE_MODEL,
+            "ANTHROPIC_SMALL_FAST_MODEL": CLAUDE_MODEL,
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": CLAUDE_MODEL,
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": CLAUDE_MODEL,
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": CLAUDE_MODEL,
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            "DISABLE_TELEMETRY": "1",
+            "DISABLE_AUTOUPDATER": "1",
+        })
     env["KG_SESSION"] = runid
     env["KG_ARM"] = runid
-    env["PATH"] = str(KG.parent) + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(kg.parent) + os.pathsep + env.get("PATH", "")
     started = time.time()
     rc = -1
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -367,9 +416,10 @@ def run_cell(host: str, arm: str, task: str, run: int) -> None:
     for name in ("usage.log", "usage-results.jsonl"):
         source = repo / ".kg" / name
         if source.exists():
-            shutil.move(str(source), str(HERE / "logs" / f"{runid}.{name}"))
+            shutil.move(str(source), str(LOGS / f"{runid}.{name}"))
     if answer.exists():
-        shutil.copy(answer, HERE / "answers" / answer.name)
+        ANSWERS_COPY.mkdir(parents=True, exist_ok=True)
+        shutil.copy(answer, ANSWERS_COPY / answer.name)
 
     if host == "grok":
         parsed = grok_parse(sid)
@@ -422,20 +472,39 @@ def run_cell(host: str, arm: str, task: str, run: int) -> None:
           f"kg={rec['kg_calls']} dur={duration}s", flush=True)
 
 
+def parse_hosts(value: str) -> tuple[str, ...]:
+    hosts = tuple(host.strip() for host in value.split(",") if host.strip())
+    unknown = [host for host in hosts if host not in HOST_TAGS]
+    if unknown:
+        raise argparse.ArgumentTypeError(f"unknown hosts: {', '.join(unknown)}")
+    return hosts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--max", type=int, default=999)
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--cell", nargs=4, metavar=("HOST", "ARM", "TASK", "RUN"))
+    ap.add_argument("--hosts", type=parse_hosts, default=DEFAULT_HOSTS)
+    ap.add_argument("--kg", type=Path, default=KG)
+    ap.add_argument("--suffix", default="")
     args = ap.parse_args()
+    if not args.kg.is_file():
+        ap.error(f"kg binary not found: {args.kg}")
+    requested = set(args.hosts)
+    if args.cell:
+        requested.add(args.cell[0])
+    if "claude" in requested and not CLAUDE.is_file():
+        ap.error(f"claude binary not found: {CLAUDE}")
+    configure_paths(args.suffix)
     if args.cell:
         host, arm, task, run = args.cell
         if host not in HOST_TAGS or arm not in ARMS or task not in TASKS:
             ap.error("invalid cell")
-        run_cell(host, arm, task, int(run))
+        run_cell(host, arm, task, int(run), args.kg)
         return 0
     done = 0
-    for host, arm, task, run in runids(args.smoke):
+    for host, arm, task, run in runids(args.smoke, args.hosts):
         if done >= args.max:
             break
         hosttag = HOST_TAGS[host]
@@ -445,7 +514,7 @@ def main() -> int:
         done += 1
         print(f"=== cell {done}/{args.max}: {runid} ===", flush=True)
         try:
-            run_cell(host, arm, task, run)
+            run_cell(host, arm, task, run, args.kg)
         except Exception as exc:
             with STATUS.open("a") as status:
                 status.write(f"[error] {runid} {exc!r}\n")

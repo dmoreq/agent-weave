@@ -1,0 +1,40 @@
+[start] claude-kgp8-r1-I1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/kg 19:23:19
+[done] claude-kgp8-r1-I1 exit=0 tools=4 kg=2 dur=9.4s 19:23:29
+[start] claude-kgc-r1-I1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/kg 19:23:39
+[done] claude-kgc-r1-I1 exit=0 tools=3 kg=0 dur=9.2s 19:23:49
+[start] claude-kgp8-r2-I1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/kg 19:23:49
+[done] claude-kgp8-r2-I1 exit=0 tools=4 kg=2 dur=8.7s 19:23:57
+[start] claude-kgc-r2-I1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/kg 19:23:58
+[done] claude-kgc-r2-I1 exit=0 tools=3 kg=0 dur=9.3s 19:24:07
+[start] claude-kgc-r1-T1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:24:20
+[done] claude-kgc-r1-T1 exit=0 tools=3 kg=0 dur=6.7s 19:24:27
+[start] claude-kgp8-r1-T1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:24:39
+[done] claude-kgp8-r1-T1 exit=0 tools=7 kg=2 dur=13.6s 19:24:53
+[start] claude-kgp8-r2-T1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:25:06
+[done] claude-kgp8-r2-T1 exit=0 tools=4 kg=2 dur=7.8s 19:25:14
+[start] claude-kgc-r2-T1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:25:26
+[done] claude-kgc-r2-T1 exit=0 tools=4 kg=0 dur=8.3s 19:25:34
+[start] claude-kgc-r1-H1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:25:47
+[done] claude-kgc-r1-H1 exit=0 tools=6 kg=0 dur=8.9s 19:25:56
+[start] claude-kgp8-r1-H1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:26:13
+[done] claude-kgp8-r1-H1 exit=0 tools=4 kg=2 dur=9.5s 19:26:22
+[start] claude-kgp8-r2-H1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:26:40
+[done] claude-kgp8-r2-H1 exit=0 tools=5 kg=2 dur=11.0s 19:26:51
+[start] claude-kgc-r2-H1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:27:02
+[done] claude-kgc-r2-H1 exit=0 tools=7 kg=0 dur=11.1s 19:27:13
+[start] claude-kgc-r1-D1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:27:24
+[done] claude-kgc-r1-D1 exit=0 tools=7 kg=0 dur=12.0s 19:27:36
+[start] claude-kgp8-r1-D1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:27:48
+[done] claude-kgp8-r1-D1 exit=0 tools=8 kg=2 dur=18.8s 19:28:07
+[start] claude-kgp8-r2-D1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:28:18
+[done] claude-kgp8-r2-D1 exit=0 tools=5 kg=2 dur=18.5s 19:28:37
+[start] claude-kgc-r2-D1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/vihap 19:28:47
+[done] claude-kgc-r2-D1 exit=0 tools=5 kg=0 dur=12.0s 19:29:00
+[start] claude-kgc-r1-A1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/finguard 19:29:00
+[done] claude-kgc-r1-A1 exit=0 tools=2 kg=0 dur=5.2s 19:29:05
+[start] claude-kgp8-r1-A1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/finguard 19:29:05
+[done] claude-kgp8-r1-A1 exit=0 tools=4 kg=2 dur=8.1s 19:29:13
+[start] claude-kgp8-r2-A1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/finguard 19:29:13
+[done] claude-kgp8-r2-A1 exit=0 tools=4 kg=2 dur=9.5s 19:29:23
+[start] claude-kgc-r2-A1 host=claude repo=/tmp/p8-utility-corpus-2026-11-03/finguard 19:29:23
+[done] claude-kgc-r2-A1 exit=0 tools=3 kg=0 dur=7.7s 19:29:31

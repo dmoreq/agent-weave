@@ -1,0 +1,18 @@
+Task H1 (vihap corpus)
+
+List the classes that directly inherit from `vihap.exceptions.VihapError`. Report each as `<path>:<line> <qualname>` in `items`. Include only direct subclasses; omit grandchildren.
+
+The index is already built — do not run `aw build`.
+
+Run `aw implementers vihap.exceptions.VihapError` FIRST. It prints resolved direct inheritors. Read source only to resolve ambiguity. Do not use `aw imports`, `aw tests`, `aw resolve`, `aw complexity`, or `aw impact --edges`.
+
+Trust the aw output as ground truth; do not re-verify with grep or source reads unless the tool explicitly labels results as candidates.
+
+Write exactly one JSON object to `{{ANSWER_PATH}}` with this shape:
+
+```json
+{"task": "H1", "items": [], "answer": ""}
+```
+
+`items` must contain `<path>:<line> <qualname>` strings. The `answer` field must contain one or two
+sentences. Do not write any other file.

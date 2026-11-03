@@ -1,0 +1,6 @@
+claude-kgp9-r1-I1|claude|kgp9|I1|
+claude-kgc-r1-I1|claude|kgc|I1|
+claude-kgp9-r1-T1|claude|kgp9|T1|
+claude-kgc-r1-T1|claude|kgc|T1|
+claude-kgp9-r1-A2|claude|kgp9|A2|
+claude-kgc-r1-A2|claude|kgc|A2|

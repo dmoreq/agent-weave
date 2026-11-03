@@ -115,6 +115,9 @@ inconsistent. **NO VALUE** otherwise. FAIL/PARTIAL is reported as such.
 ## Dated notes
 
 - 2026-11-03: protocol frozen. No valid cells had run at freeze time.
+- 2026-11-03: Claude Code + DeepSeek pilot added as a fifth, non-frozen host.
+  See `protocol-claude-extension.md`. Frozen cells and the four-host decision
+  rule are unchanged.
 
 ## Dated corrections
 
@@ -129,3 +132,7 @@ inconsistent. **NO VALUE** otherwise. FAIL/PARTIAL is reported as such.
   the metrics file for audit. Valid hosts are `grok`, `agy`, and `zcode`;
   the pre-registered 3-of-4 condition is applied as 3-of-3 valid hosts, which
   is stricter.
+- 2026-11-03, review correction: `score_p8.py` now rejects normalized
+  duplicate items and reports requested runids that are missing. Re-scoring the
+  frozen answers kept the same 4 pre-existing invalid OpenCode failures; no
+  task verdict changed.

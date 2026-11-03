@@ -42,8 +42,14 @@ def score_answer(task: str, answer_path: Path) -> tuple[bool, str]:
         return False, "items is not a list"
     if not isinstance(answer.get("answer"), str) or not answer["answer"].strip():
         return False, "missing answer prose"
-    got = sorted({norm(task, str(item)) for item in items})
-    want = sorted({norm(task, str(item)) for item in expected["items"]})
+    got_items = [norm(task, str(item)) for item in items]
+    if len(got_items) != len(set(got_items)):
+        return False, "duplicate items after normalization"
+    want_items = [norm(task, str(item)) for item in expected["items"]]
+    if len(want_items) != len(set(want_items)):
+        return False, "oracle contains duplicate items"
+    got = sorted(set(got_items))
+    want = sorted(set(want_items))
     if got != want:
         missing = sorted(set(want) - set(got))
         extra = sorted(set(got) - set(want))
@@ -65,6 +71,10 @@ def main() -> int:
     if args.runids:
         wanted = set(args.runids)
         answers = [path for path in answers if path.stem in wanted]
+        missing = sorted(wanted - {path.stem for path in answers})
+        if missing:
+            print(f"missing runids: {', '.join(missing)}")
+            return 1
     if not answers:
         print("| runid | task | correct | detail |")
         print("|---|---|---|---|")

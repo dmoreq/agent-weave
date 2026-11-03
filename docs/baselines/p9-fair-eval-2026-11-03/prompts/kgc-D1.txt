@@ -1,0 +1,14 @@
+Task D1 (vihap corpus)
+
+List every repository file that directly imports `vihap/reform/temporal.py`. Report repo-relative file paths in `items`. Include test files; omit transitive importers and omit files that only import symbols re-exported from another module.
+
+This run does NOT include the `aw impact --edges imports` command. Determine the answer from source reads and grep; do not use `aw impact`, `aw imports`, `aw tests`, `aw resolve`, `aw implementers`, or `aw complexity`. Other aw commands (`callers`, `callees`, `symbols`, `search`) are allowed but not required.
+
+Write exactly one JSON object to `{{ANSWER_PATH}}` with this shape:
+
+```json
+{"task": "D1", "items": [], "answer": ""}
+```
+
+`items` must contain repo-relative file paths, e.g. `tests/test_temporal_dag.py`. The `answer` field must contain one or two
+sentences. Do not write any other file.

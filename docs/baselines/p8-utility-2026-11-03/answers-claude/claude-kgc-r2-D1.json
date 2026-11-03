@@ -1,0 +1,1 @@
+{"task": "D1", "items": ["vihap/reform/__init__.py", "tests/test_temporal_dag.py", "tests/test_temporal_dag_benchmark.py"], "answer": "Three files directly import vihap/reform/temporal.py: the reform package initializer (via a relative import) and the two temporal DAG test modules. No other repository file imports the module directly."}

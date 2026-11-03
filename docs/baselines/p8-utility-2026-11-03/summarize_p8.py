@@ -2,6 +2,7 @@
 """Aggregate P8 utility metrics, scores, and the frozen decision rule."""
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
 import subprocess
@@ -26,9 +27,10 @@ def pct(new: float, old: float) -> str:
     return f"{(new - old) / old * 100:+.0f}%"
 
 
-def scores() -> dict[str, bool]:
+def scores(answers: Path) -> dict[str, bool]:
     out = subprocess.run(
-        [sys.executable, "-I", str(HERE / "score_p8.py")],
+        [sys.executable, "-I", str(HERE / "score_p8.py"),
+         "--answers", str(answers)],
         capture_output=True, text=True, check=False,
     )
     verdicts: dict[str, bool] = {}
@@ -44,12 +46,22 @@ def scores() -> dict[str, bool]:
 
 
 def main() -> int:
-    if not METRICS.exists():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--metrics", type=Path, default=METRICS)
+    ap.add_argument("--answers", type=Path, default=HERE / "answers")
+    ap.add_argument("--hosts", default=",".join(HOSTS))
+    ap.add_argument("--valid-hosts", default=",".join(VALID_HOSTS))
+    ap.add_argument("--no-rule", action="store_true")
+    args = ap.parse_args()
+    hosts = tuple(host.strip() for host in args.hosts.split(",") if host.strip())
+    valid_hosts = tuple(host.strip() for host in args.valid_hosts.split(",")
+                        if host.strip())
+    if not args.metrics.exists():
         print("no metrics yet", file=sys.stderr)
         return 1
-    rows = [json.loads(line) for line in METRICS.read_text().splitlines()
+    rows = [json.loads(line) for line in args.metrics.read_text().splitlines()
             if line.strip()]
-    verdicts = scores()
+    verdicts = scores(args.answers)
     print("# P8 agent-utility battery (2026-11-03)\n")
     print("| host | task | arm | n | correct | tools | kg calls | feature calls | "
           "input tok | cache tok | output tok | seconds | kg p50 ms | kg p95 ms | "
@@ -58,7 +70,7 @@ def main() -> int:
     grouped: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
     for row in rows:
         grouped[(row["host"], row["task"], row["arm"])].append(row)
-    for host in HOSTS:
+    for host in hosts:
         for task in TASKS:
             for arm in ("kgc", "kgp8"):
                 cells = grouped.get((host, task, arm), [])
@@ -85,7 +97,7 @@ def main() -> int:
     print("\n## Control vs treatment deltas\n")
     print("| host | task | metric | control | treatment | delta |")
     print("|---|---|---|---:|---:|---:|")
-    for host in VALID_HOSTS:
+    for host in valid_hosts:
         for task in TASKS:
             control = grouped.get((host, task, "kgc"), [])
             treatment = grouped.get((host, task, "kgp8"), [])
@@ -98,49 +110,50 @@ def main() -> int:
                 print(f"| {host} | {task} | {metric} | {old:.1f} | {new:.1f} | "
                       f"{pct(new, old)} |")
 
-    print("\n## Frozen decision rule (valid hosts: grok, agy, zcode)\n")
-    print("| task | host | control correct | treatment correct | tool delta | "
-          "verdict |")
-    print("|---|---|---:|---:|---:|---|")
-    task_host_conditions: dict[str, list[bool]] = defaultdict(list)
-    for task in TASKS:
-        for host in VALID_HOSTS:
-            control = [row for row in grouped.get((host, task, "kgc"), [])
-                       if not any("control arm called" in v
-                                  for v in row["violations"])]
-            treatment = grouped.get((host, task, "kgp8"), [])
-            if not control or not treatment:
-                continue
-            control_ok = sum(1 for row in control if verdicts.get(row["runid"]))
-            treatment_ok = sum(1 for row in treatment
-                               if verdicts.get(row["runid"]))
-            parity = treatment_ok >= control_ok
-            old_tools = mean([row["tools"] for row in control])
-            new_tools = mean([row["tools"] for row in treatment])
-            economy = old_tools > 0 and new_tools <= old_tools * 0.8
-            correctness_win = (control_ok <= len(control) / 2
-                                and treatment_ok >= len(treatment) * 0.75)
-            keep = parity and (economy or correctness_win)
-            task_host_conditions[task].append(keep)
-            print(f"| {task} | {host} | {control_ok}/{len(control)} | "
-                  f"{treatment_ok}/{len(treatment)} | {pct(new_tools, old_tools)} | "
-                  f"{'KEEP' if keep else 'NO'} |")
+    if not args.no_rule:
+        print("\n## Frozen decision rule (valid hosts: grok, agy, zcode)\n")
+        print("| task | host | control correct | treatment correct | tool delta | "
+              "verdict |")
+        print("|---|---|---:|---:|---:|---|")
+        task_host_conditions: dict[str, list[bool]] = defaultdict(list)
+        for task in TASKS:
+            for host in valid_hosts:
+                control = [row for row in grouped.get((host, task, "kgc"), [])
+                           if not any("control arm called" in v
+                                      for v in row["violations"])]
+                treatment = grouped.get((host, task, "kgp8"), [])
+                if not control or not treatment:
+                    continue
+                control_ok = sum(1 for row in control if verdicts.get(row["runid"]))
+                treatment_ok = sum(1 for row in treatment
+                                   if verdicts.get(row["runid"]))
+                parity = treatment_ok >= control_ok
+                old_tools = mean([row["tools"] for row in control])
+                new_tools = mean([row["tools"] for row in treatment])
+                economy = old_tools > 0 and new_tools <= old_tools * 0.8
+                correctness_win = (control_ok <= len(control) / 2
+                                    and treatment_ok >= len(treatment) * 0.75)
+                keep = parity and (economy or correctness_win)
+                task_host_conditions[task].append(keep)
+                print(f"| {task} | {host} | {control_ok}/{len(control)} | "
+                      f"{treatment_ok}/{len(treatment)} | {pct(new_tools, old_tools)} | "
+                      f"{'KEEP' if keep else 'NO'} |")
 
-    print("\n## Task verdicts\n")
-    print("| task | qualifying hosts | verdict |")
-    print("|---|---:|---|")
-    for task in TASKS:
-        conditions = task_host_conditions.get(task, [])
-        qualifying = sum(conditions)
-        if len(conditions) < len(VALID_HOSTS):
-            verdict = "INCOMPLETE"
-        elif qualifying >= len(VALID_HOSTS):
-            verdict = "KEEP"
-        elif qualifying >= 1:
-            verdict = "PARTIAL"
-        else:
-            verdict = "NO VALUE"
-        print(f"| {task} | {qualifying}/{len(VALID_HOSTS)} | {verdict} |")
+        print("\n## Task verdicts\n")
+        print("| task | qualifying hosts | verdict |")
+        print("|---|---:|---|")
+        for task in TASKS:
+            conditions = task_host_conditions.get(task, [])
+            qualifying = sum(conditions)
+            if len(conditions) < len(valid_hosts):
+                verdict = "INCOMPLETE"
+            elif qualifying >= len(valid_hosts):
+                verdict = "KEEP"
+            elif qualifying >= 1:
+                verdict = "PARTIAL"
+            else:
+                verdict = "NO VALUE"
+            print(f"| {task} | {qualifying}/{len(valid_hosts)} | {verdict} |")
 
     print("\n## Violations\n")
     for row in rows:

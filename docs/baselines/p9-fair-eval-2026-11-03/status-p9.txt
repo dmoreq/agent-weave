@@ -1,0 +1,12 @@
+[start] claude-kgp9-r1-I1 host=claude repo=/tmp/p9-corpus-2026-11-03/kg 22:19:18
+[done] claude-kgp9-r1-I1 exit=0 tools=3 aw=1 dur=17.9s 22:19:36
+[start] claude-kgc-r1-I1 host=claude repo=/tmp/p9-corpus-2026-11-03/kg 22:19:36
+[done] claude-kgc-r1-I1 exit=0 tools=4 aw=0 dur=22.9s 22:19:59
+[start] claude-kgp9-r1-T1 host=claude repo=/tmp/p9-corpus-2026-11-03/vihap 22:19:59
+[done] claude-kgp9-r1-T1 exit=0 tools=3 aw=2 dur=13.3s 22:20:12
+[start] claude-kgc-r1-T1 host=claude repo=/tmp/p9-corpus-2026-11-03/vihap 22:20:30
+[done] claude-kgc-r1-T1 exit=0 tools=7 aw=0 dur=63.2s 22:21:33
+[start] claude-kgp9-r1-A2 host=claude repo=/tmp/p9-corpus-2026-11-03/finguard 22:21:33
+[done] claude-kgp9-r1-A2 exit=0 tools=3 aw=1 dur=13.9s 22:21:47
+[start] claude-kgc-r1-A2 host=claude repo=/tmp/p9-corpus-2026-11-03/finguard 22:21:47
+[done] claude-kgc-r1-A2 exit=0 tools=2 aw=0 dur=11.6s 22:21:59

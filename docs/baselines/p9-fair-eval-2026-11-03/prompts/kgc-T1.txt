@@ -1,0 +1,14 @@
+Task T1 (vihap corpus)
+
+Which test functions transitively call `vihap.cleaners.vocab_corrector.load_lexicon` through at least one intermediate function? Report each test as `<path>:<line> <qualname>` in `items`. Include only test functions; omit intermediate helpers and non-test symbols.
+
+This run does NOT include the `aw tests` command. Determine the answer from source reads and grep only; do not use any aw command.
+
+Write exactly one JSON object to `{{ANSWER_PATH}}` with this shape:
+
+```json
+{"task": "T1", "items": [], "answer": ""}
+```
+
+`items` must contain `<path>:<line> <qualname>` strings. The `answer` field must contain one or two
+sentences. Do not write any other file.

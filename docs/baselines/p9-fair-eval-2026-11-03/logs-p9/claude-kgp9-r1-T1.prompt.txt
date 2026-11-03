@@ -1,0 +1,25 @@
+Task T1 (vihap corpus)
+
+Which test functions transitively call `vihap.cleaners.vocab_corrector.load_lexicon` through at least one intermediate function? Report each test function at its definition line as `<path>:<line> <qualname>` in `items`. Include only test functions at distance two or more from `load_lexicon`; omit the direct caller and non-test helpers.
+
+The index is already built — do not run `aw build`.
+
+Run `aw callers vihap.cleaners.vocab_corrector.load_lexicon --depth 3` FIRST. It prints callers up to three hops; rows are tagged `[depth=N]`. Report every test function tagged `[depth=2]` or `[depth=3]`, once per function, at its definition line. Use `aw symbols tests/test_vocab_corrector.py --limit 1000` only to resolve definition lines. Do not use `aw tests`, `aw imports`, `aw resolve`, `aw implementers`, `aw complexity`, or `aw impact --edges`.
+
+Trust the aw output as ground truth; do not re-verify with grep or source reads. The `callers` output supplies reachability and the `symbols` output supplies definition lines.
+
+Write exactly one JSON object to `{/tmp/p9-utility-answers-2026-11-03/claude-kgp9-r1-T1.json}` with this shape:
+
+```json
+{"task": "T1", "items": [], "answer": ""}
+```
+
+`items` must contain `<path>:<line> <qualname>` strings. The `answer` field must contain one or two
+sentences. Do not write any other file.
+
+Additional isolation rules for this run (2026-11-03):
+- Do not read or list any path outside the repository, except the
+  exact answer file path above when writing it.
+- Do not read other answer files, previous-run artifacts, or
+  .aw/index.db directly. Use only the aw CLI and repository files.
+- Use at most 25 tool calls. Stop immediately after writing the answer.

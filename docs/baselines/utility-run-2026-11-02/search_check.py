@@ -35,8 +35,8 @@ def score(runid: str) -> dict:
     if ans.get("exists") is not True:
         out["why"] = "exists != true"
         return out
-    if ans.get("hops") not in (0, None):
-        out["why"] = f"hops {ans.get('hops')} != 0"
+    if ans.get("hops") != 0:
+        out["why"] = f"hops {ans.get('hops')!r} != 0"
         return out
     route = ans.get("route") or []
     if exp["route"][0] not in route:
