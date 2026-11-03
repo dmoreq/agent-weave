@@ -1,150 +1,133 @@
-# kg — local code knowledge index
+# kg — navigate code relationships locally
 
 [![CI](https://github.com/quy-doan/kg/actions/workflows/ci.yml/badge.svg)](https://github.com/quy-doan/kg/actions/workflows/ci.yml)
 
-kg indexes a repository's symbols and call/inheritance edges into a local
-SQLite DB and answers navigation questions a code agent asks dozens of times
-per session:
+Before changing a function, you need to find its callers. Before following a
+request through a codebase, you need to connect the functions along the way.
+kg gives people and coding agents those connections without repeated name
+searches and file reads.
 
-- **who calls this** — `kg callers <symbol>`
-- **what does this call** — `kg callees <symbol>` (`--depth N` transitive closure)
-- **how A reaches B** — `kg path <from> <to>` (shortest call route: hop call sites + chain line)
-- **what surrounds this symbol** — `kg context <symbol>` (definition + signature, direct callers, direct callees in one call)
-- **what is impacted by this file** — `kg impact <file>`
-- **find a symbol by name** — `kg search <terms>` (BM25 over identifier, path, and signature tokens)
-- **file structure** — `kg symbols <file> --outline` (one-line signatures)
+kg reads Python, JavaScript, TypeScript, and Rust source into a local index.
+Its answers point to files and lines you can inspect. It does not run your code
+or prove what will happen at runtime.
 
-Consultative only: no hooks, no daemon, no network, no writes outside `.kg/`.
-One binary with no daemon and no network at runtime, nine direct dependencies, zero unsafe Rust.
+## What changes when you use kg?
 
-Measured results (see [docs/EVALUATION.md](docs/EVALUATION.md) for methodology,
-reproduction commands, and threats to validity):
+| Your task | Without kg | With kg |
+|---|---|---|
+| Find callers before changing a function | Search its name, inspect matches, and follow imports or aliases | `kg callers` lists call sites kg could connect to that function |
+| Follow a call route from A to B | Open each function and trace its next calls | `kg path` returns one shortest route through the connections in its index |
+| Understand a function's surroundings | Collect its definition, callers, and calls separately | `kg context` brings those pieces together |
+| Check which files may need attention after a change | Search for references and connect dependencies manually | `kg impact` lists files that call into the target file; optional flags include imports and inheritance |
+| Decide where to read next | Read a file to discover its structure | `kg symbols --outline` lists definitions and signatures without their bodies |
 
-| question | measured |
-|----------|----------|
-| Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall 100% on two GT sets plus the refreshed self set; call-site precision 662/664 (99.7%; two known checker/GT failures listed); P8 real-corpus GT 77/77 (imports 40/40, tests 20/20, inheritance 17/17) |
-| Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.70-2.79 s best-of-7 on the 2,025-file synthetic corpus (1.25x budget: 2.91 s) |
-| Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
-| Structure and duplication lookups? | `kg search` recall 0.775 (22/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |
-| Does everything help every host? | **No.** Route queries (`path`) cut tool calls 57-59% on Grok and 61-86% on OpenCode (Stage 1 and Stage 4); `search` showed no economics gain in its 24-run battery; `clones` transferred on Grok (−59% calls) but not OpenCode (−17%). Utility is host-dependent — see EVALUATION §5. |
+These are workflow differences, not a promise of complete coverage or universal
+savings. Existing editor references, language servers, and grep may already
+answer a small question efficiently. Keep them for verification and for
+relationships kg cannot identify.
 
-## Install
+### What has been measured?
 
-```
+In a historical navigation experiment on one repository and one host/model,
+agents found **98.6% of expected call sites with kg, versus 81.9% with grep-only**.
+When instructed to query kg first, they used **27.3% fewer input tokens** than
+the grep-only group, with the same 98.6% recall. Input-token means used 10 runs
+per group. Simply making kg available did not produce the same saving.
+
+Other experiments found that benefits depend on the task and host/model.
+Symbol search and duplicate detection did not consistently reduce effort;
+test and API lookups did not show savings in their narrow measured tasks.
+These are reported historical results, not measurements of every current build.
+See [Evaluation](docs/EVALUATION.md) for comparisons, sample sizes, limitations,
+and what can be checked from the public repository.
+
+## Try it
+
+You need Rust 1.90 or later, Cargo, Git, and a C compiler. Install from a clone;
+kg is not published on crates.io. CI builds and tests on macOS and Linux.
+
+```sh
+git clone https://github.com/quy-doan/kg.git
+cd kg
 cargo install --path . --locked
+kg build
+kg symbols src/cli.rs --outline
+kg context discover_root
 ```
 
-Requires Rust 1.90+ and a C compiler (bundled SQLite and
-tree-sitter grammars). Not yet on crates.io; install from a clone. Supported:
-macOS arm64/x86_64 and Linux x86_64/aarch64 (CI-built).
+The last two commands inspect kg's own code. To use another repository, run
+`kg build` from that repository, then ask a question using one of its symbol
+names or repository-relative file paths:
 
-## Usage
-
-```
-kg build                      # index the repo into .kg/index.db (atomic swap; unchanged trees leave index.db byte-identical)
-kg build --force              # re-extract everything (skip the fast path)
-kg callers Widget.render      # pointer list: path:line, capped at 50
-kg callees parse --depth 3    # transitive call closure
-kg path Widget.render parse_fragment  # shortest call route (resolved edges; depth cap 10)
-kg context Widget.render       # definition + callers + callees in one call
-kg implementers Base          # classes/interfaces/traits that inherit or implement Base
-kg imports app.py             # outbound resolved imports
-kg tests Widget.render       # test candidates that reach the symbol/file (static)
-kg impact app.py              # files that call into app.py (one row per file)
-kg impact app.py --edges calls,imports,inherits --depth 3  # dependency closure
-kg search parser fragment     # BM25 symbol search (identifier/path/signature tokens)
-kg clones                     # duplicate-block candidates with enclosing symbol per side (caveat: not proof)
-kg dead --exclude-tests       # dead-code candidates (caveat: not proof)
-kg unresolved                 # per-file counts + top unresolved names; [internal] = resolver gap
-kg unresolved --names         # unresolved edge sites: path:line kind name
-kg symbols app.py             # one file's symbols, ordered by line
-kg symbols src/ --outline     # directory inventory with one-line signatures
-kg symbols app.py --metrics   # per-symbol cyclomatic/branches/nesting/effective LOC
-kg complexity --min-cyc 11    # functions over the complexity ceiling
-kg files --path src           # indexed file inventory (symbols, bytes, generated)
-kg resolve --stdin < names.txt  # batch name resolution: found/ambiguous/missing
-kg stats                      # index totals (includes generated count)
-kg usage                      # usage-journal summary: calls, latency, rates
-kg usage --verify             # replay-verify sampled payload pointers: OK/CHANGED/FAIL
-kg mcp                        # MCP stdio server, JSON-RPC 2.0
-kg hotspots --limit 10        # pain-ranking: cyclomatic + LOC + churn-90d + fix-density
-kg report                     # 4-section architecture report (freshness caveat when stale)
-kg doctor [--invalidate]      # integrity, versions, staleness, orphans
+```sh
+kg callers YourClass.your_method
+kg impact path/to/your_file.py
 ```
 
-`--root <path>` overrides repo discovery (default: nearest git root ancestor).
-`--no-journal` (or env `KG_NO_JOURNAL=1`) disables the usage journal
-(`.kg/usage.log`, local-only JSONL). Every successful query that displays pointers also
-appends one self-contained payload line to `.kg/usage-results.jsonl`
-(`files`, `resolve`, and `unresolved` are journal-only by contract):
-displayed pointers byte-identical to stdout, plus index `built_at`/`source_rev`
-and `KG_SESSION`/`KG_ARM` attribution. `kg usage --verify` replays a
-deterministic sample of those pointers against current source.
-The index `.kg/index.db` is a portable artifact: cache it in CI and restore it
-into a fresh checkout — the dual-key fast path reuses it without re-parse when
-content hashes match.
+Replace these example names with your own. Results use `path:line` locations.
+Rebuild with `kg build` after source edits; kg never rebuilds automatically.
+See [Getting started](docs/getting-started.md) for setup and result handling.
 
-Exit codes: 0 ok; 1 no results / no index; 2 usage or ambiguous name (a
-candidate list is printed); 3 corrupt index; 4 locked; 5 schema mismatch;
-6 internal; 7 parse-quality abort.
+## Choose the right question
 
-## Agent integration
+| Question | Command |
+|---|---|
+| Who calls a function or method? | `kg callers <symbol>` |
+| What does it call, including further calls? | `kg callees <symbol> --depth 3` |
+| How does A call through to B? | `kg path <from> <to>` |
+| What surrounds this symbol? | `kg context <symbol>` |
+| Which files call into this file? | `kg impact <file>` |
+| Where is a symbol with this name? | `kg search '<terms>'` |
+| What definitions are in a file or directory? | `kg symbols <path> --outline` |
 
-- **MCP**: `kg mcp` serves every query subcommand except `doctor` as
-  JSON-RPC tools over stdio; successful tool text matches CLI stdout, and
-  error text appends the CLI stderr detail (conformance-tested).
-- **Skill**: [`skills/kg-first/SKILL.md`](skills/kg-first/SKILL.md) is the
-  measured routing policy for code agents — when to query kg first, how to
-  handle ambiguous names and result caps, and when to fall back to grep.
-  Stored here; installation into a host is the owner's call.
+For test candidates, import relationships, inheritance, duplication, complexity,
+and other commands, see the [CLI reference](docs/cli-reference.md).
+Use the [workflow guide](docs/usage.md) to decide what to do with a result.
 
-## Response contract
+## Know what the answer does not prove
 
-- Pointers: `repo-relative/path:line`, 1-based lines, capped at 50
-  (`--limit N`); an optional `[ambiguous]` tag and, on callers/callees/context,
-  the call-site identity (`path:line qualname`). Final stdout line
-  `showing N of M`; stderr cap note. `impact` rows are per file with
-  `(N sites)` unless `--sites`; `clones` spans name the enclosing symbol.
-- Staleness: post-cap displayed set only; stat short-circuit then FNV-1a
-  re-hash; header `kg: K of N result files changed since build — run kg build`.
-  Never auto-rebuilds.
-- Empty result: exit 1 with a reason line (symbol not in index / path not
-  indexed / 0 callers — dynamic dispatch possible, grep fallback recommended).
+- **Not every relationship is visible in source.** Dynamic dispatch, untyped
+  receivers, and external calls can remain unresolved. No result does not prove
+  that no caller, path, dependency, or test exists.
+- **Change impact is a starting point for inspection.** It identifies indexed
+  dependencies, not every runtime effect or every test you must run.
+- **Results can be limited or stale.** Read result counts and warnings. Rebuild
+  after edits, and request more results when you need the complete indexed set.
+- **Candidates need review.** Duplicate, unused-code, and test candidates are
+  not proof of equivalent behavior, safe deletion, or complete test coverage.
+- **One index covers one repository.** kg does not answer cross-repository
+  questions or search by the meaning of arbitrary behavior descriptions.
+- **Language support has boundaries.** Dart is not indexed. Supported source
+  files larger than 1 MiB are skipped. See the reference for other limits.
 
-## Safety invariants (CI-enforced)
+## Local by design
 
-1. Zero network (Seatbelt (macOS) + network-namespace (Linux) CI jobs with negative controls, Cargo.lock allowlist check).
-2. No long-lived child processes.
-3. Read-only over source; writes confined to `.kg/` (tree-snapshot test).
-4. No behavior hijack: no hooks, settings, or agent-config writes.
+At runtime, kg makes no network requests and changes no source files. Its index
+and local usage records live under `.kg/`. It installs no hooks, runs no
+background daemon, and does not edit your agent configuration.
 
-## Limitations
+Usage records are enabled by default. Pass `--no-journal` or set
+`KG_NO_JOURNAL=1` to disable them. Source names, signatures, paths, and query
+records can be sensitive: do not publish `.kg/` unintentionally.
+See [Security](SECURITY.md) for the security model.
 
-- Resolution is static: static analysis covers 10-48% of raw call sites
-  (unresolved 51.8-90.4% across six measured corpora; Django 71.7%, vscode
-  62.9%). These are raw unresolved call names and include external/library
-  calls; `kg unresolved` marks names that exist in the index (`[internal]`)
-  as actionable resolver gaps. Dynamic dispatch and untyped attribute calls
-  are unresolved by design; the tool reports the gap per file and recommends
-  grep.
-- The index is per-repo and local; cross-repo questions are out of scope.
-- Staleness is detected, never auto-repaired: run `kg build` after edits
-  (0.06-0.46 s on 27-596-file repos; 0.02-0.03 s no-op at 2,201 files —
-  unchanged builds leave `.kg/index.db` byte-identical).
+## Use it with a coding agent
 
-## Project docs
+- **MCP** gives an agent access to kg tools through `kg mcp`.
+- **The kg-first skill** tells an agent when and how to use those tools,
+  handle incomplete results, and fall back to source inspection.
 
-| doc | contents |
-|-----|----------|
-| [docs/EVALUATION.md](docs/EVALUATION.md) | **measured results** — perf, multi-repo verification, correctness gates, agent A/B, limitations |
-| [docs/designs/2026-10-31_kg-rust-code-index.md](docs/designs/2026-10-31_kg-rust-code-index.md) | THE SPEC — normative v1.1 + Amendments (gates, algorithm, schema, contract) |
-| [docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md](docs/designs/2026-10-31_concepts-brief_kg-rust-code-index.md) | concepts brief that preceded the spec |
-| [CHANGELOG.md](CHANGELOG.md) | phase-by-phase history (Keep a Changelog) |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | spec-first rules, gate workflow, review protocol, honesty rule |
-| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | contestable-findings standard |
-| [SECURITY.md](SECURITY.md) | invariants, index safety, reporting |
-| [SUPPORT.md](SUPPORT.md) | troubleshooting table, scope boundaries |
-| [skills/](skills/README.md) | kg-first agent skill (in-repo; host installation is owner-decided) |
-| [LICENSE](LICENSE) | dual MIT / Apache-2.0 (LICENSE-MIT, LICENSE-APACHE) |
-| `.github/` | PR template, bug/feature issue templates, ci.yml |
-| `docs/baselines/` | evidence layer: frozen tasks, ground truth, transcripts, harness, review records (internal; uses real corpus-repo names) |
+Neither is installed automatically. See [Agent integration](docs/agent-integration.md)
+for setup, verification, and the difference between tool access and routing.
+
+## Documentation and contribution
+
+- [Documentation index](docs/README.md): guides, reference, and technical design.
+- [Evaluation](docs/EVALUATION.md): reported benefits, costs, and evidence limits.
+- [Support](SUPPORT.md): common errors and how to report a problem.
+- [Contributing](CONTRIBUTING.md): development setup, checks, and review rules.
+- [Changelog](CHANGELOG.md): changes and required user actions.
+- [Code of conduct](CODE_OF_CONDUCT.md) and [Security policy](SECURITY.md).
+
+kg is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
