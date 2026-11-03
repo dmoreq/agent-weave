@@ -1176,8 +1176,9 @@ fn p8a_impact_depth_two_reaches_transitive_callers() {
 #[test]
 fn impact_depth_two_includes_module_level_caller() {
     let repo = temp_repo("impact-module-caller");
-    write(&repo, "m1.py", "def f():\n    pass\n");
+    write(&repo, "m1.py", "def f():\n    f()\n");
     write(&repo, "mid.py", "from m1 import f\n\ndef g():\n    f()\n");
+    write(&repo, "other.py", "from m1 import f\n\ndef h():\n    f()\n");
     write(&repo, "top.py", "from mid import g\n\ng()\n");
     build(&repo);
 

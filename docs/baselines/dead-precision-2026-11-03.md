@@ -9,8 +9,9 @@ real Python corpus?
   (`files=252 symbols=3291 edges=11294 unresolved=4984`).
 - Command: `kg --root <vihap> dead --exclude-tests --limit 50`.
 - Oracle: locate each candidate with Python `ast` at the emitted line, then
-  count textual occurrences of its bare name in every `.py` file except the
-  definition line.
+  count textual occurrences of its bare name in every indexed `.py` file
+  except the definition line. Counting the whole tree (including `.venv/` and
+  build output) gives a different result; the indexed set is the relevant one.
 - A candidate with zero external textual occurrences is a safe dead
   candidate for this probe. The oracle over-approximates references, so a
   non-zero count does not prove the symbol is live.
