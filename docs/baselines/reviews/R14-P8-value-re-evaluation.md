@@ -34,7 +34,7 @@
 
 | Item | R13 | R14 |
 |---|---|---|
-| F4/F8 1M-edge hub latency | Critical: 1,132 / 1,336 ms | Fixed: impact 110-144 ms, tests 6.9-113 ms |
+| F4/F8 1M-edge hub latency | Critical: 1,132 / 1,336 ms | Fixed: impact 97-144 ms, tests 6.9-113 ms |
 | `impact --edges all` | 1,323-1,345 ms | 121.6-146.9 ms |
 | `tests` non-hub, test-rich | 596-679 ms | 8-113 ms up to 20k tests |
 | Module-level impact callers | silently dropped at depth>1 | fixed; guarded regression |
