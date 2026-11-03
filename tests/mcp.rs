@@ -1,7 +1,7 @@
-//! G10 — MCP-vs-CLI parity conformance (Amendment 8): the same fixture must
-//! produce byte-identical result text through the MCP server and the CLI, the
-//! tool registry must expose exactly the 11 Amendment-8 tools, and every tool
-//! call must journal with surface "mcp".
+//! MCP-vs-CLI parity conformance: the same fixture must produce byte-identical
+//! result text through the MCP server and the CLI. The default registry is the
+//! eight core navigation tools; `--all-tools` exposes all 21. Every tool call
+//! must journal with surface "mcp".
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
