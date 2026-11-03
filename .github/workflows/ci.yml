@@ -97,9 +97,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: self ground truth (evidence vault only)
         run: |
-          if [ ! -f docs/baselines/ground-truth-aw-self.md ]; then
+          gt="$(ls docs/baselines/ground-truth-*-self.md 2>/dev/null | head -1)"
+          if [ -z "$gt" ]; then
             echo "no evidence vault in this tree — skipped"; exit 0
           fi
           cargo build --locked --release
           target/release/aw build --force
-          python3 -I tests/scripts/precision_recall.py . target/release/aw docs/baselines/ground-truth-aw-self.md
+          python3 -I tests/scripts/precision_recall.py . target/release/aw "$gt"

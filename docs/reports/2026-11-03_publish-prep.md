@@ -10,7 +10,7 @@ Trạng thái: **chuẩn bị, chưa publish**. Không push, không tag, không
 | Kênh | GitHub public repo + crates.io |
 | Crate name | `agent-weave` (crates.io trả 404, còn trống); fallback `aw-code-index` (cũng trống) |
 | Binary | Giữ tên `aw` qua `[[bin]] name = "aw"` |
-| Library crate | Giữ `[lib] name = "aw"` để tests hiện tại dùng `aw::...` |
+| Library crate | `[lib] name = "agent_weave"`; tests dùng `agent_weave::...` |
 | Version | `0.3.0`, `publish = false` đến khi review xong |
 | Public tree | Giữ scope hiện tại: user guides, `docs/designs/`, `skills/`, scripts cần CI |
 | Private evidence | `docs/baselines/` và `docs/reports/` không public |
@@ -69,17 +69,22 @@ worktree.
 
 ### 4.2 Public history
 
+Public history bắt đầu bằng một orphan commit chứa đúng cây đã scrub từ
+`public_export.py`. Không chạy `git filter-repo` một phần trên repo nguồn:
+cách đó vẫn để `tests/scripts/public_export.py`, `test_public_export.py`, và
+`tests/scripts/*_recall.py` nằm trong Git history.
+
 ```sh
-git clone --no-local /Users/quy.doan/Workspace/aw /tmp/aw-public-2026-11-03
-cd /tmp/aw-public-2026-11-03
-git filter-repo --invert-paths --path docs/baselines --path docs/reports \
-  --prune-empty=always
-git log --all --oneline -- docs/baselines docs/reports   # phải rỗng
-git count-objects -vH
+python3 -I tests/scripts/public_export.py --src . --out /tmp/aw-public-export-2026-11-03
+cd /tmp/aw-public-export-2026-11-03
+git init -b main
+git add -A
+git commit -m "Initial public export"
+git log --all --oneline                      # đúng một commit
+git ls-files | grep -E 'public_export|test_public_export|_recall'   # phải rỗng
 ```
 
-- Thay tên/corpus/email/path nội bộ trong commit message bằng
-  `git filter-repo --replace-text <file>` trước khi push.
+- Push cây export đã scrub làm repo public; không push lịch sử nguồn.
 - Tag cũ `v0.2.0`/`v0.2.1` không mang sang public; tạo `v0.3.0` sau review.
 - Không chạy filter-repo trên repo gốc.
 
