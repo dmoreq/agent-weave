@@ -318,7 +318,39 @@ pub fn run_build(
         });
     }
     crate::db::insert_edge_rows(&conn, &edge_rows)?;
-    crate::db::populate_symbols_fts(&conn)?;
+    // FTS (A4): a forced rebuild has every symbol in memory, so insert the FTS
+    // rows directly instead of re-reading all symbols with a SELECT + JOIN.
+    // Any other build keeps the SELECT path (carried rows are not in memory).
+    let all_fresh = old.is_none() && fresh_sym_count == resolution.symbols.len();
+    if all_fresh {
+        let mut fts_rows: Vec<(i64, &str, &str, &str, &str)> =
+            Vec::with_capacity(resolution.symbols.len());
+        let mut complete = true;
+        for (sym, pos) in resolution.symbols.iter().zip(&fresh_pos) {
+            let Some(pos) = pos else {
+                complete = false;
+                break;
+            };
+            let Some(path) = fresh_paths.get(sym.file_idx) else {
+                complete = false;
+                break;
+            };
+            fts_rows.push((
+                fresh_sym_ids[*pos],
+                sym.qualname.as_str(),
+                sym.name.as_str(),
+                path.as_str(),
+                sym.signature.as_str(),
+            ));
+        }
+        if complete {
+            crate::db::populate_symbols_fts_rows(&conn, &fts_rows)?;
+        } else {
+            crate::db::populate_symbols_fts(&conn)?;
+        }
+    } else {
+        crate::db::populate_symbols_fts(&conn)?;
+    }
     // Clone-candidate shingles (Amendment 12d): fresh-file windows keyed by
     // the just-inserted file ids; carried files' rows were copied above.
     if !fresh_shingles.is_empty() {

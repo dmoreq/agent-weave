@@ -732,6 +732,20 @@ pub fn insert_edge_rows(conn: &Connection, rows: &[EdgeRow<'_>]) -> Result<()> {
 /// inside the build transaction after `insert_edge_rows`. Amendment 14
 /// widens the indexed text with path and signature tokens — the two
 /// haystacks grep already matches and a name-only index could not.
+/// FTS text for one symbol (Amendment 12b/14/R7): qualname and name repeat so
+/// bm25 ranks identity matches above signature-only matches now that signatures
+/// carry full parameter lists. Shared by the SELECT and in-memory paths so the
+/// indexed bytes cannot drift.
+fn fts_text(qualname: &str, name: &str, path: &str, signature: &str) -> String {
+    format!(
+        "{q} {q} {n} {n} {p} {s}",
+        q = crate::extract::split_ident(qualname),
+        n = crate::extract::split_ident(name),
+        p = crate::extract::split_ident(path),
+        s = crate::extract::split_ident(signature)
+    )
+}
+
 pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT s.id, s.qualname, s.name, f.path, s.signature
@@ -744,17 +758,27 @@ pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
     for (id, qualname, name, path, signature) in rows {
-        // Name/qualname tokens repeat so bm25 ranks identity matches above
-        // signature-only matches now that signatures carry full parameter
-        // lists (R7: richer signatures otherwise crowded out name hits).
-        let text = format!(
-            "{q} {q} {n} {n} {p} {s}",
-            q = crate::extract::split_ident(&qualname),
-            n = crate::extract::split_ident(&name),
-            p = crate::extract::split_ident(&path),
-            s = crate::extract::split_ident(&signature)
-        );
-        ins.execute(rusqlite::params![id, text])?;
+        ins.execute(rusqlite::params![
+            id,
+            fts_text(&qualname, &name, &path, &signature)
+        ])?;
+    }
+    Ok(())
+}
+
+/// Populate FTS from in-memory rows (force path): one row is
+/// `(symbol id, qualname, name, file path, signature)`. Avoids the SELECT +
+/// JOIN over every inserted symbol. The indexed bytes match `fts_text` exactly.
+pub fn populate_symbols_fts_rows(
+    conn: &Connection,
+    rows: &[(i64, &str, &str, &str, &str)],
+) -> Result<()> {
+    let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
+    for &(id, qualname, name, path, signature) in rows {
+        ins.execute(rusqlite::params![
+            id,
+            fts_text(qualname, name, path, signature)
+        ])?;
     }
     Ok(())
 }

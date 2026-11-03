@@ -771,23 +771,30 @@ fn signature_of(node: Node<'_>, src: &[u8]) -> String {
 /// consecutive-capital runs are not split — `HTTPServer` stays one token —
 /// so acronym-led identifiers match by full prefix only.
 pub fn split_ident(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() + 8);
-    for (i, &ch) in chars.iter().enumerate() {
+    let mut chars = s.chars().peekable();
+    let mut prev: Option<char> = None;
+    while let Some(ch) = chars.next() {
         if ch == '_' || !ch.is_alphanumeric() {
             out.push(' ');
+            prev = Some(ch);
             continue;
         }
-        if ch.is_uppercase() && i > 0 {
-            let prev = chars[i - 1];
-            let next_lower = chars.get(i + 1).is_some_and(|c| c.is_lowercase());
-            // Split lowerCase|UPPER and the last capital of an acronym
-            // before a lowercase run ("HTTPServer" -> http server) (R7).
-            if prev.is_lowercase() || prev.is_numeric() || (prev.is_uppercase() && next_lower) {
-                out.push(' ');
+        if ch.is_uppercase() {
+            if let Some(prev_char) = prev {
+                let next_lower = chars.peek().is_some_and(|c| c.is_lowercase());
+                // Split lowerCase|UPPER and the last capital of an acronym
+                // before a lowercase run ("HTTPServer" -> http server) (R7).
+                if prev_char.is_lowercase()
+                    || prev_char.is_numeric()
+                    || (prev_char.is_uppercase() && next_lower)
+                {
+                    out.push(' ');
+                }
             }
         }
         out.push(ch.to_ascii_lowercase());
+        prev = Some(ch);
     }
     out
 }
