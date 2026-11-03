@@ -44,7 +44,7 @@ pub fn run_build(
     let mut mtime_updates: HashMap<String, i64> = HashMap::new();
     let mut fresh: Vec<crate::walk::WalkedFile> = Vec::new();
     for f in &stats.files {
-        let mtime = crate::db::stat_mtime(&f.abs).unwrap_or(0);
+        let mtime = f.mtime;
         match old_map.get(&f.rel) {
             Some((om, osz, _oh)) if *om == mtime && *osz == f.size as i64 => {
                 carried.insert(f.rel.clone());
@@ -61,12 +61,14 @@ pub fn run_build(
                     abs: f.abs.clone(),
                     rel: f.rel.clone(),
                     size: f.size,
+                    mtime,
                 }),
             },
             _ => fresh.push(crate::walk::WalkedFile {
                 abs: f.abs.clone(),
                 rel: f.rel.clone(),
                 size: f.size,
+                mtime,
             }),
         }
     }
@@ -95,6 +97,7 @@ pub fn run_build(
                             abs: f.abs.clone(),
                             rel: f.rel.clone(),
                             size: f.size,
+                            mtime: f.mtime,
                         });
                     }
                 }
@@ -184,6 +187,7 @@ pub fn run_build(
                             abs: f.abs.clone(),
                             rel: f.rel.clone(),
                             size: f.size,
+                            mtime: f.mtime,
                         });
                     }
                 }
@@ -541,7 +545,7 @@ fn extract_units(
                                 crate::db::FilesRow {
                                     rel: f.rel,
                                     size: f.size as i64,
-                                    mtime: crate::db::stat_mtime(&f.abs).unwrap_or(0),
+                                    mtime: f.mtime,
                                     content_hash: crate::hash::fnv1a64(&bytes) as i64,
                                     parse_status: parsed.status,
                                     error_nodes: parsed.error_nodes,

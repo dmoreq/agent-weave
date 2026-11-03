@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use ignore::WalkBuilder;
 
@@ -23,6 +24,9 @@ pub struct WalkedFile {
     /// Repo-root-relative path with forward slashes (stored in the index).
     pub rel: String,
     pub size: u64,
+    /// Nanosecond-precision stat mtime captured during the walk, so the build
+    /// does not stat the same path again for classification and the files row.
+    pub mtime: i64,
 }
 
 pub struct WalkStats {
@@ -121,15 +125,22 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
                 continue;
             }
         }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let metadata = entry.metadata().ok();
+        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
         if size > MAX_FILE_SIZE {
             skipped_large += 1;
             continue;
         }
+        let mtime = metadata
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as i64)
+            .unwrap_or(0);
         files.push(WalkedFile {
             abs: path.to_path_buf(),
             rel,
             size,
+            mtime,
         });
     }
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
