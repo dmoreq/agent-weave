@@ -56,7 +56,7 @@ class PublicExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             (output / "Cargo.toml").write_text(
-                'exclude = ["docs/baselines/**"]\n'
+                'include = [\n    "src/**",\n]\n'
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(public_export.gate(output), 0)
@@ -67,6 +67,23 @@ class PublicExportTests(unittest.TestCase):
             with contextlib.redirect_stdout(captured):
                 self.assertEqual(public_export.gate(output), 1)
             self.assertIn("forbidden path present: docs/reports", captured.getvalue())
+
+    def test_gate_rejects_private_export_scripts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "Cargo.toml").write_text(
+                'include = [\n    "src/**",\n]\n'
+            )
+            scripts = output / "tests/scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "import_recall.py").write_text("# private corpus harness\n")
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                self.assertEqual(public_export.gate(output), 1)
+            self.assertIn(
+                "private script present: tests/scripts/import_recall.py",
+                captured.getvalue(),
+            )
 
 
 if __name__ == "__main__":

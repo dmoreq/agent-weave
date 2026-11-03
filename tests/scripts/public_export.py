@@ -72,6 +72,19 @@ REPLACEMENTS = [
 
 TEXT_SUFFIXES = {".md", ".rs", ".py", ".sh", ".toml", ".sql", ".yml", ".yaml", ".json"}
 
+# Scripts that depend on private ground-truth files. The exporter itself and
+# its regression test are also private to the source repository.
+PRIVATE_SCRIPTS = {
+    "public_export.py",
+    "test_public_export.py",
+    "import_recall.py",
+    "inheritance_recall.py",
+    "path_recall.py",
+    "search_gap_recall.py",
+    "search_recall.py",
+    "tests_recall.py",
+}
+
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, **kw)
@@ -88,6 +101,8 @@ def export(src: Path, out: Path) -> None:
     subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
     shutil.rmtree(out / "docs" / "baselines", ignore_errors=True)
     shutil.rmtree(out / "docs" / "reports", ignore_errors=True)
+    for name in PRIVATE_SCRIPTS:
+        (out / "tests" / "scripts" / name).unlink(missing_ok=True)
 
 
 def scrub(out: Path) -> None:
@@ -108,10 +123,8 @@ def scrub(out: Path) -> None:
         path.write_text(t)
     # The gate script itself carries the private-pattern vocabulary; it stays
     # in the private repo (R6 review finding).
-    for name in ("public_export.py", "test_public_export.py"):
-        private_script = out / "tests" / "scripts" / name
-        if private_script.exists():
-            private_script.unlink()
+    for name in PRIVATE_SCRIPTS:
+        (out / "tests" / "scripts" / name).unlink(missing_ok=True)
     # Round the per-corpus table (exact counts are fingerprints).
     ev = out / "docs" / "EVALUATION.md"
     if ev.exists():
@@ -179,12 +192,17 @@ def gate(out: Path) -> int:
         if n:
             print(res.stdout[:2000]); rc = 1
     cargo = (out / "Cargo.toml").read_text()
-    if 'exclude = ["docs/baselines/**"' not in cargo:
-        print("Cargo.toml exclude pattern was mangled"); rc = 1
+    if "include = [" not in cargo or "exclude = [" in cargo:
+        print("Cargo.toml include allowlist is missing or exclude is still set")
+        rc = 1
     for bad in ("docs/baselines", "docs/reports", ".kg", "target", ".zcode"):
         p = out / bad
         if p.exists():
             print(f"forbidden path present: {bad}")
+            rc = 1
+    for name in PRIVATE_SCRIPTS:
+        if (out / "tests" / "scripts" / name).exists():
+            print(f"private script present: tests/scripts/{name}")
             rc = 1
     return rc
 

@@ -1,17 +1,41 @@
 [package]
-name = "kg"
+name = "agent-kg"
 version = "0.3.0"
 edition = "2021"
 description = "Local code knowledge index: who calls this, what does this call, what is impacted by this file."
 license = "MIT OR Apache-2.0"
-publish = false  # binary distribution only: the crates.io names `kg` and `kg-cli` are taken
+publish = false  # review pending; crates.io name is prepared as `agent-kg`
 repository = "https://github.com/quy-doan/kg"
 homepage = "https://github.com/quy-doan/kg"
+documentation = "https://docs.rs/agent-kg"
 readme = "README.md"
 keywords = ["code-search", "call-graph", "mcp", "tree-sitter", "sqlite"]
 categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.90"
-exclude = ["docs/baselines/**", ".github/**", "skills/**"]
+include = [
+    "/src/**",
+    "/tests/*.rs",
+    "/tests/scripts/timing_assert.sh",
+    "/schema.sql",
+    "/schema_indexes.sql",
+    "/build.rs",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+    "/NOTICE",
+]
+
+[lib]
+name = "kg"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kg"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
