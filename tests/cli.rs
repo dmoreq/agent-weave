@@ -3533,3 +3533,49 @@ fn documented_aw_commands_parse() {
         "only {checked} literal aw invocations checked; docs test lost coverage"
     );
 }
+
+/// A gitignored tree can be huge and unreadable. `build` must not descend it:
+/// the git-visible path list is enough to find the indexed files.
+#[cfg(unix)]
+#[test]
+fn build_does_not_descend_unreadable_gitignored_tree() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = temp_repo("walk-ignored");
+    write(&repo, ".gitignore", "generated/\n");
+    write(&repo, "a.py", "def a():\n    return 1\n");
+    let ignored = repo.join("generated");
+    fs::create_dir_all(&ignored).unwrap();
+    for i in 0..3000 {
+        fs::write(ignored.join(format!("dummy_{i}.py")), "x = 1\n").unwrap();
+    }
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    fs::set_permissions(&ignored, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let started = std::time::Instant::now();
+    let out = aw(&repo).args(["build"]).output().unwrap();
+    let elapsed = started.elapsed();
+    fs::set_permissions(&ignored, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout={stdout} stderr={stderr}"
+    );
+    assert!(stdout.contains("files=1"), "{stdout}");
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "build took {elapsed:?}"
+    );
+}

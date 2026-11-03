@@ -28,6 +28,17 @@ Consumers that parse output must review the query-shape changes listed below bef
 - Historical benchmarks recorded before 0.3.0 used the former name `kg`; the
   evaluation summary keeps those names only when quoting old artifacts.
 
+### Fixed — build walk over ignored trees (2026-11-03)
+
+- When `git ls-files` succeeds, `build` enumerates the repository-relative
+  path list directly instead of walking the whole tree. Ignored trees such as
+  `target/` and `node_modules/` are never traversed, so a large or unreadable
+  ignored directory cannot slow or abort a build. `WalkBuilder` remains the
+  fallback when git is unavailable.
+- `build` still indexes tracked-but-ignored files, untracked-unignored files,
+  and hidden files, and still skips `.aw/`, symlinks, directories, and files
+  over 1 MiB.
+
 ### Removed — ineffective surfaces (2026-11-03)
 
 - `aw api` and its MCP tool are removed. The `symbols.exported` column and

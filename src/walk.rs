@@ -2,7 +2,6 @@
 //! `.aw/` skipped unconditionally, per-file size cap 1 MB (skipped + counted),
 //! extension allowlist per language generation.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -69,39 +68,99 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// Walk `root` collecting files whose extension is in `exts`.
+///
+/// When `git ls-files` succeeds, the repository-relative path list is the
+/// source of truth: tracked plus untracked-unignored files, which is exactly
+/// the set `git` would show. Iterating that list avoids descending ignored
+/// trees (`target/`, `node_modules/`, generated output), so a huge ignored
+/// corpus costs no directory traversal and an unreadable ignored directory
+/// cannot fail the build. `WalkBuilder` remains the fallback when git is
+/// absent or the probe fails.
 pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
+    if let Some(rels) = git_visible_paths(root) {
+        return Ok(walk_git_visible(root, &rels, exts));
+    }
+    walk_fallback(root, exts)
+}
+
+/// `git ls-files -co --exclude-standard -z`: tracked plus untracked-unignored
+/// paths, repository-relative with forward slashes. `None` when git is
+/// unavailable or the command fails.
+fn git_visible_paths(root: &Path) -> Option<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "-co", "--exclude-standard", "-z"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .filter(|l| !l.is_empty())
+            .map(|l| l.replace('\\', "/"))
+            .collect(),
+    )
+}
+
+/// Stat each git-visible path once. Missing paths (staged deletions), symlinks,
+/// directories (submodules), `.aw/`, unsupported extensions, and files over
+/// `MAX_FILE_SIZE` are skipped; the size cap is counted for the build report.
+fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
+    let mut files = Vec::new();
+    let mut skipped_large = 0usize;
+    for rel in rels {
+        if rel == ".aw" || rel.starts_with(".aw/") {
+            continue;
+        }
+        let ext = Path::new(rel)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if !exts.contains(&ext) {
+            continue;
+        }
+        let path = root.join(rel);
+        // symlink_metadata does not follow links, so a symlink to a source
+        // file is skipped rather than indexed under a second path.
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            continue;
+        }
+        let size = metadata.len();
+        if size > MAX_FILE_SIZE {
+            skipped_large += 1;
+            continue;
+        }
+        let mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as i64)
+            .unwrap_or(0);
+        files.push(WalkedFile {
+            abs: path,
+            rel: rel.clone(),
+            size,
+            mtime,
+        });
+    }
+    files.sort_by(|a, b| a.rel.cmp(&b.rel));
+    WalkStats {
+        files,
+        skipped_large,
+    }
+}
+
+/// Fallback discovery when git cannot answer: `ignore`'s textual rules.
+fn walk_fallback(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     let mut builder = WalkBuilder::new(root);
     // Respect .gitignore/.ignore (node_modules and build dirs vanish here).
     // Hidden files are kept so dot-directories are governed solely by the
     // explicit .aw/ filter below, not by ignore's hidden heuristic.
     builder.hidden(false);
     builder.filter_entry(|entry| entry.file_name() != std::ffi::OsStr::new(".aw"));
-
-    // The ignore crate applies gitignore rules textually and skips
-    // TRACKED-but-gitignored files, which git itself still versions. Query the
-    // git index once and keep exactly the git-visible set (tracked +
-    // untracked-unignored). No git / probe failure -> keep the textual rules.
-    let git_visible: Option<HashSet<String>> = (|| {
-        let out = std::process::Command::new("git")
-            .args(["ls-files", "-co", "--exclude-standard", "-z"])
-            .current_dir(root)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())?;
-        let set: HashSet<String> = String::from_utf8_lossy(&out.stdout)
-            .split('\0')
-            .filter(|l| !l.is_empty())
-            .map(|l| l.replace('\\', "/"))
-            .collect();
-        Some(set)
-    })();
-
-    if git_visible.is_some() {
-        // The git-visible set is the source of truth. Walker-level ignore
-        // pruning would drop TRACKED-but-gitignored files before the set can
-        // keep them (R6d A9), so disable it when we have the set.
-        builder.git_ignore(false).ignore(false).parents(false);
-    }
 
     let mut files = Vec::new();
     let mut skipped_large = 0usize;
@@ -120,11 +179,6 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
-        if let Some(set) = &git_visible {
-            if !set.contains(&rel) {
-                continue;
-            }
-        }
         let metadata = entry.metadata().ok();
         let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
         if size > MAX_FILE_SIZE {
