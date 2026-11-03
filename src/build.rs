@@ -531,14 +531,23 @@ fn extract_units(
                             let idx = base_idx + chunk_no * chunk_len + local;
                             let bytes = std::fs::read(&f.abs)?;
                             let lang = crate::parse::Lang::from_rel(&f.rel);
-                            let parsed = crate::parse::parse_source(&bytes, lang)?;
+                            let tree = crate::parse::parse_tree(&bytes, lang)?;
+                            let crate::parse::SyntaxStats {
+                                error_nodes,
+                                status,
+                                decisions,
+                                loc,
+                                code_lines,
+                            } = crate::parse::syntax_stats(tree.root_node(), &bytes, lang);
                             let e0 = Instant::now();
-                            let fx = crate::extract::extract_file(idx, &f.rel, &bytes, &parsed);
+                            let fx = crate::extract::extract_file_with_code_lines(
+                                idx,
+                                &f.rel,
+                                &bytes,
+                                tree.root_node(),
+                                code_lines,
+                            );
                             secs += e0.elapsed().as_secs_f64();
-                            let cyclomatic = crate::parse::decision_nodes(
-                                parsed.tree.root_node(),
-                                crate::parse::decision_kinds(lang),
-                            ) as i64;
                             let shingles = crate::clones::shingles(&bytes);
                             let generated = i64::from(crate::walk::is_generated(&f.rel, &bytes));
                             units.push((
@@ -547,14 +556,11 @@ fn extract_units(
                                     size: f.size as i64,
                                     mtime: f.mtime,
                                     content_hash: crate::hash::fnv1a64(&bytes) as i64,
-                                    parse_status: parsed.status,
-                                    error_nodes: parsed.error_nodes,
+                                    parse_status: status,
+                                    error_nodes,
                                     unresolved: 0,
-                                    loc: crate::parse::non_comment_loc(
-                                        &bytes,
-                                        parsed.tree.root_node(),
-                                    ),
-                                    cyclomatic,
+                                    loc,
+                                    cyclomatic: decisions as i64,
                                     generated,
                                 },
                                 fx,

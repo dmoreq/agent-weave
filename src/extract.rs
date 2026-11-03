@@ -462,7 +462,24 @@ fn rust_crate_root(rel: &str) -> Option<String> {
     }
 }
 
+/// Lib API used by tests and fixtures; the bin uses
+/// `extract_file_with_code_lines` with the caller's syntax-stats mask.
+#[allow(dead_code)]
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {
+    let root = parsed.tree.root_node();
+    let stats = crate::parse::syntax_stats(root, src, Lang::from_rel(rel));
+    extract_file_with_code_lines(file_idx, rel, src, root, stats.code_lines)
+}
+
+/// Extraction with the file comment mask computed by the caller's single
+/// `syntax_stats` walk (B1). Keeps the public `extract_file` wrapper for tests.
+pub fn extract_file_with_code_lines(
+    file_idx: usize,
+    rel: &str,
+    src: &[u8],
+    root: Node<'_>,
+    code_lines: Vec<bool>,
+) -> FileExtraction {
     let (module, is_package) = module_path_for(rel);
     let lang = Lang::from_rel(rel);
     let crate_root = if lang == Lang::Rust {
@@ -505,13 +522,11 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
         from_import_parents: HashSet::new(),
         unresolved_inherits: Vec::new(),
         trait_impl_methods: Vec::new(),
-        code_lines: Vec::new(),
+        code_lines,
         calls: Vec::new(),
         import_edges: Vec::new(),
     };
     let mut ctx = WalkCtx::default();
-    let root = parsed.tree.root_node();
-    fx.code_lines = file_code_lines(root, src);
     walk_children(root, src, &mut fx, &mut ctx);
     finalize_rust_impls(&mut fx);
     finalize_exports(&mut fx, src, root);
@@ -1717,13 +1732,6 @@ fn callable_metrics(
     )
 }
 
-fn is_comment_kind(kind: &str) -> bool {
-    matches!(
-        kind,
-        "comment" | "line_comment" | "block_comment" | "doc_comment"
-    )
-}
-
 /// Effective LOC from the file-wide comment mask plus the Python docstring.
 /// A line counts when it has a non-whitespace byte outside every comment node;
 /// docstring bytes are excluded only when the whole line is inside the string.
@@ -1751,7 +1759,7 @@ fn callable_effective_loc(node: Node<'_>, src: &[u8], lang: Lang, code_lines: &[
     };
     let doc_start = doc.start_byte();
     let doc_end = doc.end_byte();
-    let line_bounds = line_byte_bounds(src);
+    let line_bounds = crate::parse::line_byte_bounds(src);
     for row in doc.start_position().row..=doc.end_position().row {
         let Some(&(start, end)) = line_bounds.get(row) else {
             continue;
@@ -1768,83 +1776,6 @@ fn callable_effective_loc(node: Node<'_>, src: &[u8], lang: Lang, code_lines: &[
         }
     }
     effective
-}
-
-/// Per-line `(start, end)` byte bounds, excluding the newline.
-fn line_byte_bounds(src: &[u8]) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let mut start = 0usize;
-    for (i, byte) in src.iter().enumerate() {
-        if *byte == b'\n' {
-            out.push((start, i));
-            start = i + 1;
-        }
-    }
-    out.push((start, src.len()));
-    out
-}
-
-/// Blank-only LOC flags: a line is code when it has any non-whitespace byte.
-fn blank_code_lines(src: &[u8]) -> Vec<bool> {
-    let mut flags = Vec::new();
-    let mut code = false;
-    for byte in src {
-        if *byte == b'\n' {
-            flags.push(code);
-            code = false;
-        } else if !byte.is_ascii_whitespace() {
-            code = true;
-        }
-    }
-    flags.push(code);
-    flags
-}
-
-/// File-wide per-line code flag from tree-sitter comment nodes.
-fn file_code_lines(root: Node<'_>, src: &[u8]) -> Vec<bool> {
-    // Fast path: no comment marker bytes means no comment nodes, so only
-    // blank lines are excluded.
-    let has_marker = src.windows(2).any(|w| w == b"//")
-        || src.windows(2).any(|w| w == b"/*")
-        || src.contains(&b'#');
-    if !has_marker {
-        return blank_code_lines(src);
-    }
-    let mut covered: Vec<(usize, usize)> = Vec::new();
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        if is_comment_kind(n.kind()) {
-            covered.push((n.start_byte(), n.end_byte()));
-        }
-        let mut c = n.walk();
-        for child in n.children(&mut c) {
-            stack.push(child);
-        }
-    }
-    covered.sort_unstable();
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for (start, end) in covered {
-        match merged.last_mut() {
-            Some((_, last_end)) if start <= *last_end => *last_end = (*last_end).max(end),
-            _ => merged.push((start, end)),
-        }
-    }
-    let bounds = line_byte_bounds(src);
-    let mut flags = Vec::with_capacity(bounds.len());
-    for (start, end) in bounds {
-        let mut code = false;
-        for (i, byte) in src[start..end].iter().enumerate() {
-            if !byte.is_ascii_whitespace() {
-                let pos = start + i;
-                if !merged.iter().any(|(s, e)| pos >= *s && pos < *e) {
-                    code = true;
-                    break;
-                }
-            }
-        }
-        flags.push(code);
-    }
-    flags
 }
 
 fn define_function(
