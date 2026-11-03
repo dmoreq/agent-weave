@@ -1,17 +1,33 @@
-# kg P8 Amendment Proposal — Structural Graph, Test Impact, and Symbol Quality
+# kg Structural Graph Amendment — Dependencies, Test Candidates, and Symbol Quality (P8)
 
-- Status: **Proposed (rev 4)** — six-lens Goldfish review verdict
-  **NEEDS FIXES**; all Critical findings are fixed in this revision, and the
-  open Important findings are recorded in
-  `docs/baselines/reviews/R8-P8.md`. Owner approval pending. Not normative
-  until merged as Amendment 19 in
-  `docs/designs/2026-10-31_kg-rust-code-index.md`.
+## Reading status
+
+This companion preserves proposal revision 4 and its subsequent schema-v7 amendment, not a pending approval request.
+Implementation was authorized in Amendment 19 of the [canonical specification](2026-10-31_kg-rust-code-index.md); Amendments 20-22 refine it.
+Read those entries before interpreting original defaults, review questions, or future-tense implementation steps below.
+
+| Task | Surfaces | Impact and limit |
+|---|---|---|
+| Trace structural dependencies | `implementers`, `imports`, extended `impact` | Adds resolved import/inheritance relationships, not runtime completeness |
+| Select tests to inspect | `tests` | Returns static reverse-call candidates, not coverage proof |
+| Inspect repository structure | `files`, directory `symbols`, batch `resolve` | Reduces repeated lookups with bounded output |
+| Inspect symbol quality and exports | `complexity`, `api`, `unresolved --names` | Exposes stored metrics, visibility, and located resolution gaps |
+| Reduce generated-code noise | `--exclude-generated` | Uses generated-file tagging, not semantic classification |
+
+F1-F11 belong to this amendment. Dart support (F12/P9) remains a separate charter, not implemented support in this document.
+Read [usage](../usage.md) for workflows and [evaluation](../EVALUATION.md) for the public evidence summary and limitations.
+Original internal review and ground-truth evidence are unavailable publicly. Historical probes below do not verify the current checkout.
+
+- Historical proposal status (rev 4): six-lens Goldfish review verdict
+  **NEEDS FIXES**; all Critical findings were fixed, with open Important
+  findings recorded in internal review R8-P8 (unavailable publicly).
+  Amendment 19 later authorized implementation using revision 4 defaults.
 - Date: 2026-11-02
-- Canonical base: Amendment 18 (R7 hardening, including the grouped `impact`
+- Historical proposal base: Amendment 18 (R7 hardening, including the grouped `impact`
   default and `--sites`), Gate G22, and **schema v5**. Amendment 16
   (docstring search) was attempted and reverted; G20 failed its Stage 2c
   utility leg. This proposal does not depend on docstrings.
-- Canonical target after approval: Amendment 19, Gate Registry G23-G28,
+- Original target after approval: Amendment 19, Gate Registry G23-G28,
   schema v6. Post-review optimization: Amendment 20 (§6.1) adds schema v7
   `symbols.file_path` and the path-ordered complexity index.
 - ID note: F4 extends Amendment 18(d)'s grouped `impact` contract; it does
@@ -926,17 +942,17 @@ are separate statements, as in the existing bounded query path.
 
 The implementation phase must commit these before any gate can pass:
 
-- `tests/scripts/import_recall.py` and `docs/baselines/import-gt.jsonl`
+- `tests/scripts/import_recall.py` and internal import ground truth (unavailable publicly)
   (40 hand-verified import pairs, independent oracle, freeze commit; report
   recall/precision with Wilson 95% intervals; local `--kg-root` and
   `--vihap-root` arguments, private-corpus gate);
-- `tests/scripts/tests_recall.py` and `docs/baselines/tests-gt.jsonl`
+- `tests/scripts/tests_recall.py` and internal test ground truth (unavailable publicly)
   (20 test symbols across direct/indirect/negative cases and one real repo;
   report precision/recall with Wilson intervals);
 - `tests/scripts/timing_assert.sh` with per-case budgets from §7.5;
-- `docs/baselines/inheritance-gt.jsonl` (Rust trait, TS interface, Python
+- Internal inheritance ground truth, unavailable publicly (Rust trait, TS interface, Python
   multiple inheritance, negative controls);
-- `docs/baselines/dart-gt.jsonl` for P9, with 20 call sites and 10
+- Internal Dart ground truth (unavailable publicly) for P9, with 20 call sites and 10
   inheritance pairs, precision >= 80% / recall >= 70%, Wilson intervals.
 
 Every gate also runs MCP byte parity for its new tools and the
@@ -950,11 +966,11 @@ skipping the whole check.
 | Gate | Phase | Bar | Pass command | Kill / withdrawal |
 |---|---|---|---|---|
 | G23 | P8a | `implementers` 100% exact bytes on the inheritance fixture (Rust trait, TS interface, Python multiple inheritance, negative controls); `dead` 0 false positives on inherited/imported symbols, positive dead fixture, no AMBIGUOUS-call regression; `impact` default byte-identity plus `--edges/--depth/--context` exact bytes and depth-monotonicity; `--path` boundary tests; `symbols <dir>` exact bytes; v6 migration/partial-index tests; MCP parity; query bytes equal across fresh/carried and serial/parallel builds | `cargo test p8a_` + `cargo test --test mcp` + `KG_WORKERS=1` equality + `bash tests/scripts/timing_assert.sh 7 implementers 20 <binary> ...` | Revert P8a and schema v6; remove `implementers`, v6 columns, flags, MCP tools, journal/payload rows, and skill lines |
-| G24 | P8b | Import edges: >= 90% recall and >= 90% precision on 40 frozen pairs over kg + vihap, Wilson 95% reported; Python plain/dotted/relative/star, TS relative/side-effect/require, Rust use/mod fixtures exact; unresolved-import gap-healing; `require`/`import()` add no unresolved call; MCP parity; import-only build overhead <= 1.15x | `python3 tests/scripts/import_recall.py --pairs docs/baselines/import-gt.jsonl --kg-root <repo> --vihap-root <repo2> <binary>` + `cargo test import_` | Remove import extraction and `kg imports`; withdraw `--edges imports`, unresolved kind rows, MCP tool, journal/payload rows, and skill lines |
+| G24 | P8b | Import edges: >= 90% recall and >= 90% precision on 40 frozen pairs over kg + vihap, Wilson 95% reported; Python plain/dotted/relative/star, TS relative/side-effect/require, Rust use/mod fixtures exact; unresolved-import gap-healing; `require`/`import()` add no unresolved call; MCP parity; import-only build overhead <= 1.15x | `python3 tests/scripts/import_recall.py --pairs <internal-import-ground-truth> --kg-root <repo> --vihap-root <repo2> <binary>` (internal input unavailable publicly) + `cargo test import_` | Remove import extraction and `kg imports`; withdraw `--edges imports`, unresolved kind rows, MCP tool, journal/payload rows, and skill lines |
 | G25 | P8b | 10 seeded tests plus 20 real-repo test symbols; >= 90% recall and 0 non-test false positives under the name-only candidate rule; helper-in-test-file negative control; truncated-depth footer; exact bytes; MCP parity; timing | `cargo test tests_impact_seed` + `python3 tests/scripts/tests_recall.py ...` + `timing_assert.sh` | Remove `kg tests`; withdraw MCP/journal/payload rows and skill lines |
 | G26 | P8c | Per-feature sub-verdicts: (a) metrics exact on Python/TS/Rust fixtures incl. `elif`, ternary, lambda/arrow, comprehension, comment, nested-class cases; (b) `api` exact for `__all__`, `pub`/`pub(crate)`, local/default/re-export/type-only exports, module-symbol limit; (c) generated `--exclude-generated` 10/10 markers, 0/10 false positives incl. `gen/` and bare `DO NOT EDIT`; (d) unresolved `--names` exact, `site_line>=1`, kind, header scoping; (e) `complexity` ranking exact and `EXPLAIN QUERY PLAN` accepted; (f) v6 full-column carry-forward, deterministic order, no `metrics_version` carry; MCP parity | `cargo test p8c_` + `EXPLAIN` probe + `timing_assert.sh` | Remove the failed feature's command/flags before v6 release; withdraw every consumer flag/filter, MCP tool, journal/payload row, and skill line |
 | G27 | P8b | `resolve --stdin` bytes and exit codes for found/ambiguous/missing; 1000-name/4096-byte/1MiB caps; empty input; no partial output on fatal error; MCP `isError` carrier; search filters exact; skill drift gate parses fenced blocks and consumer lines; static manifest passes without `KG_BIN` | `cargo test resolve_batch` + `KG_BIN=<binary> python3 ~/Workspace/personal/agent-skills/tests/skill_contract_drift.py` | Remove `resolve` and search filters; withdraw MCP/journal rows and skill lines |
-| G28 | P9 | P9 addendum approved with pinned grammar crate/version, licenses, node kinds, pubspec containment; Dart fixture 20/20 call sites, 10/10 inheritance pairs, imports/parts exact; Flutter GT precision >= 80%, recall >= 70%, Wilson reported; build overhead <= 1.25x; no crash on the 2,025-file corpus; allowlist and write-path checks green | `cargo test dart_` + `python3 tests/scripts/dart_recall.py --pairs docs/baselines/dart-gt.jsonl ...` + `bash tests/scripts/timing_assert.sh ...` + `bash tests/scripts/allowlist_check.sh Cargo.lock` + `bash tests/scripts/write_path_check.sh` | Remove Dart grammar/extraction/walk extension, allowlist entry, generated suffix activation, MCP/journal rows, and skill lines |
+| G28 | P9 | P9 addendum approved with pinned grammar crate/version, licenses, node kinds, pubspec containment; Dart fixture 20/20 call sites, 10/10 inheritance pairs, imports/parts exact; Flutter GT precision >= 80%, recall >= 70%, Wilson reported; build overhead <= 1.25x; no crash on the 2,025-file corpus; allowlist and write-path checks green | `cargo test dart_` + `python3 tests/scripts/dart_recall.py --pairs <internal-dart-ground-truth> ...` (internal input unavailable publicly) + `bash tests/scripts/timing_assert.sh ...` + `bash tests/scripts/allowlist_check.sh Cargo.lock` + `bash tests/scripts/write_path_check.sh` | Remove Dart grammar/extraction/walk extension, allowlist entry, generated suffix activation, MCP/journal rows, and skill lines |
 
 Gate numbers are provisional until the owner merges Amendment 18. Each gate
 is kill-able; no feature ships without its gate. If G26 is split, the

@@ -1,7 +1,19 @@
 # Concepts Brief: kg — Local Code Knowledge Index (Rust)
 
+## Reading status
+
+This is the historical concept review, not the current feature list or implementation contract.
+Its initial scope, sequencing, and version-window proposals must be read with the later amendments.
+
+- For current contracts, read the [canonical specification](2026-10-31_kg-rust-code-index.md) and its reading guide.
+- For practical tasks, read [usage](../usage.md); for reported outcomes and limitations, read [evaluation](../EVALUATION.md).
+- Original internal review evidence is unavailable in the public distribution. The findings below preserve the historical rationale.
+
+**Task and impact:** evaluate whether local call-graph navigation merits implementation before expanding scope.
+The review made baseline measurement, atomic replacement, and explicit resolution contracts prerequisites.
+
 - Date: 2026-10-31
-- Status: Concept SURVIVES review — 6 revisions required before spec
+- Historical status (2026-10-31): Concept SURVIVES review — 6 revisions required before spec
 - Review method: six-lens Goldfish brainstorm. Isolation via stateless subagents (fresh context each; simulated Tier-2 isolation, stated per dispatch contract). Hypothesis: `.tmp/kg-spec/hypothesis.md`.
 - Lenses run: Contrarian/YAGNI, Cost/Quota/Token, UX/Ergonomics, Migration/Compat, Observability/SRE, Maintenance/Coupling.
 
@@ -26,4 +38,4 @@ Rejected / not adopted:
 
 ## Concept Status After Revisions
 
-P1 scope: `build`, `callers`, `callees`, `impact`, `doctor` — single-threaded Rust, tree-sitter-python, 5-table SQLite schema + FTS5, EXTRACTED/AMBIGUOUS tiers, full-atomic-replacement builds, versioned response contract. Phase 0 (no Rust) must complete first and produces the measured baseline that G6 compares against. Full detail: spec `docs/designs/2026-10-31_kg-rust-code-index.md`.
+P1 scope: `build`, `callers`, `callees`, `impact`, `doctor` — single-threaded Rust, tree-sitter-python, 5-table SQLite schema + FTS5, EXTRACTED/AMBIGUOUS tiers, full-atomic-replacement builds, versioned response contract. Phase 0 (no Rust) must complete first and produces the measured baseline that G6 compares against. Full detail: [canonical specification](2026-10-31_kg-rust-code-index.md).

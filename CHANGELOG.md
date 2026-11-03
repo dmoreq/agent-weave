@@ -5,7 +5,19 @@ All notable changes to kg are documented here. Format follows
 [Calm SemVer](https://calver.org) 0.x — breaking contract
 changes bump the minor while 0.x is unstable.
 
+## Reading this history
+
+- Start with [getting started](docs/getting-started.md) for installation and rebuild steps, not historical rollout instructions.
+- Entries describe their dated implementation snapshot. Later entries can supersede earlier schemas, limits, and output formats.
+- Historical measurements and review verdicts below are internally reported, not new verification of this checkout.
+  Original internal evidence is unavailable in the public distribution; this history does not make it publicly reproducible.
+- Read [evaluation](docs/EVALUATION.md) for the public evidence summary and its limitations, not replacement original evidence.
+
 ## [Unreleased]
+
+**User impact:** faster fresh builds, broader dependency navigation, and more reliable incremental resolution.
+**Required action:** run `kg build` to replace older indexes with schema v7. Query opens on v6 exit 5.
+Consumers that parse output must review the query-shape changes listed below before upgrading.
 
 ### Changed — build performance (2026-11-03)
 
@@ -26,7 +38,7 @@ changes bump the minor while 0.x is unstable.
   byte-identical except `kg stats`'s `db_bytes`, which reports the smaller
   index file. Best-of-7 `build --force` on the 2,025-file synthetic corpus:
   1.87 s vs 3.61 s baseline on a heavily loaded host (interleaved A/B); details
-  in `docs/reports/2026-11-03_kg-build-force-optimization.md`.
+  come from an internal optimization report (original evidence unavailable publicly).
 
 ### Changed — schema v7 (Amendment 20)
 
@@ -37,7 +49,7 @@ changes bump the minor while 0.x is unstable.
   Fresh inserts and carry-forward both populate the column; `probe_old`
   rejects a v7-stamped index that lacks it.
 
-### Fixed — P8 review cycle 3 (R12, Amendment 22)
+### Fixed — incremental resolution and index validation (P8 review cycle 3, R12, Amendment 22)
 
 - Incremental Rust `impl Trait for T` resolves against carried
   traits/interfaces; qualified `crate::Trait` impl targets resolve.
@@ -47,7 +59,7 @@ changes bump the minor while 0.x is unstable.
 - A pre-manifest v7 index rebuilds instead of reporting an empty default
   `complexity` result.
 
-### Fixed — P8 review cycle 2 (R11, Amendment 21)
+### Fixed — import resolution and query consistency (P8 review cycle 2, R11, Amendment 21)
 
 - Python dotted imports keep every ancestor module edge; Rust crate roots,
   wildcard use trees, and single-segment module/symbol imports resolve; star
@@ -64,7 +76,7 @@ changes bump the minor while 0.x is unstable.
 - 1M-symbol `complexity` default is 6.9 ms via `meta.callable_count`;
   path scope is amended to a 250 ms budget (201 ms measured).
 
-### Fixed — P8 review cycle (R10)
+### Fixed — structural graph correctness and latency (P8 review cycle, R10)
 
 - Rust imports: structural `use` trees (grouped, alias, `self`/`super`,
   wildcard, single-segment), `mod.rs`/`lib.rs`/`index.*` module mapping, and
@@ -94,7 +106,7 @@ changes bump the minor while 0.x is unstable.
   Flutter-corpus build smoke; P8 determinism dumps include schema-v7 columns
   and `unresolved_calls`.
 
-### Added — P8 structural graph (Amendment 19, schema v6)
+### Added — dependency, test, and symbol queries (P8, Amendment 19, schema v6)
 
 - `kg implementers <name>`: resolved inbound `inherits` edges; Rust
   `trait_item`/`function_signature_item` and TS `interface_declaration`
@@ -125,7 +137,7 @@ changes bump the minor while 0.x is unstable.
   `api`, `files`, and `resolve`; `impact`, `dead`, `symbols`, `search`,
   `unresolved`, `clones`, `hotspots`, and `report` gained their new flags.
 
-### Fixed — P8 implementation review (R9)
+### Fixed — bounded queries and structural analysis (P8 implementation review, R9)
 
 - `dead` trait/interface parent exclusion is materialized and indexable:
   2,025-file corpus 15.57 s -> 0.14 s; 1M-symbol COUNT no longer scans
@@ -157,7 +169,10 @@ changes bump the minor while 0.x is unstable.
 
 ## [0.2.1] - 2026-11-02
 
-### Fixed — R7 accuracy, utility, and latency hardening (Amendment 18)
+**User impact:** fuller signatures, better call resolution, and lower no-op build cost.
+**Required action:** run `kg build` to refresh old signatures; review pointer identity and grouped `impact` output in integrations.
+
+### Fixed — accuracy, utility, and latency hardening (R7, Amendment 18)
 
 - Signatures capture the full multi-line parameter list (collapsed, capped
   160), stopping before the body; 500/3,039 truncated Python signatures on
@@ -184,6 +199,10 @@ changes bump the minor while 0.x is unstable.
   required argument.
 
 ## [0.2.0] - 2026-11-02
+
+**User impact:** symbol context, call paths, search, outlines, and clone candidates expand navigation beyond individual call queries.
+**Required action:** rebuild older indexes with `kg build`; query opens reject incompatible schemas with exit 5.
+Review the output-contract changes below if scripts consume query text.
 
 ### Added — `kg context <symbol>` (Amendment 17, P8)
 
@@ -213,8 +232,8 @@ changes bump the minor while 0.x is unstable.
   MCP tool `path` with G10 byte parity.
 - Spec review: six independent Goldfish reviewers, 73 findings consolidated
   to 20, 2 fix cycles, round-2 APPROVE
-  (`docs/baselines/reviews/R5-P5.md`); G17 gate evidence
-  (`docs/baselines/g17-path-2026-11-02.md`): 10/10 exact-byte fixtures,
+   (internal review R5-P5, unavailable publicly); internally reported G17 gate
+   evidence (original evidence unavailable publicly): 10/10 exact-byte fixtures,
   8/8 frozen GT pairs, 0.6-1.4 ms in-process best-of-7 across the 85k-symbol
   synth corpus and the 26-file self-index (spawn-inclusive wall < 10 ms).
 
@@ -244,7 +263,7 @@ changes bump the minor while 0.x is unstable.
 - Attempted schema v6 `symbols.docstring` + FTS widening. Retrieval improved
   (prose-gap 5/6, G14 unchanged at 0.800) but the Stage 2c utility A/B failed
   (Grok tool calls +12%, OpenCode −9%) — reverted under gate G20's kill rule.
-  Evidence retained: `docs/baselines/stage2c-prose-2026-11-02.md`.
+  Evidence retained internally; original Stage 2c evidence is unavailable publicly.
 
 ### Fixed — R6 remediation (Amendment 15, schema v5)
 
@@ -297,7 +316,7 @@ changes bump the minor while 0.x is unstable.
   byte-parity coverage.
 
 
-### Added — P4 roadmap amendment (Amendment 12, docs)
+### Added — agent-tooling design companion (P4 roadmap, Amendment 12, docs)
 
 - `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
   features distilled from the pi-sherlock reference analysis — F1
@@ -305,7 +324,7 @@ changes bump the minor while 0.x is unstable.
   lookup), F3 skill hardening + drift gate, F4 `kg clones` (shingle
   candidates). Proposal spec-reviewed by an independent stateless Goldfish
   reviewer (round 1 NEEDS FIXES with 12 findings, round 2 APPROVE; record
-  `docs/baselines/reviews/R4-P4.md`). OQ4a (signature text) and OQ4b
+  R4-P4, internal review unavailable publicly). OQ4a (signature text) and OQ4b
   (symbol-slice `search` deferral lift) approved by the owner 2026-11-01.
   Gates G13-G16 registered in the spec's Gate Registry. Implementation
   follows (F3 -> F1 -> F2 -> F4), one schema v4 bump for whatever survives
@@ -325,7 +344,7 @@ changes bump the minor while 0.x is unstable.
   joins the Amendment 10 payload list; MCP `search` tool with G10 byte-parity.
 - G14 gate PASS: mean per-query recall 0.850 on 20 frozen queries
   (pooled 24/28, Wilson 95% [0.685, 0.943]) —
-  `docs/baselines/g14-search-2026-11-01.md`.
+  internally reported G14 evidence (original evidence unavailable publicly).
 
 ### Added — `kg clones` (Amendment 12d, F4)
 
@@ -342,7 +361,7 @@ changes bump the minor while 0.x is unstable.
 - G16 PASS: 10/10 seeded pairs, 0 spurious (bar >= 8/10, <= 20%); build
   overhead +23.2% interleaved-measured — owner amended the proposed 15% bar
   to 25% with INSERT-I/O attribution on record
-  (`docs/baselines/g16-clones-2026-11-01.md`).
+  (internally reported G16 evidence; original evidence unavailable publicly).
 
 ### Changed — performance ceiling pass (Amendment 11, G12)
 
@@ -371,7 +390,7 @@ precision/recall PASS.
   silently skipped by hotspots; metrics are frozen at each file's last fresh
   extraction (changed files are always re-extracted by the fast-path rules).
 
-### Added — P0 baseline (f9d57b9..1ca1d0e)
+### Added — navigation baseline and measurement harness (P0, f9d57b9..1ca1d0e)
 
 - Frozen A/B baselines: 5 navigation task definitions (T1-T5), 30 verified
   ground-truth call sites on vihap, provisional top-10 pain list.
@@ -382,7 +401,7 @@ precision/recall PASS.
   (premise not weak).
 - R0 independent review record (APPROVE after 1 fix cycle).
 
-### Added — P1 core (9f75656..e72b9b0)
+### Added — local call-graph navigation (P1 core, 9f75656..e72b9b0)
 
 - `kg` Rust CLI (single binary, 5 pinned deps, `#![forbid(unsafe_code)]`):
   `build`, `callers`, `callees [--depth N]`, `impact`, `doctor`, `stats`,
@@ -400,7 +419,7 @@ precision/recall PASS.
   precision 493/495; G3 p95 10.1ms; G6 -50% tool calls, -67% bytes.
 - R1 independent review record (APPROVE after 2 fix cycles).
 
-### Added — P1.5 extensions (d9951ce..5034939)
+### Added — index statistics and repository reports (P1.5, d9951ce..5034939)
 
 - `kg stats`, `kg hotspots` (per-metric min-max normalization of
   cyclomatic + LOC + churn-90d + fix-density), `kg report` (4 sections).
@@ -409,7 +428,7 @@ precision/recall PASS.
 - `code-index` skill wrapper in the agent-skills repo (OQ2).
 - R1.5 independent review record (APPROVE after 1 fix cycle).
 
-### Added — P2 multi-language (2aeeb9d..7a99343)
+### Added — TypeScript, JavaScript, and Rust indexing (P2, 2aeeb9d..7a99343)
 
 - TypeScript/TSX and JavaScript/JSX grammars (one-commit upgrade rule);
   Rust grammar (P2.5, rs-0.24.2).
@@ -567,8 +586,8 @@ precision/recall PASS.
 
 ### Changed — M0 re-baseline (Elephant/Goldfish cycle)
 
-- All measurable gates re-run on the post-fix binary (`docs/baselines/
-  rebaseline-m0.md`): G1 0.47s/22.8MB/1.98MB, G2 vihap 29/29 + 493/495,
+- All measurable gates re-run on the post-fix binary (internal M0 rebaseline
+  evidence unavailable publicly): G1 0.47s/22.8MB/1.98MB, G2 vihap 29/29 + 493/495,
   finguard 20/20 + 57/57, self 9/10 + 14/14 (all matching pre-fix numbers —
   zero regression), G3 p95 9.8ms, G7 8/10.
 - G2-finguard G02 row refreshed (finguard working tree moved; GT staleness,

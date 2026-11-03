@@ -1,11 +1,23 @@
-# kg P5 Amendment Proposal — `kg path <from> <to>` (Call-Chain Traversal)
+# kg Call-Chain Traversal Amendment — `kg path <from> <to>` (P5)
+
+## Reading status
+
+This approved, implemented design companion preserves the call-path rationale and original gate definitions.
+Use Amendment 13 in the [canonical specification](2026-10-31_kg-rust-code-index.md) for the implemented traversal contract.
+
+**Task and impact:** find a shortest route between two known symbols without reconstructing hops from separate queries.
+Only resolved forward call edges participate; missing paths do not prove that runtime reachability is absent.
+
+Read [usage](../usage.md) for navigation workflows and [evaluation](../EVALUATION.md) for public evidence limitations.
+Original internal review records and frozen ground truth are unavailable publicly; retained results below are historical reports.
+
 
 - Status: **Approved (rev 3)** — OQ5 approved by owner 2026-11-02
   (forward-only semantics). Six-reviewer Goldfish round (L1-L6, all NEEDS
   FIXES; 73 raw findings consolidated to 20, all dispositioned in
-  `docs/baselines/reviews/R5-P5.md`), 2 fix cycles, round-2 disposition +
+  internal review R5-P5, unavailable publicly), 2 fix cycles, round-2 disposition +
   amend-delta verification verdict APPROVE. Implementation landed with G17
-  evidence `docs/baselines/g17-path-2026-11-02.md`; canonical entry is
+  evidence retained internally (original G17 evidence unavailable publicly); canonical entry is
   Amendment 13 in `docs/designs/2026-10-31_kg-rust-code-index.md`.
 - Date: 2026-11-01 (rev 3 2026-11-02)
 - Golden references: RepoGraph (arXiv 2410.14684, **reported** numbers,
@@ -88,9 +100,9 @@ Ambiguous endpoint (exit 2, existing class `usage` — there is no `ambiguous` c
 ### 2.4 Gate G17 (kill-able)
 
 - Correctness: `cargo test path_seed` — exactly 10 fixtures, each asserting exact stdout bytes: (1) 3-hop chain; (2) diamond tie-break (pinned parent rule output); (3) cycle A->B->C->A (A reaches C in 2 hops, terminates); (4) disconnected pair -> exit 1 exhaustive-negative bytes; (5) depth-cap miss (real path at 11) -> exit 1 cap-truncated bytes; (6) from == to -> exit 1 same-symbol bytes; (7) ambiguous `from` endpoint -> exit 2 with role bytes; (8) ambiguous `to` endpoint -> exit 2 with role bytes; (9) multi-edge representative (two call sites, one pair -> min-`site_line` pointer); (10) stale-index header bytes on `path` output. Bar: 10/10.
-- Frozen GT: `docs/baselines/path-gt.jsonl` — hand-verified reachable pairs (with expected hop counts) plus at least one no-path pair per repo, on the GT repos (kg + vihap worktrees, as G14). Construction protocol: every hop edge of every GT pair verified `EXTRACTED` in the index at freeze time. Pass command: `python3 tests/scripts/path_recall.py --pairs docs/baselines/path-gt.jsonl <kg-binary> --kg-root <kg-repo> --vihap-root <vihap-worktree>`. Bar: 100% agreement. Mismatch routing (pinned): a hop edge missing or moved at re-run = resolution-attributable -> routed to G2 retune, NOT a path kill; a BFS-attributable failure (wrong parent assignment, non-determinism, wrong byte shape) = path kill.
+- Frozen GT: internal path ground truth (unavailable publicly) — hand-verified reachable pairs (with expected hop counts) plus at least one no-path pair per repo, on the GT repos (kg + vihap worktrees, as G14). Construction protocol: every hop edge of every GT pair verified `EXTRACTED` in the index at freeze time. Historical pass command: `python3 tests/scripts/path_recall.py --pairs <internal-path-ground-truth> <kg-binary> --kg-root <kg-repo> --vihap-root <vihap-worktree>` (requires unavailable internal inputs). Bar: 100% agreement. Mismatch routing (pinned): a hop edge missing or moved at re-run = resolution-attributable -> routed to G2 retune, NOT a path kill; a BFS-attributable failure (wrong parent assignment, non-determinism, wrong byte shape) = path kill.
 - Latency: `tests/scripts/timing.sh` gains a `path` case; budget < 20 ms best-of-7 on the GT repos (existing queries measure 5-10 ms; BFS adds one pass). The 2,025-file synthetic corpus from Amendment 11 has no committed generator; P5 commits one (`tests/scripts/make_synth_corpus.py`) and the < 20 ms budget is re-stated on it at gate day (Amendment 11's 4.6 MB index is the scale reference; the "<= 1M edges" headroom claim is est., not measured).
-- Kill action (full residue): code removed; the contract-bump entry withdrawn; MCP tool, journal `to` key, payload-list entry, and skill paragraph withdrawn; `path-gt.jsonl` + `path_recall.py` + `make_synth_corpus.py` archived under `docs/baselines/`; no schema or data migration (v4 stays v4).
+- Kill action (full residue): code removed; the contract-bump entry withdrawn; MCP tool, journal `to` key, payload-list entry, and skill paragraph withdrawn; `path-gt.jsonl` + `path_recall.py` + `make_synth_corpus.py` archived internally (archive unavailable publicly); no schema or data migration (v4 stays v4).
 
 ## 3. Rejected alternatives
 
@@ -123,7 +135,7 @@ Ambiguous endpoint (exit 2, existing class `usage` — there is no `ambiguous` c
 3. `src/cli.rs` + `src/mcp.rs`: `path` surface, 1:1 (no `--limit`).
 4. `src/journal.rs`: `to` arg key; payload-list membership (no verifier change).
 5. `tests/fixtures.rs`: `path_seed` (the 10 G17 fixtures);
-   `docs/baselines/path-gt.jsonl` + `tests/scripts/path_recall.py` +
+   internal path ground truth (unavailable publicly) + `tests/scripts/path_recall.py` +
    `tests/scripts/make_synth_corpus.py`.
 6. Docs: canonical Amendment 13 + G17 rows, README usage block, skill edits
    per 2.3.

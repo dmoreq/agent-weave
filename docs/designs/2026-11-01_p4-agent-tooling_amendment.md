@@ -1,13 +1,29 @@
-# kg P4 Amendment — Agent-Tooling Features Distilled from Reference Implementations
+# kg Agent-Tooling Amendment — Outlines, Search, Skills, and Clone Candidates (P4)
+
+## Reading status
+
+This approved design companion records the original outline, search, skill, and clone-candidate decisions.
+The [canonical specification](2026-10-31_kg-rust-code-index.md) governs later changes, including signature capture in Amendment 18.
+
+| Task | Surface | Impact and limit |
+|---|---|---|
+| Inspect declarations before reading bodies | `kg symbols <file> --outline` (F1) | Adds bounded signatures, not source bodies |
+| Find symbols by vocabulary | `kg search <terms>` (F2) | Searches indexed symbol text, not arbitrary content |
+| Keep agent guidance aligned | Skill hardening (F3) | Companion-repository drift checks have limited enforcement |
+| Investigate repeated blocks | `kg clones` (F4) | Returns candidates, never proof of semantic duplication |
+
+Read [usage](../usage.md) for workflows and [evaluation](../EVALUATION.md) for the public evidence summary.
+Original internal review records and harness evidence are unavailable publicly; session-dated observations below are not fresh measurements.
+
 
 - Status: Approved (owner approved OQ4a + OQ4b, 2026-11-01). Spec review R4a:
   independent Goldfish reviewer, round 1 NEEDS FIXES (12 findings), fix cycle 1,
   round 2 APPROVE (0 open Critical + Important). Record:
-  `docs/baselines/reviews/R4-P4.md`.
+  internal review R4-P4 (original evidence unavailable publicly).
 - Date: 2026-11-01
 - Canonical location: `docs/designs/2026-10-31_kg-rust-code-index.md`
   (Amendment 12 + Gate Registry G13-G16). This file is the self-contained
-  evidence and design companion.
+  historical design companion, not a complete public evidence archive.
 - Golden references: `dmoreq/pi-sherlock` v0.1.0 (clone analyzed at commit
   57b6071, 2026-05-27), ast-grep CLI (local), semgrep 1.157.0 (local).
 - Measured evidence: session 2026-10-31/11-01 on repo `~/Workspace/kg` at an
@@ -75,7 +91,7 @@ rules:
   without). Journal: covered by the existing `symbols` entry (Amendment 6) —
   the journal `args` shape gains the boolean `outline` key. Payload: covered
   by the existing `symbols` entry (Amendment 10).
-- Gate G13 (kill-able): D0 harness (`docs/baselines/harness/`) run with the 5
+- Gate G13 (kill-able): D0 harness (internal evidence unavailable publicly) run with the 5
   standard architecture tasks in outline-first vs read-first mode; pass
   >= 30% tool-call reduction (same bar as G8) and no correctness loss.
   Pass command: the committed harness (`g` logger pattern + `count.py` +
@@ -111,9 +127,9 @@ rules:
   Kills collapse before release. A post-release drop of a feature's table is
   NOT additive removal — it is a schema v5 rebuild under the version policy.
 - Gate G14 (kill-able): recall >= 70% on a frozen 20-query NL-navigation list
-  (`docs/baselines/search-gt.jsonl`, frozen BEFORE implementation), FPR
+  (internal search ground truth, frozen BEFORE implementation; unavailable publicly), FPR
   surfaced alongside with Wilson 95% interval (G-A conventions). Pass
-  command: `python3 tests/scripts/search_recall.py --queries docs/baselines/search-gt.jsonl <kg-binary> --kg-root <kg-repo> --vihap-root <vihap-worktree>`. Fail -> F2 dropped before
+  historical command: `python3 tests/scripts/search_recall.py --queries <internal-search-ground-truth> <kg-binary> --kg-root <kg-repo> --vihap-root <vihap-worktree>` (requires unavailable internal inputs). Fail -> F2 dropped before
   release (schema v4 ships without `symbols_fts`).
 
 ### F3 — Skill wrapper hardening (OQ2; CI conformance check, not a kill-able gate) — APPROVED
@@ -164,7 +180,7 @@ rules:
   pairs into the fixture tree; require >= 8/10 detected with <= 20% spurious
   groups; build-time overhead <= 25% wall on G1's corpus (bar amended from
   the proposed 15% by owner decision 2026-11-01: the measured cost is
-  clone-row INSERT I/O — attribution in `docs/baselines/g16-clones-2026-11-01.md`).
+  clone-row INSERT I/O — attribution retained internally; original G16 evidence unavailable publicly).
   Pass command:
   `cargo test clones_seed` + interleaved before/after build timing (A/B rounds
   on identical corpora; hyperfine if installed — the executed measurement used
