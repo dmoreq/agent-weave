@@ -344,6 +344,8 @@ struct CallSite {
     line: usize,
     scope_func: String,
     scope_class: Option<String>,
+    /// Innermost inline `mod` qualname (Rust), for `self::`/`super::` paths.
+    scope_mod: Option<String>,
     callee: Callee,
 }
 

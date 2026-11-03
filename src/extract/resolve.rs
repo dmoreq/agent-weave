@@ -839,7 +839,10 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 return Outcome::Unresolved;
             }
             if chain[0] == "self::" || chain[0] == "super::" {
-                let mut module = fctx.module.clone();
+                let mut module = site
+                    .scope_mod
+                    .clone()
+                    .unwrap_or_else(|| fctx.module.clone());
                 let mut rest: &[String] = &chain[1..];
                 if chain[0] == "super::" {
                     loop {

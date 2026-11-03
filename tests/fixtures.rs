@@ -674,3 +674,21 @@ fn rust_unknown_receiver_does_not_fan_out_ambiguous() {
         "several same-name impls must stay unresolved, not AMBIGUOUS: {edges:?}"
     );
 }
+
+#[test]
+fn rust_inline_mod_self_and_super_paths_resolve() {
+    let src = "mod child {\n    fn local() -> i32 { 1 }\n    fn go() -> i32 { self::local() + super::outer() }\n}\nfn outer() -> i32 { 2 }\n";
+    let edges = rust_call_edges(&[("src/lib.rs", src)]);
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.child.local"),
+        "self::local() must resolve inside the inline mod: {edges:?}"
+    );
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.outer"),
+        "super::outer() must resolve in the parent module: {edges:?}"
+    );
+}

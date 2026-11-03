@@ -139,8 +139,9 @@ Each phase ends with an independent expert review before the next phase starts:
   `self.m()`, typed parameters (`x: T`, `&T`, `&mut T`), and constructor-typed
   locals (`let x: T`, `let x = T::new()`, `let x = T { .. }`) type the receiver;
   `Self::assoc()`, `self::f()`, and `super::f()` resolve through the enclosing
-  impl target or module tree; free functions inside inline `mod` keep kind
-  `function` (supersedes Amendment 22(c)'s "even when stored as method").
+  impl target or module tree, including the innermost inline `mod` path; free
+  functions inside inline `mod` keep kind `function` (supersedes Amendment
+  22(c)'s "even when stored as method").
   Unknown receivers fall back only to a unique same-file method name; common
   stdlib/trait names and multi-match names stay unresolved instead of emitting
   AMBIGUOUS fan-out. (b) `target_ids` adds a `Class.method` suffix fallback

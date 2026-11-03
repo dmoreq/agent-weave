@@ -938,6 +938,7 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
         line: node.start_position().row + 1,
         scope_func: ctx.scope_func(),
         scope_class: ctx.class_stack.last().cloned(),
+        scope_mod: ctx.mod_stack.last().cloned(),
         callee,
     });
 }
