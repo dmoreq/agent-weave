@@ -319,7 +319,7 @@ pub fn impact(
     }
     if truncated {
         header.push_str(&format!(
-            "\nkg: depth cap {depth} reached; deeper dependents may exist"
+            "\naw: depth cap {depth} reached; deeper dependents may exist"
         ));
     }
     out.header = Some(header);

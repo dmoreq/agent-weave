@@ -294,7 +294,7 @@ pub fn test_impact(
     }
     if truncated {
         header.push_str(&format!(
-            "\nkg: depth cap {depth} reached; deeper tests may exist"
+            "\naw: depth cap {depth} reached; deeper tests may exist"
         ));
     }
     out.header = Some(header);
