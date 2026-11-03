@@ -753,7 +753,8 @@ impl MetricTables {
 }
 
 struct WalkCtx {
-    class_stack: Vec<String>, // qualnames
+    class_stack: Vec<String>, // class/impl qualnames
+    mod_stack: Vec<String>,   // inline `mod` qualnames (Rust)
     func_stack: Vec<String>,  // qualnames
     depth: usize,             // AST recursion depth (R6d Blocker 1 guard)
     /// Per-line byte bounds for the Python docstring adjustment, computed once
@@ -766,6 +767,7 @@ impl WalkCtx {
     fn for_file(lang: Lang, src: &[u8]) -> WalkCtx {
         WalkCtx {
             class_stack: Vec::new(),
+            mod_stack: Vec::new(),
             func_stack: Vec::new(),
             depth: 0,
             line_bounds: if lang == Lang::Python {
@@ -951,6 +953,18 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             }
             None
         }
+        // Rust receiver and field access: `self.foo()` / `x.foo()`. The
+        // field_expression carries `value` (receiver) and `field` (member);
+        // `self` is its own node kind in the Rust grammar.
+        "self" => Some(vec![text(node, src)]),
+        "field_identifier" => Some(vec![text(node, src)]),
+        "field_expression" => {
+            let value = node.child_by_field_name("value")?;
+            let field = node.child_by_field_name("field")?;
+            let mut chain = dotted_chain(value, src)?;
+            chain.push(text(field, src));
+            Some(chain)
+        }
         // Constructor-call receiver: `Base().m()` / `super().m()` /
         // `super(C, self).m()` (Amendment 18). Non-uppercase factory calls
         // are left unresolved to avoid manufacturing class edges.
@@ -1027,10 +1041,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 .child_by_field_name("name")
                 .map(|n| text(n, src))
                 .unwrap_or_default();
-            let qualname = if ctx.class_stack.is_empty() {
-                format!("{}.{}", fx.module, name)
-            } else {
-                format!("{}.{}", ctx.class_stack.last().unwrap(), name)
+            let parent = ctx.class_stack.last().or_else(|| ctx.mod_stack.last());
+            let qualname = match parent {
+                Some(parent) => format!("{parent}.{name}"),
+                None => format!("{}.{}", fx.module, name),
             };
             let sym_idx = fx.symbols.len();
             fx.symbols.push(NewSymbol {
@@ -1054,11 +1068,11 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                     site_line: node.start_position().row + 1,
                 });
             }
-            ctx.class_stack.push(qualname);
+            ctx.mod_stack.push(qualname);
             if let Some(body) = node.child_by_field_name("body") {
                 walk_children(body, src, fx, ctx);
             }
-            ctx.class_stack.pop();
+            ctx.mod_stack.pop();
         }
         "internal_module" | "module" => {
             // TypeScript `namespace N { ... }` (R7).
@@ -1106,10 +1120,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
         "impl_item" => {
             // impl Type { ... } — scope methods under the type name.
             let type_name = impl_type_name(node, src);
-            let qualname = if ctx.class_stack.is_empty() {
-                format!("{}.{}", fx.module, type_name)
-            } else {
-                format!("{}.{}", ctx.class_stack.last().unwrap(), type_name)
+            let parent = ctx.class_stack.last().or_else(|| ctx.mod_stack.last());
+            let qualname = match parent {
+                Some(parent) => format!("{parent}.{type_name}"),
+                None => format!("{}.{}", fx.module, type_name),
             };
             let trait_impl = node
                 .child_by_field_name("trait")
@@ -1192,6 +1206,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             let scope = ctx
                 .class_stack
                 .last()
+                .or_else(|| ctx.mod_stack.last())
                 .cloned()
                 .unwrap_or_else(|| fx.module.clone());
             record_use_decl(node, src, fx, &scope);
@@ -1340,6 +1355,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             record_assignment(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
         }
+        "let_declaration" if fx.lang == Lang::Rust => {
+            record_rust_let(node, src, fx, ctx);
+            walk_children(node, src, fx, ctx);
+        }
         "call" | "call_expression" => {
             record_call(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
@@ -1356,6 +1375,8 @@ fn parent_symbol_idx(fx: &FileExtraction, ctx: &WalkCtx) -> Option<usize> {
         f.clone()
     } else if let Some(c) = ctx.class_stack.last() {
         c.clone()
+    } else if let Some(m) = ctx.mod_stack.last() {
+        m.clone()
     } else {
         return Some(0); // module symbol is always symbols[0]
     };
@@ -1365,6 +1386,28 @@ fn parent_symbol_idx(fx: &FileExtraction, ctx: &WalkCtx) -> Option<usize> {
 fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
     let mut cursor = params.walk();
     for p in params.children(&mut cursor) {
+        // Rust: `x: Foo`, `x: &Foo`, `x: &mut Foo`. `self`/`&self` parameters
+        // carry no type and are skipped.
+        if p.kind() == "parameter" {
+            let (Some(pattern), Some(ty)) = (
+                p.child_by_field_name("pattern"),
+                p.child_by_field_name("type"),
+            ) else {
+                continue;
+            };
+            let Some(var) = pattern_name(pattern, src) else {
+                continue;
+            };
+            let Some(chain) = dotted_chain(unwrap_ref_type(ty), src) else {
+                continue;
+            };
+            fx.params.push(ParamType {
+                var,
+                ann_dotted: chain,
+                scope_func: scope.to_string(),
+            });
+            continue;
+        }
         // TS: required_parameter / optional_parameter carry pattern + type.
         if matches!(p.kind(), "required_parameter" | "optional_parameter") {
             let Some(ty) = p.child_by_field_name("type") else {
@@ -1404,6 +1447,34 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
             }
         }
     }
+}
+
+/// Binding name of a declarator pattern: `x`, `mut x`, `(a, b)` (first name).
+fn pattern_name(node: Node<'_>, src: &[u8]) -> Option<String> {
+    if node.kind() == "identifier" {
+        return Some(text(node, src));
+    }
+    if node.kind() == "mut_pattern" {
+        if let Some(inner) = node.child_by_field_name("pattern") {
+            return pattern_name(inner, src);
+        }
+    }
+    let mut cursor = node.walk();
+    let ident = node
+        .named_children(&mut cursor)
+        .find(|c| c.kind() == "identifier");
+    ident.map(|c| text(c, src))
+}
+
+/// Strip `&`, `&mut`, and raw-pointer wrappers from a Rust type node.
+fn unwrap_ref_type(mut node: Node<'_>) -> Node<'_> {
+    while matches!(node.kind(), "reference_type" | "pointer_type") {
+        match node.child_by_field_name("type") {
+            Some(inner) => node = inner,
+            None => break,
+        }
+    }
+    node
 }
 
 /// Constructor-target scan for receiver typing. CONSERVATIVE (R1 fix): only a
@@ -1467,6 +1538,77 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
     }
 }
 
+/// Rust local receiver typing: `let x: Foo` (annotation) and
+/// `let x = Foo::new()` / `let x = Foo { .. }` (construction). Only a direct
+/// constructor-shaped value types the binding; factory calls stay unknown.
+fn record_rust_let(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    let Some(pattern) = node.child_by_field_name("pattern") else {
+        return;
+    };
+    let Some(var) = pattern_name(pattern, src) else {
+        return;
+    };
+    if let Some(ty) = node.child_by_field_name("type") {
+        if let Some(chain) = dotted_chain(unwrap_ref_type(ty), src) {
+            fx.params.push(ParamType {
+                var,
+                ann_dotted: chain,
+                scope_func: ctx.scope_func(),
+            });
+        }
+        return;
+    }
+    let Some(value) = node.child_by_field_name("value") else {
+        return;
+    };
+    let value = {
+        let mut v = value;
+        while v.kind() == "reference_expression" {
+            match v.child_by_field_name("value") {
+                Some(inner) => v = inner,
+                None => break,
+            }
+        }
+        v
+    };
+    let target = match value.kind() {
+        "call_expression" => value
+            .child_by_field_name("function")
+            .and_then(|f| dotted_chain(f, src)),
+        "struct_expression" => value
+            .child_by_field_name("name")
+            .and_then(|n| dotted_chain(n, src)),
+        _ => None,
+    };
+    let Some(mut chain) = target else {
+        return;
+    };
+    // `Foo::new()` -> Foo; `crate::m::Foo::new()` -> crate::m::Foo.
+    // A bare lowercase call (`make()`) has no knowable type.
+    let head = chain.first().map(String::as_str).unwrap_or("");
+    let type_like = matches!(head, "crate" | "self" | "super" | "Self")
+        || head.chars().next().is_some_and(|c| c.is_uppercase());
+    if !type_like {
+        return;
+    }
+    if head == "Self" {
+        if chain.len() != 1 {
+            return;
+        }
+        let Some(class_qn) = ctx.class_stack.last() else {
+            return;
+        };
+        chain = class_qn.split('.').map(str::to_string).collect();
+    } else if chain.len() >= 2 {
+        chain.pop();
+    }
+    fx.assignments.push(Assignment {
+        var,
+        target_dotted: chain,
+        scope_func: ctx.scope_func(),
+    });
+}
+
 fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
     // call_expression uses field "function"; TS new_expression uses "constructor".
     let f = node
@@ -1493,10 +1635,21 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
             }
         }
     }
-    let _ = fx.lang;
     let callee = match dotted_chain(f, src) {
         Some(chain) if chain.len() == 1 => Callee::Name(chain.into_iter().next().unwrap()),
-        Some(chain) => Callee::Attr(chain),
+        Some(mut chain) => {
+            // `self::f()` and `super::f()` are Rust module paths, distinct
+            // from the `self.m()` receiver form. Mark the leading segment so
+            // resolution can tell them apart.
+            if fx.lang == Lang::Rust && f.kind() == "scoped_identifier" {
+                match chain.first().map(String::as_str) {
+                    Some("self") => chain[0] = "self::".to_string(),
+                    Some("super") => chain[0] = "super::".to_string(),
+                    _ => {}
+                }
+            }
+            Callee::Attr(chain)
+        }
         None => return, // foo()[i](...): unresolvable, not recorded
     };
     fx.calls.push(CallSite {
@@ -1853,9 +2006,10 @@ fn define_function(
     };
     let name = text(name_node, src);
     let parent_qn = ctx
-        .class_stack
+        .func_stack
         .last()
-        .or_else(|| ctx.func_stack.last())
+        .or_else(|| ctx.class_stack.last())
+        .or_else(|| ctx.mod_stack.last())
         .cloned()
         .unwrap_or_else(|| fx.module.clone());
     let qualname = format!("{parent_qn}.{name}");
@@ -1925,6 +2079,7 @@ fn define_class_ts(
         .class_stack
         .last()
         .or_else(|| ctx.func_stack.last())
+        .or_else(|| ctx.mod_stack.last())
         .cloned()
         .unwrap_or_else(|| fx.module.clone());
     let qualname = format!("{parent_qn}.{name}");
@@ -3404,6 +3559,35 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                     }
                 }
             }
+            // Rust path keywords. `Self::assoc()` resolves through the
+            // enclosing impl target; `self::f()`/`super::f()` walk the module
+            // tree from the current or parent module.
+            if chain[0] == "Self" {
+                if let Some(class_qn) = &site.scope_class {
+                    if chain.len() == 2 {
+                        return mro_outcome(t, class_qn, &chain[1]);
+                    }
+                }
+                return Outcome::Unresolved;
+            }
+            if chain[0] == "self::" || chain[0] == "super::" {
+                let mut module = fctx.module.clone();
+                let mut rest: &[String] = &chain[1..];
+                if chain[0] == "super::" {
+                    loop {
+                        let Some((parent, _)) = module.rsplit_once('.') else {
+                            return Outcome::Unresolved;
+                        };
+                        module = parent.to_string();
+                        if rest.first().map(String::as_str) == Some("super") {
+                            rest = &rest[1..];
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                return module_scoped_call(t, &module, rest);
+            }
             // Rust crate::path::call — map crate:: to the crate root dir.
             if chain[0] == "crate" {
                 if let Some(root) = &fctx.crate_root {
@@ -3426,8 +3610,94 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 return Outcome::Unresolved;
             }
             // Module-qualified call through the alias map / module tree.
-            module_chain_outcome(t, fi, chain)
+            let out = module_chain_outcome(t, fi, chain);
+            if !matches!(out, Outcome::Unresolved) {
+                return out;
+            }
+            // Unknown Rust receiver: fall back to a same-file method name only
+            // when it is unique. Ubiquitous trait/stdlib names never fall
+            // back, and several matches stay unresolved instead of emitting
+            // a noisy AMBIGUOUS fan-out across unrelated impls.
+            if fctx.lang == Lang::Rust && chain.len() == 2 {
+                return rust_unknown_receiver_outcome(t, fi, &chain[1]);
+            }
+            out
         }
+    }
+}
+
+/// Conservatively resolve `receiver.method()` when the receiver type is
+/// unknown: exactly one same-file method with that name wins. Common stdlib
+/// and trait method names are excluded so they cannot manufacture edges.
+fn rust_unknown_receiver_outcome(t: &Tables, fi: usize, method: &str) -> Outcome {
+    const UBIQUITOUS: &[&str] = &[
+        "new",
+        "default",
+        "clone",
+        "into",
+        "from",
+        "iter",
+        "len",
+        "next",
+        "fmt",
+        "drop",
+        "eq",
+        "cmp",
+        "to_string",
+        "as_ref",
+        "as_mut",
+        "unwrap",
+        "expect",
+        "map",
+        "and_then",
+        "push",
+        "pop",
+        "get",
+        "insert",
+        "remove",
+        "contains",
+        "is_empty",
+        "write",
+        "read",
+        "send",
+        "recv",
+        "poll",
+        "main",
+    ];
+    if UBIQUITOUS.contains(&method) {
+        return Outcome::Unresolved;
+    }
+    let mut found: Option<usize> = None;
+    for methods in t.class_methods.values() {
+        let Some(idxs) = methods.get(method) else {
+            continue;
+        };
+        for &idx in idxs {
+            if t.symbols[idx].file_idx != fi {
+                continue;
+            }
+            if found.is_some_and(|f| f != idx) {
+                return Outcome::Unresolved;
+            }
+            found = Some(idx);
+        }
+    }
+    found.map(Outcome::Extracted).unwrap_or(Outcome::Unresolved)
+}
+
+/// Module-qualified call from `self::`/`super::`. The parent directory may
+/// not have its own module symbol (src/ layout without mod.rs), so a direct
+/// qualname lookup is the fallback after the module tree walk.
+fn module_scoped_call(t: &Tables, module: &str, rest: &[String]) -> Outcome {
+    let out = chain_from_module(t, module.to_string(), rest);
+    if !matches!(out, Outcome::Unresolved) {
+        return out;
+    }
+    let full = format!("{module}.{}", rest.join("."));
+    match t.by_qualname.get(&full) {
+        Some(v) if v.len() == 1 => Outcome::Extracted(v[0]),
+        Some(v) if v.len() > 1 => Outcome::Ambiguous(full),
+        _ => Outcome::Unresolved,
     }
 }
 

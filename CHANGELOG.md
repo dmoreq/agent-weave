@@ -28,6 +28,19 @@ Consumers that parse output must review the query-shape changes listed below bef
 - Historical benchmarks recorded before 0.3.0 used the former name `kg`; the
   evaluation summary keeps those names only when quoting old artifacts.
 
+### Fixed — Rust receiver and module resolution (2026-11-03)
+
+- Rust method calls on `self`, typed parameters, and constructor-typed locals
+  now produce call edges. `let x: Foo`, `let x = Foo::new()`, and
+  `let x = Foo { .. }` type the receiver; `&`/`&mut` wrappers are unwrapped.
+- `Self::assoc()`, `self::f()`, and `super::f()` resolve through the enclosing
+  impl target or the module tree.
+- Free functions inside an inline `mod` keep kind `function` instead of being
+  labeled methods.
+- When a receiver type is unknown, a uniquely named same-file method resolves;
+  common stdlib/trait names and multi-match names stay unresolved instead of
+  producing ambiguous fan-out.
+
 ### Fixed — build walk over ignored trees (2026-11-03)
 
 - When `git ls-files` succeeds, `build` enumerates the repository-relative

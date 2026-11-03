@@ -565,3 +565,112 @@ fn acronym_identifiers_split_at_the_case_boundary() {
     assert_eq!(split_ident("getHTTPResponse"), "get http response");
     assert_eq!(split_ident("parseS3Uploader"), "parse s3 uploader");
 }
+
+/// Resolve a set of Rust files and return (confidence, dst_name) for call edges.
+fn rust_call_edges(files: &[(&str, &str)]) -> Vec<(String, String)> {
+    let mut extractions = Vec::new();
+    for (i, (rel, src)) in files.iter().enumerate() {
+        let parsed = parse_source(src.as_bytes(), Lang::Rust).unwrap();
+        extractions.push(extract_file(i, rel, src.as_bytes(), &parsed));
+    }
+    resolve(extractions, Default::default())
+        .edges
+        .iter()
+        .filter(|e| e.kind == "calls")
+        .map(|e| (e.confidence.to_string(), e.dst_name.clone()))
+        .collect()
+}
+
+#[test]
+fn rust_self_receiver_call_resolves() {
+    let src = "struct Pointer;\nimpl Pointer {\n    fn render(&self) -> i32 { 1 }\n    fn go(&self) -> i32 { self.render() }\n}\n";
+    let edges = rust_call_edges(&[("src/query.rs", src)]);
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.query.Pointer.render"),
+        "self.render() must resolve to the impl method: {edges:?}"
+    );
+}
+
+#[test]
+fn rust_typed_parameter_receiver_resolves() {
+    let src = "struct Pointer;\nimpl Pointer {\n    fn render(&self) -> i32 { 1 }\n}\nfn go(p: &Pointer) -> i32 { p.render() }\n";
+    let edges = rust_call_edges(&[("src/query.rs", src)]);
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.query.Pointer.render"),
+        "&Pointer parameter must type p: {edges:?}"
+    );
+}
+
+#[test]
+fn rust_let_constructor_receiver_resolves() {
+    let src = "struct Pointer;\nimpl Pointer {\n    fn new() -> Pointer { Pointer }\n    fn render(&self) -> i32 { 1 }\n}\nfn go() -> i32 { let p = Pointer::new(); p.render() }\n";
+    let edges = rust_call_edges(&[("src/query.rs", src)]);
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.query.Pointer.render"),
+        "constructed local must type p: {edges:?}"
+    );
+}
+
+#[test]
+fn rust_self_assoc_and_super_module_calls_resolve() {
+    let lib = "struct Foo;\nimpl Foo {\n    fn make() -> Foo { Foo }\n    fn go() -> Foo { Self::make() }\n}\npub fn helper() -> i32 { 1 }\n";
+    let child = "fn go() -> i32 { super::helper() }\n";
+    let edges = rust_call_edges(&[("src/lib.rs", lib), ("src/child.rs", child)]);
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.Foo.make"),
+        "Self::make() must resolve through the impl target: {edges:?}"
+    );
+    assert!(
+        edges
+            .iter()
+            .any(|(c, n)| c == "EXTRACTED" && n == "src.helper"),
+        "super::helper() must resolve in the parent module: {edges:?}"
+    );
+}
+
+#[test]
+fn rust_inline_mod_functions_keep_function_kind() {
+    let src = "mod child {\n    pub fn helper() -> i32 { 1 }\n}\n";
+    let parsed = parse_source(src.as_bytes(), Lang::Rust).unwrap();
+    let fx = extract_file(0, "src/lib.rs", src.as_bytes(), &parsed);
+    let helper = fx
+        .symbols
+        .iter()
+        .find(|s| s.name == "helper")
+        .expect("helper symbol");
+    assert_eq!(helper.qualname, "src.child.helper");
+    assert_eq!(
+        helper.kind, "function",
+        "free function in mod is not a method"
+    );
+}
+
+#[test]
+fn rust_unknown_receiver_without_candidates_stays_unresolved() {
+    let src = "struct Pointer;\nimpl Pointer {\n    fn render(&self) -> i32 { 1 }\n}\nfn go(x: External) -> i32 { x.mystery() }\n";
+    let edges = rust_call_edges(&[("src/query.rs", src)]);
+    assert!(
+        !edges.iter().any(|(_, n)| n.contains("mystery")),
+        "unknown receiver must not manufacture an edge: {edges:?}"
+    );
+}
+
+#[test]
+fn rust_unknown_receiver_does_not_fan_out_ambiguous() {
+    let src = "struct A;\nstruct B;\nimpl A { fn render(&self) -> i32 { 1 } }\nimpl B { fn render(&self) -> i32 { 2 } }\nfn go(p: Unknown) -> i32 { p.render() }\n";
+    let edges = rust_call_edges(&[("src/query.rs", src)]);
+    assert!(
+        !edges
+            .iter()
+            .any(|(c, n)| c == "AMBIGUOUS" && n.ends_with(".render")),
+        "several same-name impls must stay unresolved, not AMBIGUOUS: {edges:?}"
+    );
+}
