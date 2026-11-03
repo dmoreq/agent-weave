@@ -39,9 +39,9 @@ what changed; it does not vote.
   source-file meta counters (module-level callers included); `tests` returns
   no-results immediately when no test-shaped symbol exists.
 - Measurements on the 1.37M-edge hub corpus (`/tmp/kg-r13-l3/edges1m-sub`):
-  `impact --depth 3` 110.0-144.3 ms best-of-7 (budget 150 ms);
-  `impact --edges all` 146.9 ms; `tests --depth 10` 9.3-9.9 ms via the
-  no-test fast path (budget 200 ms).
+  `impact --depth 3` 97.1-144.3 ms best-of-7 (budget 150 ms);
+  `impact --edges all` 104.1-146.9 ms; `tests --depth 10` 6.9-113.2 ms across
+  zero-test, 100-test, and 10,000-test corpora (budget 200 ms).
 - 3.1M stress: 269.4 ms / 391.8 ms (outside the 1M budget).
 - 987k-symbol representative: 5.1 ms / 5.6 ms.
 - Raw method: `docs/baselines/p8-latency-2026-11-03.md`.
