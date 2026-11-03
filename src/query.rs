@@ -56,6 +56,9 @@ const IMPORTS_CAVEAT: &str =
 
 /// `kg tests` caveat (Amendment 19): static candidates only.
 const TESTS_CAVEAT: &str = "kg: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed";
+/// Forward search from every test is cheaper than a reverse graph walk when
+/// the test set is small; larger sets keep the reverse BFS.
+const FORWARD_TEST_LIMIT: usize = 1000;
 
 fn is_test_symbol_name(name: &str) -> bool {
     name.starts_with("test_")
@@ -106,6 +109,82 @@ impl TestTop {
         records.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
         (total, records)
     }
+}
+
+fn forward_test_top(
+    conn: &Connection,
+    targets: &HashSet<i64>,
+    depth: usize,
+    limit: usize,
+) -> Result<TestTop> {
+    let mut tests = TestTop::new(limit);
+    let mut stmt = conn.prepare(
+        "SELECT id, name, kind, file_path, line_start, qualname FROM symbols
+         WHERE kind IN ('function', 'method')
+           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')
+         ORDER BY file_path, line_start, qualname",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, i64>(4)?,
+            r.get::<_, String>(5)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, name, _kind, path, line, qualname) = row?;
+        if targets.contains(&id) || !is_test_symbol_name(&name) {
+            continue;
+        }
+        if reaches_target(conn, id, targets, depth)? {
+            tests.insert(id, path, line, qualname);
+        }
+    }
+    Ok(tests)
+}
+
+fn reaches_target(
+    conn: &Connection,
+    start: i64,
+    targets: &HashSet<i64>,
+    depth: usize,
+) -> Result<bool> {
+    let mut visited = HashSet::from([start]);
+    let mut frontier = vec![start];
+    for _ in 0..depth {
+        let mut next = Vec::new();
+        for chunk in frontier.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT DISTINCT dst_id FROM edges
+                 WHERE src_id IN ({placeholders}) AND kind = 'calls' AND dst_id IS NOT NULL"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|i| rusqlite::types::Value::from(*i))
+                .collect();
+            for dst in stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                r.get::<_, i64>(0)
+            })? {
+                let dst = dst?;
+                if targets.contains(&dst) {
+                    return Ok(true);
+                }
+                if visited.insert(dst) {
+                    next.push(dst);
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+    Ok(false)
 }
 
 pub fn test_impact(
@@ -169,61 +248,68 @@ pub fn test_impact(
             detail: "0 test candidates found (static call edges only)".to_string(),
         });
     }
-    let mut visited: HashSet<i64> = seed_set.clone();
-    let mut visited_callables = seed_callables;
-    let mut current = seed_ids;
     let total_callables = total_callables(conn)?;
     let total_tests = total_test_symbols(conn)?;
-    let mut tests = TestTop::new(limit);
+    let mut tests;
     let mut truncated = false;
-    for d in 1..=depth {
-        if current.is_empty() || visited_callables >= total_callables || tests.len() >= total_tests
-        {
-            break;
-        }
-        let mut next = Vec::new();
-        for chunk in current.chunks(500) {
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
-                "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
-                 FROM edges e JOIN symbols s ON s.id = e.src_id
-                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<rusqlite::types::Value> = chunk
-                .iter()
-                .map(|i| rusqlite::types::Value::from(*i))
-                .collect();
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, i64>(4)?,
-                    r.get::<_, String>(5)?,
-                ))
-            })?;
-            for row in rows {
-                let (id, name, kind, path, line, qualname) = row?;
-                if !seed_set.contains(&id)
-                    && matches!(kind.as_str(), "function" | "method")
-                    && is_test_symbol_name(&name)
-                {
-                    tests.insert(id, path, line, qualname);
-                }
-                if visited.insert(id) {
-                    if is_callable_kind(&kind) {
-                        visited_callables += 1;
+    if total_tests <= FORWARD_TEST_LIMIT {
+        tests = forward_test_top(conn, &seed_set, depth, limit)?;
+    } else {
+        tests = TestTop::new(limit);
+        let mut visited: HashSet<i64> = seed_set.clone();
+        let mut visited_callables = seed_callables;
+        let mut current = seed_ids;
+        for d in 1..=depth {
+            if current.is_empty()
+                || visited_callables >= total_callables
+                || tests.len() >= total_tests
+            {
+                break;
+            }
+            let mut next = Vec::new();
+            for chunk in current.chunks(500) {
+                let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let sql = format!(
+                    "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
+                     FROM edges e JOIN symbols s ON s.id = e.src_id
+                     WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let params: Vec<rusqlite::types::Value> = chunk
+                    .iter()
+                    .map(|i| rusqlite::types::Value::from(*i))
+                    .collect();
+                let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, String>(5)?,
+                    ))
+                })?;
+                for row in rows {
+                    let (id, name, kind, path, line, qualname) = row?;
+                    if !seed_set.contains(&id)
+                        && matches!(kind.as_str(), "function" | "method")
+                        && is_test_symbol_name(&name)
+                    {
+                        tests.insert(id, path, line, qualname);
                     }
-                    next.push(id);
+                    if visited.insert(id) {
+                        if is_callable_kind(&kind) {
+                            visited_callables += 1;
+                        }
+                        next.push(id);
+                    }
                 }
             }
+            if d == depth && !next.is_empty() {
+                truncated = true;
+            }
+            current = next;
         }
-        if d == depth && !next.is_empty() {
-            truncated = true;
-        }
-        current = next;
     }
     if tests.is_empty() {
         return Err(if truncated {
