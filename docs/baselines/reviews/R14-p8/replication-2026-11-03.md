@@ -46,5 +46,6 @@ unchanged.
 - F4: KEEP under rule (a): 5/5 correct, -53.3% median tool calls, n=5 on one
   host. The 1.37M-edge latency gate also passes (97.1-144.3 ms vs 150 ms).
 - F7: KEEP under rule (a): 5/5 correct, -57.1% median tool calls, n=5 on one
-  host. The previous host-dependent result is superseded on this host.
+  host. Cross-host replication is in `replication-crosshost-2026-11-03.md`:
+  grok -50.0%, agy -76.2%, zcode -57.1%.
 - F8/F10 and the unmeasured features are unchanged.

@@ -18,10 +18,10 @@ commit. No feature reaches the 4/5 REMOVE threshold.
 | F1 implementers/dead | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE (dead demoted)** | Keep `implementers`; `dead` removed from routing until a precision gate exists |
 | F2 impact `--context` | IMPROVE | DEFER | KEEP | IMPROVE | REMOVE (1/5) | **IMPROVE / OWNER** | No removal; owner decides flag demotion |
 | F3 path/files/symbols dir | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one inventory utility task; no claim change |
-| F4 impact edges/depth | KEEP | IMPROVE | IMPROVE | IMPROVE | DEFER | **KEEP (replicated)** | Route after owner sign-off; n=5 local replication, -53.3% tools |
+| F4 impact edges/depth | KEEP | IMPROVE | IMPROVE | IMPROVE | DEFER | **KEEP (host-dependent)** | n=5: agy -66.7%, zcode -53.3%, grok -16.7%; route with the mixed result stated |
 | F5 unresolved names | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one utility task; include or document ambiguous sites |
 | F6 resolve/search filters | IMPROVE | DEFER | KEEP | IMPROVE | DEMOTE (filters) | **IMPROVE (filters demoted)** | Keep `resolve`; search-filter claim removed; apply D2 |
-| F7 imports | IMPROVE | IMPROVE | KEEP | IMPROVE | DEFER | **KEEP (replicated)** | Route after owner sign-off; n=5 local replication, -57.1% tools |
+| F7 imports | IMPROVE | IMPROVE | KEEP | IMPROVE | DEFER | **KEEP (uniform)** | n=5: grok -50.0%, agy -76.2%, zcode -57.1%; equal correctness |
 | F8 tests | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE** | Latency fixed for <=20k tests; >20k remains a stress case |
 | F9 complexity/metrics | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one ceiling/ranking task; no claim change |
 | F10 api | IMPROVE | IMPROVE | KEEP | DEMOTE | DEMOTE | **DEMOTE (applied)** | Removed from routed skill/README; keep code experimental |
