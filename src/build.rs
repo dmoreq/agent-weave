@@ -451,7 +451,7 @@ pub fn run_build(
         "SELECT COUNT(DISTINCT CASE WHEN e.kind = 'calls' THEN s.file_path END),
                 COUNT(DISTINCT CASE WHEN e.kind = 'imports' THEN s.file_path END),
                 COUNT(DISTINCT CASE WHEN e.kind = 'inherits' THEN s.file_path END),
-                COUNT(DISTINCT s.file_path)
+                COUNT(DISTINCT CASE WHEN e.kind IN ('calls','imports','inherits') THEN s.file_path END)
          FROM edges e JOIN symbols s ON s.id = e.src_id",
         [],
         |r| {
