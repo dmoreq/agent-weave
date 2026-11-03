@@ -57,8 +57,8 @@ const IMPORTS_CAVEAT: &str =
 /// `kg tests` caveat (Amendment 19): static candidates only.
 const TESTS_CAVEAT: &str = "kg: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed";
 /// Forward search from every test is cheaper than a reverse graph walk when
-/// the test set is small; larger sets keep the reverse BFS.
-const FORWARD_TEST_LIMIT: usize = 1000;
+/// the test set is bounded; larger sets keep the reverse BFS.
+const FORWARD_TEST_LIMIT: usize = 20000;
 
 fn is_test_symbol_name(name: &str) -> bool {
     name.starts_with("test_")

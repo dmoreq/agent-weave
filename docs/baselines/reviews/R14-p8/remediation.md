@@ -65,3 +65,25 @@ what changed; it does not vote.
   `cargo test --locked`: 197 tests, 0 failures.
 - GT at the current source: imports 40/40 recall, 183/183 precision; tests
   20/20 recall, 2679/2679 precision; inheritance 17/17.
+
+## Post-report fix cycle (baseline `e74deab`)
+
+The first R14 reports found three issues in the remediation batch. These were
+fixed before the L5/L6 wave:
+
+- **Impact universe correctness.** The calls-only bound used callable files
+  only, so a module-level call site could be dropped at depth > 1. The build
+  now stores exact per-kind source-file counts (`edge_*_src_files`); the query
+  reads those counters and falls back to an edge scan on old indexes.
+  Regression: `impact_depth_two_includes_module_level_caller`.
+- **Non-hub test latency.** `tests --depth 10` on a leaf target walked the
+  whole reverse graph. The index now stores `test_symbol_count`; when the test
+  set is <= 20,000 symbols, `tests` searches forward from each test. A
+  test-rich 1.37M-edge corpus with 100 tests measures 8-10 ms; a 10,000-test
+  copy measures 63-113 ms; the reverse BFS remains above 20,000 tests.
+- **Dead probe and GT counts.** The probe is 6/50 zero-reference candidates,
+  not 0/50; README/EVALUATION/R13 sheet now say 77/77 total and 17/17
+  inheritance.
+- `api` caveat now names non-callable declarations; `dead` help matches its
+  predicate; README no longer claims byte-identical MCP errors; CHANGELOG
+  drops the unsupported `api .` claim.
