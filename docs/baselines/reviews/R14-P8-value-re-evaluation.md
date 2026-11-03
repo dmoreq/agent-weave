@@ -13,17 +13,18 @@
 
 - **No feature is removed.** L6 is **INSUFFICIENT for REMOVE**; no feature
   reached 4/5 REMOVE votes.
-- **F4 and F7 now meet the KEEP bar on one host with n=5.** F4: 29-45% fewer
-  tool calls on three hosts in the original n=2 battery, and a local n=5
-  replication at -53.3% median tools, 5/5 correct. F7: -57.1% median tools,
-  5/5 correct. F4 latency is fixed (97-144 ms vs 150 ms at 1.37M edges).
+- **F4 and F7 are KEEP, with different cross-host strength.** F7 passes on all
+  three hosts at n=5: grok -50.0%, agy -76.2%, zcode -57.1%, equal
+  correctness. F4 passes on agy -66.7% and zcode -53.3% but is -16.7% on grok,
+  below the 25% bar. F4 latency is fixed (97-144 ms vs 150 ms at 1.37M edges).
 - **F6's R13 contract blocker is fixed**: `resolve` honors `--no-journal`,
   MCP rejects blank/non-string names, and journal counts reflect parsed names.
 - **F8's 1M-edge test latency is fixed** for indexes with <=20,000 test
   symbols: zero-test 6.9-9.5 ms, 100-test 8-10 ms, 10,000-test 63-113 ms at
   1.37M edges. Above 20,000 tests the reverse BFS remains a stress case.
-- **F4 and F7 have positive n=5 measurements. F1 is mixed; F8/F10 are
-  negative in their only shapes; F2/F3/F5/F6/F9/F11 have no utility task.**
+- **F7 has uniform n=5 value; F4 has n=5 value on two of three hosts. F1 is
+  mixed; F8/F10 are negative in their only shapes; F2/F3/F5/F6/F9/F11 have no
+  utility task.**
 - **DEMOTE decisions applied** (owner, 2026-11-03): `kg api` routing (F10),
   search-filter claims (F6), six `--exclude-generated` flags (F11), and `dead`
   routing (F1). Code, MCP tools, tags, and `resolve` remain. Owner record:
