@@ -3776,3 +3776,19 @@ fn complexity_path_scope_uses_the_file_path_index() {
         "path scope must use symbols_file_path: {plan:?}"
     );
 }
+
+#[test]
+fn path_endpoints_accept_class_method_suffixes() {
+    let repo = temp_repo("path-suffix");
+    write(
+        &repo,
+        "a.py",
+        "class A:\n    def m(self):\n        return done()\n\ndef done():\n    return 1\n\ndef start(a: A):\n    return a.m()\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["path", "start", "A.m"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
+    assert!(stdout.contains("a.A.m"), "{stdout}");
+}
