@@ -15,7 +15,15 @@
     "59 Fund",
     "69 BalanceSnapshot",
     "79 ExchangeRate",
-    "90 AuditLogEntry"
+    "90 AuditLogEntry",
+    "1 AccountType",
+    "15 PostingDirection",
+    "32 TransactionStatus",
+    "33 TransactionSource",
+    "50 CategoryType",
+    "88 AuditAction",
+    "138 Command",
+    "176 Result"
   ],
-  "note": "exported interfaces in core-ledger types.ts; aw symbols does not index TypeScript type aliases"
+  "note": "15 exported interfaces plus 8 exported type aliases in core-ledger types.ts; aliases are resolved from source because aw symbols does not index them"
 }
