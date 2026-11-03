@@ -389,6 +389,9 @@ pub struct FileExtraction {
     from_import_parents: HashSet<(usize, String)>,
     /// Unresolvable inheritance sites: (base name, line).
     unresolved_inherits: Vec<(String, usize)>,
+    /// Methods declared inside a trait impl; trait impl methods are public
+    /// even without `pub`, while inherent methods follow `pub`.
+    trait_impl_methods: Vec<String>,
     /// Per-line code flag (comment nodes excluded), computed once per file.
     pub code_lines: Vec<bool>,
     calls: Vec<CallSite>,
@@ -501,6 +504,7 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
         stars: Vec::new(),
         from_import_parents: HashSet::new(),
         unresolved_inherits: Vec::new(),
+        trait_impl_methods: Vec::new(),
         code_lines: Vec::new(),
         calls: Vec::new(),
         import_edges: Vec::new(),
@@ -619,19 +623,13 @@ fn export_method(fx: &FileExtraction, i: usize, lines: &[&[u8]]) -> bool {
     let parent_is_trait = parent
         .map(|s| matches!(s.kind, "trait" | "interface"))
         .unwrap_or(false);
-    let trait_impl = parent_qn.as_ref().is_some_and(|pq| {
-        fx.impl_inherits
-            .iter()
-            .any(|(idx, _, _)| &fx.symbols[*idx].qualname == pq)
-    });
+    let trait_impl_method = fx.trait_impl_methods.contains(&sym.qualname);
     match fx.lang {
         Lang::Python => parent_exported && !sym.name.starts_with('_'),
         Lang::Rust => {
-            parent_exported
-                && (rust_is_pub(&sym.signature)
-                    || parent_is_trait
-                    || trait_impl
-                    || parent_is_module)
+            ((rust_is_pub(&sym.signature) || parent_is_trait || trait_impl_method)
+                && parent_exported)
+                || (parent_is_module && rust_is_pub(&sym.signature))
         }
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
             let source_line = lines
@@ -808,6 +806,25 @@ fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             let mut chain = dotted_chain(obj, src)?;
             chain.push(text(attr, src));
             Some(chain)
+        }
+        // Rust scoped type paths in impl/trait positions: crate::Shape,
+        // std::fmt::Display. Treat them like scoped_identifier so a qualified
+        // impl target still produces an edge or unresolved row.
+        "scoped_type_identifier" => {
+            let mut chain = Vec::new();
+            if let Some(path) = node.child_by_field_name("path") {
+                if let Some(mut sub) = dotted_chain(path, src) {
+                    chain.append(&mut sub);
+                }
+            }
+            if let Some(name) = node.child_by_field_name("name") {
+                chain.push(text(name, src));
+            }
+            if chain.is_empty() {
+                None
+            } else {
+                Some(chain)
+            }
         }
         // Rust scoped_identifier: a::b::c (fields path + name).
         "scoped_identifier" => {
@@ -1014,15 +1031,27 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             } else {
                 format!("{}.{}", ctx.class_stack.last().unwrap(), type_name)
             };
-            if let Some(trait_node) = node.child_by_field_name("trait") {
-                if let Some(chain) = dotted_chain(trait_node, src) {
-                    fx.rust_impls
-                        .push((qualname.clone(), chain, node.start_position().row + 1));
-                }
+            let trait_impl = node
+                .child_by_field_name("trait")
+                .and_then(|trait_node| dotted_chain(trait_node, src));
+            if let Some(chain) = &trait_impl {
+                fx.rust_impls.push((
+                    qualname.clone(),
+                    chain.clone(),
+                    node.start_position().row + 1,
+                ));
             }
+            let method_start = fx.symbols.len();
             ctx.class_stack.push(qualname);
             walk_children(node, src, fx, ctx);
             ctx.class_stack.pop();
+            if trait_impl.is_some() {
+                for sym in &fx.symbols[method_start..] {
+                    if sym.kind == "method" {
+                        fx.trait_impl_methods.push(sym.qualname.clone());
+                    }
+                }
+            }
         }
         // ---- TypeScript/TSX/JSX definitions (P2) ----
         "function_declaration" | "generator_function_declaration" => {
@@ -1448,11 +1477,13 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
             let module_abs =
                 module_node.map(|m| resolve_from_module(m, src, &fx.module, fx.is_package));
             let Some(m) = module_abs else { return };
-            fx.import_edges.push(ImportEdgeCandidate {
-                line,
-                target: ImportTarget::Module { path: m.clone() },
-            });
-            fx.from_import_parents.insert((line, m.clone()));
+            if !m.is_empty() {
+                fx.import_edges.push(ImportEdgeCandidate {
+                    line,
+                    target: ImportTarget::Module { path: m.clone() },
+                });
+                fx.from_import_parents.insert((line, m.clone()));
+            }
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if Some(child) == module_node {
@@ -1468,26 +1499,36 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     }
                     "dotted_name" => {
                         let name = text(child, src);
-                        fx.aliases.push((
-                            name.clone(),
+                        // `from .. import X` at a first-level package has an
+                        // empty parent: bind the root child directly.
+                        let alias = if m.is_empty() {
+                            ImportTarget::ModuleRoot { path: name.clone() }
+                        } else {
                             ImportTarget::Symbol {
                                 module: m.clone(),
                                 name: name.clone(),
-                            },
-                        ));
+                            }
+                        };
+                        fx.aliases.push((name.clone(), alias));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::Module {
-                                path: format!("{m}.{name}"),
+                                path: if m.is_empty() {
+                                    name.clone()
+                                } else {
+                                    format!("{m}.{name}")
+                                },
                             },
                         });
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line,
-                            target: ImportTarget::Symbol {
-                                module: m.clone(),
-                                name,
-                            },
-                        });
+                        if !m.is_empty() {
+                            fx.import_edges.push(ImportEdgeCandidate {
+                                line,
+                                target: ImportTarget::Symbol {
+                                    module: m.clone(),
+                                    name,
+                                },
+                            });
+                        }
                     }
                     // `from m import n as y` wraps the binding in an
                     // aliased_import node (import_statement uses "alias").
@@ -1499,26 +1540,34 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                             continue;
                         };
                         let name = text(target, src);
-                        fx.aliases.push((
-                            text(alias, src),
+                        let alias_target = if m.is_empty() {
+                            ImportTarget::ModuleRoot { path: name.clone() }
+                        } else {
                             ImportTarget::Symbol {
                                 module: m.clone(),
                                 name: name.clone(),
-                            },
-                        ));
+                            }
+                        };
+                        fx.aliases.push((text(alias, src), alias_target));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::Module {
-                                path: format!("{m}.{name}"),
+                                path: if m.is_empty() {
+                                    name.clone()
+                                } else {
+                                    format!("{m}.{name}")
+                                },
                             },
                         });
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line,
-                            target: ImportTarget::Symbol {
-                                module: m.clone(),
-                                name,
-                            },
-                        });
+                        if !m.is_empty() {
+                            fx.import_edges.push(ImportEdgeCandidate {
+                                line,
+                                target: ImportTarget::Symbol {
+                                    module: m.clone(),
+                                    name,
+                                },
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -2252,6 +2301,10 @@ fn resolve_ts_module(source: &str, dir: &str) -> String {
     if parts.last() == Some(&"index") {
         parts.pop();
     }
+    if parts.is_empty() {
+        // Root-level index.* is the repository root module.
+        return "root".to_string();
+    }
     parts.join(".")
 }
 
@@ -2583,11 +2636,34 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             t.existing_ids.push(None);
             t.by_qualname.entry(qualname.clone()).or_default().push(idx);
             let direct_child = qualname == format!("{module}.{name}");
-            if kind != "method" && direct_child {
-                t.by_mod_name
-                    .entry((module.clone(), name.clone()))
-                    .or_default()
-                    .push(idx);
+            // Rust inline `mod` members are scoped as methods, but their
+            // parent is a module; they are importable/callable bare names.
+            let parent_qn_kind = qualname.rsplit_once('.').map(|(parent, _)| {
+                (parent.to_string(), {
+                    t.symbols
+                        .iter()
+                        .rev()
+                        .find(|s| s.qualname == parent)
+                        .map(|s| s.kind)
+                        .unwrap_or("")
+                })
+            });
+            match parent_qn_kind {
+                // Any direct child of a module is a bare-name candidate, even
+                // when Rust inline `mod` scopes it as kind "method".
+                Some((parent, "module")) => {
+                    t.by_mod_name
+                        .entry((parent, name.clone()))
+                        .or_default()
+                        .push(idx);
+                }
+                _ if direct_child && kind != "method" => {
+                    t.by_mod_name
+                        .entry((module.clone(), name.clone()))
+                        .or_default()
+                        .push(idx);
+                }
+                _ => {}
             }
             if kind == "method" {
                 let class_qn = qualname
@@ -2687,11 +2763,30 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             .or_default()
             .push(idx);
         let direct_child = c.qualname == format!("{}.{}", c.module, c.name);
-        if c.kind != "method" && direct_child {
-            t.by_mod_name
-                .entry((c.module.clone(), c.name.clone()))
-                .or_default()
-                .push(idx);
+        let parent_qn_kind = c.qualname.rsplit_once('.').map(|(parent, _)| {
+            (parent.to_string(), {
+                t.symbols
+                    .iter()
+                    .rev()
+                    .find(|s| s.qualname == parent)
+                    .map(|s| s.kind)
+                    .unwrap_or("")
+            })
+        });
+        match parent_qn_kind {
+            Some((parent, "module")) => {
+                t.by_mod_name
+                    .entry((parent, c.name.clone()))
+                    .or_default()
+                    .push(idx);
+            }
+            _ if direct_child && c.kind != "method" => {
+                t.by_mod_name
+                    .entry((c.module.clone(), c.name.clone()))
+                    .or_default()
+                    .push(idx);
+            }
+            _ => {}
         }
         if c.kind == "method" {
             let class_qn = c
@@ -3157,7 +3252,16 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                         return Outcome::Dropped;
                     }
                 }
-                Some(ImportTarget::ModuleRoot { .. }) | Some(ImportTarget::Module { .. }) => {
+                Some(ImportTarget::ModuleRoot { path }) => {
+                    // A root-level `from .. import fn` binds a function, while a
+                    // module alias is not callable; try the same-named child.
+                    if let Some(out) =
+                        bare_candidates(t.by_mod_name.get(&(path.clone(), name.clone())), name)
+                    {
+                        return out;
+                    }
+                }
+                Some(ImportTarget::Module { .. }) => {
                     // Calling a bare module alias is invalid Python; fall through.
                 }
                 None => {}
@@ -3432,6 +3536,22 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
         return None;
     }
     let fctx = &t.file_ctx[fi];
+    // `crate::Trait` in an impl target: map through the crate root first.
+    if chain[0] == "crate" {
+        if let Some(root) = &fctx.crate_root {
+            let mapped = if root.is_empty() {
+                chain[1..].to_vec()
+            } else {
+                root_chain(root, chain)
+            };
+            if !mapped.is_empty() {
+                let qn = mapped.join(".");
+                if class_exists(t, &qn) {
+                    return Some(qn);
+                }
+            }
+        }
+    }
     // 1. Local module class (possibly nested: a.B.C).
     let local = format!("{}.{}", fctx.module, chain.join("."));
     if class_exists(t, &local) {

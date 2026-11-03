@@ -30,7 +30,7 @@ def leaf_in_import_block(lines: list[str], start: int, leaf: str) -> bool:
         return True
     balance = lines[start].count("(") + lines[start].count("{")
     balance -= lines[start].count(")") + lines[start].count("}")
-    for line in lines[start + 1 : start + 50]:
+    for line in lines[start + 1 : start + 200]:
         if leaf in line:
             return True
         balance += line.count("(") + line.count("{")

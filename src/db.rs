@@ -264,6 +264,18 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
     if metrics_version != METRICS_VERSION {
         return Ok(None);
     }
+    // Amendment 21 added the complexity manifest after v7 shipped. An index
+    // without it must rebuild; the read-only no-op path cannot backfill.
+    let has_callable_count: i64 = old
+        .query_row(
+            "SELECT COUNT(*) FROM meta WHERE key = 'callable_count'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_callable_count == 0 {
+        return Ok(None);
+    }
     Ok(Some(old))
 }
 
@@ -458,6 +470,11 @@ pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedI
             "class" => "class",
             "function" => "function",
             "method" => "method",
+            // A carried trait/interface is a valid impl target on the fast
+            // path; dropping it made incremental Rust impls permanently
+            // unresolved (R12 Critical).
+            "trait" => "trait",
+            "interface" => "interface",
             _ => continue,
         };
         let (module, _) = crate::extract::module_path_for(&path);

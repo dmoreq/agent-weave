@@ -285,8 +285,9 @@ Four independent Goldfish lenses evaluated F1-F12 at `c39e21f`; the R10
 record (`baselines/reviews/R10-P8-evaluation.md`) found F5/F8/F11/schema v6 at
 ceiling and the rest below. The R10 fix cycle closed that batch. The R11
 record (`baselines/reviews/R11-P8-evaluation.md`) re-ran the same four-lens
-protocol at `1fd4d37`; its six Critical findings are closed and its remaining
-Important findings are either fixed or recorded as owner decisions.
+protocol at `1fd4d37`; its six Critical findings are closed. The R12 record
+(`baselines/reviews/R12-P8-evaluation.md`) re-ran it again at `69ad161`; its
+one Critical and six Important findings are closed with regression tests.
 
 | surface | measured | command |
 |---------|----------|---------|
@@ -298,7 +299,7 @@ Important findings are either fixed or recorded as owner decisions.
 | `kg tests <no-hit>` | **5.4 ms** best-of-5 | same |
 | `kg impact <file> --depth 10` | **5.1 ms** best-of-5 | same |
 | Flutter corpus build smoke | 124 indexed files, 735 symbols, 0 parse errors, 3.46 s | `kg build --root <flutter>` |
-| test suite | 186 tests (25 lib + 25 bin + 104 CLI + 26 fixture + 6 MCP) | `cargo test --locked` |
+| test suite | 191 tests (25 lib + 25 bin + 109 CLI + 26 fixture + 6 MCP) | `cargo test --locked` |
 
 Real-corpus gates are local-only and frozen at kg `342ebc3`, vihap `efcd310`,
 finguard `dddfe07`, Flutter `20f82749394`:

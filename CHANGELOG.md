@@ -16,6 +16,16 @@ changes bump the minor while 0.x is unstable.
   Fresh inserts and carry-forward both populate the column; `probe_old`
   rejects a v7-stamped index that lacks it.
 
+### Fixed — P8 review cycle 3 (R12, Amendment 22)
+
+- Incremental Rust `impl Trait for T` resolves against carried
+  traits/interfaces; qualified `crate::Trait` impl targets resolve.
+- Root TS `index.*`, Python `from .. import X`, and Rust inline `mod` members
+  resolve their imports/calls; Rust trait-impl exports no longer leak
+  inherent private methods, while module-parent `pub fn` exports.
+- A pre-manifest v7 index rebuilds instead of reporting an empty default
+  `complexity` result.
+
 ### Fixed — P8 review cycle 2 (R11, Amendment 21)
 
 - Python dotted imports keep every ancestor module edge; Rust crate roots,

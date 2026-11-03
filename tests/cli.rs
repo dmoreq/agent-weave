@@ -470,6 +470,149 @@ fn dead_exclude_tests_matches_nested_test_filename() {
 }
 
 #[test]
+fn incremental_carries_trait_and_qualified_impl_targets() {
+    let repo = temp_repo("incremental-trait");
+    write(
+        &repo,
+        "src/lib.rs",
+        "pub trait Greet {\n    fn hello(&self);\n}\n",
+    );
+    build(&repo);
+    write(
+        &repo,
+        "src/user.rs",
+        "use crate::Greet;\npub struct Thing;\nimpl Greet for Thing {\n    fn hello(&self) {}\n}\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["implementers", "Greet"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("src/user.rs:2 src.user.Thing"), "{stdout}");
+
+    write(
+        &repo,
+        "src/qualified.rs",
+        "use crate::Greet;\npub struct Other;\nimpl crate::Greet for Other {\n    fn hello(&self) {}\n}\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["implementers", "Greet"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("src/qualified.rs:2 src.qualified.Other"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn root_ts_index_and_python_root_parent_imports_resolve() {
+    let repo = temp_repo("root-imports");
+    write(&repo, "index.ts", "export function idx() {}\n");
+    write(
+        &repo,
+        "rootidx.ts",
+        "import { idx } from './index';\n\nexport function use() {\n    return idx();\n}\n",
+    );
+    write(&repo, "app.py", "def app():\n    pass\n");
+    write(&repo, "pkg/__init__.py", "");
+    write(
+        &repo,
+        "pkg/relinner.py",
+        "from .. import app\n\nuse = app\n",
+    );
+    build(&repo);
+
+    let out = kg(&repo).args(["imports", "rootidx.ts"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("rootidx.ts:1 root"), "{stdout}");
+    assert!(stdout.contains("rootidx.ts:1 root.idx"), "{stdout}");
+    let out = kg(&repo)
+        .args(["imports", "pkg/relinner.py"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("pkg/relinner.py:1 app"), "{stdout}");
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "no unresolved expected");
+}
+
+#[test]
+fn rust_inline_mod_members_resolve_and_export() {
+    let repo = temp_repo("inline-mod-rust");
+    write(
+        &repo,
+        "src/lib.rs",
+        "pub mod inner {\n    pub mod sub {\n        pub fn s1() {}\n        pub fn s2() {}\n    }\n}\n",
+    );
+    write(
+        &repo,
+        "src/user.rs",
+        "use crate::inner::sub::{s1, s2};\n\npub fn use_both() {\n    s1();\n    s2();\n}\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["imports", "src/user.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("src/user.rs:1 src.inner.sub.s1"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("src/user.rs:1 src.inner.sub.s2"),
+        "{stdout}"
+    );
+    let out = kg(&repo).args(["unresolved"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+
+    let out = kg(&repo).args(["api", "src/lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("src.inner.sub.s1"), "{stdout}");
+}
+
+#[test]
+fn rust_trait_impl_export_does_not_leak_inherent_methods() {
+    let repo = temp_repo("rust-export-trait");
+    write(
+        &repo,
+        "lib.rs",
+        "pub struct Widget;\n\nimpl Widget {\n    fn helper(&self) {}\n    pub fn public_helper(&self) {}\n}\n\npub trait Shape {\n    fn area(&self);\n}\n\nimpl Shape for Widget {\n    fn area(&self) {}\n}\n",
+    );
+    build(&repo);
+    let out = kg(&repo).args(["api", "lib.rs"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("lib.Widget.public_helper"), "{stdout}");
+    assert!(stdout.contains("lib.Widget.area"), "{stdout}");
+    assert!(!stdout.contains("lib.Widget.helper"), "{stdout}");
+}
+
+#[test]
+fn pre_manifest_index_rebuilds_instead_of_empty_complexity() {
+    let repo = temp_repo("pre-manifest");
+    write(
+        &repo,
+        "app.py",
+        "def f(x):\n    if x:\n        return 1\n    return 0\n\ndef g():\n    if true:\n        return 2\n    return 3\n",
+    );
+    build(&repo);
+    let idx = repo.join(".kg/index.db");
+    let status = std::process::Command::new("sqlite3")
+        .args([
+            idx.to_string_lossy().as_ref(),
+            "DELETE FROM meta WHERE key='callable_count';",
+        ])
+        .output()
+        .unwrap();
+    assert!(status.status.success(), "sqlite3 demotion failed");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = kg(&repo)
+        .args(["complexity", "--limit", "1"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("showing 1 of"), "{stdout}");
+}
+
+#[test]
 fn response_contract_limit_clamps() {
     let repo = fixture("limit");
     build(&repo);
