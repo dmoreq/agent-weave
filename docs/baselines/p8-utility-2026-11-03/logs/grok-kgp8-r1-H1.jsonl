@@ -1,0 +1,10 @@
+I'll start with `kg implementers` for `vihap.exceptions.VihapError` and use that list as the direct-subclass set.Wrote `/tmp/p8-utility-answers-2026-11-03/grok-kgp8-r1-H1.json` with four direct subclasses of `vihap.exceptions.VihapError`.
+
+| Path:line | Qualname |
+|---|---|
+| `vihap/exceptions.py:10` | `vihap.exceptions.VihapConfigError` |
+| `vihap/exceptions.py:14` | `vihap.exceptions.VihapArtifactError` |
+| `vihap/exceptions.py:18` | `vihap.exceptions.VihapParsingError` |
+| `vihap/exceptions.py:44` | `vihap.exceptions.VihapScoringError` |
+
+`AdminResolutionError` and `InvalidAddressFormatError` inherit from `VihapParsingError`, so they are omitted.

@@ -1,0 +1,10 @@
+{
+  "task": "H1",
+  "items": [
+    "vihap/exceptions.py:10 vihap.exceptions.VihapConfigError",
+    "vihap/exceptions.py:14 vihap.exceptions.VihapArtifactError",
+    "vihap/exceptions.py:18 vihap.exceptions.VihapParsingError",
+    "vihap/exceptions.py:44 vihap.exceptions.VihapScoringError"
+  ],
+  "answer": "There are four classes that directly inherit from vihap.exceptions.VihapError in vihap/exceptions.py: VihapConfigError, VihapArtifactError, VihapParsingError, and VihapScoringError. Grandchildren inheriting via VihapParsingError are excluded."
+}

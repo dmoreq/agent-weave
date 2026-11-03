@@ -1,0 +1,21 @@
+Task D1 (vihap corpus)
+
+List every repository file that directly imports `vihap/reform/temporal.py`. Report repo-relative file paths in `items`. Include test files; omit transitive importers and omit files that only import symbols re-exported from another module.
+
+This run does NOT include `kg impact --edges imports`. Determine the answer from source reads and grep; do not use `kg impact`, `kg imports`, `kg tests`, `kg resolve`, `kg api`, `kg implementers`, or `kg complexity`.
+
+Write exactly one JSON object to `{/tmp/p8-utility-answers-2026-11-03/grok-kgc-r1-D1.json}` with this shape:
+
+```json
+{"task": "D1", "items": [], "answer": ""}
+```
+
+`items` must contain repo-relative file paths, e.g. `tests/test_temporal_dag.py`.. The `answer` field must contain one or two
+sentences. Do not write any other file.
+
+Additional isolation rules for this run (2026-11-03):
+- Do not read or list any path outside the repository, except the
+  exact answer file path above when writing it.
+- Do not read other answer files, previous-run artifacts, or
+  .kg/index.db directly. Use only the kg CLI and repository files.
+- Use at most 25 tool calls. Stop immediately after writing the answer.

@@ -1,0 +1,1 @@
+{"task": "T1", "items": ["tests/test_centralized_grammar_patterns.py:19 tests.test_centralized_grammar_patterns.test_exact_text_key"], "answer": "The direct test caller is tests.test_centralized_grammar_patterns.test_exact_text_key at tests/test_centralized_grammar_patterns.py:19. The kg query returned no results in the current repository index."}

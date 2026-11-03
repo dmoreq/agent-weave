@@ -1,0 +1,1 @@
+{"task": "I1", "items": ["10 src.db", "11 src.error", "12 src.hash"], "answer": "src/query.rs has three crate-internal use imports: crate::db at line 10, crate::error at line 11, and crate::hash at line 12. All other imports are external crates or std, and imported symbols are omitted."}

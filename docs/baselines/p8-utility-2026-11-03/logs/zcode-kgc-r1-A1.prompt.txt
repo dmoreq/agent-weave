@@ -1,0 +1,21 @@
+Task A1 (finguard corpus)
+
+List every exported interface declared in `packages/core-ledger/src/types.ts`. Report each as `<source-line> <interface-name>` in `items`. Omit exported type aliases, constants, and non-interface declarations.
+
+This run does NOT include the `kg api` command. Determine the answer from source reads and grep; do not use `kg api`, `kg imports`, `kg tests`, `kg resolve`, `kg implementers`, `kg complexity`, or `kg impact --edges`.
+
+Write exactly one JSON object to `{/tmp/p8-utility-answers-2026-11-03/zcode-kgc-r1-A1.json}` with this shape:
+
+```json
+{"task": "A1", "items": [], "answer": ""}
+```
+
+`items` must contain `<line> <interface-name>` strings.. The `answer` field must contain one or two
+sentences. Do not write any other file.
+
+Additional isolation rules for this run (2026-11-03):
+- Do not read or list any path outside the repository, except the
+  exact answer file path above when writing it.
+- Do not read other answer files, previous-run artifacts, or
+  .kg/index.db directly. Use only the kg CLI and repository files.
+- Use at most 25 tool calls. Stop immediately after writing the answer.

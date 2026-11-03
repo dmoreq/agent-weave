@@ -1,0 +1,1 @@
+{"task": "I1", "items": ["10 src.db", "11 src.error", "12 src.hash"], "answer": "src/query.rs directly imports three crate-internal modules: db (line 10), error (line 11), and hash (line 12). Symbol imports such as KgError and fnv1a64 are part of those same module imports and are omitted."}

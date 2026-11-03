@@ -1,0 +1,5 @@
+I'll run the direct-import impact query first, then write the JSON answer from those edges.The impact query needs a repository root. I'll rerun it against this workspace.Three files import `temporal.py` directly. I'll write that list to the answer file.Wrote `grok-kgp8-r1-D1.json` with three direct importers of `vihap/reform/temporal.py`.
+
+- `tests/test_temporal_dag.py`
+- `tests/test_temporal_dag_benchmark.py`
+- `vihap/reform/__init__.py`

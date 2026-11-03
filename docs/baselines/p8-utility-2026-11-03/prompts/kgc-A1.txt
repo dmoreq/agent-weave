@@ -1,0 +1,14 @@
+Task A1 (finguard corpus)
+
+List every exported interface declared in `packages/core-ledger/src/types.ts`. Report each as `<source-line> <interface-name>` in `items`. Omit exported type aliases, constants, and non-interface declarations.
+
+This run does NOT include the `kg api` command. Determine the answer from source reads and grep; do not use `kg api`, `kg imports`, `kg tests`, `kg resolve`, `kg implementers`, `kg complexity`, or `kg impact --edges`.
+
+Write exactly one JSON object to `{{ANSWER_PATH}}` with this shape:
+
+```json
+{"task": "A1", "items": [], "answer": ""}
+```
+
+`items` must contain `<line> <interface-name>` strings.. The `answer` field must contain one or two
+sentences. Do not write any other file.
