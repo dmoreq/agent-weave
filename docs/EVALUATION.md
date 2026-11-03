@@ -343,8 +343,9 @@ All retained valid-host cells were correct. OpenCode's 20 cells are invalid:
 its CLI ignored the corpus working directory and executed against the kg
 workspace; raw rows are retained but excluded. Two agy control cells called
 the forbidden feature and were excluded. n=2 per cell, so deltas are
-directional. R14 added a one-host n=5 replication: F4 -53.3% and F7 -57.1%
-median tool calls at 5/5 correct, and the owner confirmed KEEP for both. R14
+directional. R14 added n=5 replications on grok/agy/zcode. F7 is uniform: -50.0% /
+-76.2% / -57.1%. F4 is host-dependent: -66.7% / -53.3% on agy/zcode but
+-16.7% on grok. The owner confirmed KEEP for both. R14
 also demoted `kg api` and the search-filter claims from routing; F2 and the
 `--exclude-generated` filters remain REMOVE candidates blocked by the
 evidence-integrity gate. Record: `baselines/reviews/R14-P8-value-re-evaluation.md`.
