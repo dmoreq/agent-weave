@@ -138,7 +138,6 @@ pub fn hotspots(
     root: &Path,
     limit: usize,
     path: Option<&str>,
-    exclude_generated: bool,
 ) -> Result<Vec<String>> {
     if limit == 0 {
         return Err(KgError::Usage("--limit must be >= 1".to_string()));
@@ -148,10 +147,7 @@ pub fn hotspots(
     }
     // Amendment 11d: loc/cyclomatic are stored per file at build time —
     // hotspots is a single scan + git log, not a whole-repo re-parse.
-    let mut scope = crate::query::path_scope_sql_pub("f", path);
-    if exclude_generated {
-        scope.push_str(" AND f.generated = 0");
-    }
+    let scope = crate::query::path_scope_sql_pub("f", path);
     let mut stmt = conn.prepare(&format!(
         "SELECT f.path, f.loc, f.cyclomatic FROM files f WHERE 1=1 {scope}"
     ))?;
@@ -223,22 +219,14 @@ pub fn hotspots(
         .collect())
 }
 
-pub fn report(
-    conn: &Connection,
-    root: &Path,
-    path: Option<&str>,
-    exclude_generated: bool,
-) -> Result<Vec<String>> {
+pub fn report(conn: &Connection, root: &Path, path: Option<&str>) -> Result<Vec<String>> {
     if let Some(p) = path {
         crate::query::validate_path_scope(p, false)?;
     }
     let mut out = Vec::new();
     // Freshness (R7 L4): the report is a build snapshot, but agents read it
     // as current. Check a bounded sample of indexed files and say so.
-    let mut scope = crate::query::path_scope_sql_pub("f", path);
-    if exclude_generated {
-        scope.push_str(" AND f.generated = 0");
-    }
+    let scope = crate::query::path_scope_sql_pub("f", path);
     let mut stmt = conn.prepare(&format!(
         "SELECT f.path FROM files f WHERE 1=1 {scope} LIMIT 5000"
     ))?;
@@ -296,15 +284,12 @@ pub fn report(
     }
     // Section 3: hotspots top-5.
     out.push("## 3. hotspots (top 5)".to_string());
-    for line in hotspots(conn, root, 5, path, exclude_generated)? {
+    for line in hotspots(conn, root, 5, path)? {
         out.push(format!("  {line}"));
     }
     // Section 4: most-called symbols (fan-in top 8).
     out.push("## 4. most-called symbols (fan-in top 8)".to_string());
-    let mut fan_scope = crate::query::path_scope_sql_pub("df", path);
-    if exclude_generated {
-        fan_scope.push_str(" AND df.generated = 0");
-    }
+    let fan_scope = crate::query::path_scope_sql_pub("df", path);
     let mut stmt = conn.prepare(&format!(
         "SELECT ds.qualname, COUNT(*) AS n
          FROM edges e JOIN symbols ds ON ds.id = e.dst_id

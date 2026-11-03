@@ -11,8 +11,10 @@
 
 ## TL;DR
 
-- **No feature is removed.** L6 is **INSUFFICIENT for REMOVE**; no feature
-  reached 4/5 REMOVE votes.
+- **Three ineffective surfaces are removed** under the owner cleanup:
+  `kg api`, `search --kind/--path/--exact`, and the six
+  `--exclude-generated` flags. `dead` is demoted from routing but kept. L6
+  remains **INSUFFICIENT** for a broader REMOVE; no feature reached 4/5 votes.
 - **F4 and F7 are KEEP, with different cross-host strength.** F7 passes on all
   three hosts at n=5: grok -50.0%, agy -76.2%, zcode -57.1%, equal
   correctness. F4 passes on agy -66.7% and zcode -53.3% but is -16.7% on grok,
@@ -25,10 +27,10 @@
 - **F7 has uniform n=5 value; F4 has n=5 value on two of three hosts. F1 is
   mixed; F8/F10 are negative in their only shapes; F2/F3/F5/F6/F9/F11 have no
   utility task.**
-- **DEMOTE decisions applied** (owner, 2026-11-03): `kg api` routing (F10),
-  search-filter claims (F6), six `--exclude-generated` flags (F11), and `dead`
-  routing (F1). Code, MCP tools, tags, and `resolve` remain. Owner record:
-  `reviews/R14-p8/owner-decision.md`.
+- **Owner cleanup applied** (2026-11-03): `kg api` (F10), search filters (F6),
+  and the six `--exclude-generated` flags (F11) are removed. `dead` routing
+  (F1) is demoted; the command remains. Tags, `stats`, `files`, and `resolve`
+  remain. Record: `reviews/R14-p8/cleanup-2026-11-03.md`.
 - **REMOVE candidates** exist but are blocked: F2 `--context` (1/5) and F11
   filters (1/5). L6 blocks removal on the current battery.
 
@@ -90,8 +92,8 @@ See `reviews/R14-p8/decision-matrix.md`. Summary:
 
 - KEEP: **F4, F7** (local n=5 replication; owner sign-off pending).
 - IMPROVE: F1, F2, F3, F5, F6, F8, F9, F11 (tag).
-- DEMOTE recommended: F10 (routing), F6 search filters, F11 filters, F1
-  `dead` claims.
+- REMOVED: F10 `api`, F6 search filters, F11 exclude-generated flags.
+- DEMOTED: F1 `dead` routing.
 - OWNER: F2 flag demotion.
 - REMOVE: none approved; F2 1/5, F11 filters 1/5; L6 INSUFFICIENT.
 
@@ -102,5 +104,5 @@ See `reviews/R14-p8/decision-matrix.md`. Summary:
 3. Add one utility task each for F2/F3/F5/F6/F9/F11 before any routing claim.
 4. Fix ambiguous-edge visibility in `impact`/`unresolved` or document it in
    the user-facing caveat.
-5. Decide the DEMOTE packets with the owner; no schema drop is required.
+5. Cleanup is applied; no schema drop is required.
 6. Do not run a REMOVE decision until L6's checklist is met.

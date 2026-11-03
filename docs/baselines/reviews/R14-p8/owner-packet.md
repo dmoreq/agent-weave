@@ -1,6 +1,6 @@
 # R14 owner packet — DEMOTE / REMOVE / replication
 
-Status: **decided 2026-11-03**. KEEP F4/F7 confirmed; D1-D4 applied as routing/claim demotions. See `owner-decision.md`.
+Status: **decided and cleaned up 2026-11-03**. KEEP F4/F7 confirmed; D1-D3 removed from the CLI/MCP/query surface; D4 is routing-only. See `owner-decision.md` and `cleanup-2026-11-03.md`.
 
 ## A. DEMOTE packets (code stays)
 
@@ -67,6 +67,7 @@ R14 rule.
 ## D. Owner decision
 
 - KEEP F4/F7: confirmed.
-- D1-D4: applied as demotions.
+- D1-D3: code surfaces removed.
+- D4: routing demoted; command kept.
 - F2/F11 filters: not removed; L6 blocks.
 - Ambiguous call sites: open IMPROVE item, not part of this packet.

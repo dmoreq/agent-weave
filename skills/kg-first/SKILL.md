@@ -60,7 +60,7 @@ for correctness, safety, or review takes precedence over avoiding duplicate navi
    edge is unresolved. No path in the resolved graph does not prove no runtime
    connection. Inspect `callees`/`callers` and source or grep for missing hops
    instead of repeating an unchanged `path` query.
-4. **Static-surface caveats**: `implementers`, `imports`, `tests`, `api`, and
+4. **Static-surface caveats**: `implementers`, `imports`, `tests`, and
    `complexity` are static. Successful evaluation cases do not establish complete
    repository coverage; a negative is not proof. `tests` misses Rust `#[test]` names outside `test_*`, TS
    `describe`/`it` callbacks, and function-local imports. `dead` is a

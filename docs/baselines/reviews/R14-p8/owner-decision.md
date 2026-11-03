@@ -9,18 +9,18 @@ routing.
 |---|---|---|
 | KEEP F4 | **CONFIRMED** | Existing `kg impact` routing kept; latency gate 97-144 ms vs 150 ms; n=5 replication -53.3% tools, 5/5 correct |
 | KEEP F7 | **CONFIRMED** | Existing `kg imports` routing kept; n=5 replication -57.1% tools, 5/5 correct |
-| D1 F10 `api` | **DEMOTE** | Removed `kg api` from `skills/kg-first/SKILL.md` and the README command list; spec marks it experimental |
-| D2 F6 search filters | **DEMOTE** | Removed `--kind/--path/--exact` filter claim from README; spec marks the combinations experimental; base search and `kg resolve` stay routed |
-| D3 F11 filters | **DEMOTE** | Spec marks the six `--exclude-generated` flags experimental; tag, `files`, and `stats generated=N` stay supported |
-| D4 F1 `dead` | **DEMOTE** | Removed `kg dead` from the `kg-first` routing row; spec marks `dead` candidate-only; `implementers` stays routed |
+| D1 F10 `api` | **REMOVE** | `kg api` CLI, MCP tool, and query removed; `symbols.exported` kept for schema compatibility |
+| D2 F6 search filters | **REMOVE** | `search --kind/--path/--exact` removed from CLI/MCP/query; base search and `kg resolve` stay |
+| D3 F11 filters | **REMOVE** | Six `--exclude-generated` flags removed; tag, `files`, and `stats generated=N` stay |
+| D4 F1 `dead` | **DEMOTE** | `kg dead` removed from `kg-first` routing; command stays candidate-only; `implementers` stays routed |
 | F2 `--context` | **NOT REMOVED** | L6 INSUFFICIENT and 1/5 REMOVE; no change |
-| F11 filters | **NOT REMOVED** | L6 INSUFFICIENT and 1/5 REMOVE; flags kept, marked experimental |
+| F11 filters | **REMOVED (D3)** | Covered by D3; tag/stats/files remain |
 
 ## Consequences
 
-- No schema, CLI, MCP, payload, or journal surface was removed.
-- The demoted commands remain available for explicit use; only routing and
-  claim surfaces changed.
+- D1-D3 removed their CLI/MCP/query surfaces; schema columns and generated tags remain.
+- `kg api` and the filter flags are no longer available; `dead` remains an
+  explicit command outside routing.
 - F4/F7 are KEEP on one host. Cross-host grok/agy replication remains open.
 - A future REMOVE decision still requires the L6 checklist.
 

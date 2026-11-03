@@ -160,7 +160,6 @@ fn g10_initialize_tools_list_and_parity() {
             "unresolved",
             "symbols",
             "complexity",
-            "api",
             "files",
             "resolve",
             "search",
@@ -296,7 +295,6 @@ fn g10_initialize_tools_list_and_parity() {
             json!({"min_cyc": 1}),
             vec!["complexity", "--min-cyc", "1"],
         ),
-        ("api", json!({"path": "app.py"}), vec!["api", "app.py"]),
         (
             "hotspots",
             json!({"limit": 5}),
@@ -456,7 +454,7 @@ fn g10_initialize_tools_list_and_parity() {
     // Every dispatched tool call journaled with the mcp surface: callers,
     // symbols (plain), symbols (outline), search, clones, clones (min_lines
     // failure), dead, stats, path, plus the R6e parity additions (callees,
-    // impact, hotspots, report, unresolved, imports, complexity, api; imports
+    // impact, hotspots, report, unresolved, imports, complexity; imports
     // no-result). The
     // unknown tool is rejected
     // before dispatch and journals nothing; CLI reference commands above add
@@ -466,7 +464,7 @@ fn g10_initialize_tools_list_and_parity() {
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 20, "{log}");
+    assert_eq!(mcp_lines, 19, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -477,8 +475,8 @@ fn g10_initialize_tools_list_and_parity() {
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
     assert_eq!(
-        mcp_payload, 13,
-        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+tests+complexity+api, not stats: {payload}"
+        mcp_payload, 12,
+        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+tests+complexity, not stats: {payload}"
     );
     let callers_line = payload
         .lines()

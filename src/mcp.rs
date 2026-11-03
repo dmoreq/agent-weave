@@ -47,31 +47,29 @@ fn tools() -> Value {
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
         {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; sites=true lists every call site; edges/depth extend the dependency set",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "sites": {"type": "boolean"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "edges": {"type": "string"}, "context": {"type": "boolean"}, "explain": {"type": "boolean"}, "limit": limit}), &["file"])},
-        {"name": "dead", "description": "Dead-code candidates (no resolved inbound calls/imports/inherits) — candidates, never proof; exclude_tests/generated and path scope filters",
-         "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "exclude_generated": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
+        {"name": "dead", "description": "Dead-code candidates (no resolved inbound calls/imports/inherits) — candidates, never proof; exclude_tests and path scope filters",
+         "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
         {"name": "unresolved", "description": "Per-file unresolved-callee counts, or names=true for path:line kind name sites",
          "inputSchema": schema_obj(json!({"names": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
         {"name": "symbols", "description": "Symbols of one indexed file or directory, ordered by line; outline adds signatures, metrics adds per-symbol metrics",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "outline": {"type": "boolean"}, "metrics": {"type": "boolean"}, "limit": limit}), &["file"])},
         {"name": "complexity", "description": "Per-symbol complexity ranking: cyclomatic, branches, nesting, effective LOC",
-         "inputSchema": schema_obj(json!({"min_cyc": {"type": "integer", "minimum": 0}, "min_loc": {"type": "integer", "minimum": 0}, "min_branches": {"type": "integer", "minimum": 0}, "min_nest": {"type": "integer", "minimum": 0}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &[])},
-        {"name": "api", "description": "Public/exported symbol inventory for a file or directory",
-         "inputSchema": schema_obj(json!({"path": {"type": "string"}, "include_private": {"type": "boolean"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &["path"])},
+         "inputSchema": schema_obj(json!({"min_cyc": {"type": "integer", "minimum": 0}, "min_loc": {"type": "integer", "minimum": 0}, "min_branches": {"type": "integer", "minimum": 0}, "min_nest": {"type": "integer", "minimum": 0}, "path": {"type": "string"}, "limit": limit}), &[])},
         {"name": "files", "description": "Indexed file inventory with symbol/byte counts and generated tag",
          "inputSchema": schema_obj(json!({"path": {"type": "string"}, "limit": limit}), &[])},
         {"name": "resolve", "description": "Batch-resolve names: found/ambiguous/missing per name",
          "inputSchema": schema_obj(json!({"names": {"type": "array", "items": {"type": "string"}, "maxItems": 1000}}), &["names"])},
-        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms; kind/path/exact filters",
-         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "kind": {"type": "string"}, "path": {"type": "string"}, "exact": {"type": "boolean"}, "limit": limit}), &["terms"])},
+        {"name": "search", "description": "Symbol-level search: bm25-ranked FTS5 over split identifier terms",
+         "inputSchema": schema_obj(json!({"terms": {"type": "string"}, "limit": limit}), &["terms"])},
         {"name": "clones", "description": "Duplicate-block candidates: merged 5-line shingle windows, paired",
-         "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}, "limit": limit}), &[])},
+         "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "path": {"type": "string"}, "limit": limit}), &[])},
 
         {"name": "stats", "description": "Index totals: files, symbols, edges, parse errors, sizes",
          "inputSchema": schema_obj(json!({}), &[])},
         {"name": "hotspots", "description": "Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density",
-         "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "path": {"type": "string"}, "exclude_generated": {"type": "boolean"}}), &[])},
+         "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "path": {"type": "string"}}), &[])},
         {"name": "report", "description": "Four-section architecture report",
-         "inputSchema": schema_obj(json!({"path": {"type": "string"}, "exclude_generated": {"type": "boolean"}}), &[])},
+         "inputSchema": schema_obj(json!({"path": {"type": "string"}}), &[])},
         {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates; verify=true replays sampled payload pointers (Amendment 10)",
          "inputSchema": schema_obj(json!({"verify": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10000}}), &[])},
     ])
@@ -258,7 +256,6 @@ fn required_args(tool: &str) -> &'static [&'static str] {
         "callers" | "callees" | "context" | "implementers" | "tests" => &["name"],
         "path" => &["from", "to"],
         "impact" | "symbols" | "imports" => &["file"],
-        "api" => &["path"],
         "resolve" => &["names"],
         "search" => &["terms"],
         _ => &[],
@@ -434,7 +431,6 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
                 arg_bool(args, "exclude_tests"),
-                arg_bool(args, "exclude_generated"),
                 arg_str(args, "path").as_deref(),
             )?;
             record(&out);
@@ -482,18 +478,6 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 arg_usize(args, "min_branches", 0),
                 arg_usize(args, "min_nest", 0),
                 arg_str(args, "path").as_deref(),
-                arg_bool(args, "exclude_generated"),
-                arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
-            )?))
-        }
-        "api" => {
-            let conn = crate::db::open_for_query(root)?;
-            Ok(join_lines(&crate::query::api(
-                &conn,
-                root,
-                &arg_str(args, "path").unwrap_or_default(),
-                arg_bool(args, "include_private"),
-                arg_bool(args, "exclude_generated"),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
@@ -550,9 +534,6 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &conn,
                 root,
                 &arg_str(args, "terms").unwrap_or_default(),
-                arg_str(args, "kind").as_deref(),
-                arg_str(args, "path").as_deref(),
-                arg_bool(args, "exact"),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
@@ -568,7 +549,6 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 min_lines,
                 arg_str(args, "path").as_deref(),
-                arg_bool(args, "exclude_generated"),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
             )?))
         }
@@ -581,13 +561,11 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             root,
             arg_usize(args, "limit", 10),
             arg_str(args, "path").as_deref(),
-            arg_bool(args, "exclude_generated"),
         )?)),
         "report" => Ok(join_lines(&crate::insights::report(
             &crate::db::open_for_query(root)?,
             root,
             arg_str(args, "path").as_deref(),
-            arg_bool(args, "exclude_generated"),
         )?)),
         "usage" => {
             if args
@@ -699,10 +677,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "dead" => {
             out.push(("exclude_tests", arg_bool(args, "exclude_tests").to_string()));
-            out.push((
-                "exclude_generated",
-                arg_bool(args, "exclude_generated").to_string(),
-            ));
             out.push(("path", arg_str(args, "path").unwrap_or_default()));
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
         }
@@ -713,10 +687,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "hotspots" => {
             out.push(("path", arg_str(args, "path").unwrap_or_default()));
-            out.push((
-                "exclude_generated",
-                arg_bool(args, "exclude_generated").to_string(),
-            ));
             out.push(("limit", arg_usize(args, "limit", 10).to_string()));
         }
         "implementers" => {
@@ -741,22 +711,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             ));
             out.push(("min_nest", arg_usize(args, "min_nest", 0).to_string()));
             out.push(("path", arg_str(args, "path").unwrap_or_default()));
-            out.push((
-                "exclude_generated",
-                arg_bool(args, "exclude_generated").to_string(),
-            ));
-            out.push(("limit", arg_usize(args, "limit", 50).to_string()));
-        }
-        "api" => {
-            out.push(("path", arg_str(args, "path").unwrap_or_default()));
-            out.push((
-                "include_private",
-                arg_bool(args, "include_private").to_string(),
-            ));
-            out.push((
-                "exclude_generated",
-                arg_bool(args, "exclude_generated").to_string(),
-            ));
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
         }
         "files" => {
@@ -765,10 +719,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "report" => {
             out.push(("path", arg_str(args, "path").unwrap_or_default()));
-            out.push((
-                "exclude_generated",
-                arg_bool(args, "exclude_generated").to_string(),
-            ));
         }
         "resolve" => {
             let n = args
@@ -791,9 +741,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(terms) = arg_str(args, "terms") {
                 out.push(("terms", terms));
             }
-            out.push(("kind", arg_str(args, "kind").unwrap_or_default()));
-            out.push(("path", arg_str(args, "path").unwrap_or_default()));
-            out.push(("exact", arg_bool(args, "exact").to_string()));
             out.push((
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
@@ -801,10 +748,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
         }
         "clones" => {
             out.push(("path", arg_str(args, "path").unwrap_or_default()));
-            out.push((
-                "exclude_generated",
-                arg_bool(args, "exclude_generated").to_string(),
-            ));
             out.push((
                 "min_lines",
                 args.get("min_lines")

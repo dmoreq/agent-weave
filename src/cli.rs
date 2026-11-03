@@ -131,9 +131,6 @@ pub enum Cmd {
         /// Exclude tests/ paths and test_* symbols (policy filter)
         #[arg(long)]
         exclude_tests: bool,
-        /// Exclude generated files (path/marker detection)
-        #[arg(long)]
-        exclude_generated: bool,
         /// Restrict to a repo-relative file or directory prefix
         #[arg(long)]
         path: Option<String>,
@@ -180,23 +177,6 @@ pub enum Cmd {
         /// Restrict to a repo-relative file or directory prefix
         #[arg(long)]
         path: Option<String>,
-        /// Exclude generated files
-        #[arg(long)]
-        exclude_generated: bool,
-        /// Maximum results shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
-        limit: usize,
-    },
-    /// Public/exported symbol inventory for a file or directory
-    Api {
-        /// Repo-relative file or directory path
-        path: String,
-        /// Include private (underscore-prefixed) symbols
-        #[arg(long)]
-        include_private: bool,
-        /// Exclude generated files
-        #[arg(long)]
-        exclude_generated: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -220,15 +200,6 @@ pub enum Cmd {
     Search {
         /// Space-separated terms; camelCase/snake_case are split and matched
         terms: String,
-        /// Filter by symbol kind (function, method, class, module, ...)
-        #[arg(long)]
-        kind: Option<String>,
-        /// Restrict to a repo-relative file or directory prefix
-        #[arg(long)]
-        path: Option<String>,
-        /// Match the full qualname or bare name exactly
-        #[arg(long)]
-        exact: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -241,9 +212,6 @@ pub enum Cmd {
         /// Restrict to pairs where both regions are under this prefix
         #[arg(long)]
         path: Option<String>,
-        /// Exclude generated files
-        #[arg(long)]
-        exclude_generated: bool,
         /// Maximum pair lines shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -258,18 +226,12 @@ pub enum Cmd {
         /// Restrict to a repo-relative file or directory prefix
         #[arg(long)]
         path: Option<String>,
-        /// Exclude generated files
-        #[arg(long)]
-        exclude_generated: bool,
     },
     /// Four-section architecture report (overview, map, hotspots, fan-in)
     Report {
         /// Restrict sections 2-4 to a repo-relative file or directory prefix
         #[arg(long)]
         path: Option<String>,
-        /// Exclude generated files
-        #[arg(long)]
-        exclude_generated: bool,
     },
     /// Inspect index health (integrity, versions, staleness, orphans)
     Doctor {

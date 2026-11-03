@@ -19,6 +19,20 @@ changes bump the minor while 0.x is unstable.
 **Required action:** run `kg build` to replace older indexes with schema v7. Query opens on v6 exit 5.
 Consumers that parse output must review the query-shape changes listed below before upgrading.
 
+### Removed — ineffective surfaces (2026-11-03)
+
+- `kg api` and its MCP tool are removed. The `symbols.exported` column and
+  extraction remain for schema compatibility; no CLI or MCP surface reads it.
+- `search --kind`, `search --path`, and `search --exact` are removed. Base
+  `kg search <terms>` and the identity fast path remain.
+- The six `--exclude-generated` flags on `dead`, `clones`, `hotspots`,
+  `report`, and `complexity` are removed. `files.generated`, `stats
+  generated=N`, and the generated tag remain.
+- `dead` stays as a command but is no longer routed by `kg-first`; it is
+  candidate-only until a precision gate exists.
+- Package version moves to `0.3.0` for the breaking CLI/MCP contract change.
+  Schema stays v7.
+
 ### Changed — build performance (2026-11-03)
 
 - Fresh builds create secondary indexes after the bulk insert

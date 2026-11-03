@@ -35,8 +35,6 @@ const CONTEXT_CAVEAT: &str =
 
 /// Permanent honesty caveat for `kg implementers` (Amendment 19).
 const IMPLEMENTERS_CAVEAT: &str = "kg: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
-/// Permanent honesty caveat for `kg api`.
-const API_CAVEAT: &str = "kg: api — static export heuristics; re-exports, module visibility, non-callable declarations (const/static/type aliases/variables), and dynamic exports may be incomplete";
 
 /// `impact` caveats (Amendment 19): the default calls-only shape stays
 /// byte-identical; the extended shapes state their static-edge limit.
@@ -1907,7 +1905,6 @@ pub fn dead(
     root: &Path,
     limit: usize,
     exclude_tests: bool,
-    exclude_generated: bool,
     path: Option<&str>,
 ) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
@@ -1961,9 +1958,6 @@ pub fn dead(
               AND s.name NOT LIKE 'test\\_%' ESCAPE '\\'
               AND s.name NOT GLOB 'test[A-Z]*'",
         );
-    }
-    if exclude_generated {
-        predicate.push_str(" AND f.generated = 0");
     }
     if let Some(path) = path {
         let escaped = path
@@ -2031,23 +2025,15 @@ pub fn complexity(
     min_branches: usize,
     min_nest: usize,
     path: Option<&str>,
-    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
-    let mut gen_filter = file_path_scope_sql("s", path);
-    if exclude_generated {
-        gen_filter.push_str(" AND s.file_id NOT IN (SELECT id FROM files WHERE generated = 1)");
-    }
-    let default_filters = min_cyc <= 1
-        && min_loc == 0
-        && min_branches == 0
-        && min_nest == 0
-        && path.is_none()
-        && !exclude_generated;
+    let gen_filter = file_path_scope_sql("s", path);
+    let default_filters =
+        min_cyc <= 1 && min_loc == 0 && min_branches == 0 && min_nest == 0 && path.is_none();
     let total: i64 = if default_filters {
         db::meta_get(conn, "callable_count")
             .and_then(|v| v.parse().ok())
@@ -2243,132 +2229,6 @@ pub fn files(conn: &Connection, path: Option<&str>, limit: usize) -> Result<Vec<
         eprintln!("[kg] capped at {shown} results ({total} total)");
     }
     crate::journal::record_result(total, shown, total, false, 0);
-    Ok(out)
-}
-
-/// `kg api` (Amendment 19): exported/public symbol inventory for a file or
-/// directory. Visibility is a static name heuristic in v1.
-pub fn api(
-    conn: &Connection,
-    root: &Path,
-    path: &str,
-    include_private: bool,
-    exclude_generated: bool,
-    limit: usize,
-) -> Result<Vec<String>> {
-    let limit = clamp_limit(limit)?;
-    let rel = path
-        .trim_start_matches("./")
-        .trim_end_matches('/')
-        .to_string();
-    validate_path_scope(&rel, false)?;
-    let root_scope = false;
-    let mut where_sql = String::from("s.kind IN ('function','method','class','trait','interface')");
-    if !root_scope {
-        where_sql.push_str(" AND (f.path = ?1 OR substr(f.path, 1, length(?1) + 1) = ?1 || '/')");
-    }
-    if !include_private {
-        where_sql.push_str(" AND s.exported = 1");
-    }
-    if exclude_generated {
-        where_sql.push_str(" AND s.file_id NOT IN (SELECT id FROM files WHERE generated = 1)");
-    }
-    let total: usize = if root_scope {
-        conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {where_sql}"
-            ),
-            [],
-            |r| r.get::<_, i64>(0),
-        )? as usize
-    } else {
-        conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {where_sql}"
-            ),
-            [&rel],
-            |r| r.get::<_, i64>(0),
-        )? as usize
-    };
-    if total == 0 {
-        let imports: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM edges e
-             JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
-             WHERE f.path = ?1 AND e.kind = 'imports'",
-            [&rel],
-            |r| r.get(0),
-        )?;
-        let detail = if imports > 0 {
-            format!(
-                "0 exported symbols in '{path}' (module declarations and re-exports are not listed; query the imported files)"
-            )
-        } else {
-            format!("0 exported symbols in '{path}'")
-        };
-        return Err(KgError::NoResultsCaveated {
-            caveat: API_CAVEAT,
-            detail,
-        });
-    }
-    let sql = format!(
-        "SELECT f.path, s.line_start, s.kind, s.qualname, s.signature
-         FROM symbols s JOIN files f ON f.id = s.file_id
-         WHERE {where_sql}
-         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let map_row = |r: &rusqlite::Row<'_>| {
-        let mut text = format!(
-            "{}:{} {} {}",
-            r.get::<_, String>(0)?,
-            r.get::<_, i64>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?
-        );
-        let sig: String = r.get(4)?;
-        if !sig.is_empty() {
-            text.push(' ');
-            text.push_str(&sig);
-        }
-        Ok(text)
-    };
-    let rows: Vec<String> = if root_scope {
-        stmt.query_map([], map_row)?
-            .collect::<std::result::Result<_, _>>()?
-    } else {
-        stmt.query_map([&rel], map_row)?
-            .collect::<std::result::Result<_, _>>()?
-    };
-    let shown = rows.len();
-    let stale = rows.iter().take(shown).any(|line| {
-        line.split(':')
-            .next()
-            .is_some_and(|p| file_changed(conn, root, p))
-    });
-    let mut out = vec![API_CAVEAT.to_string()];
-    if stale {
-        out.push("kg: result files changed since build — run kg build".to_string());
-    }
-    let data_lines: Vec<String> = rows.iter().take(shown).cloned().collect();
-    out.extend(data_lines.iter().cloned());
-    if total > shown {
-        out.push(format!("showing {shown} of {total}"));
-        eprintln!("[kg] capped at {shown} results ({total} total)");
-    }
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(
-        path,
-        &data_lines,
-        stale,
-        shown,
-        total,
-        built_at,
-        &source_rev,
-    );
-    crate::journal::record_result(total, shown, total, stale, 0);
     Ok(out)
 }
 
@@ -2781,72 +2641,8 @@ fn symbols_directory(
 /// tokens. Hits are symbol identities — the tier field position stays empty
 /// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
 /// for cap, post-cap staleness, and payload capture.
-pub fn search(
-    conn: &Connection,
-    root: &Path,
-    terms: &str,
-    kind: Option<&str>,
-    path: Option<&str>,
-    exact: bool,
-    limit: usize,
-) -> Result<Vec<String>> {
+pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
-    if let Some(p) = path {
-        validate_path_scope(p, false)?;
-    }
-    // Exact identity is a separate lookup: it must not depend on FTS
-    // tokenization (`_`, `$`) or write a fuzzy payload on a miss.
-    if exact {
-        let mut filter = path_scope_sql("f", path);
-        if let Some(kind) = kind {
-            let escaped = kind.replace('\'', "''");
-            filter.push_str(&format!(" AND s.kind = '{escaped}'"));
-        }
-        let exact_name = terms.trim();
-        let exact_total: usize = conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
-                 WHERE (s.name = ?1 OR s.qualname = ?1) {filter}"
-            ),
-            [exact_name],
-            |r| r.get::<_, i64>(0),
-        )? as usize;
-        if exact_total == 0 {
-            return Err(KgError::NoResults(format!(
-                "0 symbols matched '{terms}' exactly"
-            )));
-        }
-        let mut stmt = conn.prepare(&format!(
-            "SELECT f.path, s.line_start, s.qualname, s.signature
-             FROM symbols s JOIN files f ON f.id = s.file_id
-             WHERE (s.name = ?1 OR s.qualname = ?1) {filter}
-             ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
-        ))?;
-        let rows = stmt.query_map([exact_name], |r| {
-            let qualname: String = r.get(2)?;
-            let signature: String = r.get(3)?;
-            Ok(Pointer {
-                file: r.get::<_, String>(0)?,
-                line: r.get::<_, i64>(1)?,
-                tag: "",
-                detail: if signature.is_empty() {
-                    qualname
-                } else {
-                    format!("{qualname} {signature}")
-                },
-            })
-        })?;
-        let out = collect_output(
-            conn,
-            root,
-            terms,
-            rows,
-            limit,
-            &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
-            Some(exact_total),
-        )?;
-        return search_lines(out);
-    }
     // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
     // and rarer tokens rank higher — natural-language fit without brittle
     // all-token AND requirements.
@@ -2887,17 +2683,10 @@ pub fn search(
     // Amendment 14b: hits carry the stored one-line signature after the
     // qualname — the agent no longer needs a follow-up `symbols` call to
     // learn what the hit is. Empty signature keeps the 12b byte shape.
-    let mut filter = path_scope_sql("f", path);
-    if let Some(kind) = kind {
-        let escaped = kind.replace('\'', "''");
-        filter.push_str(&format!(" AND s.kind = '{escaped}'"));
-    }
     let mut total: usize = conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM symbols_fts ft
-             JOIN symbols s ON s.id = ft.rowid JOIN files f ON f.id = s.file_id
-             WHERE symbols_fts MATCH ?1 {filter}"
-        ),
+        "SELECT COUNT(*) FROM symbols_fts ft
+         JOIN symbols s ON s.id = ft.rowid JOIN files f ON f.id = s.file_id
+         WHERE symbols_fts MATCH ?1",
         [&expr],
         |r| r.get::<_, i64>(0),
     )? as usize;
@@ -2934,7 +2723,7 @@ pub fn search(
          FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid
          JOIN files f ON f.id = s.file_id
-         WHERE symbols_fts MATCH ?1 {filter}
+         WHERE symbols_fts MATCH ?1
          -- Tie-break on stable columns: rowids differ between fresh and
          -- carried builds, so bm25 alone is not deterministic (R6d A9).
          ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
@@ -2972,10 +2761,8 @@ pub fn search(
     if toks.len() == 1 {
         let exact_name = toks.join(" ");
         let exact_total: usize = conn.query_row(
-            &format!(
-                "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
-                 WHERE (s.name = ?1 OR s.qualname = ?1) {filter}"
-            ),
+            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+             WHERE (s.name = ?1 OR s.qualname = ?1)",
             [exact_name.as_str()],
             |r| r.get::<_, i64>(0),
         )? as usize;
@@ -2983,7 +2770,7 @@ pub fn search(
             let mut stmt = conn.prepare(&format!(
                 "SELECT f.path, s.line_start, s.qualname, s.signature
                  FROM symbols s JOIN files f ON f.id = s.file_id
-                 WHERE (s.name = ?1 OR s.qualname = ?1) {filter}
+                 WHERE (s.name = ?1 OR s.qualname = ?1)
                  ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
             ))?;
             let rows = stmt.query_map([exact_name.as_str()], |r| {
@@ -3026,7 +2813,6 @@ pub fn clones(
     root: &Path,
     min_lines: usize,
     path: Option<&str>,
-    exclude_generated: bool,
     limit: usize,
 ) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
@@ -3034,19 +2820,14 @@ pub fn clones(
         validate_path_scope(p, false)?;
     }
     let min_lines = min_lines.max(crate::clones::WINDOW);
-    let gen_filter = if exclude_generated {
-        " AND f.generated = 0"
-    } else {
-        ""
-    };
-    let mut stmt = conn.prepare(&format!(
+    let mut stmt = conn.prepare(
         "SELECT cg.shingle_hash, f.path, cg.line_start, cg.line_end
          FROM clone_groups cg JOIN files f ON f.id = cg.file_id
          WHERE cg.shingle_hash IN (
              SELECT shingle_hash FROM clone_groups
-             GROUP BY shingle_hash HAVING COUNT(*) >= 2) {gen_filter}
-         ORDER BY cg.shingle_hash, f.path, cg.line_start"
-    ))?;
+             GROUP BY shingle_hash HAVING COUNT(*) >= 2)
+         ORDER BY cg.shingle_hash, f.path, cg.line_start",
+    )?;
     let mut groups: std::collections::BTreeMap<i64, Vec<(String, i64, i64)>> = Default::default();
     let rows = stmt.query_map([], |r| {
         Ok((

@@ -1,5 +1,13 @@
 # kg Structural Graph Amendment — Dependencies, Test Candidates, and Symbol Quality (P8)
 
+> **Current status (2026-11-03, Amendment 22).** R14 value review and the
+> owner cleanup removed three surfaces described below:
+> `kg api` (F10), the `search --kind/--path/--exact` filters (F6), and the six
+> `--exclude-generated` flags (F11). The `symbols.exported` and
+> `files.generated` columns remain for index compatibility; `stats
+> generated=N`, `files`, and the generated tag remain. Sections below are the
+> historical proposal except where a current-status note says otherwise.
+
 ## Reading status
 
 This companion preserves proposal revision 4 and its subsequent schema-v7 amendment, not a pending approval request.
@@ -107,13 +115,13 @@ introduced once in P8a so P8a/P8b can write `unresolved_calls.kind` and
 | `kg files` | new | P8a | F3 |
 | `kg symbols <dir>` | directory input | P8a | F3 |
 | `kg resolve` | new, `--stdin` | P8b | F6 |
-| `kg search` | `--kind`, `--path`, `--exact` | P8b | F6 |
+| `kg search` | filters removed 2026-11-03 | P8b | F6 |
 | `kg imports <FILE>` | new | P8b | F7 |
 | `kg tests <NAME\|FILE>` | new | P8b | F8 |
 | `kg unresolved` | `--names`, `--path`; schema v6 `site_line` + `kind` | P8c | F5 |
 | `kg complexity` | new | P8c | F9 |
 | `kg symbols` | `--metrics` | P8c | F9 |
-| `kg api <FILE\|DIR>` | new | P8c | F10 |
+| `kg api <FILE\|DIR>` | removed 2026-11-03 | P8c | F10 |
 | `kg stats` | `generated=N` | P8c | F11 |
 | Dart extraction | no new command | P9 | F12 |
 
@@ -252,7 +260,7 @@ and also on an empty result.
 | `symbols --metrics` | P8c | additive columns |
 | `api` | P8c | new command; signature column included |
 | `stats` | P8c | `generated=N` inserted after `files=N` |
-| `dead`/`clones`/`hotspots`/`report`/`complexity`/`api` | P8c | opt-in `--exclude-generated`; default output unchanged |
+| `dead`/`clones`/`hotspots`/`report`/`complexity` | P8c | `--exclude-generated` removed 2026-11-03; tag/stats/files remain |
 | `impact`/`callers`/`callees`/`symbols`/`imports` | P8a/P8b | `--context` only on `impact`; `callers --context` withdrawn to avoid duplicating `kg context` |
 
 ## 5. Features
@@ -495,9 +503,9 @@ and where?
      mangle successful per-name lines.
    - Journal `args`: `count` and `candidate_limit=50`; never the names.
    - MCP `names` uses the same 4096-byte per-name and 1 MiB total bounds.
-2. `kg search <terms> --kind <k> --path <P> --exact`:
-   - `--kind` filters symbol kind; `--path` uses §4 item 9;
-   - `--exact` matches full qualname or bare name exactly, bypassing FTS;
+2. `kg search <terms>` (filter flags removed 2026-11-03; historical text:
+   `--kind` filtered symbol kind, `--path` used §4 item 9, `--exact` matched
+   the full qualname or bare name);
      exact hits first, then path, line, qualname; the signature column stays
      (Amendment 14);
    - default output unchanged.
@@ -670,7 +678,7 @@ length ceilings?
   `kg: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic`.
 - Gate G26.
 
-### F10 — Public API/export inventory (P8c, schema v6)
+### F10 — Public API/export inventory (P8c, schema v6; REMOVED 2026-11-03)
 
 **Question answered:** what is the public surface of this package or
 directory?
@@ -700,7 +708,8 @@ directory?
   library's part files at query time. No cross-file stored export state.
   P9's addendum pins the node kinds and part resolution.
 
-**Surface:** `kg api <FILE|DIR> [--include-private] [--exclude-generated] [--limit N]`.
+**Surface:** removed 2026-11-03. Historical contract follows; the CLI and MCP
+surface are gone, and `symbols.exported` remains only for index compatibility.
 
 - Output `path:line kind qualname [signature]`, sorted by path, line,
   qualname; standard cap. `signature` is the stored one-line signature and is
@@ -739,7 +748,7 @@ must exclude them?
   generated files when `--exclude-generated` is passed; default output is unchanged.
 - `callers`, `callees`, `path`, `impact`, `symbols`, `imports` keep
   generated files navigable.
-- `kg stats` gains `generated=N` after `files=N`; contract bump. The six `--exclude-generated` filters are experimental: the P8 journal recorded no filter use and no utility task exists. The tag, `files` inventory, and `stats` count remain supported.
+- `kg stats` gains `generated=N` after `files=N`; contract bump. The six `--exclude-generated` filters were removed on 2026-11-03 after zero journal use and no utility task. The tag, `files` inventory, and `stats` count remain supported.
 - Gate G26.
 
 ### F12 — Dart/Flutter support (P9)
@@ -1021,7 +1030,6 @@ kg impact file.py --edges calls,imports,inherits --depth 3
 kg imports file.py         # what does this file import (outbound)?
 kg tests X                 # which tests reach X? (candidates)
 kg complexity --min-cyc 10 # functions over the ceiling
-kg api src/                # public surface of a package
 kg files --path src        # indexed files in a directory
 kg symbols src/ --outline  # directory structure with signatures
 kg unresolved --names      # unresolved callees with lines
@@ -1050,8 +1058,8 @@ table:
 | `code-simplification` | Get callers and file metrics from `code-index` before changing a symbol; `dead` is a candidate list, not proof. |
 | `code-minimalism` | Use `code-index callers` before declaring a helper local; use `imports`/`impact --edges imports` for cross-package consumers. |
 | `deprecation-migration` | Use `code-index callers`/`impact --edges` for internal consumers; `__all__`, sibling repos, and external consumers still require grep/manual audit. |
-| `codebase-contracts` | Use `kg symbols <dir> --outline`, `kg files`, and `kg api` for directory inventory; resolve claims in batch with `kg resolve`. |
-| `python-patterns` | Use `kg imports` for module boundaries and `kg api` for public exports; call-graph traces use `callers`/`path`. |
+| `codebase-contracts` | Use `kg symbols <dir> --outline` and `kg files` for directory inventory; resolve claims in batch with `kg resolve`. |
+| `python-patterns` | Use `kg imports` for module boundaries; call-graph traces use `callers`/`path`. |
 | `python-testing` | Use `kg tests` as a candidate test set, then run the decisive targeted pytest command. |
 | `doubt-driven-development` | Use `kg path` and `kg impact --depth` for blast-radius probes; state the static-resolution caveat. |
 
