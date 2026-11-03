@@ -1,351 +1,258 @@
-# kg — Evaluation
+# kg evaluation
 
-All numbers in this document are measured, with the command attached, against
-the binary being shipped. Detailed per-run evidence lives in
-[`docs/baselines/`](baselines/) (internal records; they use real corpus-repo
-names, this document does not). Nothing here is projected or extrapolated
-without being labeled as such.
+## Corrections to earlier claims
 
-**TL;DR**
+The earlier introduction incorrectly described all results as measurements of the shipping binary. They span multiple historical snapshots and schemas. No benchmarks or runtime tests were run for this documentation update on 2026-11-03.
 
-| question | answer (measured) |
-|----------|-------------------|
-| Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets; P8 real-corpus GT 77/77 at 1.000 (imports 40, tests 20, inheritance 17) |
-| Is the query loop fast? | 5-11 ms best-of-7 end-to-end per invocation (spawn floor ~6 ms); < 10 ms on a 382 MB index (11k-file tree); query memory is bounded by the display cap since schema v5 — `docs/baselines/perf-v5-2026-11-02.md` |
-| Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.38 s best-of-7 on the self-index (~18 MB RSS); 2.70-2.79 s best-of-7 at the 2,025-file synthetic corpus (1.25x budget 2.91 s) — `baselines/perf-v5-2026-11-02.md`, `tests/scripts/timing_assert.sh` |
-| Does it make a coding agent better? | navigation recall 98.6% vs 81.9% grep-only, at flat token cost |
-| Does it make an agent cheaper? | only when routed: query-first policy cut input tokens **-27.3%** (1,058,613 → 769,306 per run) at unchanged recall |
-| Does it answer semantic questions? | No — static resolution only. Out of scope by design. |
+The earlier search table also conflated two metrics from `search_recall.py`. Mean query recall was **0.775**; pooled symbol recall was **22/28 = 0.786**. Queries have different expected-set sizes, so these values need not match.
 
-Corpora are referred to by neutral labels throughout:
+## Summary
 
-| label | description | files | symbols | edges |
-|-------|-------------|-------|---------|-------|
-| corpus A | ~102k-LOC Python address-parsing monorepo | 252 | 3,291 | 9,128 |
-| corpus B | TS/TSX product prototype | 135 | 488 | 1,848 |
-| corpus C | multi-tenant data-collection backend (Python) | 52 | 385 | 717 |
-| corpus D | Python DAG/notebook generator | 596 | 3,119 | 3,849 |
-| corpus E | Python map-search service | 150 | 1,381 | 3,486 |
-| corpus F | Python data-science pipeline | 27 | 103 | 166 |
-| kg self | this repository (Rust) | 37 | 380 | 1171 |
+Historical experiments found better navigation recall with kg and lower input-token use with query-first routing on one host. Feature-specific savings varied by task and host; test lookup and API inventory did not show savings in the measured tasks.
 
-## 1. Methodology
+| Question | Reported finding | Scope |
+|---|---|---|
+| Can pointers be checked against source? | 777/777 sampled pointers matched source locations | Six private corpora, 2026-11-01; not repository-wide recall |
+| Can kg improve agent answers? | Mean navigation recall 81.9% without kg versus 98.6% with kg | Three tasks, six runs per arm, Grok Build |
+| Does kg reduce tokens automatically? | No: unrouted kg increased tool calls 73%; input tokens fell only 2.8% | Same navigation experiment |
+| Can routing reduce tokens? | Query-first input tokens fell 27.3% versus no kg | Ten runs per arm on that host |
+| Which feature had repeatable savings? | `path` reduced calls on all four tested host/model pairs | Small, frozen route-task sets; not a general guarantee |
+| Does kg understand program behavior? | No: these results concern static relationships and lexical retrieval | Dynamic and semantic questions still need source inspection |
 
-- **Frozen tasks + ground truth**: 5 navigation tasks (hub callers, state-hub
-  callers, signature-impact, flow trace, transitive callees) with 60
-  owner-delegated, agent-verified call-site rows frozen before measurement
-  (`baselines/tasks.md`, `baselines/ground-truth*.md`, `baselines/expected/`).
-- **Correctness scoring**: mechanical checker (`baselines/harness/check.py`)
-  compares answer JSON against frozen expected sets — precision, recall,
-  ordering, grouping. No hand-picking; disagreements audited individually.
-- **Agent A/B**: 40 primary instrumented agent runs (+2 alternate T5 fills) across two hosts, both CLI-agent
-  surfaces (`opencode run`, `grok -p`; MCP byte parity is tested separately in G10), two arms (grep-only vs kg-available),
-  with per-call byte accounting and per-session token accounting taken from
-  host-recorded stores, not self-reports (`baselines/grok-a-b-2026-11-01.md`).
-- **Reproduction**: every record carries its commands; run manifests and
-  session IDs are committed (`baselines/grok-a-b-2026-11-01/`).
+All measurements below are **historical results reported from private evidence**. Raw corpora, frozen answers, agent transcripts, and some runners are unavailable in the public distribution. Public source tests can check behavior, but cannot reproduce these private numbers.
 
-## 2. Performance ceiling pass (historical, pre-schema-v4)
+## 1. How to interpret the comparisons
 
-The numbers in this section were measured on the schema-v3 binary; the
-shipped schema-v5 numbers (2,025-file fresh build 2.33 s / 183 MB RSS /
-57.4 MB index) are in `docs/baselines/perf-v5-2026-11-02.md`.
+Two different controls answer different questions. Do not interpret a feature comparison as evidence for kg versus no kg.
 
-A measured optimization pass (spec Amendment 11) against a 2,025-file
-synthetic corpus (index 4.6 MB) and the self-index:
+| Experiment | Control | Treatment |
+|---|---|---|
+| Navigation, 2026-11-01 | No kg: grep/rg/find and file reads | Same tools plus kg, either unrouted or query-first |
+| Feature utility, 2026-11-02 | kg available, target feature forbidden | Same binary, target feature first |
+| Structural-command utility, initial 2026-11-03 battery | kg available, target command forbidden | Same binary, target command first |
+| Imports/dependency replication, later 2026-11-03 | No kg commands permitted | Target kg command required |
 
-| surface | before | after | factor |
-|---------|--------|-------|--------|
-| `kg build --force` wall | 1.16 s | 0.27 s | 4.3x |
-| — parse phase (single- → 8-worker parallel) | 0.66 s | 0.11 s | 6x |
-| — db phase (fsync per 500-row chunk → single transaction) | 0.39 s | 0.09 s | 4.3x |
-| `kg callers` end-to-end | 15.1 ms | 7.6 ms | -50%, flat in index size |
-| `kg hotspots` (re-parsed the repo per call) | 409-781 ms | 31 ms | 13-25x |
-| `kg report` | 560 ms | 44 ms | ~12x |
+Reported agent metrics use host-recorded counters, not agent estimates. Tool calls count host tool invocations; kg calls count executed kg commands. A single shell invocation can contain multiple kg commands, so those totals are not interchangeable.
 
-The query-path win came from removing a full-B-tree `PRAGMA quick_check` from
-every open (0.7-1.1 ms/MB of index) — corruption still exits 3 via SQLite's
-own corruption reports; deep integrity remains `kg doctor`. The hotspots win
-came from computing cyclomatic/LOC once at build time (schema v3, additive)
-instead of re-parsing every file per invocation.
+Recall means average the fraction of expected answers found per task or query. Pooled recall divides all matched expected items by all expected items. Pointer authenticity checks source locations; it does **not** measure missing relationships or semantic correctness.
 
-## 3. Multi-repo verification
+### Historical corpus scope
 
-Fresh force builds on six real codebases + the self-index (post-optimization
-binary):
+Neutral labels A–F identify the private corpora referenced below. Individual private corpus sizes are withheld to avoid identifying repositories through size fingerprints.
 
-| check | result |
-|-------|--------|
-| Parse errors | 0 across all corpora |
-| Pointer authenticity (callers/impact/dead/symbols spot-checked against source lines) | **777/777 (100%)** |
-| Fast path | second build carries 100% of files on every corpus |
-| Corrupt-index contract | garbage/non-SQLite pages exit 3 with the contract message; a zero-length file exits 5 (schema-skew class, documented) |
-| Dirty closure | callee-side and caller-side edits both preserve cross-file edges; table totals invariant |
-| MCP vs CLI parity | tool text byte-identical to CLI stdout (1,793-byte sample) |
-| Staleness | silent on fresh indexes; header fires after a live edit |
-| Extraction determinism | parallel workers merge in deterministic order (build.rs); totals are asserted by the conformance suite |
+| Corpus | Description | Languages |
+|---|---|---|
+| A | Address-parsing monorepo | Python |
+| B | Product prototype | TypeScript/TSX |
+| C | Multi-tenant collection backend | Python |
+| D | DAG/notebook generator | Python |
+| E | Map-search service | Python |
+| F | Data-science pipeline | Python |
 
-Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
+The public kg-self corpus used an earlier Rust snapshot of this repository: 37 indexed files, 380 symbols, and 1,171 edges. These are historical counts, not current repository sizes.
 
-## 4. Correctness gates
+## 2. Agent navigation: kg versus no kg
 
-| gate | what it measures | result |
-|------|------------------|--------|
-| G2 precision/recall | `kg callers` vs 60 frozen ground-truth call sites on 3 GT sets | recall 100% (29/29, 20/20) on vihap/finguard plus 10/10 on the refreshed self set (verified today); call-site precision 662/664 (99.7%; the two known failures are listed in the records) — PASS |
-| G3 query latency | p95 over repeated pointer queries | 5-11 ms best-of-7 (limit 20 ms; re-run 9.8-10.5 ms on a 382 MB index) |
-| G11 payload conformance | 1 payload line per successful pointer call, byte-equal pointers, verify FAIL=0 | 594 pointers verified, FAIL=0 (CHANGELOG A11 entry; `kg usage --verify` on a fresh build reproduces FAIL=0) |
-| G12 perf-pass conformance | corrupt exit 3, v3 carry-forward, hotspots from index, deterministic merge order | PASS (105/105 tests at schema v5) |
-| G13 outline utility | `kg symbols --outline` replacing file reads in the task battery | 41.7% tool-call reduction vs the grep baseline (+1 call vs the plain-kg control), -62.7% bytes, zero correctness delta — PASS |
-| G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.775 recall (22/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure and 0.800 pre-R7 (ranking trade-offs recorded in the P6 and R7 reports) — PASS (bar 0.70) |
-| G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
-| G17 call-path traversal | `kg path` vs 10 exact-byte fixtures + 8 frozen GT pairs (hop edges verified EXTRACTED at freeze) + latency | 10/10 fixtures byte-exact; 8/8 GT agreement; 0.6-1.4 ms in-process best-of-7 across the 85k-symbol synth corpus and the self-index (budget 20 ms) — PASS. Routes are resolved-edge CANDIDATES: dynamic dispatch may hide paths |
-| G23-G28 structural graph | P8 fixture suite plus frozen real-corpus GT | imports 40/40, tests 20/20, inheritance 17/17; Rust/TS/Python exact-byte controls; schema v7 carry/probe/order tests — PASS |
+The main comparison used corpus A and five frozen tasks: hub callers, state-hub callers, signature impact, flow tracing, and transitive callees. Answers were mechanically scored against frozen expected sets; the private task collection included 60 verified call-site rows.
 
-## 5. Agent A/B — the measured case for kg
+The 2026-11-01 run used Grok Build 1.0.70, model `grok-4.7-build`, and a post-optimization snapshot recorded as `82d0b02`. It used `grok --always-approve --max-turns 40`, two runs per task and arm, then ten additional query-first runs. Exact prompts, session IDs, scorer inputs, and accounting scripts are private.
 
-40 primary instrumented runs (+2 alternate T5 fills); the headline experiment is 20 runs on corpus A
-(5 frozen tasks x 2 arms x 2 runs, one agent host), replicated with a
-query-first routing policy (+10 runs) and cross-checked on a second host.
-
-**Utility of features added after that battery** (G14/G16/G17 were
-quality-only gates). Stage 1 — `kg path`, 24 runs = 3 route tasks x 2 arms
-x 2 hosts x 2 runs on sanitized corpora, oracle = the frozen G17 pairs:
-correctness 24/24 in BOTH arms, so no loss; routed arm cut kg calls
-44.8 -> 4.0 and input tokens 360K -> 156K per run on Grok Build, and
-5.2 -> 1.5 kg calls / 27.0K -> 17.4K input tokens on OpenCode
-gpt-6-sol. One `path` call answers most route questions; the control arm
-stays correct at high exploration cost. Stage 2 — `kg search`, same
-24-run protocol: correctness 24/24 in both arms, but no economics gain over 24 runs
-(−18% tool calls Grok, +3% OpenCode; kg calls up) — utility UNPROVEN for
-single-target lookups whose vocabulary matches identifiers. Stage 3 —
-`kg clones`, 16 runs on a seeded fixture: correctness 16/16 both arms;
-tools −59% and tokens −39% on Grok, tools −17% and noisy tokens on
-OpenCode — PARTIAL (host-dependent, Grok only). Search retest after the
-Amendment 14 upgrade (path+signature tokens, signature in hits; 16 runs):
-16/16 correct, Grok −38% calls / −28% tokens, OpenCode −17% calls —
-G18(iii) FAIL by the both-hosts bar, owner decision recorded in the
-baseline report. Stage 4 — `path` at 2,201-file scale (24 runs): correctness
-24/24; tool calls −59%/−61%, kg calls −87%/−77%, tokens −43%/−12% on
-Grok/OpenCode — the call bar clears on BOTH hosts at this scale. Record:
-`baselines/agent-utility-2026-11-02.md` (+ `baselines/utility-run-2026-11-02/`).
-
-### 5.1 Correctness first
-
-| | grep-only arm | kg arm |
-|--|---------------|--------|
-| Gating-task recall (T1-T3, mean of 6 runs) | 81.9% | **98.6%** |
-| Re-export/indirect callers (T2) | 50% / 50% — missed them | **100% / 100%** |
-| Flow-trace task (T4, recall-only) | 0/2 runs hit the stage classes | 2/2 hits in the routed arm |
-| Transitive callees (T5, recall-only) | 0/2 runs | 100% (cross-host routed run) |
-
-The grep arm's misses are structural: re-export chains and indirect call
-sites that name-only tools cannot follow. They are exactly the resolution
-algorithm's design target.
-
-### 5.2 The economics surprise (honest)
-
-The original scripted-harness anchor predicted -50% tool calls / -67% bytes.
-**It did not replicate with a free-running agent.** Left to its own habits,
-the agent used kg as a supplement (3.8 kg calls inside 35.7 total) and spent
-MORE tool calls (+73%) exploring and verifying — tokens came out flat.
-
-What kg bought at flat cost was correctness (5.1). To also capture the token
-win, the agent must be **routed**: a binding prompt clause — run kg first for
-who-calls/impact/callees/flow questions; grep only for what kg cannot answer.
-Measured effect of routing (n=10 vs n=10, same host):
-
-| metric (mean/run) | grep-only | kg, unrouted | kg, query-first routed |
-|-------------------|-----------|--------------|------------------------|
-| input tokens | 1,058,613 | 1,028,665 | **769,306 (-27.3%)** |
-| output tokens | 13,773 | 13,403 | 10,850 (-21.2%) |
-| model calls | 20.2 | 19.9 | 17.2 (-14.9%) |
-| kg calls | 0 | 3.7 | 8.8 |
-| gating recall | 81.9% | 98.6% | 98.6% |
-
-The saving is NOT from kg's output being smaller (tool outputs are ~2.1-2.3% of
-input tokens). Input rows are n=10/arm; output and model-call rows are
-n=9/arm (the n=10 means for those two rows were not recorded). It compounds from a shorter trajectory: one kg call replaces a
-grep-noise loop, the transcript stays short, and every subsequent model call
-re-sends less. This is why routing must be enforced by prompt/skill, not
-hoped for.
-
-### 5.3 Host dominance
-
-The same routed policy on a second host/model (10 runs + 2 alternate T5 fills) kept compliance
-(4.4 kg calls/run) and the structural wins (T2 100%, T5 100%), but gating
-recall fell to 85.9% — vs 98.6% on the first host with identical tool
-access. kg supplies correct data; the ceiling on final answers is the
-agent's own capability. Skill files standardize tool behavior; they do not
-raise model capability.
-
-### 5.4 Where kg does not help
-
-- Semantic questions ("where is X behavior implemented") — out of scope.
-- Dynamic dispatch and untyped attribute calls: static resolution covers
-  10-48% of raw call sites (unresolved 51.8-90.4% across six measured corpora;
-  Django 71.7%, vscode 62.9%); the tool reports the gap and recommends grep.
-- Notebook-heavy corpora (corpus D/F class): resolution coverage ~10-19%,
-  leverage concentrates in `hotspots`/`report` instead.
-
-## 6. Limitations and threats to validity
-
-- **n=2 per task cell** in the A/B; T4/T5 split 1/2 within the routed arm —
-  per-task numbers are directional, the aggregate recall delta is the robust
-  signal.
-- **Answer-contract artifacts** independent of arms: T1 `grouping` and T2
-  `ordering` keys failed system-wide because task prompts lacked JSON-shape
-  examples; those two sub-scores under-report all arms equally.
-- **Cross-host token counters differ in scope** (what each host counts as
-  input) — token comparisons are made only within one host.
-- **Single-repo A/B anchor**: the deep instrumentation ran on corpus A; the
-  other corpora have pointer-authenticity and gate coverage, not full A/B.
-- **Warm-cache timings** on a local SSD; cold-cache numbers will be worse
-  but preserve the ratios.
-
-## 7. Evidence map
-
-| claim | record |
-|-------|--------|
-| perf ceiling pass | `baselines/perf-v5-2026-11-02.md` (schema v5); the pre-v4 A11 table lives in the root CHANGELOG |
-| multi-repo verification | `baselines/multi-repo-verification-2026-11-01-post-a11.md` |
-| G2/G11/G12 gates | `baselines/ground-truth*.md`, gate rows in the spec |
-| G13 outline | `baselines/g13-outline-2026-11-01.md` |
-| G14 search | `baselines/g14-search-2026-11-01.md` |
-| G17 path | `baselines/g17-path-2026-11-02.md`, frozen pairs `baselines/path-gt.jsonl` |
-| P8 real-corpus GT | `baselines/real-corpus-gt-2026-11-02.md`, `baselines/import-gt.jsonl`, `baselines/tests-gt.jsonl`, `baselines/inheritance-gt.jsonl` |
-| P8 evaluation and fixes | `baselines/reviews/R10-P8-evaluation.md` |
-| G16 clones | `baselines/g16-clones-2026-11-01.md` |
-| P4 spec + implementation reviews | `baselines/reviews/R4-P4.md` (the R4b implementation review is a section inside it) |
-| agent A/B + routing + replication | `baselines/grok-a-b-2026-11-01.md` (+ `baselines/grok-a-b-2026-11-01/` manifests and audits) |
-| feature-utility A/B (path, Stage 1) | `baselines/agent-utility-2026-11-02.md`, protocol `baselines/tasks-utility.md`, run artifacts `baselines/utility-run-2026-11-02/` |
-| tasks, ground truth, harness | `baselines/tasks.md`, `baselines/ground-truth*.md`, `baselines/harness/` |
-
-Internal records use real corpus-repo names; this document intentionally does
-not.
-
-## 8. R7 ceiling-review hardening (2026-11-02, Amendment 18)
-
-Four Goldfish lenses (path/context, call-graph queries, retrieval,
-analysis/infrastructure) reviewed every feature for utility, accuracy, and
-latency. The batch below fixes the highest-value findings; schema stays v5.
-All numbers are measured with the shipped binary.
-
-| surface | before | after | evidence |
-|---------|--------|-------|----------|
-| Python signatures ending at `(` (corpus A, 3,039 non-module symbols) | 500 (16.5%) | **0** | old binary built from `HEAD` (v0.2.0) vs current, both `build --force`; SQL count `substr(signature,-1)='('` |
-| signature-only parameter query `kg search skip_prewarm` (corpus A) | target absent from top-50 | **rank 2** | same two indexes; the parameter lives on a wrapped line the old capture dropped |
-| qualified/exact search latency (2,201-file synthetic corpus, journal) | — | **0.74 ms mean**, 0.90 ms p95 (20 runs) | `.kg/usage.log` latency_us |
-| no-op `kg build` at 2,201 files | 0.09-0.11 s (rewrote the DB) | **0.02-0.03 s**, `index.db` byte-unchanged | `/usr/bin/time -p` + hash/mtime compare; regression test `noop_build_leaves_the_index_untouched` |
-| `kg stats` (2,201 files) | filtered COUNT scans | **0.98 ms mean**, manifest counters | journal latency; fallback to COUNT for old indexes |
-| self ground truth | 10/10 | **10/10, call-site precision 49/49** | `precision_recall.py` after the R7 line refresh |
-| path ground truth | 8/8 | **8/8** | `path_recall.py` |
-| search recall (G14) | 0.800 | **0.775** (22/28), bar 0.70 | `search_recall.py`; richer signature tokens shift bm25 ranking, while signature-only `skip_prewarm` moves from absent to rank 2 |
-| tests | 115 | **132** | `cargo test --locked --release` |
-
-Behavior changes recorded as contract bumps: full multi-line parameter lists
-in signatures (one-time re-extraction via `signature_version`, no schema
-bump); call-site identity after caller/callee/context pointers; per-file
-`impact` rows with `(N sites)` unless `--sites`; clone spans name the
-largest-overlap enclosing symbol; `unresolved` adds distinct-name,
-`internal=`, and top-name lines; `report` adds a first-line freshness
-caveat; MCP returns `-32602` for a missing required argument. Accuracy
-changes: Python nested defs scope to the enclosing function, Rust inline
-`mod` and TS namespaces qualify members, module symbols no longer create
-false ambiguity, hotspots count `elif`/`case`/ternary and exclude comment-only
-LOC, clones filter `--min-lines` after window merging.
-
-## 9. Host extension — agy CLI and zcode CLI (2026-11-02)
-
-Replayed the frozen A/B prompts on two additional hosts: agy 1.4.12 with
-`gemini-3.8-flash-high`, and zcode 0.1.82 with its default DeepSeek V4.1
-Flash model. 52 cells: path P1-P3 x 2 arms x 2 hosts x 2 runs, plus one run
-each for search B1-B2, clones C1-C2, and context F1-F3. Full record:
-`baselines/hosts-utility-2026-11-02.md`; raw cells under
-`baselines/utility-run-2026-11-02/`.
-
-| feature | agy | zcode | correctness |
-|---|---|---|---|
-| `path` | tools −71%, kg calls −81%, input tokens −63% | tools −63%, kg calls −64%, input tokens −36% | 6/6 both |
-| `context` | tools −28%, kg calls −57%, input tokens −36% | tools −48%, kg calls −67%, input tokens −25% | 3/3 both |
-| `search` | tools −38%, input −47%, kg calls +50% | tools −29%, input +10%, kg calls +100% | 2/2 both |
-| `clones` | tools −22%, input −18% | tools −6%, input −2%, kg calls 4.5 | 2/2 both |
-
-`path` and `context` clear the 20% tool-call bar on both new hosts with
-correctness parity. `search` meets the call bar but raises kg calls and has
-mixed token economics. `clones` transfers only on agy, the same
-host-dependence seen on Grok/OpenCode. Search/clones/context are n=1 per
-cell, directional; path is n=2. Two limitations are recorded in the baseline:
-agy exceeded the 25-tool budget in 5 control cells, and F2 is scored against a host-specific expected overlay
-containing two verified sites that v0.2.1 now resolves; the shared frozen
-oracle is unchanged.
-
-## 10. P8 structural graph (2026-11-02, Amendment 19/20, schema v7)
-
-Four independent Goldfish lenses evaluated F1-F12 at `c39e21f`; the R10
-record (`baselines/reviews/R10-P8-evaluation.md`) found F5/F8/F11/schema v6 at
-ceiling and the rest below. The R10 fix cycle closed that batch. The R11
-record (`baselines/reviews/R11-P8-evaluation.md`) re-ran the same four-lens
-protocol at `1fd4d37`; its six Critical findings are closed. The R12 record
-(`baselines/reviews/R12-P8-evaluation.md`) re-ran it again at `69ad161`; its
-one Critical and six Important findings are closed with regression tests.
-
-| surface | measured | command |
-|---------|----------|---------|
-| schema v7 fresh build, 2,025-file synthetic corpus | **2.70-2.79 s** best-of-7 wall (budget 2.91 s; 1.25x frozen 2.33 s) | `target/release/kg build --force` x7 |
-| `kg dead --limit 50`, 85,050 symbols | **147.5 ms** best-of-7 (budget 200 ms) | `tests/scripts/timing_assert.sh` |
-| `kg complexity --limit 1` | **19.3 ms** best-of-7 on 85k symbols; **6.9 ms** on the 987k-symbol corpus (budget 50 ms) | `timing_assert.sh` |
-| `kg complexity --path synth` | **26.2 ms** on 85k symbols; **201 ms** on 987k symbols (R11 amendment: budget 250 ms) | same |
-| `kg symbols synth --limit 50` | **21.9 ms** best-of-7 (budget 50 ms) | same |
-| `kg tests <no-hit>` | **5.4 ms** best-of-5 | same |
-| `kg impact --depth 3`, 1.37M-edge hub | **112.2 ms** best-of-7 (budget 150 ms) | `baselines/p8-latency-2026-11-03.md` |
-| `kg tests --depth 10`, 1.37M-edge hub | **163.4 ms** best-of-7 (budget 200 ms) | same |
-| `kg impact <file> --depth 10` | **5.1 ms** best-of-5 | same |
-| Flutter corpus build smoke | 124 indexed files, 735 symbols, 0 parse errors, 3.46 s | `kg build --root <flutter>` |
-| test suite | 198 tests (25 lib + 25 bin + 115 CLI + 26 fixture + 7 MCP) | `cargo test --locked` |
-
-Real-corpus gates are local-only and frozen at kg `342ebc3`, vihap `efcd310`,
-finguard `dddfe07`, Flutter `20f82749394`:
-
-| gate | GT rows | result | harness |
-|------|---------|--------|---------|
-| F7 imports | 40 (25 vihap + 15 kg self) | **recall 40/40 = 1.000, precision 183/183 = 1.000**, Wilson 95% 0.912-1.000 | `tests/scripts/import_recall.py` |
-| F8 tests | 20 vihap symbols across 20 test files | **recall 20/20 = 1.000, precision 2679/2679 = 1.000**, Wilson 95% 0.839-1.000 | `tests/scripts/tests_recall.py` |
-| F1 inheritance | 15 vihap Python (10 same-file + 5 cross-file) + 2 finguard TS (1 same-file + 1 cross-file) | **17/17 = 1.000**, Wilson 95% 0.816-1.000 | `tests/scripts/inheritance_recall.py` |
-
-GT was derived from source ASTs (Python `ast`, tree-sitter Rust/TS) before
-measuring kg. Entry construction and exclusions are recorded in
-`baselines/real-corpus-gt-2026-11-02.md`.
-
-Contract and accuracy changes in this batch: schema v7 denormalizes
-`symbols.file_path` for deterministic complexity ordering; Rust use trees and
-module mapping; TS extension/index collapse and default-import semantics;
-two-pass exports; TS arrow metric ranges; import-site dedup and callable-only
-context tags; complexity/api staleness and payloads; directory-scope
-no-result text; bounded `tests`/`impact` collectors. Pinned limits remain:
-Dart is not indexed (P9), cross-file Rust `impl Trait for Type` is omitted,
-and function-local imports are not test-impact seeds.
-
-## 11. P8 agent-utility battery (2026-11-03)
-
-First P8-specific A/B: 5 tasks x 2 arms x 4 hosts x 2 runs. Control used the
-same kg binary with the target P8 command forbidden; treatment routed to it
-first. Full protocol and report: `baselines/p8-utility-2026-11-03.md`.
-
-| task | Grok tools | agy tools | zcode tools | verdict |
+| Metric | No kg | kg, unrouted | kg, query-first | Sample |
 |---|---:|---:|---:|---|
-| imports (`kg imports`) | 14.0 -> 4.0 (-71%) | 18.0 -> 14.5 (-19%) | 4.0 -> 4.0 (0%) | PARTIAL |
-| tests (`kg tests`) | 5.5 -> 4.5 (-18%) | 4.5 -> 8.5 (+89%) | 6.0 -> 6.5 (+8%) | NO VALUE |
-| implementers | 5.5 -> 4.5 (-18%) | 18.0 -> 7.0 (-61%) | 5.0 -> 5.0 (0%) | PARTIAL |
-| impact imports depth 1 | 8.5 -> 6.0 (-29%) | 20.5 -> 13.0 (-37%) | 10.0 -> 5.5 (-45%) | **KEEP** |
-| api inventory | 3.5 -> 4.0 (+14%) | 2.0 -> 4.5 (+125%) | 3.5 -> 4.5 (+29%) | NO VALUE |
+| Mean recall, first three tasks | 81.9% | 98.6% | 98.6% | Six answers per arm |
+| Input tokens, mean/run | 1,058,613 | 1,028,665 | 769,306 | Ten runs per arm |
+| Tool calls, mean/run | 20.6 | 35.7 | 24.9 | Ten runs per arm |
+| kg calls, mean/run | 0 | 3.7 | 8.8 | Ten runs per arm |
+| Output tokens, recorded mean/run | 13,773 | 13,403 | 10,850 | Nine-run accounting summaries; ten-run means unavailable |
+| Model calls, recorded mean/run | 20.2 | 19.9 | 17.2 | Nine-run accounting summaries; ten-run means unavailable |
 
-All retained valid-host cells were correct. OpenCode's 20 cells are invalid:
-its CLI ignored the corpus working directory and executed against the kg
-workspace; raw rows are retained but excluded. Two agy control cells called
-the forbidden feature and were excluded. n=2 per cell, so deltas are
-directional. R14 added n=5 replications on grok/agy/zcode. F7 is uniform: -50.0% /
--76.2% / -57.1%. F4 is host-dependent: -66.7% / -53.3% on agy/zcode but
--16.7% on grok. The owner confirmed KEEP for both. R14
-also demoted `kg api` and the search-filter claims from routing; F2 and the
-`--exclude-generated` filters remain REMOVE candidates blocked by the
-evidence-integrity gate. Record: `baselines/reviews/R14-P8-value-re-evaluation.md`.
+Query-first input tokens were 27.3% below the no-kg control, but tool calls remained higher. Merely making kg available did not reproduce an earlier scripted comparison's 50% call reduction or 67% byte reduction.
+
+The state-hub task improved from 50% to 100% recall in both kg runs. Flow tracing succeeded in zero of two no-kg runs, one of two unrouted runs, and both query-first runs. These are small samples, not per-task guarantees.
+
+The native Grok query-first transitive-callees runs scored 0% and 40% recall. A failed initial run was retried; a separate OpenCode `openai/gpt-6-luna` alternate scored 100%, while `gpt-6.1-terra` scored 40%. These alternates are not included in Grok token means.
+
+### Host/model dependence
+
+A ten-run OpenCode `openai/gpt-6-luna` query-first replication scored 85.9% mean recall on the first three tasks, versus Grok's 98.6%. It retained 100% recall on the state-hub and transitive-callees tasks, but had no same-host no-kg economics control.
+
+The primary collection contained 40 runs across the navigation arms and hosts, plus two alternate fills. Token counters differ between hosts; no cross-host token comparison is valid.
+
+### Scoring limitations
+
+- Each task/arm had only two runs. No statistical significance claim is made.
+- Grouping and ordering fields failed across arms where prompts lacked JSON-shape examples.
+- Some expected answers excluded test callers without stating that exclusion in the question. Extra test pointers reduced precision.
+- Flow and transitive-callees tasks were recall-only, not part of the three-task headline mean.
+- The deep navigation comparison covered corpus A, not every corpus in the table above.
+
+## 3. Feature utility: kg with and without one command
+
+The 2026-11-02 experiments used sanitized source-only corpora and frozen answers outside the queried tree. Controls could use other kg commands or grep. Treatments had to call the target feature first; both arms used the same binary within each experiment.
+
+The first two hosts were Grok Build 1.0.70 (`grok-4.7-build`) and OpenCode CLI (`openai/gpt-6-sol`). The records identify feature-era builds rather than one common commit. Deltas below compare mean tool calls and mean input tokens **within each host**.
+
+| Feature/task set | Total runs across both arms/hosts | Exact-answer matches, combined | Grok tools / input tokens | OpenCode tools / input tokens |
+|---|---:|---:|---|---|
+| `path`, three route tasks | 24 | 24/24 | -57% / -57% | -86% / -36% |
+| `path`, 2,201-file synthetic chains | 24 | 24/24 | -59% / -43% | -61% / -12% |
+| `search`, identifier-vocabulary lookup | 24 | 24/24 | -18% / +0.2% | +3% / -36%, cache-contaminated |
+| `search`, signature/delegation retest | 16 | 16/16 | -38% / -28% | -17% / -32%, cache-noisy |
+| `clones`, seeded exact duplicates | 16 | 16/16 | -59% / -39% | -17% / +32%, cache-contaminated |
+
+Each task/arm/host had two runs. The search retest followed an index upgrade that added path/signature tokens. It still failed the experiment's requirement for at least 20% call reduction on both hosts.
+
+Clone utility covered a 12-file fixture with four seeded exact pairs, a renamed near-duplicate, and decoys. Controls happened to use no kg commands. This does not establish utility for semantic duplication or arbitrary real repositories.
+
+### Two additional hosts
+
+The same feature-control design was run with agy 1.4.12 (`gemini-3.8-flash-high`) and zcode 0.1.82 (`deepseek-ai/DeepSeek-V4.1-Flash-1017`). The 52 runs comprised 24 path runs and 28 search/clone/context runs; all retained answers matched their expected sets.
+
+| Feature | agy tools / input tokens | zcode tools / input tokens | Runs per task/arm/host |
+|---|---|---|---:|
+| `path` | -71% / -63% | -63% / -36% | 2 |
+| `context` | -28% / -36% | -48% / -25% | 1 |
+| `search` | -38% / -47% | -29% / +10% | 1 |
+| `clones` | -22% / -18% | -6% / -2% | 1 |
+
+Search increased kg calls on both additional hosts. Clone and context results are directional at one run per cell. Five agy path controls exceeded the 25-tool budget and were retained; one hung control was rerun.
+
+Two contaminated smoke runs were discarded before valid measurement. One context task used a dated host-specific answer overlay containing two additional source-verified sites; it did not use exactly the earlier shared oracle.
+
+### Structural commands, 2026-11-03
+
+The initial experiment used kg `6dbe57a`, schema v7: five tasks, two arms, four hosts, and two runs per cell. Grok, agy, and zcode used the models named above. OpenCode was excluded after workspace-isolation failures; its exact model is not established here.
+
+| Task | Grok mean tool calls | agy mean tool calls | zcode mean tool calls |
+|---|---:|---:|---:|
+| Imports | 14.0 → 4.0 (-71%) | 18.0 → 14.5 (-19%) | 4.0 → 4.0 (0%) |
+| Test reachability | 5.5 → 4.5 (-18%) | 4.5 → 8.5 (+89%) | 6.0 → 6.5 (+8%) |
+| Implementers | 5.5 → 4.5 (-18%) | 18.0 → 7.0 (-61%) | 5.0 → 5.0 (0%) |
+| Direct import impact | 8.5 → 6.0 (-29%) | 20.5 → 13.0 (-37%) | 10.0 → 5.5 (-45%) |
+| API inventory | 3.5 → 4.0 (+14%) | 2.0 → 4.5 (+125%) | 3.5 → 4.5 (+29%) |
+
+Of 80 planned cells, 20 OpenCode cells and two contaminated agy controls were excluded, leaving 58 valid cells. Imports and implementers each retain only one agy control; other valid cells have two runs. All retained answers were correct.
+
+A later audit found that blanket OpenCode exclusion could bias the comparison: some cells reached the intended corpus by absolute path. OpenCode controls had nine correct captured answers; treatment had four wrong answers and one missing answer. These cells need individual workspace audits before reuse, not a claim of correctness parity.
+
+### Replication with a different control
+
+A later replication prohibited **all kg commands in controls**, unlike the initial feature-control battery. It tested imports on kg corpus `bc292ba` and direct dependency impact on corpus A `d060ace`, using the same three valid host/model pairs. The report does not pin a separate common binary revision.
+
+| Task | Grok median tool calls | agy median tool calls | zcode median tool calls |
+|---|---:|---:|---:|
+| Imports | 6 → 3 (-50.0%) | 21 → 5 (-76.2%) | 7 → 3 (-57.1%) |
+| Direct import impact | 6 → 5 (-16.7%) | 18 → 6 (-66.7%) | 15 → 7 (-53.3%) |
+
+The target was five runs per arm/host. The agy imports control instead reports the median of six correct runs, excluding one wrong answer and one forbidden-kg run. Other cells report five correct runs per arm; no token-saving claim accompanies this replication.
+
+Concurrent journals were contaminated, so control validity was checked from transcripts. Imports savings appeared on all three tested hosts; dependency-impact savings remained host-dependent. The small initial battery does not justify removing features that lacked savings on one task shape.
+
+## 4. Static accuracy and coverage
+
+High accuracy on selected expected relationships does not imply complete repository coverage. Across six measured corpora, 51.8–90.4% of raw call sites remained unresolved; separate large-corpus checks reported 71.7% and 62.9% unresolved. Notebook-heavy corpora had approximately 10–19% resolution coverage.
+
+The following results are historical source/fixture checks, not agent-answer scores. They use several snapshots; model and agent host are not applicable.
+
+| Check | Reported result | Snapshot and measurement method |
+|---|---|---|
+| Pointer authenticity | 777/777 sampled pointers matched source lines; zero parse errors across measured corpora | 2026-11-01 post-optimization build; `callers`, `impact`, `dead`, and `symbols` source checks |
+| Caller ground truth | 29/29 and 20/20 private expected sites; refreshed self set 10/10; pooled call-site precision 662/664 | Historical caller checks and later self refresh; `precision_recall.py`; two known precision failures |
+| Search, 20 queries / 28 expected symbols | Mean recall 0.850 → 0.800 → 0.775; pooled hits 24/28 → 23/28 → 22/28 | Schema v4 then two schema-v5 snapshots, 2026-11-01/02; `search_recall.py`, top 10 |
+| Clone quality fixture | 10/10 seeded pairs, zero spurious pairs, eight distractors and one near-duplicate | 2026-11-01 feature build; `clones_seed_gate` |
+| Path quality | Ten exact-output fixtures; 8/8 frozen route pairs agreed | 2026-11-02 feature build; `path_seed_gate` and `path_recall.py` |
+| Outline utility | Seven calls versus 12 with grep, but six with kg without outline; bytes -62.7% versus grep | kg `fe1fcc0`, schema v4; private five-task scripted replay, not a free-running agent A/B |
+
+Search ranking improved some signature-only lookups while reducing mean recall on the frozen query set. For example, one wrapped-parameter query moved from outside the top 50 to rank 2 after signature extraction changed. This is a trade-off, not a universal retrieval improvement.
+
+### Imports, tests, and inheritance
+
+The source-derived expected sets were frozen on 2026-11-02 at kg `342ebc3`, corpus A `efcd310`, and corpus B `dddfe07`. A 2026-11-03 rerun used corpus A `d060ace` and refreshed one moved self-source line. The harnesses are public, but their frozen inputs and private working trees are not.
+
+| Relationship | Expected-row recall | Reported precision | Wilson 95% interval for recall | Public harness |
+|---|---:|---:|---|---|
+| Imports | 40/40 | 183/183 | 0.912–1.000 | [import_recall.py](../tests/scripts/import_recall.py) |
+| Test reachability | 20/20 | 2,679/2,679 | 0.839–1.000 | [tests_recall.py](../tests/scripts/tests_recall.py) |
+| Inheritance | 17/17 | Not measured | 0.816–1.000 | [inheritance_recall.py](../tests/scripts/inheritance_recall.py) |
+
+Imports comprised 25 corpus-A rows and 15 kg-self rows. Test recall covered 20 corpus-A symbols across 20 files. Inheritance covered 15 Python rows, including five cross-file rows, and two TypeScript rows, including one cross-file row.
+
+Import precision checks whether emitted source blocks are import-shaped and name the target leaf. Test precision checks test-shaped qualnames, not runtime execution or proof that a test validates the target. These are narrower metrics than semantic precision.
+
+Excluded relationships included function-local Python imports as test seeds, cross-file Rust trait implementations, TypeScript `tsconfig` path aliases, and Dart. Tests used `--limit 10000` to avoid the default display cap. A Flutter-tree smoke build indexed 124 supported files and 735 symbols with zero parse errors; it did **not** demonstrate Dart support.
+
+## 5. Historical performance
+
+Timing results describe local measurements, not service-level guarantees. Best-of-N is a minimum, **not p95**; earlier wording mixed those metrics. Cache state and host load affect absolute times, and cold-cache ratios were not established.
+
+The schema-v5 record used macOS 27.0.0 arm64, eight CPUs, and 16 GB RAM on 2026-11-02. Its exact commit was described as a remediation snapshot, not pinned by hash in that record. The public synthetic generator produced 2,025 files, 85,050 symbols, and 164,025 edges.
+
+| Scenario | Reported measurement | Historical command/method |
+|---|---|---|
+| Schema-v5 fresh build | 2.33 s; peak RSS 183,222,272 B; index 57,393,152 B | `kg build --force --root <synth>`; repetition count unspecified |
+| Schema-v5 no-op rebuild | 1.65 s; peak RSS 88,997,888 B | `kg build --root <synth>`; repetition count unspecified |
+| Schema-v5 common queries | Under 10 ms on the synthetic corpus | `callers`, `callees --depth 3`, `path`, `search`, `clones --limit 5`; repetition count unspecified |
+| Later schema-v5 no-op, 2,201 files | 0.02–0.03 s; index byte-unchanged | `/usr/bin/time -p kg build`, hash/mtime comparison |
+| Schema-v7 fresh build, same 2,025-file generator | 2.70–2.79 s, best-of-seven summaries | `kg build --force`; pre-later-build-optimization snapshot |
+| Schema-v7 dead candidates, 85,050 symbols | 147.5 ms, best of seven | `kg dead --limit 50`, `timing_assert.sh` |
+| Schema-v7 complexity, 85k / 987k symbols | 19.3 / 6.9 ms | `kg complexity --limit 1`, `timing_assert.sh`; best-of-seven reported for 85k |
+| Schema-v7 path-filtered complexity, 85k / 987k symbols | 26.2 / 201 ms | `kg complexity --path synth`, `timing_assert.sh` |
+| Schema-v7 symbols, 85k symbols | 21.9 ms, best of seven | `kg symbols synth --limit 50`, `timing_assert.sh` |
+
+The later query records do not consistently pin binary hashes or complete host metadata. Do not merge these rows into one current-performance claim. Early schema-v3 optimization ratios are omitted because later schemas materially changed index contents and build costs.
+
+### Later build comparison and memory trade-off
+
+A 2026-11-03 interleaved comparison used kg 0.2.1/schema v7 at `6dbe57a` versus `968e160`. It used the same 2,025-file synthetic corpus and macOS host specification above. Seven baseline/final pairs ran under heavy external load, with load averages 41.66–53.89 on eight CPUs.
+
+| Metric | Baseline | Optimized | Delta |
+|---|---:|---:|---:|
+| Best wall time | 3.61 s | 1.87 s | -48.2% |
+| Median wall time | 4.04 s | 1.99 s | -50.7% |
+| Peak RSS | 155,370,048 B | 194,839,104 B | +25.4% |
+| Index size | 69,103,616 B | 66,404,352 B | -3.9% |
+
+Measurement used interleaved `kg build --force` invocations and resource accounting recorded privately. The speed gain came with approximately 40 MB higher peak RSS. A quiet-host remeasurement is needed before presenting 1.87 s as a typical absolute build time.
+
+### Large or adversarial indexes
+
+These historical stress results are not representative-repository averages. Their local synthetic indexes are unavailable publicly; exact binary/host metadata is incomplete.
+
+| Scenario | Reported result | Historical command/method |
+|---|---|---|
+| Approximately 1.09M matching symbols, schema v5 | Search 0.49 s, 18.9 MB RSS | `kg search a` |
+| 700 files sharing a five-line header, schema v5 | Clone candidates capped; 6.3 MB RSS | `kg clones`; lower-bound output, not exhaustive enumeration |
+| 4,000-file chain, one tail edit, schema v5 | Incremental rebuild 0.20 s versus 42.5 s before the fix | `kg build` after edit |
+| 1.37M-edge hub, schema v7 | Impact 97.1–144.3 ms across best-of-seven summaries | `kg impact synth/core.py --depth 3`, `timing_assert.sh` |
+| Same hub with 10,000 tests | 63.0–113.2 ms, depending on seed | `kg tests <seed> --depth 10`, best of seven |
+| 3.1M-edge stress hub | Impact 254.3 ms; tests 363.4 ms | Same command shapes, best of five; exceeded the smaller graph's budgets |
+
+The hub measurements did not cover the reverse-search branch used above 20,000 test-shaped symbols. Display caps and bounded collectors do not imply constant query time: traversal and matching still depend on graph shape and match count.
+
+## 6. What you can reproduce publicly
+
+The commands below are **verification recipes, not results from this documentation update**. Run them from the repository root. They check public fixtures and current source behavior, not the historical agent economics or private recall scores.
+
+| Behavior | Public source | Targeted command |
+|---|---|---|
+| Static resolution and negative controls | [tests/fixtures.rs](../tests/fixtures.rs) | `cargo test --locked --test fixtures` |
+| Outbound imports | [tests/cli.rs](../tests/cli.rs), `imports_lists_outbound_resolved_edges` | `cargo test --locked --test cli imports_lists_outbound_resolved_edges` |
+| Test reachability | Same file, `tests_impact_seed_covers_direct_indirect_depth_and_file_seed` | `cargo test --locked --test cli tests_impact_seed_covers_direct_indirect_depth_and_file_seed` |
+| Route fixtures | Same file, `path_seed_gate` | `cargo test --locked --test cli path_seed_gate` |
+| Duplicate-block candidates | Same file, `clones_seed_gate` | `cargo test --locked --test cli clones_seed_gate` |
+| Search behavior | Same file, `search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes` | `cargo test --locked --test cli search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes` |
+| Untouched no-op index | Same file, `noop_build_leaves_the_index_untouched` | `cargo test --locked --test cli noop_build_leaves_the_index_untouched` |
+| CLI/MCP contracts | [tests/mcp.rs](../tests/mcp.rs) | `cargo test --locked --test mcp` |
+
+For local synthetic measurements, inspect [make_synth_corpus.py](../tests/scripts/make_synth_corpus.py) and [timing_assert.sh](../tests/scripts/timing_assert.sh). The latter reports best-of-N wall time, accepts semantic exit codes 0/1/2, and does not calculate percentiles.
+
+Record the commit, binary build mode, operating system, CPU/RAM, corpus generator arguments, indexed totals, cache conditions, repetitions, and exclusions. Preserve every timing sample if you need a median or p95. Do not label new fixture results as reproductions of private agent experiments.
+
+## 7. Practical limits
+
+- Static edges are navigation candidates, not proof of runtime behavior. Dynamic dispatch and untyped attributes can hide callers and paths.
+- Empty output does not prove absence. Check unresolved sites, stale indexes, supported languages, and display limits before drawing conclusions.
+- Duplicate-block candidates do not prove semantic duplication; test reachability does not prove test adequacy.
+- Fewer calls do not establish lower monetary cost, latency, or production error rates. Measure those outcomes separately.
+- Host/model behavior, prompt routing, cache accounting, narrow tasks, and small samples limit transfer to other workflows.
+- Private measurements remain reported evidence, not independently reproducible public benchmarks.
