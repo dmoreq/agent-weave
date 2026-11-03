@@ -476,6 +476,14 @@ pub fn run_build(
         "callable_symbol_count",
         &callable_symbols.to_string(),
     )?;
+    let test_symbols: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM symbols
+         WHERE kind IN ('function', 'method')
+           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')",
+        [],
+        |r| r.get(0),
+    )?;
+    crate::db::set_meta(&conn, "test_symbol_count", &test_symbols.to_string())?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
     conn.close()

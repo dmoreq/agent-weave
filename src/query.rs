@@ -96,6 +96,10 @@ impl TestTop {
         self.seen.is_empty()
     }
 
+    fn len(&self) -> usize {
+        self.seen.len()
+    }
+
     fn finish(mut self) -> (usize, Vec<(String, i64, String)>) {
         let total = self.seen.len();
         let mut records = std::mem::take(&mut self.heap).into_vec();
@@ -169,10 +173,12 @@ pub fn test_impact(
     let mut visited_callables = seed_callables;
     let mut current = seed_ids;
     let total_callables = total_callables(conn)?;
+    let total_tests = total_test_symbols(conn)?;
     let mut tests = TestTop::new(limit);
     let mut truncated = false;
     for d in 1..=depth {
-        if current.is_empty() || visited_callables >= total_callables {
+        if current.is_empty() || visited_callables >= total_callables || tests.len() >= total_tests
+        {
             break;
         }
         let mut next = Vec::new();
@@ -1577,6 +1583,21 @@ fn has_test_candidates(conn: &Connection) -> Result<bool> {
         )
         .optional()?
         .is_some())
+}
+
+fn total_test_symbols(conn: &Connection) -> Result<usize> {
+    if let Some(value) = db::meta_get(conn, "test_symbol_count") {
+        if let Ok(n) = value.parse::<usize>() {
+            return Ok(n);
+        }
+    }
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM symbols
+         WHERE kind IN ('function', 'method')
+           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')",
+        [],
+        |r| r.get::<_, i64>(0),
+    )? as usize)
 }
 
 fn is_callable_kind(kind: &str) -> bool {
