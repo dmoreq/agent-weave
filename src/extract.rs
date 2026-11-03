@@ -2657,18 +2657,19 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             t.symbols.push(s);
             t.existing_ids.push(None);
             t.by_qualname.entry(qualname.clone()).or_default().push(idx);
-            let direct_child = qualname == format!("{module}.{name}");
+            let direct_child = is_direct_child(&module, &name, &qualname);
             // Rust inline `mod` members are scoped as methods, but their
             // parent is a module; they are importable/callable bare names.
+            // The parent is already in `by_qualname` (symbols are processed in
+            // order), so its kind is one lookup instead of a reverse scan.
             let parent_qn_kind = qualname.rsplit_once('.').map(|(parent, _)| {
-                (parent.to_string(), {
-                    t.symbols
-                        .iter()
-                        .rev()
-                        .find(|s| s.qualname == parent)
-                        .map(|s| s.kind)
-                        .unwrap_or("")
-                })
+                let parent_kind = t
+                    .by_qualname
+                    .get(parent)
+                    .and_then(|v| v.last())
+                    .map(|i| t.symbols[*i].kind)
+                    .unwrap_or("");
+                (parent.to_string(), parent_kind)
             });
             match parent_qn_kind {
                 // Any direct child of a module is a bare-name candidate, even
@@ -2784,16 +2785,15 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             .entry(c.qualname.clone())
             .or_default()
             .push(idx);
-        let direct_child = c.qualname == format!("{}.{}", c.module, c.name);
+        let direct_child = is_direct_child(&c.module, &c.name, &c.qualname);
         let parent_qn_kind = c.qualname.rsplit_once('.').map(|(parent, _)| {
-            (parent.to_string(), {
-                t.symbols
-                    .iter()
-                    .rev()
-                    .find(|s| s.qualname == parent)
-                    .map(|s| s.kind)
-                    .unwrap_or("")
-            })
+            let parent_kind = t
+                .by_qualname
+                .get(parent)
+                .and_then(|v| v.last())
+                .map(|i| t.symbols[*i].kind)
+                .unwrap_or("");
+            (parent.to_string(), parent_kind)
         });
         match parent_qn_kind {
             Some((parent, "module")) => {
