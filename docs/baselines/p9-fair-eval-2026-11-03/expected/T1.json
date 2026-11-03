@@ -1,0 +1,8 @@
+{
+  "task": "T1",
+  "items": [
+    "tests/test_vocab_corrector.py:124 tests.test_vocab_corrector.test_missing_vocab_file_raises",
+    "tests/test_vocab_corrector.py:166 tests.test_vocab_corrector.test_get_default_query_corrector_singleton"
+  ],
+  "note": "tests reaching vihap.cleaners.vocab_corrector.load_lexicon within 3 call hops; depth 1 returns 0"
+}
