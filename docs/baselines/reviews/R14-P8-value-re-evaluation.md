@@ -13,18 +13,17 @@
 
 - **No feature is removed.** L6 is **INSUFFICIENT for REMOVE**; no feature
   reached 4/5 REMOVE votes.
-- **F4 is the only feature with significant measured value**: 29-45% fewer
-  tool calls on three valid hosts at equal correctness, and the 1M-edge hub
-  latency defect is fixed (110-144 ms vs 150 ms). The utility evidence is n=2
-  per cell, so it is **IMPROVE**, not KEEP, until replicated at n>=5.
+- **F4 and F7 now meet the KEEP bar on one host with n=5.** F4: 29-45% fewer
+  tool calls on three hosts in the original n=2 battery, and a local n=5
+  replication at -53.3% median tools, 5/5 correct. F7: -57.1% median tools,
+  5/5 correct. F4 latency is fixed (97-144 ms vs 150 ms at 1.37M edges).
 - **F6's R13 contract blocker is fixed**: `resolve` honors `--no-journal`,
   MCP rejects blank/non-string names, and journal counts reflect parsed names.
 - **F8's 1M-edge test latency is fixed** for indexes with <=20,000 test
   symbols: zero-test 6.9-9.5 ms, 100-test 8-10 ms, 10,000-test 63-113 ms at
   1.37M edges. Above 20,000 tests the reverse BFS remains a stress case.
-- **No feature has a positive utility measurement except F4 (robust), F7
-  (host-dependent), and F1 (mixed).** F8/F10 are negative in their only
-  shapes; F2/F3/F5/F6/F9/F11 have no utility task.
+- **F4 and F7 have positive n=5 measurements. F1 is mixed; F8/F10 are
+  negative in their only shapes; F2/F3/F5/F6/F9/F11 have no utility task.**
 - **DEMOTE recommendations** (owner sign-off): `kg api` (F10), search filters
   (F6), six `--exclude-generated` flags (F11), and `dead` claims (F1). Keep
   the code and the underlying tag/resolve/search surfaces.
@@ -87,20 +86,17 @@
 
 See `reviews/R14-p8/decision-matrix.md`. Summary:
 
-- IMPROVE: F1, F2, F3, F4, F5, F6, F7, F8, F9, F11 (tag).
+- KEEP: **F4, F7** (local n=5 replication; owner sign-off pending).
+- IMPROVE: F1, F2, F3, F5, F6, F8, F9, F11 (tag).
 - DEMOTE recommended: F10 (routing), F6 search filters, F11 filters, F1
   `dead` claims.
 - OWNER: F2 flag demotion.
-- KEEP: none under the frozen n>=5 rule. F4 is the first KEEP candidate after
-  an n>=5 replication.
 - REMOVE: none approved; F2 1/5, F11 filters 1/5; L6 INSUFFICIENT.
 
 ## Next steps
 
-1. Replicate D1/F4 at n>=5 per host with git-rooted corpora; if it holds, KEEP
-   F4 and route it.
-2. Run the same n>=5 protocol for I1/F7 and H1/F1; do not promote on pooled
-   host medians.
+1. F4/F7 cleared the local n=5 replication; run the same protocol on grok/agy
+   before a cross-host KEEP claim. Do not promote H1/F1 yet.
 3. Add one utility task each for F2/F3/F5/F6/F9/F11 before any routing claim.
 4. Fix ambiguous-edge visibility in `impact`/`unresolved` or document it in
    the user-facing caveat.

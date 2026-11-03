@@ -18,26 +18,28 @@ commit. No feature reaches the 4/5 REMOVE threshold.
 | F1 implementers/dead | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE** | Keep `implementers`; demote `dead` claims until a precision gate exists |
 | F2 impact `--context` | IMPROVE | DEFER | KEEP | IMPROVE | REMOVE (1/5) | **IMPROVE / OWNER** | No removal; owner decides flag demotion |
 | F3 path/files/symbols dir | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one inventory utility task; no claim change |
-| F4 impact edges/depth | KEEP | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE (closest to KEEP)** | Replicate D1 at n>=5; then owner may KEEP |
+| F4 impact edges/depth | KEEP | IMPROVE | IMPROVE | IMPROVE | DEFER | **KEEP (replicated)** | Route after owner sign-off; n=5 local replication, -53.3% tools |
 | F5 unresolved names | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one utility task; include or document ambiguous sites |
 | F6 resolve/search filters | IMPROVE | DEFER | KEEP | IMPROVE | DEMOTE (filters) | **IMPROVE** | Keep `resolve`; demote search-filter routing claims |
-| F7 imports | IMPROVE | IMPROVE | KEEP | IMPROVE | DEFER | **IMPROVE** | n>=5 host-blocked replication; no removal |
+| F7 imports | IMPROVE | IMPROVE | KEEP | IMPROVE | DEFER | **KEEP (replicated)** | Route after owner sign-off; n=5 local replication, -57.1% tools |
 | F8 tests | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE** | Latency fixed for <=20k tests; >20k remains a stress case |
 | F9 complexity/metrics | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one ceiling/ranking task; no claim change |
 | F10 api | IMPROVE | IMPROVE | KEEP | DEMOTE | DEMOTE | **DEMOTE (recommended)** | Remove `kg api` from routed skill/README claims; keep code experimental |
 | F11 generated tagging | IMPROVE | DEFER | KEEP | IMPROVE | REMOVE (filters, 1/5) | **IMPROVE (tag) / DEMOTE (filters)** | Keep tag/stats/files; demote six `--exclude-generated` flags |
 
-No feature reaches 4/5 REMOVE. L6 blocks REMOVE. The defensible actions are
-KEEP (only after replication), IMPROVE, or DEMOTE with owner sign-off.
+No feature reaches 4/5 REMOVE. L6 blocks REMOVE. F4 and F7 now meet the KEEP
+bar on one host with n=5; the other features stay IMPROVE or DEMOTE.
 
 ## Significant value
 
-- **F4** is the only robust measured winner: D1 treatment cuts tool calls by
-  29.4% / 36.6% / 45.0% on grok / agy / zcode at 12/12 correct answers, with
-  tools passing on 3/3 hosts and tokens on 2/3. The 1.37M-edge latency defect
-  is fixed: `impact --depth 3` 110-144 ms vs 150 ms.
-- **F7** is positive on 2/3 hosts but host-dependent (grok -71%, agy -19%,
-  zcode 0%) and n=2.
+- **F4** is a measured winner: the original battery cut tool calls by 29.4% /
+  36.6% / 45.0% on grok / agy / zcode at 12/12 correct answers. The local n=5
+  replication on zcode cuts median tool calls 15 -> 7 (-53.3%) at 5/5 correct.
+  The 1.37M-edge latency defect is fixed: `impact --depth 3` 97-144 ms vs
+  150 ms.
+- **F7** was positive on 2/3 hosts in the original battery (grok -71%, agy
+  -19%, zcode 0%) and n=2. The local n=5 replication on zcode cuts median tool
+  calls 7 -> 3 (-57.1%) at 5/5 correct.
 - **F1** is mixed: agy -61% (n=1 control), grok -18%, zcode 0%.
 - **F8/F10** have no positive utility in their only shapes; both shapes are
   narrow, and the battery's failed first command inflates treatment cost.
