@@ -2575,6 +2575,7 @@ fn partial_v7_file_path_column_rebuilds_fresh() {
         .args([
             idx.to_string_lossy().as_ref(),
             "DROP INDEX symbols_complexity_idx;
+             DROP INDEX symbols_file_path;
              ALTER TABLE symbols DROP COLUMN file_path;
              CREATE INDEX symbols_complexity_idx
                ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_id, line_start);",
@@ -3739,4 +3740,39 @@ fn doctor_does_not_warn_about_a_released_build_lock() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(!stdout.contains("lock file:"), "{stdout}");
+}
+
+#[test]
+fn complexity_path_scope_uses_the_file_path_index() {
+    let repo = temp_repo("complexity-plan");
+    write(
+        &repo,
+        "src/a.py",
+        "def a(n):\n    if n:\n        return 1\n    return 2\n",
+    );
+    build(&repo);
+    let conn = rusqlite::Connection::open(repo.join(".aw/index.db")).unwrap();
+    // Mirrors the scoped `aw complexity` predicate: the path range must drive
+    // the plan through symbols_file_path, not the complexity ranking index.
+    let sql = "EXPLAIN QUERY PLAN
+        SELECT s.file_path, s.line_start, s.cyclomatic, s.branches, s.nesting,
+               s.effective_loc, s.qualname
+        FROM symbols s
+        WHERE s.kind IN ('function','method')
+          AND s.cyclomatic > 0 AND s.cyclomatic >= 1 AND s.effective_loc >= 0
+          AND s.branches >= 0 AND s.nesting >= 0
+          AND (s.file_path = 'src' OR (s.file_path >= 'src' || '/' AND s.file_path < 'src' || '0'))
+        ORDER BY s.cyclomatic DESC, s.effective_loc DESC, s.qualname,
+                 s.file_path, s.line_start LIMIT 50";
+    let plan: Vec<String> = conn
+        .prepare(sql)
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    assert!(
+        plan.iter().any(|p| p.contains("symbols_file_path")),
+        "path scope must use symbols_file_path: {plan:?}"
+    );
 }

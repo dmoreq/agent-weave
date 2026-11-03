@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to aw are documented here. Format follows
+All notable changes to agent-weave are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [Calm SemVer](https://calver.org) 0.x — breaking contract
 changes bump the minor while 0.x is unstable.
@@ -52,8 +52,11 @@ Consumers that parse output must review the query-shape changes listed below bef
   renders the recorded target name for unresolved/ambiguous rows.
 - `dead` rows carry the qualified name; `symbols .` and `symbols ./` cover the
   repository root without a `/` prefix.
-- Path-scoped SQL binds its scope instead of escaping string literals, and
-  `complexity --path` lets SQLite choose `symbols_file_path`.
+- Path-scoped SQL binds its scope instead of escaping string literals and
+  uses a sargable range predicate. Fresh v7 builds add the
+  `symbols_file_path` secondary index, and `complexity --path` omits the
+  forced complexity index so SQLite selects it. Existing v7 indexes remain
+  compatible (the planner falls back).
 - Usage and payload journal lines parse through `serde_json`, so quoted
   queries and escaped pointers survive. `stats`, `hotspots`, and `report`
   record real result counts, `resolve` records latency on its early exit, and

@@ -46,7 +46,7 @@ pub(crate) fn path_scope_sql(
                 .to_string();
             (
                 format!(
-                    " AND ({alias}.path = ?{param} OR substr({alias}.path, 1, length(?{param}) + 1) = ?{param} || '/')"
+                    " AND ({alias}.path = ?{param} OR ({alias}.path >= ?{param} || '/' AND {alias}.path < ?{param} || '0'))"
                 ),
                 Some(scope),
             )
@@ -69,7 +69,7 @@ pub(crate) fn file_path_scope_sql(
                 .to_string();
             (
                 format!(
-                    " AND ({alias}.file_path = ?{param} OR substr({alias}.file_path, 1, length(?{param}) + 1) = ?{param} || '/')"
+                    " AND ({alias}.file_path = ?{param} OR ({alias}.file_path >= ?{param} || '/' AND {alias}.file_path < ?{param} || '0'))"
                 ),
                 Some(scope),
             )
