@@ -110,7 +110,7 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
     let mut files = Vec::new();
     let mut skipped_large = 0usize;
     for rel in rels {
-        if rel == ".aw" || rel.starts_with(".aw/") {
+        if rel.split('/').any(|seg| seg == ".aw") {
             continue;
         }
         let ext = Path::new(rel)
