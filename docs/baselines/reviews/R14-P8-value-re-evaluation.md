@@ -24,9 +24,10 @@
   1.37M edges. Above 20,000 tests the reverse BFS remains a stress case.
 - **F4 and F7 have positive n=5 measurements. F1 is mixed; F8/F10 are
   negative in their only shapes; F2/F3/F5/F6/F9/F11 have no utility task.**
-- **DEMOTE recommendations** (owner sign-off): `kg api` (F10), search filters
-  (F6), six `--exclude-generated` flags (F11), and `dead` claims (F1). Keep
-  the code and the underlying tag/resolve/search surfaces.
+- **DEMOTE decisions applied** (owner, 2026-11-03): `kg api` routing (F10),
+  search-filter claims (F6), six `--exclude-generated` flags (F11), and `dead`
+  routing (F1). Code, MCP tools, tags, and `resolve` remain. Owner record:
+  `reviews/R14-p8/owner-decision.md`.
 - **REMOVE candidates** exist but are blocked: F2 `--context` (1/5) and F11
   filters (1/5). L6 blocks removal on the current battery.
 

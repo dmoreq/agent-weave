@@ -1,6 +1,6 @@
 # R14 owner packet — DEMOTE / REMOVE / replication
 
-Status: awaiting owner decision. No routing or claim edits are applied yet.
+Status: **decided 2026-11-03**. KEEP F4/F7 confirmed; D1-D4 applied as routing/claim demotions. See `owner-decision.md`.
 
 ## A. DEMOTE packets (code stays)
 
@@ -64,9 +64,9 @@ R14 rule.
 - Outcome: F4/F7 meet KEEP rule (a) on this host. Raw record:
   `replication-2026-11-03.md`. Cross-host grok/agy remains unverified.
 
-## D. Owner choices
+## D. Owner decision
 
-1. Approve D1+D2+D3+D4, a subset, or none.
-2. Authorize the D1/I1 replica at n>=5 per host, or leave F4/F7 at IMPROVE.
-3. Decide whether ambiguous call sites in `impact`/`unresolved` are a code fix
-   or a documented limit.
+- KEEP F4/F7: confirmed.
+- D1-D4: applied as demotions.
+- F2/F11 filters: not removed; L6 blocks.
+- Ambiguous call sites: open IMPROVE item, not part of this packet.

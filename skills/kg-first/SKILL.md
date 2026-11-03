@@ -23,14 +23,13 @@ source:
 | which tests reach this symbol/file | `kg tests <name|file>` — static call-edge candidates only |
 | what does this file import | `kg imports <file>` — outbound resolved imports |
 | which files depend on a file | `kg impact <file>`; add `--edges calls,imports,inherits --depth N` for the dependency closure — direct import/inherit impact cut agent tool calls 29-45% on 3 hosts (P8 A/B) |
-| what is the public surface | `kg api <file|dir>` — static export heuristics |
 | which functions exceed complexity/length | `kg complexity --min-cyc 11` — cyclomatic/branches/nesting/effective LOC, not cognitive complexity |
 | what is in this directory | `kg symbols <dir> --outline`; `kg files --path <dir>` for the file inventory |
 | find a symbol by (partial) name, qualified path, or signature vocabulary | `kg search <terms>` — qualified input matches the exact phrase; exact names rank first; plurals fall back to stems |
 | resolve many names at once | `kg resolve --stdin < names.txt` — one `found`/`ambiguous`/`missing` line per name |
 | what is in this file / its signatures | `kg symbols <file> [--outline]` |
 | is this logic duplicated elsewhere | `kg clones [--min-lines N]` — candidates only, never proof; spans name the enclosing symbol per side |
-| what is risky / dead / unresolved | `kg hotspots`, `kg dead --exclude-tests`, `kg unresolved`; `kg unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
+| what is risky / unresolved | `kg hotspots`, `kg unresolved`; `kg unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
 
 Use grep/rg **only** for what kg cannot answer or to verify one specific line.
 Do not re-derive with grep what kg has already answered — that doubles the

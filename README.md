@@ -52,7 +52,7 @@ kg imports app.py             # outbound resolved imports
 kg tests Widget.render       # test candidates that reach the symbol/file (static)
 kg impact app.py              # files that call into app.py (one row per file)
 kg impact app.py --edges calls,imports,inherits --depth 3  # dependency closure
-kg search parser fragment     # BM25 symbol search (identifier/path/signature tokens); --kind/--path/--exact filters
+kg search parser fragment     # BM25 symbol search (identifier/path/signature tokens)
 kg clones                     # duplicate-block candidates with enclosing symbol per side (caveat: not proof)
 kg dead --exclude-tests       # dead-code candidates (caveat: not proof)
 kg unresolved                 # per-file counts + top unresolved names; [internal] = resolver gap
@@ -61,7 +61,6 @@ kg symbols app.py             # one file's symbols, ordered by line
 kg symbols src/ --outline     # directory inventory with one-line signatures
 kg symbols app.py --metrics   # per-symbol cyclomatic/branches/nesting/effective LOC
 kg complexity --min-cyc 11    # functions over the complexity ceiling
-kg api src/                   # public/exported symbol inventory
 kg files --path src           # indexed file inventory (symbols, bytes, generated)
 kg resolve --stdin < names.txt  # batch name resolution: found/ambiguous/missing
 kg stats                      # index totals (includes generated count)

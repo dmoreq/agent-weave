@@ -15,17 +15,17 @@ commit. No feature reaches the 4/5 REMOVE threshold.
 
 | Feature | L1 correctness | L2 utility | L3 latency | L4 contract | L5 removal | Final | Owner action |
 |---|---|---|---|---|---|---|---|
-| F1 implementers/dead | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE** | Keep `implementers`; demote `dead` claims until a precision gate exists |
+| F1 implementers/dead | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE (dead demoted)** | Keep `implementers`; `dead` removed from routing until a precision gate exists |
 | F2 impact `--context` | IMPROVE | DEFER | KEEP | IMPROVE | REMOVE (1/5) | **IMPROVE / OWNER** | No removal; owner decides flag demotion |
 | F3 path/files/symbols dir | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one inventory utility task; no claim change |
 | F4 impact edges/depth | KEEP | IMPROVE | IMPROVE | IMPROVE | DEFER | **KEEP (replicated)** | Route after owner sign-off; n=5 local replication, -53.3% tools |
 | F5 unresolved names | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one utility task; include or document ambiguous sites |
-| F6 resolve/search filters | IMPROVE | DEFER | KEEP | IMPROVE | DEMOTE (filters) | **IMPROVE** | Keep `resolve`; demote search-filter routing claims |
+| F6 resolve/search filters | IMPROVE | DEFER | KEEP | IMPROVE | DEMOTE (filters) | **IMPROVE (filters demoted)** | Keep `resolve`; search-filter claim removed; apply D2 |
 | F7 imports | IMPROVE | IMPROVE | KEEP | IMPROVE | DEFER | **KEEP (replicated)** | Route after owner sign-off; n=5 local replication, -57.1% tools |
 | F8 tests | IMPROVE | IMPROVE | IMPROVE | IMPROVE | DEFER | **IMPROVE** | Latency fixed for <=20k tests; >20k remains a stress case |
 | F9 complexity/metrics | IMPROVE | DEFER | KEEP | IMPROVE | DEFER | **IMPROVE** | Add one ceiling/ranking task; no claim change |
-| F10 api | IMPROVE | IMPROVE | KEEP | DEMOTE | DEMOTE | **DEMOTE (recommended)** | Remove `kg api` from routed skill/README claims; keep code experimental |
-| F11 generated tagging | IMPROVE | DEFER | KEEP | IMPROVE | REMOVE (filters, 1/5) | **IMPROVE (tag) / DEMOTE (filters)** | Keep tag/stats/files; demote six `--exclude-generated` flags |
+| F10 api | IMPROVE | IMPROVE | KEEP | DEMOTE | DEMOTE | **DEMOTE (applied)** | Removed from routed skill/README; keep code experimental |
+| F11 generated tagging | IMPROVE | DEFER | KEEP | IMPROVE | REMOVE (filters, 1/5) | **IMPROVE (tag) / DEMOTE (filters, applied)** | Keep tag/stats/files; six filters marked experimental |
 
 No feature reaches 4/5 REMOVE. L6 blocks REMOVE. F4 and F7 now meet the KEEP
 bar on one host with n=5; the other features stay IMPROVE or DEMOTE.

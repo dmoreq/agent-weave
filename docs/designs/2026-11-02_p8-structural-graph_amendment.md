@@ -305,6 +305,7 @@ Supertrait edges (`trait A: B`) are `inherits` edges from A to B.
   says so.
 - `impact` gains inbound `inherits`/`imports` through F4, not by changing
   `dead`.
+- Routing status: `dead` is not in the `kg-first` routing table; the command remains candidate-only until a precision gate exists.
 - Gate G23.
 
 ### F2 — Impact caller context (P8a)
@@ -690,8 +691,9 @@ directory?
   omitted when empty. The standard post-cap staleness header applies.
 - Generated files are included by default; `--exclude-generated` removes them.
   `--include-private` adds private symbols. The two flags are independent.
-- `DIR` is recursive over indexed paths under §4 item 9.
+- `DIR` is recursive over indexed paths under §4 item 9. Search filter combinations (`--kind`, `--path`, `--exact`) are experimental: the P8 journal recorded no filtered search, and no utility task exists.
 - First line: `kg: api — static export heuristics; re-exports, module visibility, non-callable declarations (const/static/type aliases/variables), and dynamic exports may be incomplete`.
+- Routing status: experimental. `kg api` is not in the `kg-first` routing table; its single utility task was negative on three hosts.
 - Gate G26.
 
 ### F11 — Generated-file tagging (P8c, schema v6)
@@ -721,7 +723,7 @@ must exclude them?
   generated files when `--exclude-generated` is passed; default output is unchanged.
 - `callers`, `callees`, `path`, `impact`, `symbols`, `imports` keep
   generated files navigable.
-- `kg stats` gains `generated=N` after `files=N`; contract bump.
+- `kg stats` gains `generated=N` after `files=N`; contract bump. The six `--exclude-generated` filters are experimental: the P8 journal recorded no filter use and no utility task exists. The tag, `files` inventory, and `stats` count remain supported.
 - Gate G26.
 
 ### F12 — Dart/Flutter support (P9)
