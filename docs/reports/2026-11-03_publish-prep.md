@@ -22,6 +22,9 @@ Trạng thái: **chuẩn bị, chưa publish**. Không push, không tag, không
 - GitHub public owner/repo URL; hiện `repository` trỏ `quy-doan/kg` và trả 404.
 - crates.io API token và quyền sở hữu `agent-kg`.
 - Xác nhận license/legal, NOTICE và kênh báo lỗi.
+- README hiện dùng link tương đối `docs/...`; crates.io không phục vụ các file
+  này. Trước publish cần link tuyệt đối tới GitHub hoặc `README.crate.md`
+  riêng cho crate.
 - Review chấp thuận bật `publish = true`.
 
 ## 3. Đã chuẩn bị trong đợt này
@@ -36,6 +39,11 @@ Trạng thái: **chuẩn bị, chưa publish**. Không push, không tag, không
 - `cargo package --list`: 33 files, 685.7 KiB unpacked / 161.2 KiB compressed;
   no docs/baselines, docs/reports, skills, exporter scripts, or recall scripts.
 - `cargo package --allow-dirty`: build verification pass.
+- `public_export.py` to `/tmp/kg-public-prep-2026-11-03`: PASS; 62 exported
+  files; no private names/symbols/paths/emails/secrets; `cargo test --release`
+  in export PASS.
+- Packaged crate `target/package/agent-kg-0.3.0`: 32 files; `cargo test
+  --locked --release` PASS (104 CLI + 26 fixture + 7 MCP).
 
 ## 4. Phase B — chưa chạy
 
