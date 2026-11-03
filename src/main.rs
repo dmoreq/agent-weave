@@ -531,6 +531,10 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
             Ok(())
         }
         cli::Cmd::Resolve { stdin } => {
+            crate::journal::set_args(&[
+                ("count", "0".to_string()),
+                ("candidate_limit", "50".to_string()),
+            ]);
             if !stdin {
                 return Err(crate::error::KgError::Usage(
                     "resolve requires --stdin".to_string(),
@@ -569,14 +573,10 @@ fn run(cli: cli::Cli, no_journal: bool) -> Result<()> {
                     "no names on stdin".to_string(),
                 ));
             }
-            crate::journal::begin(
-                "cli",
-                "resolve",
-                &[
-                    ("count", names.len().to_string()),
-                    ("candidate_limit", "50".to_string()),
-                ],
-            );
+            crate::journal::set_args(&[
+                ("count", names.len().to_string()),
+                ("candidate_limit", "50".to_string()),
+            ]);
             let (lines, exit) = query::resolve_names(&conn, &names)?;
             for line in &lines {
                 println!("{line}");

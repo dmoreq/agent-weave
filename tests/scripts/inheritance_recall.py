@@ -3,9 +3,10 @@
 
 Reads frozen JSONL rows:
   {"repo": "vihap"|"finguard", "base": "...", "child": "..."}
-and checks `kg implementers <base>` lists the child qualname. Same-file
-Python classes and a TS interface extension are covered; cross-file Rust impls
-are excluded by the pinned F1 limit.
+and checks `kg implementers <base>` lists the child qualname. Python
+same-file and cross-file inheritance plus TS same-file interface extension are
+covered; cross-file Rust impls and tsconfig path aliases are excluded by the
+pinned F1 limits.
 
 Usage:
     python3 tests/scripts/inheritance_recall.py \

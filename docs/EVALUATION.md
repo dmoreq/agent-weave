@@ -99,7 +99,7 @@ Record: `baselines/multi-repo-verification-2026-11-01-post-a11.md`.
 | G14 symbol search | `kg search` recall vs 20 frozen NL queries / 28 expected symbols | 0.775 recall (22/28) on the shipped schema-v5 index; 0.850 was the pre-P6 figure and 0.800 pre-R7 (ranking trade-offs recorded in the P6 and R7 reports) — PASS (bar 0.70) |
 | G16 clone detection | `kg clones` vs 10 seeded clone pairs + 8 distractors + 1 near-duplicate | 10/10 pairs detected, 0 spurious (bar >= 8/10, <= 20% spurious); build overhead +23.2% within the owner-amended 25% bar — PASS. Output is duplicate-block CANDIDATES, never proof of semantic duplication |
 | G17 call-path traversal | `kg path` vs 10 exact-byte fixtures + 8 frozen GT pairs (hop edges verified EXTRACTED at freeze) + latency | 10/10 fixtures byte-exact; 8/8 GT agreement; 0.6-1.4 ms in-process best-of-7 across the 85k-symbol synth corpus and the self-index (budget 20 ms) — PASS. Routes are resolved-edge CANDIDATES: dynamic dispatch may hide paths |
-| G23-G28 structural graph | P8 fixture suite plus frozen real-corpus GT | imports 40/40, tests 20/20, inheritance 11/11; Rust/TS/Python exact-byte controls; schema v7 carry/probe/order tests — PASS |
+| G23-G28 structural graph | P8 fixture suite plus frozen real-corpus GT | imports 40/40, tests 20/20, inheritance 17/17; Rust/TS/Python exact-byte controls; schema v7 carry/probe/order tests — PASS |
 
 ## 5. Agent A/B — the measured case for kg
 
@@ -297,9 +297,11 @@ one Critical and six Important findings are closed with regression tests.
 | `kg complexity --path synth` | **26.2 ms** on 85k symbols; **201 ms** on 987k symbols (R11 amendment: budget 250 ms) | same |
 | `kg symbols synth --limit 50` | **21.9 ms** best-of-7 (budget 50 ms) | same |
 | `kg tests <no-hit>` | **5.4 ms** best-of-5 | same |
+| `kg impact --depth 3`, 1.37M-edge hub | **112.2 ms** best-of-7 (budget 150 ms) | `baselines/p8-latency-2026-11-03.md` |
+| `kg tests --depth 10`, 1.37M-edge hub | **163.4 ms** best-of-7 (budget 200 ms) | same |
 | `kg impact <file> --depth 10` | **5.1 ms** best-of-5 | same |
 | Flutter corpus build smoke | 124 indexed files, 735 symbols, 0 parse errors, 3.46 s | `kg build --root <flutter>` |
-| test suite | 191 tests (25 lib + 25 bin + 109 CLI + 26 fixture + 6 MCP) | `cargo test --locked` |
+| test suite | 197 tests (25 lib + 25 bin + 114 CLI + 26 fixture + 7 MCP) | `cargo test --locked` |
 
 Real-corpus gates are local-only and frozen at kg `342ebc3`, vihap `efcd310`,
 finguard `dddfe07`, Flutter `20f82749394`:
@@ -308,7 +310,7 @@ finguard `dddfe07`, Flutter `20f82749394`:
 |------|---------|--------|---------|
 | F7 imports | 40 (25 vihap + 15 kg self) | **recall 40/40 = 1.000, precision 183/183 = 1.000**, Wilson 95% 0.912-1.000 | `tests/scripts/import_recall.py` |
 | F8 tests | 20 vihap symbols across 20 test files | **recall 20/20 = 1.000, precision 2679/2679 = 1.000**, Wilson 95% 0.839-1.000 | `tests/scripts/tests_recall.py` |
-| F1 inheritance | 10 vihap Python + 1 finguard TS | **11/11 = 1.000**, Wilson 95% 0.741-1.000 | `tests/scripts/inheritance_recall.py` |
+| F1 inheritance | 15 vihap Python (10 same-file + 5 cross-file) + 2 finguard TS (1 same-file + 1 cross-file) | **17/17 = 1.000**, Wilson 95% 0.816-1.000 | `tests/scripts/inheritance_recall.py` |
 
 GT was derived from source ASTs (Python `ast`, tree-sitter Rust/TS) before
 measuring kg. Entry construction and exclusions are recorded in

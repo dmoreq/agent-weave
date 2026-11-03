@@ -279,7 +279,11 @@ Supertrait edges (`trait A: B`) are `inherits` edges from A to B.
   (`extends mixin(Base)`), take the first identifier argument (`Base`) as the
   base; if it has no identifier argument, store unresolved
   `kind='inherit'` and emit no edge. A negative fixture covers
-  `extends mixin(1)`.
+  `extends mixin(1)`. `tsconfig` `paths` aliases (for example `@/lib/base`)
+  are not resolved in v1: the base stays unresolved `kind='inherit'` and
+  produces no edge; relative and package-root imports are resolved. When a
+  zero-result `implementers` query has matching unresolved inherit sites, the
+  detail names the count so the omission is visible.
 - `dead` predicate (complete, preserving the current AMBIGUOUS suppression):
   - `s.kind IN ('function','method','class','trait','interface')`;
   - no resolved inbound `calls`, `imports`, or `inherits` edge;
@@ -294,9 +298,11 @@ Supertrait edges (`trait A: B`) are `inherits` edges from A to B.
   - `--exclude-generated` is added by F11.
 - `dead` default remains "tests included"; skills pass `--exclude-tests`.
   This avoids a default-output break for existing users. Star-imported
-  public symbols and plain module-level imports remain known false-positive
-  classes: the star/plain import edge targets the module, not each symbol;
-  the caveat says so.
+  public symbols, plain module-level imports, type-only references, and
+  attribute references used as callables remain known false-positive classes:
+  the star/plain import edge targets the module, not each symbol; a type
+  annotation or a method passed as a value emits no call edge; the caveat
+  says so.
 - `impact` gains inbound `inherits`/`imports` through F4, not by changing
   `dead`.
 - Gate G23.
@@ -679,8 +685,9 @@ directory?
 
 **Surface:** `kg api <FILE|DIR> [--include-private] [--exclude-generated] [--limit N]`.
 
-- Output `path:line kind qualname`, sorted by path, line, qualname; standard
-  cap.
+- Output `path:line kind qualname [signature]`, sorted by path, line,
+  qualname; standard cap. `signature` is the stored one-line signature and is
+  omitted when empty. The standard post-cap staleness header applies.
 - Generated files are included by default; `--exclude-generated` removes them.
   `--include-private` adds private symbols. The two flags are independent.
 - `DIR` is recursive over indexed paths under §4 item 9.

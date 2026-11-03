@@ -507,15 +507,19 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
         }
         "resolve" => {
             let conn = crate::db::open_for_query(root)?;
-            let names: Vec<String> = args
+            let arr = args
                 .get("names")
                 .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
+                .ok_or_else(|| {
+                    crate::error::KgError::Usage("resolve requires a names array".to_string())
+                })?;
+            let mut names: Vec<String> = Vec::new();
+            for value in arr {
+                let name = value.as_str().ok_or_else(|| {
+                    crate::error::KgError::Usage("resolve names must be strings".to_string())
+                })?;
+                names.push(name.to_string());
+            }
             if names.len() > 1000
                 || names.iter().any(|n| n.len() > 4096)
                 || names.iter().map(|n| n.len()).sum::<usize>() > 1024 * 1024
@@ -524,7 +528,16 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                     "resolve accepts at most 1000 names, 4096 bytes each, 1 MiB total".to_string(),
                 ));
             }
+            if names.iter().all(|n| {
+                let t = n.trim();
+                t.is_empty() || t.starts_with('#')
+            }) {
+                return Err(crate::error::KgError::NoResults(
+                    "no names on stdin".to_string(),
+                ));
+            }
             let (lines, exit) = crate::query::resolve_names(&conn, &names)?;
+            crate::journal::record_result(lines.len(), lines.len(), lines.len(), false, 0);
             let text = join_lines(&lines);
             if exit != 0 {
                 return Err(crate::error::KgError::BatchOutput { text, code: exit });
@@ -761,7 +774,15 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             let n = args
                 .get("names")
                 .and_then(|v| v.as_array())
-                .map(|a| a.len())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .filter(|name| {
+                            let t = name.trim();
+                            !t.is_empty() && !t.starts_with('#')
+                        })
+                        .count()
+                })
                 .unwrap_or(0);
             out.push(("count", n.to_string()));
             out.push(("candidate_limit", "50".to_string()));

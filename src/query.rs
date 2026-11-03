@@ -19,7 +19,7 @@ pub const MAX_LIMIT: usize = 10_000;
 
 /// Permanent honesty caveat for `kg dead` (Amendment 5): candidates, not proof.
 const DEAD_CAVEAT: &str =
-    "kg: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, and external callers are not proven absent";
+    "kg: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, type references, attribute references, and external callers are not proven absent";
 
 /// Permanent honesty caveat for `kg clones` (Amendment 12d): candidates, not proof.
 const CLONES_CAVEAT: &str =
@@ -119,12 +119,21 @@ pub fn test_impact(
             |r| r.get(0),
         )
         .map(|c: i64| c > 0)?;
-    let seed_ids: Vec<i64> = if file_exists {
+    let (seed_ids, seed_callables): (Vec<i64>, usize) = if file_exists {
         let mut stmt = conn.prepare(
-            "SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
+            "SELECT s.id, s.kind FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
         )?;
-        let rows = stmt.query_map([target], |r| r.get(0))?;
-        rows.collect::<std::result::Result<_, _>>()?
+        let rows = stmt.query_map([target], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut ids = Vec::new();
+        let mut callables = 0;
+        for row in rows {
+            let (id, kind) = row?;
+            ids.push(id);
+            callables += usize::from(is_callable_kind(&kind));
+        }
+        (ids, callables)
     } else {
         let (ids, cands) = target_ids(conn, target)?;
         if ids.is_empty() {
@@ -140,25 +149,31 @@ pub fn test_impact(
                 role: None,
             });
         }
-        ids
+        let callables = ids.iter().try_fold(0, |acc, id| {
+            let kind: String =
+                conn.query_row("SELECT kind FROM symbols WHERE id = ?1", [id], |r| r.get(0))?;
+            Ok::<_, KgError>(acc + usize::from(is_callable_kind(&kind)))
+        })?;
+        (ids, callables)
     };
     let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
     let mut visited: HashSet<i64> = seed_set.clone();
+    let mut visited_callables = seed_callables;
     let mut current = seed_ids;
+    let total_callables = total_callables(conn)?;
     let mut tests = TestTop::new(limit);
     let mut truncated = false;
     for d in 1..=depth {
-        if current.is_empty() {
+        if current.is_empty() || visited_callables >= total_callables {
             break;
         }
         let mut next = Vec::new();
         for chunk in current.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!(
-                "SELECT DISTINCT e.src_id, s.name, s.kind, f.path, s.line_start, s.qualname
-                 FROM edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
-                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
-                 ORDER BY f.path, s.line_start, s.qualname"
+                "SELECT DISTINCT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
+                 FROM edges e JOIN symbols s ON s.id = e.src_id
+                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
             );
             let mut stmt = conn.prepare(&sql)?;
             let params: Vec<rusqlite::types::Value> = chunk
@@ -184,6 +199,9 @@ pub fn test_impact(
                     tests.insert(id, path, line, qualname);
                 }
                 if visited.insert(id) {
+                    if is_callable_kind(&kind) {
+                        visited_callables += 1;
+                    }
                     next.push(id);
                 }
             }
@@ -515,9 +533,23 @@ pub fn implementers(
         })
     })?;
     if total == 0 {
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        let unresolved: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM unresolved_calls
+             WHERE kind = 'inherit' AND (dst_name = ?1 OR dst_name = ?2)",
+            [name, bare],
+            |r| r.get(0),
+        )?;
+        let detail = if unresolved > 0 {
+            format!(
+                "0 implementers found (resolved inherits edges only; {unresolved} unresolved inherit sites may refer to this symbol)"
+            )
+        } else {
+            "0 implementers found (resolved inherits edges only)".to_string()
+        };
         return Err(KgError::NoResultsCaveated {
             caveat: IMPLEMENTERS_CAVEAT,
-            detail: "0 implementers found (resolved inherits edges only)".to_string(),
+            detail,
         });
     }
     let mut out = collect_output(
@@ -1400,9 +1432,23 @@ pub fn impact(
         return Err(KgError::NoResults(format!("path '{file}' not indexed")));
     }
     let mut records = ImpactTop::new(limit);
-    let (mut frontier, mut visited) = direct_impact_level(conn, &rel, &kind_sql, &mut records, 1)?;
+    let detail = context || explain;
+    let mut frontier = Vec::new();
+    let mut visited = HashSet::new();
+    if detail {
+        (frontier, visited) = direct_impact_level(conn, &rel, &kind_sql, &mut records, 1)?;
+    } else {
+        direct_impact_records(conn, &rel, &kind_sql, &mut records)?;
+    }
+    let total_files = impact_source_files(conn, &kinds)?;
     let mut truncated = false;
     for d in 2..=depth {
+        if records.len() >= total_files {
+            break;
+        }
+        if frontier.is_empty() && visited.is_empty() {
+            (frontier, visited) = direct_impact_frontier(conn, &rel, &kind_sql)?;
+        }
         let next = level_impact(conn, &frontier, &mut visited, &kind_sql, &mut records, d)?;
         if next.is_empty() {
             break;
@@ -1459,6 +1505,91 @@ fn total_impact_targets(conn: &Connection, rel: &str) -> Result<usize> {
     )? as usize)
 }
 
+/// Upper bound on files that can be an edge source for the selected kinds.
+/// A calls-only traversal can never reach a file without a callable symbol, so
+/// the symbol table gives a cheap bound without scanning every edge.
+fn impact_source_files(conn: &Connection, kinds: &[&str]) -> Result<usize> {
+    let filter = if kinds.iter().all(|k| *k == "calls") {
+        " WHERE kind IN ('function', 'method')"
+    } else {
+        ""
+    };
+    Ok(conn.query_row(
+        &format!("SELECT COUNT(DISTINCT file_path) FROM symbols{filter}"),
+        [],
+        |r| r.get::<_, i64>(0),
+    )? as usize)
+}
+
+fn total_callables(conn: &Connection) -> Result<usize> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM symbols WHERE kind IN ('function', 'method')",
+        [],
+        |r| r.get::<_, i64>(0),
+    )? as usize)
+}
+
+fn is_callable_kind(kind: &str) -> bool {
+    matches!(kind, "function" | "method")
+}
+
+fn direct_impact_records(
+    conn: &Connection,
+    rel: &str,
+    kind_sql: &str,
+    records: &mut ImpactTop,
+) -> Result<()> {
+    let sql = format!(
+        "SELECT MIN(e.site_line), MIN(e.kind), ss.file_path, MIN(ss.qualname), MIN(ss.kind)
+         FROM edges e
+         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+         JOIN symbols ss ON ss.id = e.src_id
+         WHERE df.path = ?1 AND e.kind IN ({kind_sql})
+         GROUP BY ss.file_path"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([rel], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+    for row in rows {
+        let (line, kind, path, qn, src_kind) = row?;
+        records.insert(path, 1, line, kind, qn, src_kind);
+    }
+    Ok(())
+}
+
+fn direct_impact_frontier(
+    conn: &Connection,
+    rel: &str,
+    kind_sql: &str,
+) -> Result<(Vec<i64>, HashSet<i64>)> {
+    let seed_sql = "SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1";
+    let mut seed_stmt = conn.prepare(seed_sql)?;
+    let mut visited: HashSet<i64> = seed_stmt
+        .query_map([rel], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    let sql = format!(
+        "SELECT DISTINCT e.src_id FROM edges e
+         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+         WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut frontier = Vec::new();
+    for id in stmt.query_map([rel], |r| r.get::<_, i64>(0))? {
+        let id = id?;
+        if visited.insert(id) {
+            frontier.push(id);
+        }
+    }
+    Ok((frontier, visited))
+}
+
 fn direct_impact_level(
     conn: &Connection,
     rel: &str,
@@ -1467,12 +1598,11 @@ fn direct_impact_level(
     depth: usize,
 ) -> Result<(Vec<i64>, HashSet<i64>)> {
     let sql = format!(
-        "SELECT e.src_id, e.site_line, e.kind, sf.path, ss.qualname, ss.kind
+        "SELECT e.src_id, e.site_line, e.kind, ss.file_path, ss.qualname, ss.kind
          FROM edges e
          JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-         JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-         WHERE df.path = ?1 AND e.kind IN ({kind_sql})
-         ORDER BY sf.path, e.site_line, ss.qualname, e.id"
+         JOIN symbols ss ON ss.id = e.src_id
+         WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([rel], |r| {
@@ -1522,11 +1652,10 @@ fn level_impact(
     for chunk in frontier.chunks(500) {
         let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
-            "SELECT e.src_id, e.site_line, e.kind, sf.path, ss.qualname, ss.kind
+            "SELECT e.src_id, e.site_line, e.kind, ss.file_path, ss.qualname, ss.kind
              FROM edges e
-             JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-             WHERE e.dst_id IN ({placeholders}) AND e.kind IN ({kind_sql})
-             ORDER BY sf.path, e.site_line, ss.qualname, e.id"
+             JOIN symbols ss ON ss.id = e.src_id
+             WHERE e.dst_id IN ({placeholders}) AND e.kind IN ({kind_sql})"
         );
         let mut stmt = conn.prepare(&sql)?;
         let params: Vec<rusqlite::types::Value> = chunk
@@ -1556,22 +1685,25 @@ fn level_impact(
 
 type ImpactRecord = (String, usize, i64, String, String, String);
 
-/// Bounded top-path collector for depth>1 impact. `seen` supplies the exact
-/// distinct-file count; `heap` keeps only the lexicographically smallest
-/// `limit` records, so the query never sorts the full closure.
+/// Exact distinct-path map with the earliest (depth, line) record per path.
+/// SQL returns unordered rows; BFS depth increases monotonically, so replace
+/// only when a same-depth row has a smaller site line. Output selection is a
+/// bounded heap, avoiding a full ORDER BY over every inbound edge.
 struct ImpactTop {
     limit: usize,
-    seen: HashSet<String>,
-    heap: BinaryHeap<ImpactRecord>,
+    seen: std::collections::HashMap<String, ImpactRecord>,
 }
 
 impl ImpactTop {
     fn new(limit: usize) -> Self {
         Self {
             limit,
-            seen: HashSet::new(),
-            heap: BinaryHeap::new(),
+            seen: std::collections::HashMap::new(),
         }
+    }
+
+    fn len(&self) -> usize {
+        self.seen.len()
     }
 
     fn insert(
@@ -1583,21 +1715,28 @@ impl ImpactTop {
         qualname: String,
         src_kind: String,
     ) {
-        if !self.seen.insert(path.clone()) {
-            return;
-        }
-        let record = (path, depth, line, kind, qualname, src_kind);
-        if self.heap.len() < self.limit {
-            self.heap.push(record);
-        } else if self.heap.peek().is_some_and(|max| record.0 < max.0) {
-            self.heap.pop();
-            self.heap.push(record);
+        let record = (path.clone(), depth, line, kind, qualname, src_kind);
+        match self.seen.get(&path) {
+            Some((_, old_depth, old_line, _, _, _)) if (*old_depth, *old_line) <= (depth, line) => {
+            }
+            _ => {
+                self.seen.insert(path, record);
+            }
         }
     }
 
-    fn finish(mut self) -> (usize, Vec<ImpactRecord>) {
+    fn finish(self) -> (usize, Vec<ImpactRecord>) {
         let total = self.seen.len();
-        let mut records = std::mem::take(&mut self.heap).into_vec();
+        let mut heap: BinaryHeap<ImpactRecord> = BinaryHeap::new();
+        for record in self.seen.into_values() {
+            if heap.len() < self.limit {
+                heap.push(record);
+            } else if heap.peek().is_some_and(|max| record.0 < max.0) {
+                heap.pop();
+                heap.push(record);
+            }
+        }
+        let mut records = heap.into_vec();
         records.sort_by(|a, b| a.0.cmp(&b.0));
         (total, records)
     }
@@ -1995,9 +2134,23 @@ pub fn api(
         )? as usize
     };
     if total == 0 {
+        let imports: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM edges e
+             JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+             WHERE f.path = ?1 AND e.kind = 'imports'",
+            [&rel],
+            |r| r.get(0),
+        )?;
+        let detail = if imports > 0 {
+            format!(
+                "0 exported symbols in '{path}' (module declarations and re-exports are not listed; query the imported files)"
+            )
+        } else {
+            format!("0 exported symbols in '{path}'")
+        };
         return Err(KgError::NoResultsCaveated {
             caveat: "kg: api — static export heuristics; re-exports, module visibility, and dynamic exports may be incomplete",
-            detail: format!("0 exported symbols in '{path}'"),
+            detail,
         });
     }
     let sql = format!(

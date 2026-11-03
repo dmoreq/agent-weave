@@ -578,6 +578,50 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 }
 
 #[test]
+fn resolve_empty_names_and_non_strings_are_tool_errors() {
+    let repo = fixture("mcp-resolve-empty");
+    let build = Command::new(env!("CARGO_BIN_EXE_kg"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let mut srv = spawn(&repo);
+
+    let empty = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "resolve", "arguments": {"names": [""]}}),
+    );
+    assert_eq!(empty["result"]["isError"], true, "{empty}");
+    assert!(result_text(&empty).contains("no names on stdin"), "{empty}");
+
+    let mixed = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "resolve", "arguments": {"names": ["normalize", 5]}}),
+    );
+    assert_eq!(mixed["result"]["isError"], true, "{mixed}");
+    assert!(
+        result_text(&mixed).contains("resolve names must be strings"),
+        "{mixed}"
+    );
+
+    let ok = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({"name": "resolve", "arguments": {"names": ["normalize"]}}),
+    );
+    assert_eq!(ok["result"]["isError"], false, "{ok}");
+    assert!(result_text(&ok).contains("found normalize"), "{ok}");
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn g10_build_via_mcp_journals_and_returns_stats_line() {
     let repo = fixture("build");
     let mut srv = spawn(&repo);

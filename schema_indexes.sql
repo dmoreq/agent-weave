@@ -3,6 +3,8 @@
 -- once instead of maintained per row. The final schema is identical to the
 -- historical schema.sql layout (same names, same key order).
 CREATE INDEX edges_dst ON edges(dst_id, kind);
+-- Covering reverse-edge index: BFS reads src/site without table lookups.
+CREATE INDEX edges_dst_cover ON edges(dst_id, kind, src_id, site_line);
 CREATE INDEX edges_src ON edges(src_id, kind);
 CREATE INDEX symbols_file ON symbols(file_id);
 CREATE INDEX symbols_qualname ON symbols(qualname);

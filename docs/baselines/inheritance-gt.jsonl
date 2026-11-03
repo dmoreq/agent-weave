@@ -9,3 +9,9 @@
 {"base": "vihap.grammar.house.SubunitLexer", "child": "vihap.grammar.house.PostalCodeLexer", "repo": "vihap"}
 {"base": "vihap.grammar.house.SubunitLexer", "child": "vihap.grammar.house.RoomLexer", "repo": "vihap"}
 {"base": "apps.web.src.providers.preferences-context.Preferences", "child": "apps.web.src.providers.preferences-context.PreferencesContextValue", "repo": "finguard"}
+{"base": "vihap.grammar.spans.BaseSpanMatch", "child": "vihap.grammar.hamlet.HamletTokenMatch", "repo": "vihap"}
+{"base": "vihap.grammar.spans.BaseSpanMatch", "child": "vihap.grammar.house.HouseNumberMatch", "repo": "vihap"}
+{"base": "vihap.grammar.spans.BaseSpanMatch", "child": "vihap.grammar.landmark.LandmarkTokenMatch", "repo": "vihap"}
+{"base": "vihap.cleaners.base.AddressCleaner", "child": "vihap.cleaners.chat_cleaner.ChatCleaner", "repo": "vihap"}
+{"base": "vihap.cleaners.base.AddressCleaner", "child": "vihap.cleaners.spelling_corrector.SpellingCorrector", "repo": "vihap"}
+{"base": "packages.db.src.persistence.SnapshotStore", "child": "packages.db.src.__tests__.command-bus.test.MemorySnapshotStore", "repo": "finguard"}

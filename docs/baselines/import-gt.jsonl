@@ -37,4 +37,4 @@
 {"file": "src/query.rs", "line": 10, "repo": "kg", "target": "src.db"}
 {"file": "src/query.rs", "line": 11, "repo": "kg", "target": "src.error"}
 {"file": "src/query.rs", "line": 12, "repo": "kg", "target": "src.hash"}
-{"file": "src/walk.rs", "line": 10, "repo": "kg", "target": "src.error"}
+{"file": "src/walk.rs", "line": 11, "repo": "kg", "target": "src.error"}

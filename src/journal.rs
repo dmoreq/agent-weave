@@ -88,6 +88,21 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
     });
 }
 
+/// Replace the armed argument object when the argument set depends on
+/// parsed input (resolve count). No-op when the journal is not armed.
+pub fn set_args(args: &[(&'static str, String)]) {
+    let body = args
+        .iter()
+        .map(|(k, v)| format!("\"{}\":\"{}\"", k, json_escape(v)))
+        .collect::<Vec<_>>()
+        .join(",");
+    PENDING.with(|p| {
+        if let Some(pending) = p.borrow_mut().as_mut() {
+            pending.args = format!("{{{body}}}");
+        }
+    });
+}
+
 /// Handlers inject the query outcome before the process exits. No-op when the
 /// journal was not armed (disabled, or a non-journaled subcommand).
 pub fn record_result(

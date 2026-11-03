@@ -98,3 +98,19 @@ feature.
    bound).
 5. Re-run a REMOVE-only audit only after the next battery meets L6 requirements.
 6. Do not update README/skills/EVALUATION until owner signs the matrix.
+
+## Post-audit remediation (2026-11-03)
+
+These changes address the IMPROVE packets; they do not change the R13
+verdicts or the L6 gate. R14 must re-evaluate independently.
+
+| Feature | R13 action | Post-audit status | Evidence |
+|---|---|---|---|
+| F1 | Cross-file GT, TS aliases, dead | **PARTIAL** | GT 17/17 (15 vihap + 2 finguard; 6 cross-file rows); TS path alias pinned as unresolved with a negative fixture; nested-function call resolution fixed (dead false positive removed); `dead` type/attribute-reference limits documented and a 50-candidate real-corpus probe found 0/50 zero-reference candidates (`baselines/dead-precision-2026-11-03.md`) |
+| F4 | 1M-edge hub latency | **FIXED (measured)** | 1.37M-edge hub `impact --depth 3` 112.2 ms best-of-7 vs 150 ms; 3.1M stress 254.3 ms |
+| F6 | no-journal/MCP/journal | **FIXED (tested)** | `resolve` honors `--no-journal`; MCP rejects blank/non-string names and records results; parsed count journaled; CLI/MCP regressions pass |
+| F8 | 1M-edge hub latency | **FIXED (measured)** | 1.37M-edge hub `tests --depth 10` 163.4 ms best-of-7 vs 200 ms; 3.1M stress 363.4 ms |
+| F10 | Crate root, export GT, docs | **PARTIAL** | Zero-result `api` names module/re-export omission when import edges exist; Python/Rust/directory export GT added; output contract updated to include `[signature]`; crate-root modules remain excluded by spec |
+| F11 | Filters and negative controls | **FIXED (tested)** | `@generated`/code-generated/`_pb2.py` positives; `gen/` and bare `DO NOT EDIT` negatives; complexity/api/dead exclude-generated filters covered; no real-corpus usage evidence |
+
+Latency corpus and raw method: `docs/baselines/p8-latency-2026-11-03.md`.

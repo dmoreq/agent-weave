@@ -4,8 +4,8 @@ Frozen on 2026-11-02 at kg `342ebc3`, vihap `efcd310`, finguard `dddfe07`,
 Flutter `20f82749394`, food-dispatch `6bc5337`. Local-only gates: the harness
 needs these working trees and is not run in CI.
 
-**TL;DR** — 71 source-verified rows: imports 40/40, tests 20/20, inheritance
-11/11 at 1.000 recall. Ground truth was derived from source ASTs before
+**TL;DR** — 77 source-verified rows: imports 40/40, tests 20/20, inheritance
+17/17 at 1.000 recall. Ground truth was derived from source ASTs before
 measuring kg, not from kg output.
 
 ## 1. Files
@@ -14,7 +14,7 @@ measuring kg, not from kg output.
 |------|---------|------|----------|
 | F7 imports | `import-gt.jsonl` | 40 | vihap 25, kg self 15 |
 | F8 tests | `tests-gt.jsonl` | 20 | vihap 20 test files |
-| F1 inheritance | `inheritance-gt.jsonl` | 11 | vihap 10, finguard 1 |
+| F1 inheritance | `inheritance-gt.jsonl` | 17 | vihap 15, finguard 2 |
 
 ## 2. Construction
 
@@ -25,7 +25,9 @@ measuring kg, not from kg output.
 - Rust rows: tree-sitter `use_declaration` with a `crate::` path; the target
   module is the path prefix minus the imported leaf, mapped to `src.*`.
   Parent `src` prefix is required to exist as `.rs` or `/mod.rs`.
-- One row per `(file, line, target)`, sorted by file, line, target.
+- One row per `(file, line, target)`, sorted by file, line, target. On
+  2026-11-03 the kg-self `src/walk.rs` row moved from line 10 to 11 after a
+  source change; the row was re-pinned at the current source.
 - A row hits when `kg imports <file>` emits exactly
   `<file>:<line> <target>`.
 
@@ -44,11 +46,16 @@ measuring kg, not from kg output.
 ### 2.3 Inheritance
 
 - Python rows: `ClassDef` bases that resolve to a class in the same vihap
-  module or to an imported `vihap.*` class.
-- The finguard row is a TypeScript `interface X extends Y` where both types
-  are in the same file.
+  module or to an imported `vihap.*` class. The 2026-11-03 extension adds
+  five cross-file rows: `BaseSpanMatch` -> three grammar subclasses and
+  `AddressCleaner` -> two cleaner subclasses.
+- The finguard rows are TypeScript interface/class extensions; one same-file
+  interface row and one cross-file class row
+  (`SnapshotStore` -> `MemorySnapshotStore`).
 - A row hits when `kg implementers <base> --limit 10000` lists the child
   qualname.
+- tsconfig `paths` aliases are not resolved in v1; a pinned fixture asserts
+  the unresolved `kind='inherit'` row instead of an edge.
 
 ## 3. Harness commands
 
@@ -85,7 +92,7 @@ target/release/kg --root /Users/quy.doan/Workspace/personal/finguard build --for
 |------|--------|-----------|---------------------|------|
 | imports | 40/40 = 1.000 | 183/183 = 1.000 | 0.912-1.000 | recall/precision >= 0.90 |
 | tests | 20/20 = 1.000 | 2679/2679 = 1.000 | 0.839-1.000 | recall/precision >= 0.90 |
-| inheritance | 11/11 = 1.000 | not applicable | 0.741-1.000 | recall 1.00 |
+| inheritance | 17/17 = 1.000 | not applicable | 0.816-1.000 | recall 1.00 |
 
 Precision is measured over every emitted row for the GT files. An import row
 is positive when its source line (or its multi-line import block) is
@@ -107,6 +114,8 @@ target/release/kg --root /Users/quy.doan/Packages/flutter build --force
 - Function-local Python imports (F8 limit): excluded from `tests-gt.jsonl`.
 - Cross-file Rust `impl Trait for Type` (F1 limit): no row; food-dispatch
   has only cross-file impls.
+- TypeScript `tsconfig` `paths` aliases (F1 limit): no cross-file row; the
+  pinned fixture asserts the unresolved inherit row instead.
 - Dart imports/tests/inheritance: P9; not measured here.
 - `kg tests` is queried with `--limit 10000` so GT rows behind the default
   50-row display cap are observable; the cap itself is covered by CLI tests.

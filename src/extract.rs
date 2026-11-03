@@ -3254,6 +3254,25 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
     let fctx = &t.file_ctx[fi];
     match &site.callee {
         Callee::Name(name) => {
+            // 0. Lexical function scope: a nested def is visible to its
+            // enclosing function and to deeper nested functions (closure).
+            // Class scope is not lexical in Python, so stop before it.
+            if !site.scope_func.is_empty() {
+                let mut scope = site.scope_func.clone();
+                while Some(scope.as_str()) != site.scope_class.as_deref() && scope != fctx.module {
+                    let candidate = format!("{scope}.{name}");
+                    if let Some(out) = bare_candidates(t.by_qualname.get(&candidate), name) {
+                        return out;
+                    }
+                    let Some((parent, _)) = scope.rsplit_once('.') else {
+                        break;
+                    };
+                    if Some(parent) == site.scope_class.as_deref() || parent == fctx.module {
+                        break;
+                    }
+                    scope = parent.to_string();
+                }
+            }
             // 1. Local module definition.
             if let Some(out) = bare_candidates(
                 t.by_mod_name.get(&(fctx.module.clone(), name.clone())),
