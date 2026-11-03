@@ -91,13 +91,21 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
 
 
 def export(src: Path, out: Path) -> None:
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+    src = src.resolve()
+    out = out.resolve()
+    if out == src or src.is_relative_to(out) or out.is_relative_to(src):
+        raise SystemExit("--out must be outside --src and must not overlap it")
+    # Validate the source archive before touching the destination.
     archive = subprocess.run(
         ["git", "-C", str(src), "archive", "--format=tar", "HEAD"],
         check=True, capture_output=True,
     ).stdout
+    if out.exists():
+        if not out.is_dir():
+            raise SystemExit("--out exists and is not a directory")
+        if any(out.iterdir()):
+            raise SystemExit("refusing non-empty --out; choose a fresh directory")
+    out.mkdir(parents=True, exist_ok=True)
     subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
     shutil.rmtree(out / "docs" / "baselines", ignore_errors=True)
     shutil.rmtree(out / "docs" / "reports", ignore_errors=True)
@@ -170,10 +178,20 @@ def gate(out: Path) -> int:
     }
     rc = 0
     for label, pat in checks.items():
-        res = subprocess.run(
-            ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
-            cwd=out, capture_output=True, text=True,
-        )
+        try:
+            res = subprocess.run(
+                ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
+                cwd=out, capture_output=True, text=True,
+            )
+        except OSError as exc:
+            print(f"{label:16s} scan-error: {exc}")
+            rc = 1
+            continue
+        if res.returncode not in (0, 1):
+            print(f"{label:16s} scan-error {res.returncode}")
+            print(res.stderr[:2000])
+            rc = 1
+            continue
         n = len([l for l in res.stdout.splitlines() if l.strip()])
         print(f"{label:16s} {n}")
         if n:
@@ -183,10 +201,20 @@ def gate(out: Path) -> int:
         "vault_prose": "the private evidence vault",
         "empty_link": "\\]\\(\\)",
     }.items():
-        res = subprocess.run(
-            ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
-            cwd=out, capture_output=True, text=True,
-        )
+        try:
+            res = subprocess.run(
+                ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
+                cwd=out, capture_output=True, text=True,
+            )
+        except OSError as exc:
+            print(f"{label:16s} scan-error: {exc}")
+            rc = 1
+            continue
+        if res.returncode not in (0, 1):
+            print(f"{label:16s} scan-error {res.returncode}")
+            print(res.stderr[:2000])
+            rc = 1
+            continue
         n = len([l for l in res.stdout.splitlines() if l.strip()])
         print(f"{label:16s} {n}")
         if n:

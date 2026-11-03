@@ -443,8 +443,9 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             define_method_ts(node, src, fx, ctx);
         }
         "variable_declarator" => {
-            record_ts_arrow_function(node, src, fx, ctx);
-            walk_children(node, src, fx, ctx);
+            if !record_ts_arrow_function(node, src, fx, ctx) {
+                walk_children(node, src, fx, ctx);
+            }
         }
         "new_expression" => {
             record_call(node, src, fx, ctx);
@@ -474,8 +475,11 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                     } else {
                         format!("{scope}.{name}")
                     };
-                    fx.aliases
-                        .push((name, ImportTarget::ModuleRoot { path: path.clone() }));
+                    fx.aliases.push((
+                        String::new(),
+                        name,
+                        ImportTarget::ModuleRoot { path: path.clone() },
+                    ));
                     fx.import_edges.push(ImportEdgeCandidate {
                         line: node.start_position().row + 1,
                         target: ImportTarget::Module { path },
@@ -525,19 +529,15 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 return;
             };
             let name = text(name_node, src);
-            let kind = if ctx.class_stack.is_empty() {
-                "function"
-            } else {
+            // Innermost lexical scope wins: class > enclosing function when
+            // the class is nested in that function, and function > class when
+            // a nested function sits inside a method.
+            let parent_qn = innermost_scope(ctx, &fx.module);
+            let kind = if ctx.class_stack.last() == Some(&parent_qn) {
                 "method"
+            } else {
+                "function"
             };
-            // Innermost scope wins: a nested def belongs to its enclosing
-            // function; a method (no func scope) belongs to its class (R7).
-            let parent_qn = ctx
-                .func_stack
-                .last()
-                .or_else(|| ctx.class_stack.last())
-                .cloned()
-                .unwrap_or_else(|| fx.module.clone());
             let qualname = format!("{parent_qn}.{name}");
             let start = node.start_position().row + 1;
             let sym_idx = fx.symbols.len();
@@ -587,14 +587,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 return;
             };
             let name = text(name_node, src);
-            // Innermost scope wins: a nested def belongs to its enclosing
-            // function; a method (no func scope) belongs to its class (R7).
-            let parent_qn = ctx
-                .func_stack
-                .last()
-                .or_else(|| ctx.class_stack.last())
-                .cloned()
-                .unwrap_or_else(|| fx.module.clone());
+            // Innermost lexical scope wins: a class nested in a function
+            // belongs to that function; a class nested in a method belongs to
+            // the method.
+            let parent_qn = innermost_scope(ctx, &fx.module);
             let qualname = format!("{parent_qn}.{name}");
             let start = node.start_position().row + 1;
             let sym_idx = fx.symbols.len();
@@ -646,28 +642,38 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             walk_children(node, src, fx, ctx);
         }
         "import_statement" | "import_from_statement" => {
-            record_import(node, src, fx);
+            record_import(node, src, fx, &ctx.scope_func());
         }
         _ => walk_children(node, src, fx, ctx),
     }
 }
 
+fn innermost_scope(ctx: &WalkCtx, module: &str) -> String {
+    [
+        ctx.func_stack.last(),
+        ctx.class_stack.last(),
+        ctx.mod_stack.last(),
+    ]
+    .into_iter()
+    .flatten()
+    .max_by_key(|qualname| qualname.len())
+    .cloned()
+    .unwrap_or_else(|| module.to_string())
+}
+
 fn parent_symbol_idx(fx: &FileExtraction, ctx: &WalkCtx) -> Option<usize> {
-    let qn = if let Some(f) = ctx.func_stack.last() {
-        f.clone()
-    } else if let Some(c) = ctx.class_stack.last() {
-        c.clone()
-    } else if let Some(m) = ctx.mod_stack.last() {
-        m.clone()
-    } else {
-        return Some(0); // module symbol is always symbols[0]
-    };
+    let qn = innermost_scope(ctx, &fx.module);
     fx.symbols.iter().position(|s| s.qualname == qn)
 }
 
 fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
     let mut cursor = params.walk();
     for p in params.children(&mut cursor) {
+        if let Some(var) = param_binding(p, src) {
+            if var != "self" && var != "cls" && var != "this" {
+                fx.locals.push((scope.to_string(), var));
+            }
+        }
         // Rust: `x: Foo`, `x: &Foo`, `x: &mut Foo`. `self`/`&self` parameters
         // carry no type and are skipped.
         if p.kind() == "parameter" {
@@ -729,6 +735,17 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
             }
         }
     }
+}
+
+/// Binding name of a parameter node: identifier, named pattern, or typed name.
+fn param_binding(node: Node<'_>, src: &[u8]) -> Option<String> {
+    if node.kind() == "identifier" {
+        return Some(text(node, src));
+    }
+    node.child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("pattern"))
+        .and_then(|n| pattern_name(n, src))
+        .or_else(|| pattern_name(node, src))
 }
 
 /// Binding name of a declarator pattern: `x`, `mut x`, `(a, b)` (first name).
@@ -793,11 +810,23 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
         } else {
             None
         };
-    let Some(target_dotted) = target else { return };
+    let Some(target) = target else {
+        // A simple `x = <unknown>` still overwrites an earlier constructor
+        // type; record it as an unknown binding instead of leaving the old
+        // assignment in place.
+        if left.kind() == "identifier" {
+            fx.assignments.push(Assignment {
+                var: text(left, src),
+                target_dotted: Vec::new(),
+                scope_func: ctx.scope_func(),
+            });
+        }
+        return;
+    };
     match left.kind() {
         "identifier" => fx.assignments.push(Assignment {
             var: text(left, src),
-            target_dotted,
+            target_dotted: target,
             scope_func: ctx.scope_func(),
         }),
         "attribute" => {
@@ -810,7 +839,7 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
                         fx.self_fields.push(SelfField {
                             class_qn,
                             field: text(attr, src),
-                            target_dotted,
+                            target_dotted: target,
                         });
                     }
                 }
@@ -865,6 +894,12 @@ fn record_rust_let(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
     let Some(mut chain) = target else {
         return;
     };
+    // Only conventional constructors type the receiver. An arbitrary
+    // associated function (`A::make() -> B`) says nothing about the returned
+    // type, so it must not be treated as `A`.
+    if !matches!(chain.last().map(String::as_str), Some("new" | "default")) {
+        return;
+    }
     // `Foo::new()` -> Foo; `crate::m::Foo::new()` -> crate::m::Foo.
     // A bare lowercase call (`make()`) has no knowable type.
     let head = chain.first().map(String::as_str).unwrap_or("");
@@ -943,7 +978,7 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
     });
 }
 
-fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
+fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
     let line = node.start_position().row + 1;
     match node.kind() {
         "import_statement" => {
@@ -953,8 +988,11 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     "dotted_name" => {
                         let path = text(child, src);
                         let root = path.split('.').next().unwrap_or(&path).to_string();
-                        fx.aliases
-                            .push((root.clone(), ImportTarget::ModuleRoot { path: root }));
+                        fx.aliases.push((
+                            scope.to_string(),
+                            root.clone(),
+                            ImportTarget::ModuleRoot { path: root },
+                        ));
                         let parts: Vec<&str> = path.split('.').collect();
                         for i in 1..=parts.len() {
                             fx.import_edges.push(ImportEdgeCandidate {
@@ -976,6 +1014,7 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                         };
                         let target_path = text(target, src);
                         fx.aliases.push((
+                            scope.to_string(),
                             text(alias, src),
                             ImportTarget::ModuleRoot {
                                 path: target_path.clone(),
@@ -1032,7 +1071,7 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                                 name: name.clone(),
                             }
                         };
-                        fx.aliases.push((name.clone(), alias));
+                        fx.aliases.push((scope.to_string(), name.clone(), alias));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::Module {
@@ -1071,7 +1110,8 @@ fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                                 name: name.clone(),
                             }
                         };
-                        fx.aliases.push((text(alias, src), alias_target));
+                        fx.aliases
+                            .push((scope.to_string(), text(alias, src), alias_target));
                         fx.import_edges.push(ImportEdgeCandidate {
                             line,
                             target: ImportTarget::Module {
@@ -1561,21 +1601,21 @@ fn record_ts_arrow_function(
     src: &[u8],
     fx: &mut FileExtraction,
     ctx: &mut WalkCtx,
-) {
+) -> bool {
     if !ctx.class_stack.is_empty() || !ctx.func_stack.is_empty() {
-        return; // nested functions are not indexed symbols
+        return false; // nested functions are not indexed symbols
     }
     let Some(name_node) = node.child_by_field_name("name") else {
-        return;
+        return false;
     };
     let Some(value) = node.child_by_field_name("value") else {
-        return;
+        return false;
     };
     if !matches!(
         value.kind(),
         "arrow_function" | "function" | "function_expression"
     ) {
-        return;
+        return false;
     }
     let name = text(name_node, src);
     let qualname = format!("{}.{}", fx.module, name);
@@ -1617,6 +1657,7 @@ fn record_ts_arrow_function(
     ctx.func_stack.push(qualname);
     walk_children(value, src, fx, ctx);
     ctx.func_stack.pop();
+    true
 }
 
 /// TS/TSX/JSX static ESM imports. Relative sources resolve by module path;
@@ -1660,6 +1701,7 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     // default import: import X from "..."
                     let name = text(part, src);
                     fx.aliases.push((
+                        String::new(),
                         name.clone(),
                         ImportTarget::Symbol {
                             module: module.clone(),
@@ -1673,6 +1715,7 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                     for p2 in part.children(&mut c3) {
                         if p2.kind() == "identifier" {
                             fx.aliases.push((
+                                String::new(),
                                 text(p2, src),
                                 ImportTarget::ModuleRoot {
                                     path: module.clone(),
@@ -1696,6 +1739,7 @@ fn record_import_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction) {
                             .map(|a| text(a, src))
                             .unwrap_or_else(|| name.clone());
                         fx.aliases.push((
+                            String::new(),
                             bound,
                             ImportTarget::Symbol {
                                 module: module.clone(),
@@ -1919,10 +1963,14 @@ fn emit_use_leaf(
         if let Some(binding) = binding {
             if let Some((name, parent)) = full.split_last() {
                 if parent.is_empty() {
-                    fx.aliases
-                        .push((binding, ImportTarget::ModuleRoot { path: qn }));
+                    fx.aliases.push((
+                        String::new(),
+                        binding,
+                        ImportTarget::ModuleRoot { path: qn },
+                    ));
                 } else {
                     fx.aliases.push((
+                        String::new(),
                         binding,
                         ImportTarget::Symbol {
                             module: parent.join("."),
@@ -1952,6 +2000,7 @@ fn emit_use_leaf(
         },
     });
     fx.aliases.push((
+        String::new(),
         alias.unwrap_or_else(|| name.clone()),
         ImportTarget::Symbol {
             module,

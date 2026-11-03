@@ -5,9 +5,13 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn temp_repo(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("aw-it-{}-{}", name, std::process::id()));
+    let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("aw-it-{}-{}-{seq}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -677,6 +681,36 @@ fn prebuilt_index_restore_carries_on_hash_match() {
 }
 
 #[test]
+fn unresolved_path_scope_binds_params() {
+    let repo = temp_repo("unresolved-path-scope");
+    write(
+        &repo,
+        "src/sample.py",
+        "def task(receiver):\n    receiver.unknown_method()\n",
+    );
+    build(&repo);
+
+    let out = aw(&repo)
+        .args(["unresolved", "--path", "src"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("src/sample.py unresolved=1"), "{stdout}");
+
+    let names = aw(&repo)
+        .args(["unresolved", "--names", "--path", "src"])
+        .output()
+        .unwrap();
+    let nstdout = String::from_utf8_lossy(&names.stdout);
+    assert_eq!(names.status.code(), Some(0), "{nstdout}");
+    assert!(
+        nstdout.contains("src/sample.py:2 call receiver.unknown_method"),
+        "{nstdout}"
+    );
+}
+
+#[test]
 fn unresolved_count_stable_across_incremental_builds() {
     let repo = temp_repo("unres");
     write(&repo, "m.py", "def go():\n    return ghost()\n");
@@ -1051,6 +1085,33 @@ fn impact_depth_footer_only_when_frontier_extended() {
         !stdout.contains("depth cap"),
         "exhausted BFS reported a cap: {stdout}"
     );
+}
+
+#[test]
+fn callers_depth_two_reaches_transitive_callers() {
+    let repo = temp_repo("callers-depth");
+    write(&repo, "c.py", "def h():\n    pass\n");
+    write(&repo, "b.py", "from c import h\n\ndef g():\n    h()\n");
+    write(&repo, "a.py", "from b import g\n\ndef f():\n    g()\n");
+    build(&repo);
+
+    // Depth 1 keeps the existing direct-caller format and does not add tags.
+    let direct = aw(&repo).args(["callers", "h"]).output().unwrap();
+    let d1 = String::from_utf8_lossy(&direct.stdout);
+    assert_eq!(direct.status.code(), Some(0), "{d1}");
+    assert!(d1.contains("b.g"), "{d1}");
+    assert!(!d1.contains("a.f"), "{d1}");
+    assert!(!d1.contains("[depth="), "{d1}");
+
+    let out = aw(&repo)
+        .args(["callers", "h", "--depth", "2"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("transitive callers"), "{stdout}");
+    assert!(stdout.contains("b.g [depth=1]"), "{stdout}");
+    assert!(stdout.contains("a.f [depth=2]"), "{stdout}");
 }
 
 #[test]
@@ -2463,17 +2524,29 @@ fn g5_no_child_processes_survive() {
     let mut child = aw(&repo).arg("build").spawn().unwrap();
     let pid = child.id().to_string();
     let mut seen: std::collections::HashSet<String> = Default::default();
+    let mut pgrep_ok = 0usize;
     loop {
-        if let Ok(out) = Command::new("ps")
-            .args(["-o", "comm=", "-P", &pid])
-            .output()
-        {
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let comm = line.trim();
-                if !comm.is_empty() {
-                    seen.insert(comm.to_string());
+        match Command::new("pgrep").args(["-P", &pid, "-l"]).output() {
+            Ok(out) if out.status.code() == Some(0) => {
+                pgrep_ok += 1;
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    if let Some((_, comm)) = line.split_once(char::is_whitespace) {
+                        let comm = comm.trim();
+                        if !comm.is_empty() {
+                            seen.insert(comm.to_string());
+                        }
+                    }
                 }
             }
+            Ok(out) if out.status.code() == Some(1) => {
+                pgrep_ok += 1;
+            }
+            Ok(out) => {
+                if child.try_wait().unwrap().is_none() {
+                    panic!("pgrep failed while build was alive: {out:?}");
+                }
+            }
+            Err(e) => panic!("pgrep inspection failed: {e}"),
         }
         if child.try_wait().unwrap().is_some() {
             break;
@@ -2482,6 +2555,9 @@ fn g5_no_child_processes_survive() {
     }
     let status = child.wait().unwrap();
     assert!(status.success());
+    assert!(pgrep_ok > 0, "process inspection never succeeded");
+    // A non-git fixture may have no child at all; the seeded-child test below
+    // separately proves the inspection mechanism is not vacuous.
     for comm in &seen {
         assert!(
             comm == "git" || comm.ends_with("/git"),
@@ -2493,7 +2569,36 @@ fn g5_no_child_processes_survive() {
         .output()
         .unwrap();
     let alive = String::from_utf8_lossy(&probe.stdout);
+    assert!(
+        probe.status.code() == Some(1),
+        "pgrep inspection did not report a clean no-match: {probe:?}"
+    );
     assert!(alive.trim().is_empty(), "processes still alive: {alive}");
+}
+
+#[test]
+fn g5_process_inspection_detects_seeded_child() {
+    // Guard the guard: pgrep must see a live descendant whose command line
+    // carries the marker. Without this, an empty result could pass vacuously.
+    let marker = format!("aw-seed-{}", std::process::id());
+    let script = format!("sleep 30; : {marker}");
+    let mut child = Command::new("sh").args(["-c", &script]).spawn().unwrap();
+    let mut found = false;
+    for _ in 0..100 {
+        let out = Command::new("pgrep")
+            .args(["-f", &marker])
+            .output()
+            .unwrap();
+        assert!(out.status.code() == Some(0) || out.status.code() == Some(1));
+        if out.status.code() == Some(0) {
+            found = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(found, "pgrep did not detect the seeded child");
 }
 
 #[test]
@@ -3213,7 +3318,7 @@ fn context_shows_definition_callers_and_callees() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let expected =
-        "aw: context — resolved static edges only; dynamic dispatch may hide callers or callees\n\
+        "aw: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees\n\
 b.py:3-4 function b.caller def caller()\n\
 callers (showing 1 of 1):\n\
 c.py:4 c.top\n\
@@ -3791,4 +3896,433 @@ fn path_endpoints_accept_class_method_suffixes() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
     assert!(stdout.contains("a.A.m"), "{stdout}");
+}
+
+#[cfg(unix)]
+fn external_symlink_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("aw-ext-{}-{}", name, std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_aw_directory_is_rejected_without_external_writes() {
+    use std::os::unix::fs::symlink;
+    let repo = temp_repo("symlink-aw-dir");
+    write(&repo, "sample.py", "def task():\n    pass\n");
+    let ext = external_symlink_dir("aw-dir");
+    let sentinel = ext.join("sentinel.txt");
+    fs::write(&sentinel, "keep").unwrap();
+    let _ = fs::remove_dir_all(repo.join(".aw"));
+    symlink(&ext, repo.join(".aw")).unwrap();
+
+    let out = aw(&repo).args(["build"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(0), "symlinked .aw must be refused");
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
+    assert!(!ext.join("index.db").exists());
+    let _ = fs::remove_dir_all(&ext);
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_aw_directory_to_missing_target_is_not_created() {
+    use std::os::unix::fs::symlink;
+    let repo = temp_repo("symlink-aw-missing");
+    write(&repo, "sample.py", "def task():\n    pass\n");
+    let target = std::env::temp_dir().join(format!("aw-ext-aw-missing-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&target);
+    let _ = fs::remove_dir_all(repo.join(".aw"));
+    symlink(&target, repo.join(".aw")).unwrap();
+
+    let out = aw(&repo).args(["build"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(0));
+    assert!(!target.exists(), "symlink target must not be created");
+    let _ = fs::remove_file(repo.join(".aw"));
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_build_lock_and_gitignore_are_rejected() {
+    use std::os::unix::fs::symlink;
+    let repo = temp_repo("symlink-lock");
+    write(&repo, "sample.py", "def task():\n    pass\n");
+    let ext = external_symlink_dir("lock");
+    let sentinel = ext.join("sentinel.txt");
+    fs::write(&sentinel, "keep").unwrap();
+    fs::create_dir_all(repo.join(".aw")).unwrap();
+    symlink(&sentinel, repo.join(".aw/build.lock")).unwrap();
+    let lock = aw(&repo).args(["build"]).output().unwrap();
+    assert_ne!(lock.status.code(), Some(0));
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
+
+    fs::remove_file(repo.join(".aw/build.lock")).unwrap();
+    symlink(&sentinel, repo.join(".aw/.gitignore")).unwrap();
+    let ignore = aw(&repo).args(["build"]).output().unwrap();
+    assert_ne!(ignore.status.code(), Some(0));
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
+    let _ = fs::remove_file(repo.join(".aw/.gitignore"));
+    let _ = fs::remove_dir_all(&ext);
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_journal_is_not_followed() {
+    use std::os::unix::fs::symlink;
+    let repo = temp_repo("symlink-journal");
+    write(&repo, "sample.py", "def task():\n    pass\n");
+    let built = aw(&repo).args(["--no-journal", "build"]).output().unwrap();
+    assert_eq!(built.status.code(), Some(0));
+    let ext = external_symlink_dir("journal");
+    let sentinel = ext.join("sentinel.txt");
+    fs::write(&sentinel, "keep").unwrap();
+    symlink(&sentinel, repo.join(".aw/usage.log")).unwrap();
+
+    let out = aw(&repo).args(["stats"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
+    let _ = fs::remove_dir_all(&ext);
+}
+
+#[cfg(unix)]
+#[test]
+fn invalidate_refuses_while_root_lock_is_held() {
+    let repo = temp_repo("invalidate-lock");
+    write(&repo, "sample.py", "def task():\n    pass\n");
+    let _ = build(&repo);
+    let sentinel = repo.join(".aw/sentinel");
+    fs::write(&sentinel, "keep").unwrap();
+    let lock = agent_weave::db::RootLock::acquire(&repo).unwrap();
+
+    let blocked = aw(&repo).args(["doctor", "--invalidate"]).output().unwrap();
+    assert_eq!(blocked.status.code(), Some(4), "{blocked:?}");
+    assert!(sentinel.exists(), "invalidate ran while root lock was held");
+
+    drop(lock);
+    let after = aw(&repo).args(["doctor", "--invalidate"]).output().unwrap();
+    assert_eq!(after.status.code(), Some(0), "{after:?}");
+    assert!(!repo.join(".aw").exists());
+}
+
+#[test]
+fn removed_inheritance_does_not_survive_incremental_build() {
+    let repo = temp_repo("removed-base");
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def foo(self):\n        pass\n\nclass B(A):\n    pass\n\ndef invoke(b: B):\n    b.foo()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let before = aw(&repo).args(["callers", "A.foo"]).output().unwrap();
+    assert_eq!(before.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&before.stdout).contains("sample.invoke"));
+
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def foo(self):\n        pass\n\nclass B:\n    pass\n\ndef invoke(b: B):\n    b.foo()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let after = aw(&repo).args(["callers", "A.foo"]).output().unwrap();
+    assert_eq!(after.status.code(), Some(1), "{after:?}");
+
+    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(force.status.code(), Some(0));
+    let forced = aw(&repo).args(["callers", "A.foo"]).output().unwrap();
+    assert_eq!(forced.status.code(), Some(1), "{forced:?}");
+}
+
+#[test]
+fn added_duplicate_candidate_invalidates_resolved_edges() {
+    let repo = temp_repo("added-candidate");
+    write(
+        &repo,
+        "caller.py",
+        "from pkg import foo\n\ndef invoke():\n    foo()\n",
+    );
+    write(&repo, "pkg.py", "def foo():\n    pass\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let before = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(before.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&before.stdout).contains("pkg.foo"),
+        "{before:?}"
+    );
+
+    write(&repo, "pkg/__init__.py", "def foo():\n    pass\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let after = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(after.status.code(), Some(0), "{after:?}");
+    assert!(
+        String::from_utf8_lossy(&after.stdout).contains("[ambiguous]"),
+        "incremental build kept a stale resolved edge: {after:?}"
+    );
+
+    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(force.status.code(), Some(0));
+    let forced = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(after.stdout, forced.stdout);
+
+    let ctx = aw(&repo).args(["context", "invoke"]).output().unwrap();
+    assert_eq!(ctx.status.code(), Some(0), "{ctx:?}");
+    let text = String::from_utf8_lossy(&ctx.stdout);
+    assert!(
+        text.starts_with("aw: context — resolved static edges plus tagged [ambiguous] candidates;"),
+        "{text}"
+    );
+    assert!(text.contains("[ambiguous] foo"), "{text}");
+}
+
+#[test]
+fn local_imports_do_not_cross_bindings() {
+    let repo = temp_repo("local-imports");
+    write(&repo, "a.py", "def f(): pass\n");
+    write(&repo, "b.py", "def f(): pass\n");
+    write(
+        &repo,
+        "app.py",
+        "def left():\n    from a import f\n    f()\n\ndef right():\n    from b import f\n    f()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let a = aw(&repo).args(["callers", "a.f"]).output().unwrap();
+    assert_eq!(a.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&a.stdout).contains("app.left"));
+    let b = aw(&repo).args(["callers", "b.f"]).output().unwrap();
+    assert_eq!(b.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&b.stdout).contains("app.right"));
+}
+
+#[test]
+fn parameter_binding_shadows_module_function() {
+    let repo = temp_repo("parameter-shadow");
+    write(
+        &repo,
+        "sample.py",
+        "def target(): pass\n\ndef run(target):\n    target()\n\ndef run2():\n    target()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("sample.run2"), "{stdout}");
+    assert!(!stdout.contains("sample.run "), "{stdout}");
+    let unresolved = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&unresolved.stdout).contains("sample.py:4 call target"),
+        "{unresolved:?}"
+    );
+}
+
+#[test]
+fn unknown_reassignment_clears_receiver_type() {
+    let repo = temp_repo("receiver-reassign");
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def m(self): pass\n\ndef run(other):\n    obj = A()\n    obj = other\n    obj.m()\n\ndef run2():\n    obj = A()\n    obj.m()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "A.m"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("sample.run2"), "{stdout}");
+    assert!(!stdout.contains("sample.run "), "{stdout}");
+}
+
+#[test]
+fn rust_factory_does_not_type_receiver() {
+    let repo = temp_repo("rust-factory");
+    write(
+        &repo,
+        "lib.rs",
+        "struct A;\nstruct B;\nimpl A {\n    fn make() -> B { B }\n    fn render(&self) {}\n}\nimpl B { fn render(&self) {} }\nfn run() {\n    let value = A::make();\n    value.render();\n}\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callees", "run"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("lib.A.make"), "{stdout}");
+    assert!(!stdout.contains("lib.A.render"), "{stdout}");
+}
+
+#[test]
+fn arrow_initializer_has_one_owner() {
+    let repo = temp_repo("arrow-owner");
+    write(
+        &repo,
+        "sample.ts",
+        "function helper() {}\nconst run = () => helper();\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "helper"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("sample.run"), "{stdout}");
+    assert!(
+        !stdout.lines().any(|line| line.ends_with(" sample")),
+        "outer walk emitted a second owner: {stdout}"
+    );
+}
+
+#[test]
+fn nested_class_methods_keep_class_qualname() {
+    let repo = temp_repo("nested-class");
+    write(
+        &repo,
+        "sample.py",
+        "def outer():\n    class C:\n        def m(self): pass\n        def run(self):\n            self.m()\n    return C()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let symbols = aw(&repo).args(["symbols", "sample.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&symbols.stdout);
+    assert!(stdout.contains("sample.outer.C.m"), "{stdout}");
+    assert!(stdout.contains("sample.outer.C.run"), "{stdout}");
+    let callees = aw(&repo)
+        .args(["callees", "sample.outer.C.run"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&callees.stdout).contains("sample.outer.C.m"),
+        "{callees:?}"
+    );
+}
+
+#[test]
+fn local_receiver_blocks_shadowed_module() {
+    let repo = temp_repo("receiver-module-shadow");
+    write(&repo, "tools.py", "def execute(): pass\n");
+    write(
+        &repo,
+        "app.py",
+        "import tools\nfrom external import External\n\nclass C(External):\n    pass\n\ndef run():\n    tools = C()\n    tools.execute()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let callers = aw(&repo)
+        .args(["callers", "tools.execute"])
+        .output()
+        .unwrap();
+    assert_eq!(callers.status.code(), Some(1), "{callers:?}");
+    let callees = aw(&repo).args(["callees", "run"]).output().unwrap();
+    assert!(
+        !String::from_utf8_lossy(&callees.stdout).contains("tools.execute"),
+        "{callees:?}"
+    );
+}
+
+#[test]
+fn ambiguous_class_does_not_pick_one_method() {
+    let repo = temp_repo("class-ambiguity");
+    write(
+        &repo,
+        "sample.py",
+        "if flag:\n    class A:\n        def render(self): pass\nelse:\n    class A:\n        pass\n\ndef run(value: A):\n    value.render()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callees", "run"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(!String::from_utf8_lossy(&out.stdout).contains("A.render"));
+}
+
+#[test]
+fn build_force_bypasses_parse_gate_and_help_says_so() {
+    let repo = temp_repo("parse-force");
+    write(&repo, "broken.py", "def broken(:\n");
+    let strict = aw(&repo).args(["build"]).output().unwrap();
+    assert_eq!(strict.status.code(), Some(7), "{strict:?}");
+    let forced = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(forced.status.code(), Some(0), "{forced:?}");
+
+    let help = aw(&repo).args(["build", "--help"]).output().unwrap();
+    let text = String::from_utf8_lossy(&help.stdout);
+    assert!(text.contains("parse-error"), "{text}");
+    let doctor = aw(&repo).args(["doctor", "--help"]).output().unwrap();
+    let text = String::from_utf8_lossy(&doctor.stdout);
+    assert!(text.contains("entire .aw"), "{text}");
+}
+
+fn dump_edges(db: &Path) -> String {
+    let sql = "SELECT e.kind, e.confidence, e.site_line,
+                      sf.path, ss.qualname, ss.line_start,
+                      COALESCE(df.path, ''), COALESCE(ds.qualname, e.dst_name),
+                      COALESCE(ds.line_start, 0)
+               FROM edges e
+               JOIN symbols ss ON ss.id = e.src_id
+               JOIN files sf ON sf.id = ss.file_id
+               LEFT JOIN symbols ds ON ds.id = e.dst_id
+               LEFT JOIN files df ON df.id = ds.file_id
+               ORDER BY 1, 2, 3, 4, 5, 6, 7, 8, 9";
+    let out = Command::new("sqlite3").arg(db).arg(sql).output().unwrap();
+    assert!(out.status.success(), "sqlite3 failed: {out:?}");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn incremental_and_fresh_edge_sets_match_after_removed_inheritance() {
+    let repo = temp_repo("removed-base-full-edges");
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def foo(self):\n        pass\n\nclass B(A):\n    pass\n\ndef invoke(b: B):\n    b.foo()\n\ndef keep(a: A):\n    a.foo()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def foo(self):\n        pass\n\nclass B:\n    pass\n\ndef invoke(b: B):\n    b.foo()\n\ndef keep(a: A):\n    a.foo()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let incremental_db = repo.join("incremental.db");
+    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
+
+    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(force.status.code(), Some(0), "{force:?}");
+    let incremental = dump_edges(&incremental_db);
+    let fresh = dump_edges(&repo.join(".aw/index.db"));
+    assert_eq!(incremental, fresh, "incremental and fresh edge sets differ");
+
+    let callers = aw(&repo).args(["callers", "A.foo"]).output().unwrap();
+    let text = String::from_utf8_lossy(&callers.stdout);
+    assert!(text.contains("sample.keep"), "{text}");
+    assert!(!text.contains("sample.invoke"), "{text}");
+}
+
+#[test]
+fn unrelated_addition_does_not_invalidate_resolved_edges() {
+    let repo = temp_repo("added-unrelated");
+    write(
+        &repo,
+        "caller.py",
+        "from pkg import foo\n\ndef invoke():\n    foo()\n",
+    );
+    write(&repo, "pkg.py", "def foo():\n    pass\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+
+    write(&repo, "unrelated.py", "def bar():\n    pass\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.contains("carried=2"),
+        "unrelated addition re-extracted carried files: {stdout}"
+    );
+    let callees = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    let text = String::from_utf8_lossy(&callees.stdout);
+    assert!(text.contains("pkg.foo"), "{text}");
+    assert!(!text.contains("[ambiguous]"), "{text}");
 }

@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 spec = importlib.util.spec_from_file_location(
@@ -84,6 +85,71 @@ class PublicExportTests(unittest.TestCase):
                 "private script present: tests/scripts/import_recall.py",
                 captured.getvalue(),
             )
+
+
+    def _source_repo(self, root: Path) -> Path:
+        source = root / "source"
+        source.mkdir()
+        (source / "README.md").write_text("public guide\n")
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(["git", "add", "."], cwd=source, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Export Test", "-c",
+             "user.email=export@example.invalid", "-c", "commit.gpgsign=false",
+             "commit", "-qm", "fixture"],
+            cwd=source, check=True,
+        )
+        return source
+
+    def test_export_rejects_nonempty_destination_before_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self._source_repo(root)
+            out = root / "export"
+            out.mkdir()
+            sentinel = out / "sentinel.txt"
+            sentinel.write_text("keep\n")
+            with self.assertRaises(SystemExit):
+                public_export.export(source, out)
+            self.assertEqual(sentinel.read_text(), "keep\n")
+            self.assertFalse((out / "README.md").exists())
+
+    def test_export_rejects_overlapping_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self._source_repo(root)
+            with self.assertRaises(SystemExit):
+                public_export.export(source, source / "export")
+
+    def test_gate_fails_closed_on_scanner_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "Cargo.toml").write_text(
+                'include = [\n    "src/**",\n]\n'
+            )
+            failed = subprocess.CompletedProcess(
+                args=["git", "grep"], returncode=128, stdout="", stderr="scanner failed"
+            )
+            captured = io.StringIO()
+            with mock.patch.object(public_export.subprocess, "run", return_value=failed):
+                with contextlib.redirect_stdout(captured):
+                    self.assertEqual(public_export.gate(output), 1)
+            self.assertIn("scan-error 128", captured.getvalue())
+
+
+    def test_invalid_source_does_not_remove_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            (source / "README.md").write_text("not a git repository\n")
+            out = root / "export"
+            out.mkdir()
+            sentinel = out / "sentinel.txt"
+            sentinel.write_text("keep\n")
+            with self.assertRaises(subprocess.CalledProcessError):
+                public_export.export(source, out)
+            self.assertEqual(sentinel.read_text(), "keep\n")
 
 
 if __name__ == "__main__":

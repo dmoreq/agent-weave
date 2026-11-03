@@ -12,12 +12,18 @@ The examples below use aw's repository after `aw build`. They show commands, not
 | Read a file's structure | `aw symbols src/build.rs --outline` | Read the file or use an editor outline |
 | Inspect a function before editing | `aw context run_build` | Read its definition, then search callers and calls |
 | Find callers | `aw callers run_build` | Search references and reject non-call matches |
+| Follow transitive callers | `aw callers run_build --depth 2` | Follow each reverse call hop manually |
 | Follow outgoing calls | `aw callees run_build --depth 2` | Follow each call manually |
 | Trace a route between functions | `aw path run_build fnv1a64` | Read and follow candidate call chains |
 | Inspect dependent files | `aw impact src/hash.rs` | Search references and imports across files |
 | Find possible tests | `aw tests src/hash.rs` | Read test files and the test runner's discovery rules |
 | Inspect imports | `aw imports src/build.rs` | Read import declarations and resolve targets |
 | Find implementations of a type | `aw implementers <name>` | Read the type hierarchy and implementation blocks |
+
+Trust the rows a successful query returns for the navigation question you
+asked; do not repeat the same lookup with grep. Use source reads for behavioral
+claims, edits, and for capped, ambiguous, stale, or empty results. Treat
+`tests`, `dead`, and `unresolved` as candidates.
 
 See the [CLI reference](cli-reference.md) for all options and maintenance commands.
 
@@ -34,7 +40,7 @@ aw impact src/build.rs --sites
 
 `context` returns a definition range, caller sites, and callee definitions. Its per-section limit defaults to 10; an empty caller or callee section still permits a successful result.
 
-`callers` identifies call sites, not all textual references. `impact` reverses the dependency direction: it finds files that depend on the target file, excluding that file itself.
+`callers` identifies call sites, not all textual references. `--depth N` follows the resolved reverse call closure and tags rows with their shortest depth. `impact` reverses the dependency direction: it finds files that depend on the target file, excluding that file itself.
 
 By default, impact uses calls and emits one row per caller file with a site count. Use `--sites` for individual sites, or extend the relationships and depth explicitly:
 

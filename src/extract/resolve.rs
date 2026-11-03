@@ -13,7 +13,9 @@ struct FileCtx {
     /// Crate-root dir segment for Rust files (e.g. "src") — maps crate:: paths.
     crate_root: Option<String>,
     module_sym_idx: usize,
-    aliases: HashMap<String, ImportTarget>,
+    aliases: HashMap<String, Vec<(String, ImportTarget)>>,
+    /// (scope_func, var) parameters/locals that shadow outer names.
+    locals: HashSet<(String, String)>,
     stars: Vec<(String, usize)>,
     from_import_parents: HashSet<(usize, String)>,
     unresolved_inherits: Vec<(String, usize)>,
@@ -144,10 +146,11 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             .into_iter()
             .map(|(src, chain, line)| (src + base, chain, line))
             .collect();
-        let mut aliases = HashMap::new();
-        for (alias, target) in fx.aliases {
-            aliases.insert(alias, target); // later rebinding wins
+        let mut aliases: HashMap<String, Vec<(String, ImportTarget)>> = HashMap::new();
+        for (scope, alias, target) in fx.aliases {
+            aliases.entry(alias).or_default().push((scope, target));
         }
+        let locals: HashSet<(String, String)> = fx.locals.into_iter().collect();
         let mut assignments = HashMap::new();
         for a in fx.assignments {
             assignments.insert((a.scope_func, a.var), a.target_dotted);
@@ -167,6 +170,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             crate_root,
             module_sym_idx: base,
             aliases,
+            locals,
             stars: fx.stars,
             from_import_parents: fx.from_import_parents,
             unresolved_inherits: fx.unresolved_inherits,
@@ -696,6 +700,19 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                     scope = parent.to_string();
                 }
             }
+            // 0b. Function-local import binding: a local `from a import f`
+            // shadows the file-wide binding for this function.
+            if let Some((alias_scope, target)) = nearest_alias_scoped(fctx, &site.scope_func, name)
+            {
+                if !alias_scope.is_empty() {
+                    return local_alias_outcome(t, target, name);
+                }
+            }
+            // 0c. A parameter/local variable shadows module and file-level
+            // names; it is not a static call target.
+            if is_local_binding(fctx, site, name) {
+                return Outcome::Unresolved;
+            }
             // 1. Local module definition.
             if let Some(out) = bare_candidates(
                 t.by_mod_name.get(&(fctx.module.clone(), name.clone())),
@@ -704,7 +721,7 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 return out;
             }
             // 2. Import alias map (follows re-export chains transitively).
-            match fctx.aliases.get(name) {
+            match file_alias(fctx, name) {
                 Some(ImportTarget::Symbol { module, name: n }) => {
                     let mut seen: HashSet<(String, String)> = HashSet::new();
                     if let Some(out) = follow_binding(t, module, n, 0, &mut seen, name) {
@@ -787,10 +804,9 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             // (Amendment 7b): a local binding shadows a same-named module.
             if chain.len() == 2 {
                 if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
-                    let out = mro_outcome(t, &var_class, &method);
-                    if !matches!(out, Outcome::Unresolved) {
-                        return out;
-                    }
+                    // A typed local receiver shadows a same-named module even
+                    // when the method miss leaves the call unresolved.
+                    return mro_outcome(t, &var_class, &method);
                 }
             }
             // Class-attribute call: Class.m(...) or pkg.Class.m(...).
@@ -982,7 +998,7 @@ fn root_chain(root: &str, chain: &[String]) -> Vec<String> {
 /// Does the first chain segment bind to a module (alias or bare indexed name)?
 fn chain_is_module_start(t: &Tables, fi: usize, first: &str) -> bool {
     let fctx = &t.file_ctx[fi];
-    match fctx.aliases.get(first) {
+    match file_alias(fctx, first) {
         Some(ImportTarget::ModuleRoot { .. }) | Some(ImportTarget::Module { .. }) => true,
         Some(ImportTarget::Symbol { module, name }) => {
             t.module_paths.contains(&format!("{module}.{name}"))
@@ -999,6 +1015,76 @@ fn bare_candidates(cands: Option<&Vec<usize>>, display: &str) -> Option<Outcome>
         1 => Some(Outcome::Extracted(v[0])),
         0 => None,
         _ => Some(Outcome::Ambiguous(display.to_string())),
+    }
+}
+
+/// Nearest import binding for `name` at `scope`: an exact local scope (or a
+/// nested function under it) beats a file-level binding.
+fn nearest_alias_scoped<'a>(
+    fctx: &'a FileCtx,
+    scope: &str,
+    name: &str,
+) -> Option<(&'a str, &'a ImportTarget)> {
+    let entries = fctx.aliases.get(name)?;
+    let mut best: Option<&'a (String, ImportTarget)> = None;
+    for entry in entries {
+        let binding_scope = entry.0.as_str();
+        let visible = binding_scope.is_empty()
+            || scope == binding_scope
+            || scope.starts_with(&format!("{binding_scope}."));
+        if visible && best.is_none_or(|b| binding_scope.len() >= b.0.len()) {
+            best = Some(entry);
+        }
+    }
+    best.map(|(binding_scope, target)| (binding_scope.as_str(), target))
+}
+
+fn file_alias<'a>(fctx: &'a FileCtx, name: &str) -> Option<&'a ImportTarget> {
+    fctx.aliases
+        .get(name)?
+        .iter()
+        .rev()
+        .find(|(scope, _)| scope.is_empty())
+        .map(|(_, target)| target)
+}
+
+/// A parameter or local variable in the current or an enclosing function
+/// shadows module and file-level bindings. Python class scope is not lexical.
+fn is_local_binding(fctx: &FileCtx, site: &CallSite, name: &str) -> bool {
+    let mut scope = site.scope_func.as_str();
+    while !scope.is_empty() && scope != fctx.module {
+        let key = (scope.to_string(), name.to_string());
+        if fctx.locals.contains(&key) {
+            return true;
+        }
+        let Some((parent, _)) = scope.rsplit_once('.') else {
+            break;
+        };
+        if Some(parent) == site.scope_class.as_deref() {
+            break;
+        }
+        scope = parent;
+    }
+    false
+}
+
+fn local_alias_outcome(t: &Tables, target: &ImportTarget, name: &str) -> Outcome {
+    match target {
+        ImportTarget::Symbol { module, name: n } => {
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            if let Some(out) = follow_binding(t, module, n, 0, &mut seen, name) {
+                return out;
+            }
+            if !t.module_paths.contains(module) {
+                return Outcome::Dropped;
+            }
+            Outcome::Unresolved
+        }
+        ImportTarget::ModuleRoot { path } => {
+            bare_candidates(t.by_mod_name.get(&(path.clone(), name.to_string())), name)
+                .unwrap_or(Outcome::Unresolved)
+        }
+        ImportTarget::Module { .. } => Outcome::Unresolved,
     }
 }
 
@@ -1026,7 +1112,7 @@ fn follow_binding(
     }
     let file_idx = t.file_ctx.iter().position(|f| f.module == module)?;
     let fctx = &t.file_ctx[file_idx];
-    match fctx.aliases.get(name) {
+    match file_alias(fctx, name) {
         Some(ImportTarget::Symbol {
             module: m2,
             name: n2,
@@ -1070,15 +1156,16 @@ fn mro_outcome(t: &Tables, class_qn: &str, method: &str) -> Outcome {
 fn resolve_var_class(t: &Tables, fi: usize, var: &str, scope: &str) -> Option<String> {
     let fctx = &t.file_ctx[fi];
     if let Some(ann) = fctx.params.get(&(scope.to_string(), var.to_string())) {
-        if let Some(qn) = resolve_class_of_chain(t, fi, ann) {
-            return Some(qn);
-        }
+        return resolve_class_of_chain(t, fi, ann);
     }
     for s in [scope, ""] {
         if let Some(target) = fctx.assignments.get(&(s.to_string(), var.to_string())) {
-            if let Some(qn) = resolve_class_of_chain(t, fi, target) {
-                return Some(qn);
+            // An unknown or unresolved local assignment blocks the outer
+            // module binding; it must not fall back to a stale class.
+            if target.is_empty() {
+                return None;
             }
+            return resolve_class_of_chain(t, fi, target);
         }
     }
     None
@@ -1102,7 +1189,7 @@ fn resolve_base_chain(
         } else {
             format!("{parent}.{}", chain.join("."))
         };
-        if class_exists(t, &candidate) {
+        if unique_class_exists(t, &candidate) {
             return Some(candidate);
         }
         match parent.rsplit_once('.') {
@@ -1128,7 +1215,7 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
             };
             if !mapped.is_empty() {
                 let qn = mapped.join(".");
-                if class_exists(t, &qn) {
+                if unique_class_exists(t, &qn) {
                     return Some(qn);
                 }
             }
@@ -1136,18 +1223,18 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
     }
     // 1. Local module class (possibly nested: a.B.C).
     let local = format!("{}.{}", fctx.module, chain.join("."));
-    if class_exists(t, &local) {
+    if unique_class_exists(t, &local) {
         return Some(local);
     }
     // 2. Alias map.
-    if let Some(target) = fctx.aliases.get(&chain[0]) {
+    if let Some(target) = file_alias(fctx, &chain[0]) {
         match target {
             ImportTarget::Symbol { module, name } => {
                 let qn = format!("{module}.{name}");
                 // Direct hit first; then follow package re-export chains
                 // (`from pkg import Base` where pkg/__init__ re-exports it).
                 let mut base_qn: Option<String> = None;
-                if class_exists(t, &qn) {
+                if unique_class_exists(t, &qn) {
                     base_qn = Some(qn.clone());
                 } else {
                     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -1164,7 +1251,7 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
                         return Some(bq);
                     }
                     let nested = format!("{}.{}", bq, chain[1..].join("."));
-                    if class_exists(t, &nested) {
+                    if unique_class_exists(t, &nested) {
                         return Some(nested);
                     }
                 }
@@ -1173,7 +1260,7 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
                 if let Some((module, rest)) = longest_module_prefix(t, path, &chain[1..]) {
                     if !rest.is_empty() {
                         let qn = format!("{}.{}", module, rest.join("."));
-                        if class_exists(t, &qn) {
+                        if unique_class_exists(t, &qn) {
                             return Some(qn);
                         }
                     }
@@ -1184,10 +1271,19 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
     }
     // 3. Absolute qualname.
     let abs = chain.join(".");
-    if class_exists(t, &abs) {
+    if unique_class_exists(t, &abs) {
         return Some(abs);
     }
     None
+}
+
+fn unique_class_exists(t: &Tables, qualname: &str) -> bool {
+    t.by_qualname.get(qualname).is_some_and(|v| {
+        v.iter()
+            .filter(|&&i| matches!(t.symbols[i].kind, "class" | "trait" | "interface"))
+            .count()
+            == 1
+    })
 }
 
 fn class_exists(t: &Tables, qualname: &str) -> bool {
@@ -1236,7 +1332,7 @@ fn longest_module_prefix(
 /// `module.func(...)`, `pkg.mod.Class.m(...)` — resolve through the module tree.
 fn module_chain_outcome(t: &Tables, fi: usize, chain: &[String]) -> Outcome {
     let fctx = &t.file_ctx[fi];
-    let start: Option<String> = match fctx.aliases.get(&chain[0]) {
+    let start: Option<String> = match file_alias(fctx, &chain[0]) {
         Some(ImportTarget::ModuleRoot { path }) => Some(path.clone()),
         Some(ImportTarget::Module { .. }) => None,
         Some(ImportTarget::Symbol { module, name }) => {
@@ -1380,8 +1476,8 @@ mod gt_repro_tests {
             ],
             "use-tree candidates"
         );
-        assert!(fx.aliases.iter().any(|(a, _)| a == "T"), "alias T");
-        assert!(fx.aliases.iter().any(|(a, _)| a == "u"), "alias u");
+        assert!(fx.aliases.iter().any(|(_, a, _)| a == "T"), "alias T");
+        assert!(fx.aliases.iter().any(|(_, a, _)| a == "u"), "alias u");
     }
 
     #[test]
@@ -1409,7 +1505,7 @@ mod alias_repro {
         assert!(
             fx.aliases
                 .iter()
-                .any(|(a, _)| a == "knowledge_artifacts_dir"),
+                .any(|(_, a, _)| a == "knowledge_artifacts_dir"),
             "aliases: {:?}",
             fx.aliases
         );

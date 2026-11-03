@@ -9,7 +9,19 @@ use crate::db;
 use crate::error::Result;
 
 pub fn invalidate(root: &Path) -> Result<()> {
+    // Serialize with builds through the stable root-directory lock. Removing
+    // `.aw/` while a build holds its lock would unlink the lock inode and let
+    // a second builder enter a new critical section.
+    let _root_lock = db::RootLock::acquire(root)?;
     let dir = db::aw_dir(root);
+    if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+        if meta.file_type().is_symlink() {
+            return Err(crate::error::AwError::Internal(format!(
+                "refusing symlinked .aw directory: {}",
+                dir.display()
+            )));
+        }
+    }
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
         println!("aw: removed {}", dir.display());

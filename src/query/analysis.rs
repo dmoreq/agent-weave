@@ -476,7 +476,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
          LIMIT 10"
     ))?;
     let names = name_stmt
-        .query_map([], |r| {
+        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, i64>(1)?,
@@ -494,7 +494,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
               {scope}
             GROUP BY uc.dst_name)"
         ),
-        [],
+        rusqlite::params_from_iter(scope_params.iter()),
         |r| r.get(0),
     )?;
     let distinct: i64 = conn.query_row(
@@ -502,7 +502,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
             "SELECT COUNT(DISTINCT uc.dst_name) FROM unresolved_calls uc
              JOIN files f ON f.id = uc.file_id WHERE uc.kind = 'call' {scope}"
         ),
-        [],
+        rusqlite::params_from_iter(scope_params.iter()),
         |r| r.get(0),
     )?;
     let mut out = vec![format!(
@@ -956,6 +956,9 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
 /// Caveat line always first — candidates, never proof. NOT payload-journaled
 /// (Amendment 12 deviation: pair lines are not single pointers, so the
 /// `usage --verify` structural checks do not apply).
+type CloneGroup = Vec<(String, i64, i64)>;
+type ClonePair = (String, i64, i64, String, i64, i64);
+
 pub fn clones(
     conn: &Connection,
     root: &Path,
@@ -968,6 +971,14 @@ pub fn clones(
         validate_path_scope(p, false)?;
     }
     let min_lines = min_lines.max(crate::clones::WINDOW);
+    let groups = clone_groups(conn)?;
+    let (pairs, capped) = clone_pairs(groups);
+    let pairs = merge_clone_pairs(pairs, min_lines, path);
+    render_clones(conn, root, &pairs, capped, limit)
+}
+
+/// Load clone shingle groups that occur at least twice.
+fn clone_groups(conn: &Connection) -> Result<std::collections::BTreeMap<i64, CloneGroup>> {
     let mut stmt = conn.prepare(
         "SELECT cg.shingle_hash, f.path, cg.line_start, cg.line_end
          FROM clone_groups cg JOIN files f ON f.id = cg.file_id
@@ -989,14 +1000,18 @@ pub fn clones(
         let (h, path, s, e) = r?;
         groups.entry(h).or_default().push((path, s, e));
     }
-    // Pair generation is bounded (R6d Blocker 2): a shared header can put
-    // thousands of regions in one shingle group, and the full pair set is
-    // quadratic. Candidates beyond the caps are reported as a lower bound.
+    Ok(groups)
+}
+
+/// Bounded pair generation. A shared header can put thousands of regions in
+/// one shingle group and the full pair set is quadratic, so caps report a
+/// lower bound instead of unbounded work.
+fn clone_pairs(groups: std::collections::BTreeMap<i64, CloneGroup>) -> (Vec<ClonePair>, bool) {
     const MAX_REGIONS_PER_GROUP: usize = 64;
     const MAX_PAIRS: usize = 20_000;
     let mut capped = false;
     let mut seen = std::collections::BTreeSet::new();
-    let mut pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
+    let mut pairs: Vec<ClonePair> = Vec::new();
     'groups: for regions in groups.values() {
         // Merge overlapping / near-adjacent windows (gap < window) per file:
         // one long clone produces many overlapping windows, one region.
@@ -1038,14 +1053,19 @@ pub fn clones(
             }
         }
     }
-    // Pair-merge (R7): windows of one long clone live in different hash
-    // groups, so group every candidate by the unordered file pair and merge
-    // overlapping spans on BOTH sides into maximal regions. Apply the
-    // --min-lines filter AFTER merging (the old code filtered 5-line windows
-    // first, which made every min-lines > 5 return a false negative).
-    // Group by file pair first (R7 review): sorting globally interleaves
-    // different pairs, so merging only against the previous row left
-    // overlapping spans for the same pair unmerged.
+    (pairs, capped)
+}
+
+/// Merge per-window pairs into maximal spans, then apply min-lines and path
+/// filters. Merge-before-filter is required: filtering 5-line windows first
+/// made every min-lines > 5 a false negative.
+fn merge_clone_pairs(
+    pairs: Vec<ClonePair>,
+    min_lines: usize,
+    path: Option<&str>,
+) -> Vec<ClonePair> {
+    // Group by file pair first: sorting globally interleaves different pairs,
+    // so merging only against the previous row leaves overlaps unmerged.
     type SpanPair = (i64, i64, i64, i64);
     let mut by_pair: std::collections::BTreeMap<(String, String), Vec<SpanPair>> =
         Default::default();
@@ -1088,7 +1108,18 @@ pub fn clones(
             (a.0.as_str(), a.1, a.3.as_str(), a.4).cmp(&(b.0.as_str(), b.1, b.3.as_str(), b.4))
         })
     });
-    let pairs = merged_pairs;
+    merged_pairs
+}
+
+/// Render merged pairs with staleness/journal accounting and enclosing-symbol
+/// identity. Journaling stays at this public-surface phase.
+fn render_clones(
+    conn: &Connection,
+    root: &Path,
+    pairs: &[ClonePair],
+    capped: bool,
+    limit: usize,
+) -> Result<Vec<String>> {
     if pairs.is_empty() {
         return Err(AwError::NoResultsCaveated {
             caveat: CLONES_CAVEAT,

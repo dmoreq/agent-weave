@@ -169,16 +169,36 @@ pub fn run_build(
     // files. Bounded by gap rows, not by corpus size.
     if let Some(c) = &old {
         let old_quals = crate::db::symbol_names(c)?;
+        let old_qual_files = crate::db::symbol_qualname_files(c)?;
         let mut new_names: std::collections::HashSet<String> = Default::default();
+        let mut duplicate_quals: std::collections::HashSet<String> = Default::default();
         for fx in &extractions {
+            let rel = fresh
+                .get(fx.file_idx)
+                .map(|f| f.rel.as_str())
+                .unwrap_or_default();
             for sym in &fx.symbols {
                 if !old_quals.contains(&sym.qualname) {
                     new_names.insert(sym.qualname.clone());
+                } else if old_qual_files
+                    .get(&sym.qualname)
+                    .is_some_and(|paths| paths.iter().any(|p| p.as_str() != rel))
+                {
+                    duplicate_quals.insert(sym.qualname.clone());
                 }
             }
         }
+        let mut gap = std::collections::HashSet::new();
         if !new_names.is_empty() {
-            let gap = crate::db::gap_files_for_new_names(c, &new_names)?;
+            gap.extend(crate::db::gap_files_for_new_names(c, &new_names)?);
+        }
+        if !duplicate_quals.is_empty() {
+            gap.extend(crate::db::gap_files_for_candidate_changes(
+                c,
+                &duplicate_quals,
+            )?);
+        }
+        if !gap.is_empty() {
             let mut second: Vec<crate::walk::WalkedFile> = Vec::new();
             for rel in gap {
                 if carried.remove(&rel) {

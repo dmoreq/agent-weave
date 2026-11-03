@@ -28,7 +28,8 @@ pub struct Cli {
 pub enum Cmd {
     /// Index the repository into .aw/index.db (full atomic replacement)
     Build {
-        /// Re-extract everything (disable the unchanged-file fast path)
+        /// Re-extract everything (disable the unchanged-file fast path) and
+        /// bypass the parse-error abort
         #[arg(long)]
         force: bool,
         /// Abort when this fraction of files fails to parse (default 5%)
@@ -42,6 +43,9 @@ pub enum Cmd {
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
+        /// Transitive depth for the caller closure (default 1 = direct callers)
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
     },
     /// What does this symbol call
     Callees {
@@ -55,7 +59,7 @@ pub enum Cmd {
         depth: usize,
     },
     /// One-call symbol context: definition + signature, direct callers, and
-    /// direct callees over resolved edges. Resolved static edges only.
+    /// direct callees. Resolved static edges plus tagged ambiguous candidates.
     Context {
         /// Symbol name or dotted qualname
         name: String,
@@ -235,7 +239,8 @@ pub enum Cmd {
     },
     /// Inspect index health (integrity, versions, staleness, orphans)
     Doctor {
-        /// Delete the index entirely (one-command exit to grep-only)
+        /// Delete the entire .aw directory and all its contents (index,
+        /// journals, and any other files stored there)
         #[arg(long)]
         invalidate: bool,
     },

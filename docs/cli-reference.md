@@ -16,6 +16,13 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 | Inspect recorded usage | `usage` |
 | Connect an MCP client | `mcp` |
 
+## Trust contract
+
+A successful query is ground truth for the rows it returns. Re-run or read
+source when output is capped, ambiguous, stale, or empty; those are coverage
+limits, not routine re-verification. Treat `tests`, `dead`, and `unresolved`
+as candidates.
+
 ## Invocation and global options
 
 ```text
@@ -31,7 +38,7 @@ aw [GLOBAL_OPTIONS] <COMMAND> [ARGUMENTS] [OPTIONS]
 
 `--root` and `--no-journal` work before or after a subcommand. `aw help` and `aw help <COMMAND>` also show help. Every subcommand supports `-h` and `--help`.
 
-Names below are exact bare names or full printed qualified names, not pointers or partial qualified names. Copy qualified names from `search`, `symbols`, or ambiguity candidates.
+Names accept an exact bare name or a full printed qualified name. If no exact match exists, a dotted suffix such as `Class.method` resolves when unique; multiple suffix matches stay ambiguous. Pointers and partial segments are not accepted.
 
 File arguments use root-relative paths with `/`, not paths relative to the invoking subdirectory. Where `--path <PATH>` is offered, it selects an exact file or a directory and descendants, not an arbitrary string prefix.
 
@@ -88,10 +95,10 @@ Resolved callees point to definitions; ambiguous callee entries can point to the
 ### `callers <NAME>`
 
 ```text
-aw callers <NAME> [--limit <N>]
+aw callers <NAME> [--limit <N>] [--depth <N>]
 ```
 
-Print sites that call the symbol, with the enclosing caller's qualified name. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target.
+Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target.
 
 ### `callees <NAME>`
 

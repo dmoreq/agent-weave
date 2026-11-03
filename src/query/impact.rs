@@ -88,7 +88,6 @@ pub fn impact(
     let depth = depth.clamp(1, 10);
     let kinds = parse_edge_kinds(edges)?;
     let kind_sql = edge_kind_sql(&kinds);
-    let site_key = IMPACT_SITE_KEY;
     let rel = file.trim_start_matches("./").to_string();
     let exists: bool = conn
         .query_row("SELECT COUNT(*) FROM files WHERE path = ?1", [&rel], |r| {
@@ -117,172 +116,204 @@ pub fn impact(
         ));
     }
 
+    let ctx = ImpactCtx {
+        file,
+        rel: &rel,
+        limit,
+        depth,
+        kind_sql: &kind_sql,
+        caveat,
+        kinds: &kinds,
+        context,
+        explain,
+        extended,
+    };
     if depth == 1 {
         if !sites {
-            let total_files: usize = conn.query_row(
-                &format!(
-                    "SELECT COUNT(DISTINCT sf.path) FROM edges e
-                     JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-                     JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-                     WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
-                ),
-                [&rel],
-                |r| r.get::<_, i64>(0),
-            )? as usize;
-            if total_files == 0 {
-                if extended {
-                    return Err(AwError::NoResultsCaveated {
-                        caveat,
-                        detail: {
-                            let has_imports = kinds.contains(&"imports");
-                            let has_inherits = kinds.contains(&"inherits");
-                            match (has_imports, has_inherits) {
-                                (true, true) => {
-                                    "0 impacting files found (unresolved imports/bases are omitted)"
-                                }
-                                (true, false) => {
-                                    "0 impacting files found (unresolved imports are omitted)"
-                                }
-                                (false, true) => {
-                                    "0 impacting files found (unresolved bases are omitted)"
-                                }
-                                (false, false) => "0 impacting files found",
-                            }
-                            .to_string()
-                        },
-                    });
-                }
-                return Err(AwError::NoResults("0 impacting files found".to_string()));
-            }
-            let mut stmt = conn.prepare(&format!(
-                "SELECT sf.path, MIN(e.site_line) AS line,
-                        COUNT(DISTINCT {site_key}) AS n
-                 FROM edges e
-                 JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-                 JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-                 WHERE df.path = ?1 AND e.kind IN ({kind_sql})
-                 GROUP BY sf.path ORDER BY sf.path LIMIT {limit}"
-            ))?;
-            let rows = stmt.query_map([&rel], |r| {
-                Ok(Pointer {
-                    file: r.get::<_, String>(0)?,
-                    line: r.get::<_, i64>(1)?,
-                    tag: "",
-                    detail: format!("({} sites)", r.get::<_, i64>(2)?),
-                })
-            })?;
-            let mut out = collect_output(
-                conn,
-                root,
-                &rel,
-                rows,
-                limit,
-                "0 impacting files found",
-                Some(total_files),
-            )?;
-            if extended {
-                out.header = Some(match out.header.take() {
-                    Some(stale) => format!("{caveat}\n{stale}"),
-                    None => caveat.to_string(),
-                });
-            }
-            return Ok(out);
+            return impact_direct_grouped(conn, root, &ctx);
         }
+        return impact_direct_sites(conn, root, &ctx);
+    }
+    impact_deep(conn, root, &ctx)
+}
 
-        let total: usize = conn.query_row(
-            &format!(
-                "SELECT COUNT(DISTINCT {site_key}) FROM edges e
-                 JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
-                 JOIN symbols ss ON ss.id = e.src_id
-                 WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
-            ),
-            [&rel],
-            |r| r.get::<_, i64>(0),
-        )? as usize;
-        if total == 0 {
-            if extended {
-                return Err(AwError::NoResultsCaveated {
-                    caveat,
-                    detail: impact_empty_detail(&kinds),
-                });
-            }
-            return Err(AwError::NoResults("0 impacting files found".to_string()));
-        }
-        let sql = format!(
-            "SELECT MIN(e.site_line), MIN(e.confidence), MIN(sf.path),
-                    MIN(ss.qualname), MIN(ss.kind), MIN(e.kind)
-             FROM edges e
+/// Shared, immutable arguments for the three impact phases. The phases stay
+/// contiguous; this is not a generic query framework.
+struct ImpactCtx<'a> {
+    file: &'a str,
+    rel: &'a str,
+    limit: usize,
+    depth: usize,
+    kind_sql: &'a str,
+    caveat: &'static str,
+    kinds: &'a [&'static str],
+    context: bool,
+    explain: bool,
+    extended: bool,
+}
+
+fn impact_with_caveat(mut out: QueryOutput, caveat: &str, extended: bool) -> QueryOutput {
+    if extended {
+        out.header = Some(match out.header.take() {
+            Some(stale) => format!("{caveat}\n{stale}"),
+            None => caveat.to_string(),
+        });
+    }
+    out
+}
+
+/// Depth-1 grouped rows: one row per impacting file, with its site count.
+fn impact_direct_grouped(
+    conn: &Connection,
+    root: &Path,
+    ctx: &ImpactCtx<'_>,
+) -> Result<QueryOutput> {
+    let total_files: usize = conn.query_row(
+        &format!(
+            "SELECT COUNT(DISTINCT sf.path) FROM edges e
              JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
              JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
-             WHERE df.path = ?1 AND e.kind IN ({kind_sql})
-             GROUP BY {site_key}
-             ORDER BY 3, 1, 4 LIMIT {limit}"
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map([&rel], |r| {
-            let site: i64 = r.get(0)?;
-            let conf: String = r.get(1)?;
-            let path: String = r.get(2)?;
-            let qn: String = r.get(3)?;
-            let src_kind: String = r.get(4)?;
-            let kind: String = r.get(5)?;
-            Ok(Pointer {
-                file: path,
-                line: site,
-                tag: if conf == "AMBIGUOUS" {
-                    " [ambiguous]"
-                } else {
-                    ""
-                },
-                detail: impact_detail(context, &qn, &src_kind, explain, &kind, 1),
-            })
-        })?;
-        let mut out = collect_output(
-            conn,
-            root,
-            &rel,
-            rows,
-            limit,
-            "0 impacting files found",
-            Some(total),
-        )?;
-        if extended {
-            out.header = Some(match out.header.take() {
-                Some(stale) => format!("{caveat}\n{stale}"),
-                None => caveat.to_string(),
+             WHERE df.path = ?1 AND e.kind IN ({})",
+            ctx.kind_sql
+        ),
+        [ctx.rel],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    if total_files == 0 {
+        if ctx.extended {
+            return Err(AwError::NoResultsCaveated {
+                caveat: ctx.caveat,
+                detail: impact_empty_detail(ctx.kinds),
             });
         }
-        return Ok(out);
+        return Err(AwError::NoResults("0 impacting files found".to_string()));
     }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT sf.path, MIN(e.site_line) AS line,
+                COUNT(DISTINCT {}) AS n
+         FROM edges e
+         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+         JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+         WHERE df.path = ?1 AND e.kind IN ({})
+         GROUP BY sf.path ORDER BY sf.path LIMIT {}",
+        IMPACT_SITE_KEY, ctx.kind_sql, ctx.limit
+    ))?;
+    let rows = stmt.query_map([ctx.rel], |r| {
+        Ok(Pointer {
+            file: r.get::<_, String>(0)?,
+            line: r.get::<_, i64>(1)?,
+            tag: "",
+            detail: format!("({} sites)", r.get::<_, i64>(2)?),
+        })
+    })?;
+    let out = collect_output(
+        conn,
+        root,
+        ctx.rel,
+        rows,
+        ctx.limit,
+        "0 impacting files found",
+        Some(total_files),
+    )?;
+    Ok(impact_with_caveat(out, ctx.caveat, ctx.extended))
+}
 
-    // depth > 1: reverse BFS. R1 is the exact depth-1 edge set; deeper levels
-    // expand from R1's source symbols, so deeper search is monotone.
-    if total_impact_targets(conn, &rel)? == 0 {
-        return Err(AwError::NoResults(format!("path '{file}' not indexed")));
+/// Depth-1 per-site rows: one row per call site, with optional context/explain.
+fn impact_direct_sites(conn: &Connection, root: &Path, ctx: &ImpactCtx<'_>) -> Result<QueryOutput> {
+    let total: usize = conn.query_row(
+        &format!(
+            "SELECT COUNT(DISTINCT {}) FROM edges e
+             JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+             JOIN symbols ss ON ss.id = e.src_id
+             WHERE df.path = ?1 AND e.kind IN ({})",
+            IMPACT_SITE_KEY, ctx.kind_sql
+        ),
+        [ctx.rel],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    if total == 0 {
+        if ctx.extended {
+            return Err(AwError::NoResultsCaveated {
+                caveat: ctx.caveat,
+                detail: impact_empty_detail(ctx.kinds),
+            });
+        }
+        return Err(AwError::NoResults("0 impacting files found".to_string()));
     }
-    let mut records = ImpactTop::new(limit);
-    let detail = context || explain;
+    let sql = format!(
+        "SELECT MIN(e.site_line), MIN(e.confidence), MIN(sf.path),
+                MIN(ss.qualname), MIN(ss.kind), MIN(e.kind)
+         FROM edges e
+         JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+         JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+         WHERE df.path = ?1 AND e.kind IN ({})
+         GROUP BY {}
+         ORDER BY 3, 1, 4 LIMIT {}",
+        ctx.kind_sql, IMPACT_SITE_KEY, ctx.limit
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([ctx.rel], |r| {
+        let site: i64 = r.get(0)?;
+        let conf: String = r.get(1)?;
+        let path: String = r.get(2)?;
+        let qn: String = r.get(3)?;
+        let src_kind: String = r.get(4)?;
+        let kind: String = r.get(5)?;
+        Ok(Pointer {
+            file: path,
+            line: site,
+            tag: if conf == "AMBIGUOUS" {
+                " [ambiguous]"
+            } else {
+                ""
+            },
+            detail: impact_detail(ctx.context, &qn, &src_kind, ctx.explain, &kind, 1),
+        })
+    })?;
+    let out = collect_output(
+        conn,
+        root,
+        ctx.rel,
+        rows,
+        ctx.limit,
+        "0 impacting files found",
+        Some(total),
+    )?;
+    Ok(impact_with_caveat(out, ctx.caveat, ctx.extended))
+}
+
+/// Depth > 1: reverse BFS. R1 is the exact depth-1 edge set; deeper levels
+/// expand from R1's source symbols, so deeper search is monotone.
+fn impact_deep(conn: &Connection, root: &Path, ctx: &ImpactCtx<'_>) -> Result<QueryOutput> {
+    if total_impact_targets(conn, ctx.rel)? == 0 {
+        return Err(AwError::NoResults(format!(
+            "path '{}' not indexed",
+            ctx.file
+        )));
+    }
+    let mut records = ImpactTop::new(ctx.limit);
+    let detail = ctx.context || ctx.explain;
     let mut frontier = Vec::new();
     let mut visited = HashSet::new();
     if detail {
-        (frontier, visited) = direct_impact_level(conn, &rel, &kind_sql, &mut records, 1)?;
+        (frontier, visited) = direct_impact_level(conn, ctx.rel, ctx.kind_sql, &mut records, 1)?;
     } else {
-        direct_impact_records(conn, &rel, &kind_sql, &mut records)?;
+        direct_impact_records(conn, ctx.rel, ctx.kind_sql, &mut records)?;
     }
-    let total_files = impact_source_files(conn, &kinds, &kind_sql)?;
+    let total_files = impact_source_files(conn, ctx.kinds, ctx.kind_sql)?;
     let mut truncated = false;
-    for d in 2..=depth {
+    for d in 2..=ctx.depth {
         if records.len() >= total_files {
             break;
         }
         if frontier.is_empty() && visited.is_empty() {
-            (frontier, visited) = direct_impact_frontier(conn, &rel, &kind_sql)?;
+            (frontier, visited) = direct_impact_frontier(conn, ctx.rel, ctx.kind_sql)?;
         }
-        let next = level_impact(conn, &frontier, &mut visited, &kind_sql, &mut records, d)?;
+        let next = level_impact(conn, &frontier, &mut visited, ctx.kind_sql, &mut records, d)?;
         if next.is_empty() {
             break;
         }
-        if d == depth {
+        if d == ctx.depth {
             truncated = true;
         }
         frontier = next;
@@ -290,8 +321,8 @@ pub fn impact(
     let (total, paths) = records.finish();
     if total == 0 {
         return Err(AwError::NoResultsCaveated {
-            caveat,
-            detail: impact_empty_detail(&kinds),
+            caveat: ctx.caveat,
+            detail: impact_empty_detail(ctx.kinds),
         });
     }
     let pointers: Vec<Pointer> = paths
@@ -300,26 +331,27 @@ pub fn impact(
             file: path,
             line,
             tag: "",
-            detail: impact_detail(context, &qn, &src_kind, explain, &kind, d),
+            detail: impact_detail(ctx.context, &qn, &src_kind, ctx.explain, &kind, d),
         })
         .collect();
     let mut out = collect_output(
         conn,
         root,
-        &rel,
+        ctx.rel,
         pointers.into_iter().map(Ok),
-        limit,
+        ctx.limit,
         "0 impacting files found",
         Some(total),
     )?;
-    let mut header = caveat.to_string();
+    let mut header = ctx.caveat.to_string();
     if let Some(stale) = out.header.take() {
         header.push('\n');
         header.push_str(&stale);
     }
     if truncated {
         header.push_str(&format!(
-            "\naw: depth cap {depth} reached; deeper dependents may exist"
+            "\naw: depth cap {} reached; deeper dependents may exist",
+            ctx.depth
         ));
     }
     out.header = Some(header);

@@ -12,12 +12,26 @@ changes bump the minor while 0.x is unstable.
 - Historical measurements and review verdicts below are internally reported, not new verification of this checkout.
   Original internal evidence is unavailable in the public distribution; this history does not make it publicly reproducible.
 - Read [evaluation](docs/EVALUATION.md) for the public evidence summary and its limitations, not replacement original evidence.
+- Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
 ## [Unreleased]
 
 **User impact:** faster fresh builds, broader dependency navigation, and more reliable incremental resolution.
 **Required action:** run `aw build` to replace older indexes with schema v7. Query opens on v6 exit 5.
 Consumers that parse output must review the query-shape changes listed below before upgrading.
+
+### Added — transitive callers (2026-11-03)
+
+- `aw callers <name> --depth N` follows the resolved reverse call closure up to
+  N hops. Depth 1 keeps the existing output unchanged; deeper rows append
+  `[depth=N]`. MCP exposes the same `depth` argument. No schema change.
+
+### Changed — agent trust contract (2026-11-03)
+
+- The `aw-first` skill now states that successful navigation output is ground
+  truth for the fields it returns. `tests`, `dead`, and `unresolved` remain
+  candidate-only. Source reads still gate behavioral claims, edits, safety, and
+  review. No CLI, output, or MCP contract changed.
 
 ### Changed — project rename (2026-11-03)
 
@@ -474,7 +488,7 @@ precision/recall PASS.
 ### Added — navigation baseline and measurement harness (P0, f9d57b9..1ca1d0e)
 
 - Frozen A/B baselines: 5 navigation task definitions (T1-T5), 30 verified
-  ground-truth call sites on vihap, provisional top-10 pain list.
+  ground-truth call sites on corpus-a, provisional top-10 pain list.
 - D0 harness: `g` call logger (byte/call accounting both directions),
   `count.py`, `check.py` (precision/recall with AMBIGUOUS-candidate and
   dynamic-dispatch rules), derivation scripts, cold-run equivalence check.
@@ -496,7 +510,7 @@ precision/recall PASS.
 - Safety: zero network (Seatbelt/seccomp CI), Cargo.lock allowlist,
   write-path grep, tree-snapshot (content-hashed), proc-hygiene test.
 - 54 tests; clippy `-D warnings` clean.
-- Gate results on vihap (~102k LOC): G1 1.91s/21.4MB/1.9MB; G2 recall 29/29,
+- Gate results on corpus-a (~102k LOC): G1 1.91s/21.4MB/1.9MB; G2 recall 29/29,
   precision 493/495; G3 p95 10.1ms; G6 -50% tool calls, -67% bytes.
 - Independent review record (APPROVE after 2 fix cycles).
 
@@ -519,7 +533,7 @@ precision/recall PASS.
   (dot-stem safe), external-module drop rule.
 - Rust extraction: functions, structs/enums/impls, `use` and `mod`
   declarations, `crate::` call paths, scoped identifiers.
-- G2-finguard: 20/20 recall, 57/57 precision. G2-self (dogfooding): 9/10,
+- G2-corpus-b: 20/20 recall, 57/57 precision. G2-self (dogfooding): 9/10,
   14/14. Python regression green throughout.
 - Independent review record (APPROVE after 2 fix cycles).
 
@@ -575,8 +589,8 @@ precision/recall PASS.
   volume or its explicit absence.
 - G11 gate (payload conformance) added to the Gate Registry: one payload
   line per successful pointer call, byte-equal pointers, verify FAIL=0 on
-  fresh builds. Conformance run on the 3 GT repos (aw self / vihap /
-  finguard): 594 pointers verified, FAIL=0; byte-parity payload-vs-stdout
+  fresh builds. Conformance run on the 3 GT repos (aw self / corpus-a /
+  corpus-b): 594 pointers verified, FAIL=0; byte-parity payload-vs-stdout
   confirmed. Tests 91/91; clippy -D warnings clean.
 - Support changes: index meta `built_at` now carries millisecond precision
   (the verify epoch comparison must not collide on same-second rebuilds);
@@ -619,7 +633,7 @@ precision/recall PASS.
   `AwError::Ambiguous` instead of being printed mid-query (stdout stays a
   pure protocol/data channel on every surface).
 - aw-self GT rows G02-G10 refreshed after the M3 line shifts (provenance in
-  the GT file); G2 vihap 29/29 + 493/495, finguard 20/20 + 57/57 unchanged.
+  the GT file); G2 corpus-a 29/29 + 493/495, corpus-b 20/20 + 57/57 unchanged.
 - Tests 76/76 (3 new MCP conformance tests); clippy -D warnings clean.
 
 ### Added — resolution recall
@@ -668,10 +682,10 @@ precision/recall PASS.
 ### Changed — M0 re-baseline (Elephant/Goldfish cycle)
 
 - All measurable gates re-run on the post-fix binary (internal M0 rebaseline
-  evidence unavailable publicly): G1 0.47s/22.8MB/1.98MB, G2 vihap 29/29 + 493/495,
-  finguard 20/20 + 57/57, self 9/10 + 14/14 (all matching pre-fix numbers —
+  evidence unavailable publicly): G1 0.47s/22.8MB/1.98MB, G2 corpus-a 29/29 + 493/495,
+  corpus-b 20/20 + 57/57, self 9/10 + 14/14 (all matching pre-fix numbers —
   zero regression), G3 p95 9.8ms, G7 8/10.
-- G2-finguard G02 row refreshed (finguard working tree moved; GT staleness,
+- G2-corpus-b G02 row refreshed (corpus-b working tree moved; GT staleness,
   not a regression). G6/G8 A/B re-runs marked pending with rationale.
 - README gates table updated to the re-baselined numbers.
 

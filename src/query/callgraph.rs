@@ -139,120 +139,8 @@ pub fn test_impact(
     let limit = clamp_limit(limit)?;
     let depth = depth.clamp(1, 10);
     let target = target.trim_start_matches("./").trim_end_matches('/');
-    let file_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM files WHERE path = ?1",
-            [target],
-            |r| r.get(0),
-        )
-        .map(|c: i64| c > 0)?;
-    let (seed_ids, seed_callables): (Vec<i64>, usize) = if file_exists {
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.kind FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
-        )?;
-        let rows = stmt.query_map([target], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?;
-        let mut ids = Vec::new();
-        let mut callables = 0;
-        for row in rows {
-            let (id, kind) = row?;
-            ids.push(id);
-            callables += usize::from(is_callable_kind(&kind));
-        }
-        (ids, callables)
-    } else {
-        let (ids, cands) = target_ids(conn, target)?;
-        if ids.is_empty() {
-            return Err(AwError::NoResults(format!(
-                "symbol '{target}' not in index"
-            )));
-        }
-        if cands.len() > 1 {
-            return Err(AwError::Ambiguous {
-                name: target.to_string(),
-                total: ids.len(),
-                candidates: cands,
-                role: None,
-            });
-        }
-        let callables = ids.iter().try_fold(0, |acc, id| {
-            let kind: String =
-                conn.query_row("SELECT kind FROM symbols WHERE id = ?1", [id], |r| r.get(0))?;
-            Ok::<_, AwError>(acc + usize::from(is_callable_kind(&kind)))
-        })?;
-        (ids, callables)
-    };
-    let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
-    if !has_test_candidates(conn)? {
-        return Err(AwError::NoResultsCaveated {
-            caveat: TESTS_CAVEAT,
-            detail: "0 test candidates found (static call edges only)".to_string(),
-        });
-    }
-    let total_callables = total_callables(conn)?;
-    let total_tests = total_test_symbols(conn)?;
-    let mut tests;
-    let mut truncated = false;
-    if total_tests <= FORWARD_TEST_LIMIT {
-        tests = forward_test_top(conn, &seed_set, depth, limit)?;
-    } else {
-        tests = TestTop::new(limit);
-        let mut visited: HashSet<i64> = seed_set.clone();
-        let mut visited_callables = seed_callables;
-        let mut current = seed_ids;
-        for d in 1..=depth {
-            if current.is_empty()
-                || visited_callables >= total_callables
-                || tests.len() >= total_tests
-            {
-                break;
-            }
-            let mut next = Vec::new();
-            for chunk in current.chunks(500) {
-                let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-                let sql = format!(
-                    "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
-                     FROM edges e JOIN symbols s ON s.id = e.src_id
-                     WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let params: Vec<rusqlite::types::Value> = chunk
-                    .iter()
-                    .map(|i| rusqlite::types::Value::from(*i))
-                    .collect();
-                let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-                    Ok((
-                        r.get::<_, i64>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                        r.get::<_, String>(3)?,
-                        r.get::<_, i64>(4)?,
-                        r.get::<_, String>(5)?,
-                    ))
-                })?;
-                for row in rows {
-                    let (id, name, kind, path, line, qualname) = row?;
-                    if !seed_set.contains(&id)
-                        && matches!(kind.as_str(), "function" | "method")
-                        && is_test_symbol_name(&name)
-                    {
-                        tests.insert(id, path, line, qualname);
-                    }
-                    if visited.insert(id) {
-                        if is_callable_kind(&kind) {
-                            visited_callables += 1;
-                        }
-                        next.push(id);
-                    }
-                }
-            }
-            if d == depth && !next.is_empty() {
-                truncated = true;
-            }
-            current = next;
-        }
-    }
+    let (seed_ids, seed_callables) = test_seed(conn, target)?;
+    let (tests, truncated) = collect_tests(conn, seed_ids, seed_callables, depth, limit)?;
     if tests.is_empty() {
         return Err(if truncated {
             AwError::NoResultsCaveated {
@@ -299,6 +187,132 @@ pub fn test_impact(
     }
     out.header = Some(header);
     Ok(out)
+}
+
+/// Resolve a file path or symbol name to seed ids and the callable-seed count
+/// used by the bounded forward test collector.
+fn test_seed(conn: &Connection, target: &str) -> Result<(Vec<i64>, usize)> {
+    let file_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files WHERE path = ?1",
+            [target],
+            |r| r.get(0),
+        )
+        .map(|c: i64| c > 0)?;
+    if file_exists {
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.kind FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
+        )?;
+        let rows = stmt.query_map([target], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut ids = Vec::new();
+        let mut callables = 0;
+        for row in rows {
+            let (id, kind) = row?;
+            ids.push(id);
+            callables += usize::from(is_callable_kind(&kind));
+        }
+        return Ok((ids, callables));
+    }
+    let (ids, cands) = target_ids(conn, target)?;
+    if ids.is_empty() {
+        return Err(AwError::NoResults(format!(
+            "symbol '{target}' not in index"
+        )));
+    }
+    if cands.len() > 1 {
+        return Err(AwError::Ambiguous {
+            name: target.to_string(),
+            total: ids.len(),
+            candidates: cands,
+            role: None,
+        });
+    }
+    let callables = ids.iter().try_fold(0, |acc, id| {
+        let kind: String =
+            conn.query_row("SELECT kind FROM symbols WHERE id = ?1", [id], |r| r.get(0))?;
+        Ok::<_, AwError>(acc + usize::from(is_callable_kind(&kind)))
+    })?;
+    Ok((ids, callables))
+}
+
+/// Bounded test closure: the direct forward pass when the test universe fits,
+/// otherwise a per-level reverse walk capped by depth and the test/limit count.
+fn collect_tests(
+    conn: &Connection,
+    seed_ids: Vec<i64>,
+    seed_callables: usize,
+    depth: usize,
+    limit: usize,
+) -> Result<(TestTop, bool)> {
+    let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
+    if !has_test_candidates(conn)? {
+        return Err(AwError::NoResultsCaveated {
+            caveat: TESTS_CAVEAT,
+            detail: "0 test candidates found (static call edges only)".to_string(),
+        });
+    }
+    let total_callables = total_callables(conn)?;
+    let total_tests = total_test_symbols(conn)?;
+    let mut truncated = false;
+    if total_tests <= FORWARD_TEST_LIMIT {
+        return Ok((forward_test_top(conn, &seed_set, depth, limit)?, false));
+    }
+    let mut tests = TestTop::new(limit);
+    let mut visited: HashSet<i64> = seed_set.clone();
+    let mut visited_callables = seed_callables;
+    let mut current = seed_ids;
+    for d in 1..=depth {
+        if current.is_empty() || visited_callables >= total_callables || tests.len() >= total_tests
+        {
+            break;
+        }
+        let mut next = Vec::new();
+        for chunk in current.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
+                 FROM edges e JOIN symbols s ON s.id = e.src_id
+                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|i| rusqlite::types::Value::from(*i))
+                .collect();
+            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, String>(5)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, name, kind, path, line, qualname) = row?;
+                if !seed_set.contains(&id)
+                    && matches!(kind.as_str(), "function" | "method")
+                    && is_test_symbol_name(&name)
+                {
+                    tests.insert(id, path, line, qualname);
+                }
+                if visited.insert(id) {
+                    if is_callable_kind(&kind) {
+                        visited_callables += 1;
+                    }
+                    next.push(id);
+                }
+            }
+        }
+        if d == depth && !next.is_empty() {
+            truncated = true;
+        }
+        current = next;
+    }
+    Ok((tests, truncated))
 }
 
 pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
@@ -356,8 +370,15 @@ pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
     Ok(out)
 }
 
-pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Result<QueryOutput> {
+pub fn callers(
+    conn: &Connection,
+    root: &Path,
+    name: &str,
+    limit: usize,
+    depth: usize,
+) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
+    let depth = depth.clamp(1, 10);
     let (ids, cands) = target_ids(conn, name)?;
     if ids.is_empty() {
         return Err(AwError::NoResults(format!("symbol '{name}' not in index")));
@@ -372,47 +393,39 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
             role: None,
         });
     }
-    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let count_sql = format!(
-        "SELECT COUNT(*) FROM edges e WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
-    );
-    let count_params: Vec<rusqlite::types::Value> = ids
-        .iter()
-        .map(|i| rusqlite::types::Value::from(*i))
-        .collect();
-    let total: usize = conn.query_row(
-        &count_sql,
-        rusqlite::params_from_iter(count_params.iter()),
-        |r| r.get::<_, i64>(0),
-    )? as usize;
-    let sql = format!(
-        "SELECT e.site_line, e.confidence, f.path, s.qualname
-         FROM edges e
-         JOIN symbols s ON s.id = e.src_id
-         JOIN files f ON f.id = s.file_id
-         WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
-         ORDER BY f.path, e.site_line LIMIT {limit}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let params: Vec<rusqlite::types::Value> = ids
-        .iter()
-        .map(|i| rusqlite::types::Value::from(*i))
-        .collect();
-    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-        let site: i64 = r.get(0)?;
-        let conf: String = r.get(1)?;
-        let path: String = r.get(2)?;
+    if depth > 1 {
+        let (rows, total) = transitive_callers(conn, &ids, depth, limit)?;
+        let mut out = collect_output(
+            conn,
+            root,
+            name,
+            rows.into_iter().map(Ok),
+            limit,
+            "0 callers found (dynamic dispatch possible — grep fallback recommended)",
+            Some(total),
+        )?;
+        let caveat =
+            format!("aw: transitive callers — resolved static call edges only; depth {depth}");
+        out.header = Some(match out.header.take() {
+            Some(stale) => format!("{caveat}\n{stale}"),
+            None => caveat,
+        });
+        return Ok(out);
+    }
+
+    let (callers, total) = direct_callers(conn, &ids, limit)?;
+    let rows = callers.into_iter().map(|row| {
         Ok(Pointer {
-            file: path,
-            line: site,
-            tag: if conf == "AMBIGUOUS" {
+            file: row.path,
+            line: row.site_line,
+            tag: if row.confidence == "AMBIGUOUS" {
                 " [ambiguous]"
             } else {
                 ""
             },
-            detail: r.get::<_, String>(3)?,
+            detail: row.qualname,
         })
-    })?;
+    });
     collect_output(
         conn,
         root,
@@ -422,6 +435,175 @@ pub fn callers(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         "0 callers found (dynamic dispatch possible — grep fallback recommended)",
         Some(total),
     )
+}
+
+/// Reverse call-edge BFS. Each caller symbol is expanded once at its shortest
+/// distance; all call sites at that distance are kept. Rows are bounded by the
+/// display limit while `total` counts every reachable caller row.
+fn transitive_callers(
+    conn: &Connection,
+    targets: &[i64],
+    depth: usize,
+    limit: usize,
+) -> Result<(Vec<Pointer>, usize)> {
+    let mut visited: HashSet<i64> = targets.iter().copied().collect();
+    let mut frontier: Vec<i64> = targets.to_vec();
+    let mut displayed: Vec<Pointer> = Vec::new();
+    let mut total = 0usize;
+    for level in 1..=depth {
+        if frontier.is_empty() {
+            break;
+        }
+        let mut next: Vec<i64> = Vec::new();
+        let mut queued: HashSet<i64> = HashSet::new();
+        for chunk in frontier.chunks(500) {
+            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT e.src_id, e.site_line, e.confidence, f.path, s.qualname
+                 FROM edges e
+                 JOIN symbols s ON s.id = e.src_id
+                 JOIN files f ON f.id = s.file_id
+                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
+                 ORDER BY f.path, e.site_line, s.qualname"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<rusqlite::types::Value> = chunk
+                .iter()
+                .map(|i| rusqlite::types::Value::from(*i))
+                .collect();
+            let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+            while let Some(row) = rows.next()? {
+                let src: i64 = row.get(0)?;
+                if visited.contains(&src) {
+                    continue;
+                }
+                let site: i64 = row.get(1)?;
+                let conf: String = row.get(2)?;
+                let path: String = row.get(3)?;
+                let qualname: String = row.get(4)?;
+                if queued.insert(src) {
+                    next.push(src);
+                }
+                total += 1;
+                if displayed.len() < limit {
+                    displayed.push(Pointer {
+                        file: path,
+                        line: site,
+                        tag: if conf == "AMBIGUOUS" {
+                            " [ambiguous]"
+                        } else {
+                            ""
+                        },
+                        detail: format!("{qualname} [depth={level}]"),
+                    });
+                }
+            }
+        }
+        for id in &next {
+            visited.insert(*id);
+        }
+        frontier = next;
+    }
+    Ok((displayed, total))
+}
+
+/// One direct caller row. Private loader output; rendering and journaling stay
+/// at the public surface.
+struct CallerRow {
+    site_line: i64,
+    confidence: String,
+    path: String,
+    qualname: String,
+}
+
+/// One direct callee row (depth 1). `confidence` is carried so `callees` and
+/// `context` keep the same ambiguous tagging.
+struct CalleeRow {
+    line: i64,
+    confidence: String,
+    path: String,
+    qualname: String,
+}
+
+/// Side-effect-free direct-caller load. The count and the bounded display set
+/// use the same predicate; callers/context render them differently.
+fn direct_callers(conn: &Connection, ids: &[i64], limit: usize) -> Result<(Vec<CallerRow>, usize)> {
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM edges e WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
+    );
+    let total: usize =
+        conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| {
+            r.get::<_, i64>(0)
+        })? as usize;
+    let sql = format!(
+        "SELECT e.site_line, e.confidence, f.path, s.qualname
+         FROM edges e
+         JOIN symbols s ON s.id = e.src_id
+         JOIN files f ON f.id = s.file_id
+         WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
+         ORDER BY f.path, e.site_line LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok(CallerRow {
+                site_line: r.get(0)?,
+                confidence: r.get(1)?,
+                path: r.get(2)?,
+                qualname: r.get(3)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok((rows, total))
+}
+
+/// Side-effect-free direct-callee load. Mirrors the depth-1 SQL used by
+/// `callees`; `context` reuses it with a single id.
+fn direct_callees(conn: &Connection, ids: &[i64], limit: usize) -> Result<(Vec<CalleeRow>, usize)> {
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let params: Vec<rusqlite::types::Value> = ids
+        .iter()
+        .map(|i| rusqlite::types::Value::from(*i))
+        .collect();
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT COALESCE(ds.id, -(1000000 + e.id)))
+         FROM edges e LEFT JOIN symbols ds ON ds.id = e.dst_id
+         WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
+    );
+    let total: usize =
+        conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| {
+            r.get::<_, i64>(0)
+        })? as usize;
+    let sql = format!(
+        "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
+                MAX(e.confidence) AS confidence,
+                MAX(COALESCE(df.path, sf.path)) AS path,
+                COALESCE(ds.qualname, e.dst_name) AS qn
+         FROM edges e
+         JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
+         LEFT JOIN symbols ds ON ds.id = e.dst_id
+         LEFT JOIN files df ON df.id = ds.file_id
+         WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'
+         GROUP BY COALESCE(ds.id, -(1000000 + e.id))
+         ORDER BY path, line LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok(CalleeRow {
+                line: r.get(0)?,
+                confidence: r.get(1)?,
+                path: r.get(2)?,
+                qualname: r.get(3)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok((rows, total))
 }
 
 pub fn implementers(
@@ -532,50 +714,47 @@ pub fn callees(
     }
     // Callee pointer: the callee's definition line. AMBIGUOUS edges have no
     // dst symbol; they surface as the call site itself with the ambiguous tag.
+    if depth == 1 {
+        let (callees, total) = direct_callees(conn, &ids, limit)?;
+        let rows = callees.into_iter().map(|row| {
+            Ok(Pointer {
+                file: row.path,
+                line: row.line,
+                tag: if row.confidence == "AMBIGUOUS" {
+                    " [ambiguous]"
+                } else {
+                    ""
+                },
+                detail: row.qualname,
+            })
+        });
+        return collect_output(
+            conn,
+            root,
+            name,
+            rows,
+            limit,
+            "0 callees found",
+            Some(total),
+        );
+    }
     // depth > 1: recursive closure over call edges from the reached set.
-    let total_opt: Option<usize>;
     let mut params: Vec<rusqlite::types::Value> = ids
         .iter()
         .map(|i| rusqlite::types::Value::from(*i))
         .collect();
-    let sql: String = if depth == 1 {
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let count_sql = format!(
-            "SELECT COUNT(DISTINCT COALESCE(ds.id, -(1000000 + e.id)))
-             FROM edges e LEFT JOIN symbols ds ON ds.id = e.dst_id
-             WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'"
-        );
-        total_opt = Some(conn.query_row(
-            &count_sql,
-            rusqlite::params_from_iter(params.iter()),
-            |r| r.get::<_, i64>(0),
-        )? as usize);
-        format!(
-            "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
-                MAX(e.confidence) AS confidence,
-                MAX(COALESCE(df.path, sf.path)) AS path,
-                COALESCE(ds.qualname, e.dst_name) AS qn
-         FROM edges e
-         JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
-         LEFT JOIN symbols ds ON ds.id = e.dst_id
-         LEFT JOIN files df ON df.id = ds.file_id
-         WHERE e.src_id IN ({placeholders}) AND e.kind = 'calls'
-         GROUP BY COALESCE(ds.id, -(1000000 + e.id))
-         ORDER BY path, line LIMIT {limit}"
-        )
-    } else {
-        let seed = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let cte = format!(
-            "WITH RECURSIVE reach(sym, d) AS (
+    let seed = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let cte = format!(
+        "WITH RECURSIVE reach(sym, d) AS (
              SELECT id, 0 FROM symbols WHERE id IN ({seed})
              UNION
              SELECT e.dst_id, r.d + 1 FROM edges e JOIN reach r ON e.src_id = r.sym
              WHERE e.kind = 'calls' AND e.dst_id IS NOT NULL AND r.d < ?{d}
          )",
-            d = 1 + ids.len()
-        );
-        let select = format!(
-            "SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
+        d = 1 + ids.len()
+    );
+    let select = format!(
+        "SELECT DISTINCT COALESCE(ds.line_start, e.site_line) AS line, e.confidence,
                 COALESCE(df.path, sf.path) AS path, COALESCE(ds.qualname, e.dst_name) AS qn
          FROM reach r
          -- CROSS JOIN + WHERE lets SQLite drive from the recursive set and
@@ -585,20 +764,18 @@ pub fn callees(
          LEFT JOIN symbols ds ON ds.id = e.dst_id
          LEFT JOIN files df ON df.id = ds.file_id
          WHERE e.src_id = r.sym AND e.kind = 'calls' AND r.d < ?{d2}",
-            d2 = 2 + ids.len()
-        );
-        params.push(rusqlite::types::Value::from(depth as i64));
-        params.push(rusqlite::types::Value::from(depth as i64));
-        let count_sql = format!("{cte} SELECT COUNT(*) FROM ({select})");
-        total_opt = Some(conn.query_row(
-            &count_sql,
-            rusqlite::params_from_iter(params.iter()),
-            |r| r.get::<_, i64>(0),
-        )? as usize);
-        // Bounded materialization (R6 round-2): the closure result is
-        // counted above and fetched with LIMIT, never fully collected.
-        format!("{cte} {select} ORDER BY path, line LIMIT {limit}")
-    };
+        d2 = 2 + ids.len()
+    );
+    params.push(rusqlite::types::Value::from(depth as i64));
+    params.push(rusqlite::types::Value::from(depth as i64));
+    let count_sql = format!("{cte} SELECT COUNT(*) FROM ({select})");
+    let total: usize =
+        conn.query_row(&count_sql, rusqlite::params_from_iter(params.iter()), |r| {
+            r.get::<_, i64>(0)
+        })? as usize;
+    // Bounded materialization (R6 round-2): the closure result is counted
+    // above and fetched with LIMIT, never fully collected.
+    let sql = format!("{cte} {select} ORDER BY path, line LIMIT {limit}");
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
         let line: i64 = r.get(0)?;
@@ -615,7 +792,15 @@ pub fn callees(
             detail: r.get::<_, String>(3)?,
         })
     })?;
-    collect_output(conn, root, name, rows, limit, "0 callees found", total_opt)
+    collect_output(
+        conn,
+        root,
+        name,
+        rows,
+        limit,
+        "0 callees found",
+        Some(total),
+    )
 }
 
 /// Shortest call path (Amendment 13): does `from` reach `to` through resolved
@@ -928,56 +1113,16 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
             r.get(5)?,
         ))
     })?;
-    let callers_total: usize = conn.query_row(
-        "SELECT COUNT(*) FROM edges e WHERE e.dst_id = ?1 AND e.kind = 'calls'",
-        [id],
-        |r| r.get::<_, i64>(0),
-    )? as usize;
-    let mut stmt = conn.prepare(
-        "SELECT e.site_line, f.path, s.qualname
-         FROM edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
-         WHERE e.dst_id = ?1 AND e.kind = 'calls'
-         ORDER BY f.path, e.site_line LIMIT ?2",
-    )?;
-    let callers: Vec<(String, i64, String)> = stmt
-        .query_map(rusqlite::params![id, limit as i64], |r| {
-            Ok((
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let callees_total: usize = conn.query_row(
-        "SELECT COUNT(DISTINCT COALESCE(ds.id, -(1000000 + e.id)))
-         FROM edges e LEFT JOIN symbols ds ON ds.id = e.dst_id
-         WHERE e.src_id = ?1 AND e.kind = 'calls'",
-        [id],
-        |r| r.get::<_, i64>(0),
-    )? as usize;
-    let mut stmt = conn.prepare(
-        "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
-                MAX(COALESCE(df.path, sf.path)) AS path,
-                COALESCE(ds.qualname, e.dst_name) AS qn,
-                MAX(e.confidence) AS conf
-         FROM edges e
-         JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
-         LEFT JOIN symbols ds ON ds.id = e.dst_id
-         LEFT JOIN files df ON df.id = ds.file_id
-         WHERE e.src_id = ?1 AND e.kind = 'calls'
-         GROUP BY COALESCE(ds.id, -(1000000 + e.id))
-         ORDER BY path, line LIMIT ?2",
-    )?;
-    let callees: Vec<(String, i64, String, String)> = stmt
-        .query_map(rusqlite::params![id, limit as i64], |r| {
-            Ok((
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-            ))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let (caller_rows, callers_total) = direct_callers(conn, &[id], limit)?;
+    let callers: Vec<(String, i64, String)> = caller_rows
+        .into_iter()
+        .map(|row| (row.path, row.site_line, row.qualname))
+        .collect();
+    let (callee_rows, callees_total) = direct_callees(conn, &[id], limit)?;
+    let callees: Vec<(String, i64, String, String)> = callee_rows
+        .into_iter()
+        .map(|row| (row.path, row.line, row.qualname, row.confidence))
+        .collect();
     // Staleness over the displayed set (definition + shown callers/callees).
     let mut files: BTreeSet<&String> = BTreeSet::new();
     files.insert(&def_path);

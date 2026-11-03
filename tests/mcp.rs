@@ -280,6 +280,11 @@ fn g10_initialize_tools_list_and_parity() {
     // wall-clock timings or journal state.
     for (tool, args, cli_args) in [
         (
+            "callers",
+            json!({"name": "normalize", "depth": 2}),
+            vec!["callers", "normalize", "--depth", "2"],
+        ),
+        (
             "callees",
             json!({"name": "caller"}),
             vec!["callees", "caller"],
@@ -457,11 +462,10 @@ fn g10_initialize_tools_list_and_parity() {
     );
 
     // Every dispatched tool call journaled with the mcp surface: callers,
-    // symbols (plain), symbols (outline), search, clones, clones (min_lines
-    // failure), dead, stats, path, plus the R6e parity additions (callees,
-    // impact, hotspots, report, unresolved, imports, complexity; imports
-    // no-result). The
-    // unknown tool is rejected
+    // callers (depth 2), symbols (plain), symbols (outline), search, clones,
+    // clones (min_lines failure), dead, stats, path, plus the R6e parity
+    // additions (callees, impact, hotspots, report, unresolved, imports,
+    // complexity; imports no-result). The unknown tool is rejected
     // before dispatch and journals nothing; CLI reference commands above add
     // their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
@@ -469,7 +473,7 @@ fn g10_initialize_tools_list_and_parity() {
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 19, "{log}");
+    assert_eq!(mcp_lines, 20, "{log}");
 
     // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
     // stats writes none. The callers payload pointers are byte-equal to the
@@ -480,8 +484,8 @@ fn g10_initialize_tools_list_and_parity() {
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
     assert_eq!(
-        mcp_payload, 12,
-        "callers+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+tests+complexity, not stats: {payload}"
+        mcp_payload, 13,
+        "callers+callers(depth2)+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+tests+complexity, not stats: {payload}"
     );
     let callers_line = payload
         .lines()
@@ -741,4 +745,78 @@ fn default_mcp_exposes_core_navigation_tools() {
         .as_str()
         .unwrap()
         .contains("unknown tool 'search'"));
+}
+
+#[test]
+fn mcp_framing_survives_invalid_utf8_and_oversized_frames() {
+    let repo = fixture("mcp-framing");
+    let mut srv = spawn(&repo);
+
+    // Invalid UTF-8 must produce a parse error, not terminate the session.
+    srv.stdin.write_all(&[0xFF, b'\n']).unwrap();
+    srv.stdin.flush().unwrap();
+    let mut invalid = String::new();
+    srv.reader.read_line(&mut invalid).unwrap();
+    let err: Value = serde_json::from_str(&invalid).unwrap();
+    assert_eq!(err["error"]["code"], -32700, "{invalid}");
+
+    let init = rpc(
+        &mut srv,
+        2,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}),
+    );
+    assert!(init["result"].is_object(), "{init}");
+
+    // Reject an oversized frame without consuming the following request.
+    for id in [3u64, 4] {
+        let pad = if id == 3 { 0 } else { 16 };
+        let mut frame = vec![b' '; 8 * 1024 * 1024 + pad];
+        frame.push(b'\n');
+        let req = serde_json::to_vec(
+            &json!({"jsonrpc": "2.0", "id": id, "method": "tools/list", "params": {}}),
+        )
+        .unwrap();
+        frame.extend_from_slice(&req);
+        frame.push(b'\n');
+        srv.stdin.write_all(&frame).unwrap();
+        srv.stdin.flush().unwrap();
+
+        let mut first = String::new();
+        srv.reader.read_line(&mut first).unwrap();
+        let err: Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(err["error"]["code"], -32600, "{first}");
+
+        let mut second = String::new();
+        srv.reader.read_line(&mut second).unwrap();
+        let resp: Value = serde_json::from_str(&second).unwrap();
+        assert_eq!(resp["id"], id, "{second}");
+        assert!(resp["result"]["tools"].is_array(), "{second}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn mcp_build_rejects_symlinked_aw_directory() {
+    use std::os::unix::fs::symlink;
+    let repo = fixture("mcp-symlink-aw");
+    let ext = std::env::temp_dir().join(format!("aw-ext-mcp-aw-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&ext);
+    fs::create_dir_all(&ext).unwrap();
+    let sentinel = ext.join("sentinel.txt");
+    fs::write(&sentinel, "keep").unwrap();
+    let _ = fs::remove_dir_all(repo.join(".aw"));
+    symlink(&ext, repo.join(".aw")).unwrap();
+
+    let mut srv = spawn(&repo);
+    let build = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "build", "arguments": {}}),
+    );
+    assert_eq!(build["result"]["isError"], true, "{build}");
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
+    assert!(!ext.join("index.db").exists());
+    let _ = fs::remove_dir_all(&ext);
 }

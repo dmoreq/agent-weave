@@ -31,7 +31,7 @@ const PATH_CAVEAT: &str = "aw: path — resolved static edges only; dynamic disp
 
 /// Permanent honesty caveat for `aw context` (Amendment 17).
 const CONTEXT_CAVEAT: &str =
-    "aw: context — resolved static edges only; dynamic dispatch may hide callers or callees";
+    "aw: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees";
 
 /// Permanent honesty caveat for `aw implementers` (Amendment 19).
 const IMPLEMENTERS_CAVEAT: &str = "aw: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";

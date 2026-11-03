@@ -382,8 +382,12 @@ pub struct FileExtraction {
     rust_impls: Vec<(String, Vec<String>, usize)>,
     assignments: Vec<Assignment>,
     params: Vec<ParamType>,
+    /// (scope_func, var) for parameters and local bindings that shadow outer
+    /// names during bare-name resolution.
+    locals: Vec<(String, String)>,
     self_fields: Vec<SelfField>,
-    aliases: Vec<(String, ImportTarget)>,
+    /// (scope_func, bound name, target): function-local imports stay local.
+    aliases: Vec<(String, String, ImportTarget)>,
     /// Modules appearing in `from m import *`.
     /// Star-imported modules with the statement line (per-statement scope).
     stars: Vec<(String, usize)>,
@@ -518,6 +522,7 @@ pub fn extract_file_with_code_lines(
         rust_impls: Vec::new(),
         assignments: Vec::new(),
         params: Vec::new(),
+        locals: Vec::new(),
         self_fields: Vec::new(),
         aliases: Vec::new(),
         stars: Vec::new(),

@@ -316,6 +316,13 @@ fn non_comment_loc_from_ranges(bytes: &[u8], ranges: &[(usize, usize)]) -> i64 {
 /// File-wide per-line code flag over already-collected comment ranges. Merges
 /// touching ranges first, exactly like the old `file_code_lines` pass.
 fn code_lines_from_ranges(src: &[u8], ranges: &[(usize, usize)]) -> Vec<bool> {
+    code_lines_from_ranges_work(src, ranges).0
+}
+
+/// Same scan plus a work counter: one unit per inspected byte and per advanced
+/// range cursor. Tests use it to verify near-linear growth without wall-clock
+/// timing.
+fn code_lines_from_ranges_work(src: &[u8], ranges: &[(usize, usize)]) -> (Vec<bool>, usize) {
     let mut merged: Vec<(usize, usize)> = Vec::new();
     for &(start, end) in ranges {
         match merged.last_mut() {
@@ -325,12 +332,24 @@ fn code_lines_from_ranges(src: &[u8], ranges: &[(usize, usize)]) -> Vec<bool> {
     }
     let bounds = line_byte_bounds(src);
     let mut flags = Vec::with_capacity(bounds.len());
+    let mut range_idx = 0usize;
+    let mut work = 0usize;
     for (start, end) in bounds {
+        while range_idx < merged.len() && merged[range_idx].1 <= start {
+            range_idx += 1;
+            work += 1;
+        }
         let mut code = false;
+        let mut idx = range_idx;
         for (i, byte) in src[start..end].iter().enumerate() {
+            work += 1;
             if !byte.is_ascii_whitespace() {
                 let pos = start + i;
-                if !merged.iter().any(|(s, e)| pos >= *s && pos < *e) {
+                while idx < merged.len() && merged[idx].1 <= pos {
+                    idx += 1;
+                    work += 1;
+                }
+                if idx >= merged.len() || pos < merged[idx].0 {
                     code = true;
                     break;
                 }
@@ -338,7 +357,7 @@ fn code_lines_from_ranges(src: &[u8], ranges: &[(usize, usize)]) -> Vec<bool> {
         }
         flags.push(code);
     }
-    flags
+    (flags, work)
 }
 
 /// Per-line `(start, end)` byte bounds, excluding the newline.
@@ -412,5 +431,30 @@ mod tests {
         // Extraction offsets rows at emission; parse layer only exposes the tree.
         let p = parse_source(b"a = 1\nb = 2\n", Lang::Python).unwrap();
         assert_eq!(p.tree.root_node().child(0).unwrap().start_position().row, 0);
+    }
+
+    #[test]
+    fn comment_scan_work_is_near_linear() {
+        fn fixture(lines: usize) -> (Vec<u8>, Vec<(usize, usize)>) {
+            let text = b"// comment line";
+            let mut src = Vec::new();
+            let mut ranges = Vec::new();
+            for _ in 0..lines {
+                let start = src.len();
+                src.extend_from_slice(text);
+                ranges.push((start, start + text.len()));
+                src.push(b'\n');
+            }
+            (src, ranges)
+        }
+        let (src1, ranges1) = fixture(1000);
+        let (src2, ranges2) = fixture(2000);
+        let (_, work1) = code_lines_from_ranges_work(&src1, &ranges1);
+        let (_, work2) = code_lines_from_ranges_work(&src2, &ranges2);
+        assert!(work1 > 0);
+        assert!(
+            work2 <= work1 * 3,
+            "comment scan work grew superlinearly: n={work1}, 2n={work2}"
+        );
     }
 }

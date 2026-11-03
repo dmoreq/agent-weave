@@ -193,13 +193,39 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
 }
 
 fn append_line(path: &Path, line: &str) {
+    if is_symlink(path) || path.parent().is_some_and(is_symlink) {
+        return;
+    }
     rotate_if_needed(path, ROTATE_BYTES);
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = f.write_all(line.as_bytes());
+    let mut file = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => return,
+        Ok(_) => match OpenOptions::new().append(true).open(path) {
+            Ok(file) => file,
+            Err(_) => return,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            match OpenOptions::new().create_new(true).append(true).open(path) {
+                Ok(file) => file,
+                Err(_) => return,
+            }
+        }
+        Err(_) => return,
+    };
+    // Re-check after open: a path swapped to a symlink must not receive the
+    // append through the opened target.
+    if is_symlink(path) {
+        return;
     }
+    let _ = file.write_all(line.as_bytes());
+}
+
+fn is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 /// Payload journal line (Amendment 10a): self-contained — replay verification
@@ -227,6 +253,9 @@ fn payload_line(p: &Pending, ts: u64) -> String {
 }
 
 fn rotate_if_needed(path: &Path, max: u64) {
+    if is_symlink(path) || path.parent().is_some_and(is_symlink) {
+        return;
+    }
     let oversized = fs::metadata(path).map(|m| m.len() > max).unwrap_or(false);
     if !oversized {
         return;

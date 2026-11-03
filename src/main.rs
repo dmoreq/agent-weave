@@ -141,8 +141,12 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             ("force", force.to_string()),
             ("threshold", max_parse_error_rate.to_string()),
         ],
-        cli::Cmd::Callers { name, limit } => {
-            vec![("name", name.clone()), ("limit", limit.to_string())]
+        cli::Cmd::Callers { name, limit, depth } => {
+            vec![
+                ("name", name.clone()),
+                ("depth", depth.to_string()),
+                ("limit", limit.to_string()),
+            ]
         }
         cli::Cmd::Callees { name, limit, depth } => vec![
             ("name", name.clone()),
@@ -267,10 +271,10 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             println!("{line}");
             Ok(())
         }
-        cli::Cmd::Callers { name, limit } => {
+        cli::Cmd::Callers { name, limit, depth } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::callers(&conn, &root, &name, limit)?;
+            let out = query::callers(&conn, &root, &name, limit, depth)?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,

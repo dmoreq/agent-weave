@@ -38,7 +38,7 @@ Binding repository conventions for `aw`, a local static code index for Python, T
   - Do not force `INDEXED BY` hints when optional filters (such as `--path`) have a more selective index (`symbols_file_path`).
   - Always include deterministic tie-breaker columns (`qualname`, `file_path`, `line_start`) in `ORDER BY`; rowids and `file_id` vary across fresh vs carried builds.
 - **Exit Codes**:
-  - `0` ok | `1` empty result, missing target, or missing index | `2` invalid CLI usage or ambiguous bare name (`path:line qualname` candidates) | `3` corrupt DB | `4` active build lock or parse-error-rate abort | `5` schema skew | `6` internal or I/O error.
+  - `0` ok | `1` empty result, missing target, or missing index | `2` invalid CLI usage or ambiguous bare name (`path:line qualname` candidates) | `3` corrupt DB | `4` active build lock | `5` schema skew | `6` internal or I/O error | `7` parse-error-rate abort.
 
 ## 4. Cross-Surface Synchronization Gate
 

@@ -34,6 +34,50 @@ pub fn aw_dir(root: &Path) -> PathBuf {
     root.join(".aw")
 }
 
+fn reject_symlink(path: &Path, label: &str) -> Result<()> {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err(AwError::Internal(format!(
+                "refusing symlinked {label}: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Create or validate `.aw/`, refusing a symlinked directory. A symlink can
+/// redirect every later write outside the repository root.
+pub fn ensure_aw_dir(root: &Path) -> Result<PathBuf> {
+    let dir = aw_dir(root);
+    match fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(AwError::Internal(format!(
+                "refusing symlinked .aw directory: {}",
+                dir.display()
+            )));
+        }
+        Ok(meta) if !meta.is_dir() => {
+            return Err(AwError::Internal(format!(
+                ".aw exists but is not a directory: {}",
+                dir.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&dir)?;
+            if fs::symlink_metadata(&dir)?.file_type().is_symlink() {
+                return Err(AwError::Internal(format!(
+                    "refusing symlinked .aw directory: {}",
+                    dir.display()
+                )));
+            }
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(dir)
+}
+
 pub fn db_path(root: &Path) -> PathBuf {
     aw_dir(root).join("index.db")
 }
@@ -46,31 +90,92 @@ pub fn db_new_path(root: &Path) -> PathBuf {
 /// directory disappears from `git status` without touching the repo's own
 /// .gitignore (allowed write path per invariant 3's constant list).
 pub fn ensure_aw_gitignore(root: &Path) -> Result<()> {
-    let dir = aw_dir(root);
-    fs::create_dir_all(&dir)?;
+    let dir = ensure_aw_dir(root)?;
     let marker = dir.join(".gitignore");
-    if !marker.exists() {
-        fs::write(&marker, "*\n")?;
+    match fs::symlink_metadata(&marker) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(AwError::Internal(format!(
+            "refusing symlinked .aw/.gitignore: {}",
+            marker.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&marker)?;
+            file.write_all(b"*\n")?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
     }
-    Ok(())
+}
+
+/// Stable build identity: an exclusive flock on the repository directory
+/// itself. The directory inode survives `.aw/` removal, so maintenance and
+/// builds cannot split into two lock identities across invalidation.
+pub struct RootLock {
+    file: File,
+}
+
+impl RootLock {
+    pub fn acquire(root: &Path) -> Result<RootLock> {
+        let file = File::open(root)?;
+        match file.try_lock() {
+            Ok(()) => Ok(RootLock { file }),
+            Err(std::fs::TryLockError::WouldBlock) => Err(AwError::Locked(0)),
+            Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+        }
+    }
+}
+
+impl Drop for RootLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 ///Exclusive flock over `.aw/build.lock` for the whole build (CUJ6).
 pub struct BuildLock {
+    _root_lock: RootLock,
     file: File,
 }
 
 impl BuildLock {
     pub fn acquire(root: &Path) -> Result<BuildLock> {
-        let dir = aw_dir(root);
-        fs::create_dir_all(&dir)?;
+        let root_lock = RootLock::acquire(root)?;
+        let dir = ensure_aw_dir(root)?;
         let lock_path = dir.join("build.lock");
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .read(true)
-            .open(&lock_path)?;
+        let file = match fs::symlink_metadata(&lock_path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(AwError::Internal(format!(
+                    "refusing symlinked build lock: {}",
+                    lock_path.display()
+                )));
+            }
+            Ok(_) => fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&lock_path)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                match fs::OpenOptions::new()
+                    .create_new(true)
+                    .read(true)
+                    .write(true)
+                    .open(&lock_path)
+                {
+                    Ok(file) => file,
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(&lock_path)?
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Err(e) => return Err(e.into()),
+        };
+        reject_symlink(&lock_path, "build lock")?;
         match file.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => {
@@ -98,7 +203,10 @@ impl BuildLock {
         file.seek(SeekFrom::Start(0))?;
         file.set_len(0)?;
         writeln!(file, "{} {}", std::process::id(), env!("CARGO_PKG_VERSION"))?;
-        Ok(BuildLock { file })
+        Ok(BuildLock {
+            _root_lock: root_lock,
+            file,
+        })
     }
 }
 
@@ -117,7 +225,9 @@ impl Drop for BuildLock {
 /// both map to the contract message via `AwError::from(rusqlite::Error)`.
 /// Deep integrity remains `aw doctor` (`PRAGMA integrity_check`).
 pub fn open_for_query(root: &Path) -> Result<Connection> {
+    reject_symlink(&aw_dir(root), ".aw directory")?;
     let path = db_path(root);
+    reject_symlink(&path, "index.db")?;
     if !path.exists() {
         return Err(AwError::NoResults(format!(
             "no .aw/index.db under {} — run aw build",
@@ -147,6 +257,7 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
     ensure_aw_gitignore(root)?;
     let path = db_new_path(root);
     let _ = fs::remove_file(&path);
+    reject_symlink(&path, "index.db.new")?;
     let conn = Connection::open(&path)?;
     // Build-only pragmas (A2): `.new` is disposable until publish_new_index
     // renames it, so this connection drops the rollback journal (no double
@@ -191,7 +302,9 @@ pub fn publish_new_index(root: &Path) -> Result<()> {
 /// Fast path gate: a usable previous index under the SAME schema AND grammar
 /// versions (any mismatch disables the fast path for the whole build).
 pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
+    reject_symlink(&aw_dir(root), ".aw directory")?;
     let old_path = db_path(root);
+    reject_symlink(&old_path, "index.db")?;
     if !old_path.exists() {
         return Ok(None);
     }
@@ -402,6 +515,60 @@ pub fn symbol_names(conn: &Connection) -> Result<HashSet<String>> {
     Ok(out)
 }
 
+/// Old symbol qualnames grouped by the files that declare them. Used to detect
+/// a newly added duplicate candidate, not just a brand-new name.
+pub fn symbol_qualname_files(conn: &Connection) -> Result<HashMap<String, HashSet<String>>> {
+    let mut out: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut stmt =
+        conn.prepare("SELECT s.qualname, f.path FROM symbols s JOIN files f ON f.id = s.file_id")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for r in rows {
+        let (qualname, path) = r?;
+        out.entry(qualname).or_default().insert(path);
+    }
+    Ok(out)
+}
+
+/// Carried files whose edges or unresolved sites mention a qualname whose
+/// candidate set just grew. Those sites may now be ambiguous even though they
+/// were resolved before the build; re-extract them so the incremental result
+/// matches a fresh build.
+pub fn gap_files_for_candidate_changes(
+    old: &Connection,
+    duplicate_qualnames: &HashSet<String>,
+) -> Result<HashSet<String>> {
+    if duplicate_qualnames.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut out = HashSet::new();
+    let mut stmt = old.prepare(
+        "SELECT DISTINCT f.path, e.dst_name
+         FROM edges e
+         JOIN symbols s ON s.id = e.src_id
+         JOIN files f ON f.id = s.file_id
+         WHERE e.kind IN ('calls', 'imports', 'inherits')",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for r in rows {
+        let (path, dst) = r?;
+        if duplicate_qualnames.contains(&dst) {
+            out.insert(path);
+        }
+    }
+    let mut stmt = old.prepare(
+        "SELECT DISTINCT f.path, u.dst_name
+         FROM unresolved_calls u JOIN files f ON f.id = u.file_id",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    for r in rows {
+        let (path, dst) = r?;
+        if duplicate_qualnames.contains(&dst) {
+            out.insert(path);
+        }
+    }
+    Ok(out)
+}
+
 /// Carried files whose resolution gaps mention any of `new_names`
 /// (Amendment 15): a file with an unresolved call or an AMBIGUOUS calls edge
 /// whose last name segment is a newly added symbol must be re-extracted, or
@@ -480,6 +647,12 @@ pub fn insert_unresolved_calls(
 
 /// Symbols + inherits pairs of the carried set, for resolution tables.
 pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedIndex> {
+    if rels.is_empty() {
+        return Ok(CarriedIndex {
+            symbols: Vec::new(),
+            inherits: Vec::new(),
+        });
+    }
     let mut symbols = Vec::new();
     let mut stmt = old.prepare(
         "SELECT s.id, s.kind, s.name, s.qualname, f.path
@@ -522,13 +695,20 @@ pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedI
         });
     }
     let mut inherits = Vec::new();
-    let mut stmt = old.prepare(
+    let placeholders = rels.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let mut stmt = old.prepare(&format!(
         "SELECT s.qualname, e.dst_name
          FROM edges e JOIN symbols s ON s.id = e.src_id
-         WHERE e.kind = 'inherits' AND e.dst_name IS NOT NULL",
-    )?;
+         JOIN files f ON f.id = s.file_id
+         WHERE e.kind = 'inherits' AND e.dst_name IS NOT NULL
+           AND f.path IN ({placeholders})"
+    ))?;
+    let rel_params: Vec<&str> = rels.iter().map(String::as_str).collect();
     let pairs = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .query_map(
+            rusqlite::params_from_iter(rel_params.iter().copied()),
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     for (sub, base) in pairs {
         inherits.push((sub, base));

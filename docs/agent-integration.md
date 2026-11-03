@@ -84,9 +84,18 @@ When validating an integration, record the host version, `aw --version`, reposit
 - **Empty result or no path:** inspect source or use grep. Missing resolved edges do not prove missing runtime behavior.
 - **Changed code:** rebuild before further navigation. No staleness warning does not prove the entire index is current.
 - **Conflicting evidence:** verify current source. Query-first routing does not prohibit safety checks or required review evidence.
+- **Transitive callers:** `aw callers <name> --depth N` follows the resolved reverse call closure; rows deeper than one hop carry `[depth=N]`.
 
 For workflows, see [Usage](usage.md). For arguments, limits, exit codes, and journaling, see [CLI reference](cli-reference.md).
 Read [Evaluation](EVALUATION.md) before applying measured benefits to another host or repository.
+
+## Trust contract
+
+When an `aw` query exits 0, accept the returned navigation fields as ground
+truth for the question it answers. Do not repeat the same lookup with grep or a
+second `aw` call. Treat `tests`, `dead`, and `unresolved` as candidates, not
+proofs. Source reads remain required for behavioral claims, edits, safety, and
+review. The full policy is in [`aw-first/SKILL.md`](../skills/aw-first/SKILL.md).
 
 ## Local data and removal
 

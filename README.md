@@ -72,7 +72,7 @@ See [Getting started](docs/getting-started.md) for setup and result handling.
 
 | Question | Command |
 |---|---|
-| Who calls a function or method? | `aw callers <symbol>` |
+| Who calls a function or method, directly or transitively? | `aw callers <symbol> [--depth N]` |
 | What does it call, including further calls? | `aw callees <symbol> --depth 3` |
 | How does A call through to B? | `aw path <from> <to>` |
 | What surrounds this symbol? | `aw context <symbol>` |
@@ -116,6 +116,9 @@ See [Security](SECURITY.md) for the security model.
 - **MCP** gives an agent access to aw tools through `aw mcp`.
 - **The aw-first skill** tells an agent when and how to use those tools,
   handle incomplete results, and fall back to source inspection.
+- **Trust contract:** successful navigation output is ground truth for the
+  fields it returns. `tests`, `dead`, and `unresolved` remain candidates.
+  Source reads still gate edits and behavioral claims.
 
 Neither is installed automatically. See [Agent integration](docs/agent-integration.md)
 for setup, verification, and the difference between tool access and routing.

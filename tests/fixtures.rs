@@ -97,18 +97,17 @@ fn import_x_as_y_binds_module_root() {
 #[test]
 fn factory_nested_constructor_types_nothing() {
     // R1: obj = factory(A()) must NOT type obj as A.
-    let src = "\
-class A:\n\
-    def m(self):\n\
-        return 1\n\
-\n\
-def factory(x):\n\
-    return x\n\
-\n\
-def go():\n\
-    obj = factory(A())\n\
-    return obj.m()\n\
-";
+    let src = r#"class A:
+    def m(self):
+        return 1
+
+def factory(x):
+    return x
+
+def go():
+    obj = factory(A())
+    return obj.m()
+"#;
     let e = edges_for(src);
     assert!(
         !e.iter()

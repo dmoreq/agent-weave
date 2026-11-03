@@ -34,16 +34,16 @@ fn tools(all: bool) -> Value {
     let mut v = json!([
         {"name": "build", "description": "Index the repository into .aw/index.db (full atomic replacement)",
          "inputSchema": schema_obj(json!({
-             "force": {"type": "boolean", "description": "Re-extract everything (disable the fast path)"},
+             "force": {"type": "boolean", "description": "Re-extract everything (disable the fast path) and bypass the parse-error abort"},
              "max_parse_error_rate": {"type": "number", "description": "Abort above this fraction of parse-error files (default 0.05)"}
          }), &[])},
-        {"name": "callers", "description": "Who calls this symbol — pointer list path:line",
-         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": limit}), &["name"])},
+        {"name": "callers", "description": "Who calls this symbol — direct by default; transitive with depth; pointer list path:line",
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Transitive depth (default 1)"}, "limit": limit}), &["name"])},
         {"name": "callees", "description": "What does this symbol call — transitive with depth",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
         {"name": "path", "description": "Shortest call path between two symbols — hop call-site pointers path:line over resolved edges; dynamic dispatch may hide paths",
          "inputSchema": schema_obj(json!({"from": {"type": "string"}, "to": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum hops (default 10)"}}), &["from", "to"])},
-        {"name": "context", "description": "One-call symbol context: definition + signature, direct callers, direct callees over resolved edges",
+        {"name": "context", "description": "One-call symbol context: definition + signature, direct callers, direct callees over resolved edges plus tagged ambiguous candidates",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Callers/callees shown per section (default 10)"}}), &["name"])},
         {"name": "implementers", "description": "Who inherits from or implements this symbol — resolved inherits edges only; cross-file impls omitted",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": limit}), &["name"])},
@@ -110,39 +110,49 @@ pub fn serve(
     // Bounded frame size (R6d A7): the MCP input is untrusted; without a cap
     // a single oversized frame forces memory linear in its size.
     const MAX_FRAME_BYTES: u64 = 8 * 1024 * 1024;
-    let mut line = String::new();
+    let mut buf: Vec<u8> = Vec::new();
     loop {
-        line.clear();
+        buf.clear();
         let read = reader
             .by_ref()
             .take(MAX_FRAME_BYTES + 1)
-            .read_line(&mut line)?;
+            .read_until(b'\n', &mut buf)?;
         if read == 0 {
             return Ok(());
         }
+        let newline_seen = buf.last() == Some(&b'\n');
         if read as u64 > MAX_FRAME_BYTES {
             // Drain the rest of the oversized frame in fixed-size chunks so
-            // memory stays bounded regardless of frame size (R6 finding).
-            loop {
-                let buf = reader.fill_buf()?;
-                if buf.is_empty() {
-                    break;
-                }
-                let nl = buf.iter().position(|&b| b == b'\n');
-                let take = nl.map(|i| i + 1).unwrap_or(buf.len());
-                reader.consume(take);
-                if nl.is_some() {
-                    break;
+            // memory stays bounded. If the bounded read already consumed the
+            // delimiter, do not drain: the next line is a fresh request.
+            if !newline_seen {
+                loop {
+                    let chunk = reader.fill_buf()?;
+                    if chunk.is_empty() {
+                        break;
+                    }
+                    let nl = chunk.iter().position(|&b| b == b'\n');
+                    let take = nl.map(|i| i + 1).unwrap_or(chunk.len());
+                    reader.consume(take);
+                    if nl.is_some() {
+                        break;
+                    }
                 }
             }
             write_error(&mut out, None, -32600, "frame too large")?;
             continue;
         }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+        let frame = match std::str::from_utf8(&buf) {
+            Ok(text) => text.trim(),
+            Err(_) => {
+                write_error(&mut out, None, -32700, "parse error")?;
+                continue;
+            }
+        };
+        if frame.is_empty() {
             continue;
         }
-        let msg: Value = match serde_json::from_str(trimmed) {
+        let msg: Value = match serde_json::from_str(frame) {
             Ok(v) => v,
             Err(_) => {
                 write_error(&mut out, None, -32700, "parse error")?;
@@ -359,6 +369,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 &arg_str(args, "name").unwrap_or_default(),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
+                arg_usize(args, "depth", 1),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
@@ -633,6 +644,7 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             if let Some(name) = arg_str(args, "name") {
                 out.push(("name", name));
             }
+            out.push(("depth", arg_usize(args, "depth", 1).to_string()));
             out.push((
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
