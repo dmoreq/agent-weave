@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the public export tree and prove it clean (R6b gate).
 
-Exports `git archive HEAD`, removes the private evidence vault
-(docs/baselines), scrubs private identifiers/paths/emails, rounds the
+Exports `git archive HEAD`, removes private evidence and reports
+(docs/baselines and docs/reports), scrubs private identifiers/paths/emails, rounds the
 per-corpus table, then runs zero-assert checks over the staged tree.
 
 Usage: python3 tests/scripts/public_export.py --src <repo> --out <empty dir>
@@ -87,6 +87,7 @@ def export(src: Path, out: Path) -> None:
     ).stdout
     subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
     shutil.rmtree(out / "docs" / "baselines", ignore_errors=True)
+    shutil.rmtree(out / "docs" / "reports", ignore_errors=True)
 
 
 def scrub(out: Path) -> None:
@@ -107,9 +108,10 @@ def scrub(out: Path) -> None:
         path.write_text(t)
     # The gate script itself carries the private-pattern vocabulary; it stays
     # in the private repo (R6 review finding).
-    self_copy = out / "tests" / "scripts" / "public_export.py"
-    if self_copy.exists():
-        self_copy.unlink()
+    for name in ("public_export.py", "test_public_export.py"):
+        private_script = out / "tests" / "scripts" / name
+        if private_script.exists():
+            private_script.unlink()
     # Round the per-corpus table (exact counts are fingerprints).
     ev = out / "docs" / "EVALUATION.md"
     if ev.exists():
@@ -179,7 +181,7 @@ def gate(out: Path) -> int:
     cargo = (out / "Cargo.toml").read_text()
     if 'exclude = ["docs/baselines/**"' not in cargo:
         print("Cargo.toml exclude pattern was mangled"); rc = 1
-    for bad in ("docs/baselines", ".kg", "target", ".zcode"):
+    for bad in ("docs/baselines", "docs/reports", ".kg", "target", ".zcode"):
         p = out / bad
         if p.exists():
             print(f"forbidden path present: {bad}")
