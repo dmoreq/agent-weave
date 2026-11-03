@@ -1174,6 +1174,27 @@ fn p8a_impact_depth_two_reaches_transitive_callers() {
 }
 
 #[test]
+fn impact_depth_two_includes_module_level_caller() {
+    let repo = temp_repo("impact-module-caller");
+    write(&repo, "m1.py", "def f():\n    pass\n");
+    write(&repo, "mid.py", "from m1 import f\n\ndef g():\n    f()\n");
+    write(&repo, "top.py", "from mid import g\n\ng()\n");
+    build(&repo);
+
+    let out = kg(&repo)
+        .args(["impact", "m1.py", "--depth", "2"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("mid.py"), "{stdout}");
+    assert!(
+        stdout.contains("top.py"),
+        "module-level caller missing: {stdout}"
+    );
+}
+
+#[test]
 fn p8a_symbols_directory_groups_files_and_counts_symbols() {
     let repo = temp_repo("symbols-dir");
     write(&repo, "pkg/a.py", "def a():\n    pass\n");

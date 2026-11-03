@@ -387,12 +387,19 @@ pub fn run_build(
     )?;
     crate::db::set_meta(&conn, "source_rev", &crate::db::source_rev(&root))?;
     // One scan per table instead of one query per count (A3).
-    let (sym_total, callable_total) = conn.query_row(
+    let (sym_total, callable_symbols, callable_total) = conn.query_row(
         "SELECT COUNT(*),
+                COALESCE(SUM(kind IN ('function','method')), 0),
                 COALESCE(SUM(kind IN ('function','method') AND cyclomatic > 0), 0)
          FROM symbols",
         [],
-        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
     )?;
     crate::db::set_meta(&conn, "callable_count", &callable_total.to_string())?;
     let (edge_total, calls_total, imports_total, inherits_total) = conn.query_row(
@@ -438,6 +445,37 @@ pub fn run_build(
     ] {
         crate::db::set_meta(&conn, key, &n.to_string())?;
     }
+    // Exact reachable-universe counters for impact early-stop. Distinct source
+    // files per kind plus the union; old indexes fall back to an edge scan.
+    let (calls_src, imports_src, inherits_src, all_src) = conn.query_row(
+        "SELECT COUNT(DISTINCT CASE WHEN e.kind = 'calls' THEN s.file_path END),
+                COUNT(DISTINCT CASE WHEN e.kind = 'imports' THEN s.file_path END),
+                COUNT(DISTINCT CASE WHEN e.kind = 'inherits' THEN s.file_path END),
+                COUNT(DISTINCT s.file_path)
+         FROM edges e JOIN symbols s ON s.id = e.src_id",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        },
+    )?;
+    for (key, n) in [
+        ("edge_calls_src_files", calls_src),
+        ("edge_imports_src_files", imports_src),
+        ("edge_inherits_src_files", inherits_src),
+        ("edge_all_src_files", all_src),
+    ] {
+        crate::db::set_meta(&conn, key, &n.to_string())?;
+    }
+    crate::db::set_meta(
+        &conn,
+        "callable_symbol_count",
+        &callable_symbols.to_string(),
+    )?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;
     conn.close()

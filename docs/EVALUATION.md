@@ -10,7 +10,7 @@ without being labeled as such.
 
 | question | answer (measured) |
 |----------|-------------------|
-| Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets; P8 real-corpus GT 71/71 at 1.000 (imports 40, tests 20, inheritance 11) |
+| Are the pointers real? | 777/777 emitted pointers verified against source lines across 6 corpora; ground-truth recall and EXTRACTED-tier precision 100% on 3 frozen ground-truth sets; P8 real-corpus GT 77/77 at 1.000 (imports 40, tests 20, inheritance 17) |
 | Is the query loop fast? | 5-11 ms best-of-7 end-to-end per invocation (spawn floor ~6 ms); < 10 ms on a 382 MB index (11k-file tree); query memory is bounded by the display cap since schema v5 — `docs/baselines/perf-v5-2026-11-02.md` |
 | Is the build fast? | 0.06-0.46 s fresh on 27-596-file corpora; 0.38 s best-of-7 on the self-index (~18 MB RSS); 2.70-2.79 s best-of-7 at the 2,025-file synthetic corpus (1.25x budget 2.91 s) — `baselines/perf-v5-2026-11-02.md`, `tests/scripts/timing_assert.sh` |
 | Does it make a coding agent better? | navigation recall 98.6% vs 81.9% grep-only, at flat token cost |

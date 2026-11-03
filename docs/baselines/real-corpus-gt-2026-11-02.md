@@ -1,8 +1,10 @@
 # Real-corpus P8 ground truth (2026-11-02)
 
 Frozen on 2026-11-02 at kg `342ebc3`, vihap `efcd310`, finguard `dddfe07`,
-Flutter `20f82749394`, food-dispatch `6bc5337`. Local-only gates: the harness
-needs these working trees and is not run in CI.
+Flutter `20f82749394`, food-dispatch `6bc5337`. Re-run on 2026-11-03 at
+vihap `d060ace`, finguard `dddfe07`; the full finguard tree (not the p8
+utility subset) is required for the two TS rows. Local-only gates: the
+harness needs these working trees and is not run in CI.
 
 **TL;DR** — 77 source-verified rows: imports 40/40, tests 20/20, inheritance
 17/17 at 1.000 recall. Ground truth was derived from source ASTs before

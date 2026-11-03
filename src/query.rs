@@ -5,7 +5,7 @@
 use std::collections::{BTreeSet, BinaryHeap, HashSet};
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::db;
 use crate::error::{KgError, Result};
@@ -157,6 +157,12 @@ pub fn test_impact(
         (ids, callables)
     };
     let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
+    if !has_test_candidates(conn)? {
+        return Err(KgError::NoResultsCaveated {
+            caveat: TESTS_CAVEAT,
+            detail: "0 test candidates found (static call edges only)".to_string(),
+        });
+    }
     let mut visited: HashSet<i64> = seed_set.clone();
     let mut visited_callables = seed_callables;
     let mut current = seed_ids;
@@ -1440,7 +1446,7 @@ pub fn impact(
     } else {
         direct_impact_records(conn, &rel, &kind_sql, &mut records)?;
     }
-    let total_files = impact_source_files(conn, &kinds)?;
+    let total_files = impact_source_files(conn, &kinds, &kind_sql)?;
     let mut truncated = false;
     for d in 2..=depth {
         if records.len() >= total_files {
@@ -1505,28 +1511,70 @@ fn total_impact_targets(conn: &Connection, rel: &str) -> Result<usize> {
     )? as usize)
 }
 
-/// Upper bound on files that can be an edge source for the selected kinds.
-/// A calls-only traversal can never reach a file without a callable symbol, so
-/// the symbol table gives a cheap bound without scanning every edge.
-fn impact_source_files(conn: &Connection, kinds: &[&str]) -> Result<usize> {
-    let filter = if kinds.iter().all(|k| *k == "calls") {
-        " WHERE kind IN ('function', 'method')"
-    } else {
-        ""
+/// Exact upper bound on files that can be an edge source for the selected
+/// kinds. New indexes store per-kind and all-kind counters; older indexes and
+/// mixed subsets fall back to an edge scan. The calls-only case must include
+/// module-level call sites: a module symbol can be a `calls` edge source.
+fn impact_source_files(conn: &Connection, kinds: &[&str], kind_sql: &str) -> Result<usize> {
+    let key = match kinds {
+        [kind] => match *kind {
+            "calls" => Some("edge_calls_src_files"),
+            "imports" => Some("edge_imports_src_files"),
+            "inherits" => Some("edge_inherits_src_files"),
+            _ => None,
+        },
+        _ if kinds.len() == 3
+            && kinds
+                .iter()
+                .all(|k| matches!(*k, "calls" | "imports" | "inherits")) =>
+        {
+            Some("edge_all_src_files")
+        }
+        _ => None,
     };
+    if let Some(key) = key {
+        if let Some(value) = db::meta_get(conn, key) {
+            if let Ok(n) = value.parse::<usize>() {
+                return Ok(n);
+            }
+        }
+    }
     Ok(conn.query_row(
-        &format!("SELECT COUNT(DISTINCT file_path) FROM symbols{filter}"),
+        &format!(
+            "SELECT COUNT(DISTINCT ss.file_path) FROM edges e
+             JOIN symbols ss ON ss.id = e.src_id
+             WHERE e.kind IN ({kind_sql})"
+        ),
         [],
         |r| r.get::<_, i64>(0),
     )? as usize)
 }
 
 fn total_callables(conn: &Connection) -> Result<usize> {
+    if let Some(value) = db::meta_get(conn, "callable_symbol_count") {
+        if let Ok(n) = value.parse::<usize>() {
+            return Ok(n);
+        }
+    }
     Ok(conn.query_row(
         "SELECT COUNT(*) FROM symbols WHERE kind IN ('function', 'method')",
         [],
         |r| r.get::<_, i64>(0),
     )? as usize)
+}
+
+fn has_test_candidates(conn: &Connection) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM symbols
+         WHERE kind IN ('function', 'method')
+           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')
+         LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 fn is_callable_kind(kind: &str) -> bool {

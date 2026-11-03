@@ -22,7 +22,7 @@ reproduction commands, and threats to validity):
 
 | question | measured |
 |----------|----------|
-| Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall 100% on two GT sets plus the refreshed self set; call-site precision 662/664 (99.7%; two known checker/GT failures listed); P8 real-corpus GT 71/71 (imports 40/40, tests 20/20, inheritance 11/11) |
+| Does it point at real code? | 777/777 emitted pointers verified against source lines; ground-truth recall 100% on two GT sets plus the refreshed self set; call-site precision 662/664 (99.7%; two known checker/GT failures listed); P8 real-corpus GT 77/77 (imports 40/40, tests 20/20, inheritance 17/17) |
 | Is it fast enough for an agent loop? | queries 5-11 ms best-of-7 end-to-end (self-index; < 10 ms on a 382 MB index); builds 0.06-0.46 s on 27-596-file repos and 2.70-2.79 s best-of-7 on the 2,025-file synthetic corpus (1.25x budget: 2.91 s) |
 | Does it help a coding agent? | navigation recall 98.6% vs 81.9% grep-only; with query-first routing: **-27% input tokens** at equal recall (40 primary instrumented runs + 2 alternate fills; Grok Build, n=10/arm) |
 | Structure and duplication lookups? | `kg search` recall 0.775 (22/28) on frozen NL queries; `symbols --outline` cuts battery tool calls -41.7% vs the grep baseline (+1 call vs the plain-kg control); `kg clones` detects 10/10 seeded pairs with 0 spurious (candidates, not proof) |

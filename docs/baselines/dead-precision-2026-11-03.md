@@ -20,9 +20,17 @@ real Python corpus?
 | metric | value |
 |---|---:|
 | candidates sampled | 50 |
-| candidates with zero external textual occurrences | **0** |
-| candidates with 1 external occurrence | 7 |
-| candidates with >1 external occurrence | 43 |
+| candidates with zero external textual occurrences | **6** |
+| candidates with 1 external occurrence | 11 |
+| candidates with >1 external occurrence | 33 |
+
+The six zero-reference candidates are `scripts/overengineering_metrics.py:108
+FunctionInfo`, `vihap/grammar/admin.py:692
+compile_anchored_prefix_alternation`, `vihap/grammar/entity.py:235
+acronyms_in_text`, `vihap/grammar/entity.py:245 landmarks_in_text`,
+`vihap/grammar/hamlet.py:343 compile_hamlet_digit_pattern`, and
+`vihap/grammar/landmark.py:436 swap_bilingual_admin_spacing`. Each occurs
+exactly once in the corpus (its definition).
 
 Examples:
 
@@ -39,8 +47,9 @@ false-positive classes.
 
 ## Interpretation
 
-- `dead` currently has no demonstrated precision on dynamic Python. It is a
-  candidate generator whose caveat names the main false-positive classes.
+- `dead` has limited precision on dynamic Python: 6/50 sampled candidates
+  have no external textual reference; 44/50 are referenced in source and are
+  false positives under this oracle.
 - Type references (Rust structs used as types) and attribute references
   (methods passed as callables) emit no call edge, so `dead` flags them.
 - A future improvement would need type-reference and attribute-reference

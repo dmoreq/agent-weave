@@ -106,7 +106,7 @@ verdicts or the L6 gate. R14 must re-evaluate independently.
 
 | Feature | R13 action | Post-audit status | Evidence |
 |---|---|---|---|
-| F1 | Cross-file GT, TS aliases, dead | **PARTIAL** | GT 17/17 (15 vihap + 2 finguard; 6 cross-file rows); TS path alias pinned as unresolved with a negative fixture; nested-function call resolution fixed (dead false positive removed); `dead` type/attribute-reference limits documented and a 50-candidate real-corpus probe found 0/50 zero-reference candidates (`baselines/dead-precision-2026-11-03.md`) |
+| F1 | Cross-file GT, TS aliases, dead | **PARTIAL** | GT 17/17 (15 vihap + 2 finguard; 6 cross-file rows); TS path alias pinned as unresolved with a negative fixture; nested-function call resolution fixed (dead false positive removed); `dead` type/attribute-reference limits documented and a 50-candidate real-corpus probe found 6/50 zero-reference candidates (`baselines/dead-precision-2026-11-03.md`) |
 | F4 | 1M-edge hub latency | **FIXED (measured)** | 1.37M-edge hub `impact --depth 3` 112.2 ms best-of-7 vs 150 ms; 3.1M stress 254.3 ms |
 | F6 | no-journal/MCP/journal | **FIXED (tested)** | `resolve` honors `--no-journal`; MCP rejects blank/non-string names and records results; parsed count journaled; CLI/MCP regressions pass |
 | F8 | 1M-edge hub latency | **FIXED (measured)** | 1.37M-edge hub `tests --depth 10` 163.4 ms best-of-7 vs 200 ms; 3.1M stress 363.4 ms |
