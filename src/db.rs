@@ -801,6 +801,7 @@ pub fn meta_get(conn: &Connection, key: &str) -> Option<String> {
 /// Probe the source repo's git revision with a `-dirty` suffix on a dirty tree.
 pub fn source_rev(root: &Path) -> String {
     let head = std::process::Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["rev-parse", "HEAD"])
         .current_dir(root)
         .output()
@@ -811,6 +812,7 @@ pub fn source_rev(root: &Path) -> String {
         return "unknown".to_string();
     };
     let dirty = std::process::Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["status", "--porcelain"])
         .current_dir(root)
         .output()

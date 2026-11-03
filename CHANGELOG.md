@@ -28,6 +28,18 @@ Consumers that parse output must review the query-shape changes listed below bef
 - Historical benchmarks recorded before 0.3.0 used the former name `kg`; the
   evaluation summary keeps those names only when quoting old artifacts.
 
+### Changed — internal module layout (2026-11-03)
+
+- `src/extract.rs` is now a facade over `extract/walk.rs` (AST walk) and
+  `extract/resolve.rs` (global resolution). `src/query.rs` is a facade over
+  `query/callgraph.rs`, `query/impact.rs`, `query/analysis.rs`, and
+  `query/scope.rs`. Public crate paths and all output bytes are unchanged.
+- `tests/scripts/write_path_check.sh` scans nested `src/**/*.rs` and its
+  negative control covers a write inside a subdirectory.
+- Production code no longer mutates process environment: `GIT_OPTIONAL_LOCKS=0`
+  is set on each git probe, and the MCP `--no-journal` flag disables the
+  journal through a process-local flag instead of `AW_NO_JOURNAL`.
+
 ### Fixed — query edge cases and diagnostics (2026-11-03)
 
 - `Class.method` names now resolve as a qualname suffix when the exact name is

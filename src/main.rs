@@ -26,9 +26,6 @@ use std::time::Instant;
 use error::Result;
 
 fn main() {
-    // git read-only commands must not refresh/rewrite `.git/index` — the
-    // safety invariant says no writes outside `.aw/` (R6d A8).
-    std::env::set_var("GIT_OPTIONAL_LOCKS", "0");
     // A downstream pipe close is not an internal error; keep stderr quiet
     // and let the catch_unwind arm exit 0 (R6 finding).
     let default_hook = std::panic::take_hook();

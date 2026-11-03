@@ -88,6 +88,7 @@ pub fn walk(root: &Path, exts: &[&str]) -> Result<WalkStats> {
 /// unavailable or the command fails.
 fn git_visible_paths(root: &Path) -> Option<Vec<String>> {
     let out = std::process::Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["ls-files", "-co", "--exclude-standard", "-z"])
         .current_dir(root)
         .output()

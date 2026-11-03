@@ -55,12 +55,19 @@ struct Pending {
 
 thread_local! {
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
+    static DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Disable journaling for this process without mutating the environment.
+/// Used by the MCP server when `--no-journal` is requested.
+pub fn disable() {
+    DISABLED.with(|d| d.set(true));
 }
 
 /// Arm the journal for this invocation. No-op when the env opt-out is set;
 /// the `--no-journal` flag is enforced by the caller skipping `begin`.
 pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)]) {
-    if std::env::var("AW_NO_JOURNAL").as_deref() == Ok("1") {
+    if DISABLED.with(|d| d.get()) || std::env::var("AW_NO_JOURNAL").as_deref() == Ok("1") {
         return;
     }
     let body = args

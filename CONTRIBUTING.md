@@ -34,9 +34,9 @@ claim that a particular run passed.
 | Area | Files |
 |---|---|
 | Commands and output errors | `src/cli.rs`, `src/main.rs`, `src/error.rs` |
-| File discovery, parsing, and extraction | `src/walk.rs`, `src/parse.rs`, `src/extract.rs` |
+| File discovery, parsing, and extraction | `src/walk.rs`, `src/parse.rs`, `src/extract.rs`, `src/extract/` |
 | Index construction and storage | `src/build.rs`, `src/db.rs` |
-| Queries and analysis | `src/query.rs`, `src/insights.rs`, `src/clones.rs` |
+| Queries and analysis | `src/query.rs`, `src/query/`, `src/insights.rs`, `src/clones.rs` |
 | Diagnostics and usage journal | `src/doctor.rs`, `src/journal.rs` |
 | MCP integration | `src/mcp.rs` |
 | Behavior fixtures and safety checks | `tests/fixtures.rs`, `tests/scripts/` |

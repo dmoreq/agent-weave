@@ -8,7 +8,7 @@ Binding repository conventions for `aw`, a local static code index for Python, T
 - **Strict `.aw/` Write Confinement**:
   - Runtime filesystem writes and deletes may live **only** in [`src/db.rs`](src/db.rs), [`src/doctor.rs`](src/doctor.rs), and [`src/journal.rs`](src/journal.rs) (plus `db_new_path` handling in [`src/build.rs`](src/build.rs)).
   - Files under `src/` must **never** mention agent-configuration tokens (`AGENTS.md`, `CLAUDE.md`, `.claude`, `.codex`, `settings.json`, `keychain`, `credentials`, `hook_file`, `pre-commit`). [`tests/scripts/write_path_check.sh`](tests/scripts/write_path_check.sh) rejects any match.
-  - Before splitting `src/*.rs` into subdirectories, update [`tests/scripts/write_path_check.sh`](tests/scripts/write_path_check.sh) from `src.glob("*.rs")` to `src.rglob("*.rs")` so subdirectory modules stay covered.
+  - [`tests/scripts/write_path_check.sh`](tests/scripts/write_path_check.sh) scans `src.rglob("*.rs")`, so nested modules stay covered; its negative controls include a nested-subdirectory write.
 - **Rust & Dependency Discipline**:
   - Maintain MSRV `1.90` (`edition = "2021"`). Avoid `std::env::set_var` / `remove_var` in production code to keep Rust Edition 2024 compatibility open.
   - Zero `unsafe` code anywhere in `src/` or `tests/`.
@@ -21,9 +21,9 @@ Binding repository conventions for `aw`, a local static code index for Python, T
 |---|---|---|
 | CLI & Entrypoint | [`src/cli.rs`](src/cli.rs), [`src/main.rs`](src/main.rs), [`src/error.rs`](src/error.rs) | `clap` subcommands, exit-code mapping, latency/result journaling |
 | Discovery & Parsing | [`src/walk.rs`](src/walk.rs), [`src/parse.rs`](src/parse.rs), [`src/hash.rs`](src/hash.rs) | Git-visible / ignore-aware file enumeration, 1 MiB cap, Tree-sitter parsing, FNV-1a hashing |
-| Extraction & Resolution | [`src/extract.rs`](src/extract.rs) | Symbol/signature/metric extraction and static call, import, and inheritance resolution |
+| Extraction & Resolution | [`src/extract.rs`](src/extract.rs), [`src/extract/walk.rs`](src/extract/walk.rs), [`src/extract/resolve.rs`](src/extract/resolve.rs) | Symbol/signature/metric extraction and static call, import, and inheritance resolution |
 | Storage & Build | [`src/build.rs`](src/build.rs), [`src/db.rs`](src/db.rs), [`schema.sql`](schema.sql), [`schema_indexes.sql`](schema_indexes.sql) | Advisory `flock` (`build.lock`), incremental carry-forward, atomic `.aw/index.db.new` replacement |
-| Query & Analysis | [`src/query.rs`](src/query.rs), [`src/insights.rs`](src/insights.rs), [`src/clones.rs`](src/clones.rs) | Graph traversal, FTS5 symbol search, staleness headers, complexity/clone/hotspot reports |
+| Query & Analysis | [`src/query.rs`](src/query.rs), [`src/query/callgraph.rs`](src/query/callgraph.rs), [`src/query/impact.rs`](src/query/impact.rs), [`src/query/analysis.rs`](src/query/analysis.rs), [`src/query/scope.rs`](src/query/scope.rs), [`src/insights.rs`](src/insights.rs), [`src/clones.rs`](src/clones.rs) | Graph traversal, FTS5 symbol search, staleness headers, complexity/clone/hotspot reports |
 | Diagnostics & Telemetry | [`src/doctor.rs`](src/doctor.rs), [`src/journal.rs`](src/journal.rs) | Integrity/staleness checks, `--invalidate`, usage/payload JSONL journals (`serde_json`) |
 | Agent Surfaces | [`src/mcp.rs`](src/mcp.rs), [`skills/aw-first/SKILL.md`](skills/aw-first/SKILL.md) | Newline-delimited JSON-RPC 2.0 MCP stdio server and agent routing policy |
 

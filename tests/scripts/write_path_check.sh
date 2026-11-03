@@ -35,7 +35,7 @@ def strip_test_modules(text):
         i = m
     return "".join(out)
 
-for p in sorted(src.glob("*.rs")):
+for p in sorted(src.rglob("*.rs")):
     if p.name in allowed:
         continue
     text = p.read_text()
@@ -58,6 +58,8 @@ fi
 probe="$(mktemp -d)"; trap 'rm -rf "$probe"' EXIT
 cp -R "$SRC" "$probe/src"
 printf 'fn evil() { let _ = std::fs::File::create("/tmp/aw-write-probe"); }\n' > "$probe/src/evil.rs"
+mkdir -p "$probe/src/nested"
+printf 'fn nested_evil() { let _ = std::fs::write("/tmp/aw-write-probe", b"x"); }\n' > "$probe/src/nested/evil.rs"
 printf '#[cfg(test)]\nmod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n\npub fn leaky() { std::fs::write("/tmp/z", b"w").unwrap(); }\n' > "$probe/src/walk.rs"
 printf 'fn t() { std::fs::File::options().write(true).create(true).open("/tmp/y").unwrap(); }\n' >> "$probe/src/query.rs"
 probe_bad="$(check "$probe/src")"
@@ -69,5 +71,8 @@ if ! echo "$probe_bad" | grep -q "src/query.rs:.*File::options"; then
 fi
 if ! echo "$probe_bad" | grep -q "src/evil.rs"; then
   echo "G5 write-path: negative control missed evil.rs" >&2; exit 1
+fi
+if ! echo "$probe_bad" | grep -q "src/nested/evil.rs"; then
+  echo "G5 write-path: negative control missed a nested subdirectory write" >&2; exit 1
 fi
 echo "G5 write-path: writes confined to aw_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"

@@ -101,7 +101,7 @@ pub fn serve(
     let root = crate::walk::discover_root(root_arg)?;
     if no_journal {
         // Amendment 6 opt-out must hold on the MCP surface too (R6d A7).
-        std::env::set_var("AW_NO_JOURNAL", "1");
+        crate::journal::disable();
     }
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();

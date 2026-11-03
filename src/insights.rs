@@ -92,6 +92,7 @@ fn git_counts(root: &Path) -> Result<(HashMap<String, f64>, HashMap<String, f64>
     // hotspots stays useful, just LOC+cyc-driven.
     let run = |args: &[&str]| -> Option<String> {
         let out = std::process::Command::new("git")
+            .env("GIT_OPTIONAL_LOCKS", "0")
             .args(args)
             .current_dir(root)
             .output()
