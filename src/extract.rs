@@ -526,7 +526,7 @@ pub fn extract_file_with_code_lines(
         calls: Vec::new(),
         import_edges: Vec::new(),
     };
-    let mut ctx = WalkCtx::default();
+    let mut ctx = WalkCtx::for_file(lang, src);
     walk_children(root, src, &mut fx, &mut ctx);
     finalize_rust_impls(&mut fx);
     finalize_exports(&mut fx, src, root);
@@ -601,6 +601,15 @@ fn finalize_exports(fx: &mut FileExtraction, src: &[u8], root: Node<'_>) {
     }
 }
 
+/// True when `qualname` is exactly `module.name` (no extra nesting). Avoids a
+/// per-symbol `format!` allocation in the export walk.
+fn is_direct_child(module: &str, name: &str, qualname: &str) -> bool {
+    qualname.len() == module.len() + 1 + name.len()
+        && qualname.starts_with(module)
+        && qualname.as_bytes().get(module.len()) == Some(&b'.')
+        && qualname.ends_with(name)
+}
+
 fn export_base(
     fx: &FileExtraction,
     i: usize,
@@ -611,7 +620,7 @@ fn export_base(
     if sym.kind == "module" {
         return false;
     }
-    let top_level = sym.qualname == format!("{}.{}", fx.module, sym.name);
+    let top_level = is_direct_child(&fx.module, &sym.name, &sym.qualname);
     match fx.lang {
         Lang::Python => match all_names {
             Some(all) => all.contains(&sym.name),
@@ -717,14 +726,57 @@ fn finalize_rust_impls(fx: &mut FileExtraction) {
     }
 }
 
-#[derive(Default)]
+/// Per-language metric tables computed once per file instead of once per
+/// callable (B2): the filtered decision kinds and the branch kinds.
+struct MetricTables {
+    decisions: Vec<&'static str>,
+    branches: &'static [&'static str],
+}
+
+impl MetricTables {
+    fn for_lang(lang: Lang) -> MetricTables {
+        let decisions: Vec<&str> = crate::parse::decision_kinds(lang)
+            .iter()
+            .copied()
+            .filter(|k| {
+                !matches!(
+                    *k,
+                    "match_statement" | "if_let_expression" | "while_let_expression"
+                )
+            })
+            .collect();
+        MetricTables {
+            decisions,
+            branches: branch_kinds(lang),
+        }
+    }
+}
+
 struct WalkCtx {
     class_stack: Vec<String>, // qualnames
     func_stack: Vec<String>,  // qualnames
     depth: usize,             // AST recursion depth (R6d Blocker 1 guard)
+    /// Per-line byte bounds for the Python docstring adjustment, computed once
+    /// per file instead of per callable.
+    line_bounds: Vec<(usize, usize)>,
+    metrics: MetricTables,
 }
 
 impl WalkCtx {
+    fn for_file(lang: Lang, src: &[u8]) -> WalkCtx {
+        WalkCtx {
+            class_stack: Vec::new(),
+            func_stack: Vec::new(),
+            depth: 0,
+            line_bounds: if lang == Lang::Python {
+                crate::parse::line_byte_bounds(src)
+            } else {
+                Vec::new()
+            },
+            metrics: MetricTables::for_lang(lang),
+        }
+    }
+
     fn scope_func(&self) -> String {
         self.func_stack.last().cloned().unwrap_or_default()
     }
@@ -775,7 +827,13 @@ fn signature_of(node: Node<'_>, src: &[u8]) -> String {
         end += 1;
     }
     let raw = String::from_utf8_lossy(&src[start..end]);
-    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut collapsed = String::with_capacity(raw.len());
+    for word in raw.split_whitespace() {
+        if !collapsed.is_empty() {
+            collapsed.push(' ');
+        }
+        collapsed.push_str(word);
+    }
     collapsed.chars().take(160).collect()
 }
 
@@ -1186,7 +1244,14 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             let qualname = format!("{parent_qn}.{name}");
             let start = node.start_position().row + 1;
             let sym_idx = fx.symbols.len();
-            let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang, &fx.code_lines);
+            let (cyc, br, nest, loc) = callable_metrics(
+                node,
+                src,
+                fx.lang,
+                &fx.code_lines,
+                &ctx.line_bounds,
+                &ctx.metrics,
+            );
             fx.symbols.push(NewSymbol {
                 kind,
                 name: name.clone(),
@@ -1687,18 +1752,11 @@ fn callable_metrics(
     src: &[u8],
     lang: Lang,
     code_lines: &[bool],
+    line_bounds: &[(usize, usize)],
+    tables: &MetricTables,
 ) -> (usize, usize, usize, usize) {
-    let decisions: Vec<&str> = crate::parse::decision_kinds(lang)
-        .iter()
-        .copied()
-        .filter(|k| {
-            !matches!(
-                *k,
-                "match_statement" | "if_let_expression" | "while_let_expression"
-            )
-        })
-        .collect();
-    let branches = branch_kinds(lang);
+    let decisions = &tables.decisions;
+    let branches = tables.branches;
     let mut cyclomatic = 1usize;
     let mut branch_count = 0usize;
     let mut max_nest = 0usize;
@@ -1728,14 +1786,20 @@ fn callable_metrics(
         cyclomatic,
         branch_count,
         max_nest,
-        callable_effective_loc(node, src, lang, code_lines),
+        callable_effective_loc(node, src, lang, code_lines, line_bounds),
     )
 }
 
 /// Effective LOC from the file-wide comment mask plus the Python docstring.
 /// A line counts when it has a non-whitespace byte outside every comment node;
 /// docstring bytes are excluded only when the whole line is inside the string.
-fn callable_effective_loc(node: Node<'_>, src: &[u8], lang: Lang, code_lines: &[bool]) -> usize {
+fn callable_effective_loc(
+    node: Node<'_>,
+    src: &[u8],
+    lang: Lang,
+    code_lines: &[bool],
+    line_bounds: &[(usize, usize)],
+) -> usize {
     let base_row = node.start_position().row;
     let end_row = node.end_position().row;
     let mut effective = (base_row..=end_row)
@@ -1759,7 +1823,6 @@ fn callable_effective_loc(node: Node<'_>, src: &[u8], lang: Lang, code_lines: &[
     };
     let doc_start = doc.start_byte();
     let doc_end = doc.end_byte();
-    let line_bounds = crate::parse::line_byte_bounds(src);
     for row in doc.start_position().row..=doc.end_position().row {
         let Some(&(start, end)) = line_bounds.get(row) else {
             continue;
@@ -1799,7 +1862,14 @@ fn define_function(
     let start = node.start_position().row + 1;
     let sym_idx = fx.symbols.len();
     let (cyc, br, nest, loc) = if node.child_by_field_name("body").is_some() {
-        callable_metrics(node, src, fx.lang, &fx.code_lines)
+        callable_metrics(
+            node,
+            src,
+            fx.lang,
+            &fx.code_lines,
+            &ctx.line_bounds,
+            &ctx.metrics,
+        )
     } else {
         (0, 0, 0, 0)
     };
@@ -1988,7 +2058,14 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
     let qualname = format!("{class_qn}.{name}");
     let start = node.start_position().row + 1;
     let sym_idx = fx.symbols.len();
-    let (cyc, br, nest, loc) = callable_metrics(node, src, fx.lang, &fx.code_lines);
+    let (cyc, br, nest, loc) = callable_metrics(
+        node,
+        src,
+        fx.lang,
+        &fx.code_lines,
+        &ctx.line_bounds,
+        &ctx.metrics,
+    );
     fx.symbols.push(NewSymbol {
         kind: "method",
         name: name.clone(),
@@ -2066,7 +2143,14 @@ fn record_ts_arrow_function(
     let qualname = format!("{}.{}", fx.module, name);
     let start = value.start_position().row + 1;
     let sym_idx = fx.symbols.len();
-    let (cyc, br, nest, loc) = callable_metrics(value, src, fx.lang, &fx.code_lines);
+    let (cyc, br, nest, loc) = callable_metrics(
+        value,
+        src,
+        fx.lang,
+        &fx.code_lines,
+        &ctx.line_bounds,
+        &ctx.metrics,
+    );
     fx.symbols.push(NewSymbol {
         kind: "function",
         name: name.clone(),
