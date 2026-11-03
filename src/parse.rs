@@ -73,6 +73,12 @@ pub struct ParserSlot {
     lang: Option<Lang>,
 }
 
+impl Default for ParserSlot {
+    fn default() -> ParserSlot {
+        ParserSlot::new()
+    }
+}
+
 impl ParserSlot {
     pub fn new() -> ParserSlot {
         ParserSlot {
