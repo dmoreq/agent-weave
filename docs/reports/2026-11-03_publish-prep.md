@@ -14,7 +14,7 @@ Trạng thái: **chuẩn bị, chưa publish**. Không push, không tag, không
 | Version | `0.3.0`, `publish = false` đến khi review xong |
 | Public tree | Giữ scope hiện tại: user guides, `docs/designs/`, `skills/`, scripts cần CI |
 | Private evidence | `docs/baselines/` và `docs/reports/` không public |
-| History | `git filter-repo` trên clone public; repo private gốc giữ nguyên |
+| History | Orphan commit từ cây export đã scrub; không filter-repo lịch sử nguồn |
 | Worktree | Lưu patch/bundle rồi xóa; chưa chạy trong đợt prep |
 
 ## 2. Owner inputs còn thiếu
@@ -29,7 +29,7 @@ Trạng thái: **chuẩn bị, chưa publish**. Không push, không tag, không
 
 ## 3. Đã chuẩn bị trong đợt này
 
-- `Cargo.toml`: package name `agent-weave` (crates.io 404 confirmed), `[lib] name = "aw"`,
+- `Cargo.toml`: package name `agent-weave` (crates.io 404 confirmed), `[lib] name = "agent_weave"`,
   `[[bin]] name = "aw"`, `documentation`, anchored `include` allowlist.
 - `publish = false` vẫn giữ.
 - `tests/scripts/public_export.py`: prune recall scripts nội bộ; gate kiểm tra
