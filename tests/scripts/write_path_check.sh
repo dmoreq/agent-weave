@@ -36,7 +36,10 @@ def strip_test_modules(text):
     return "".join(out)
 
 for p in sorted(src.rglob("*.rs")):
-    if p.name in allowed:
+    # Only the top-level modules named in the invariant are exempt; a nested
+    # db.rs/doctor.rs/journal.rs must not inherit their write permission.
+    rel = p.relative_to(src).as_posix()
+    if rel in allowed:
         continue
     text = p.read_text()
     scanned = strip_test_modules(text) if p.name == "walk.rs" else text
@@ -60,6 +63,7 @@ cp -R "$SRC" "$probe/src"
 printf 'fn evil() { let _ = std::fs::File::create("/tmp/aw-write-probe"); }\n' > "$probe/src/evil.rs"
 mkdir -p "$probe/src/nested"
 printf 'fn nested_evil() { let _ = std::fs::write("/tmp/aw-write-probe", b"x"); }\n' > "$probe/src/nested/evil.rs"
+printf 'fn nested_db() { let _ = std::fs::write("/tmp/aw-write-probe", b"x"); }\n' > "$probe/src/nested/db.rs"
 printf '#[cfg(test)]\nmod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n\npub fn leaky() { std::fs::write("/tmp/z", b"w").unwrap(); }\n' > "$probe/src/walk.rs"
 printf 'fn t() { std::fs::File::options().write(true).create(true).open("/tmp/y").unwrap(); }\n' >> "$probe/src/query.rs"
 probe_bad="$(check "$probe/src")"
@@ -74,5 +78,8 @@ if ! echo "$probe_bad" | grep -q "src/evil.rs"; then
 fi
 if ! echo "$probe_bad" | grep -q "src/nested/evil.rs"; then
   echo "G5 write-path: negative control missed a nested subdirectory write" >&2; exit 1
+fi
+if ! echo "$probe_bad" | grep -q "src/nested/db.rs"; then
+  echo "G5 write-path: negative control let a nested db.rs inherit the write exemption" >&2; exit 1
 fi
 echo "G5 write-path: writes confined to aw_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"
