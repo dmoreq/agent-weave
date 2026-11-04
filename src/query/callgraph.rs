@@ -2,11 +2,6 @@
 
 use super::*;
 
-fn is_test_symbol_name(name: &str) -> bool {
-    name.starts_with("test_")
-        || (name.starts_with("test") && name.chars().nth(4).is_some_and(|c| c.is_ascii_uppercase()))
-}
-
 /// Bounded top-test collector: `seen` counts every distinct reachable test
 /// symbol, while `heap` keeps only the first `limit` rows in output order.
 struct TestTop {
@@ -63,7 +58,7 @@ fn forward_test_top(
     let mut stmt = conn.prepare(
         "SELECT id, name, kind, file_path, line_start, qualname FROM symbols
          WHERE kind IN ('function', 'method')
-           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')
+           AND is_test = 1
          ORDER BY file_path, line_start, qualname",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -77,8 +72,8 @@ fn forward_test_top(
         ))
     })?;
     for row in rows {
-        let (id, name, _kind, path, line, qualname) = row?;
-        if targets.contains(&id) || !is_test_symbol_name(&name) {
+        let (id, _name, _kind, path, line, qualname) = row?;
+        if targets.contains(&id) {
             continue;
         }
         if reaches_target(conn, id, targets, depth)? {
@@ -169,7 +164,6 @@ pub fn test_impact(
     let mut out = collect_output(
         conn,
         root,
-        "",
         pointers.into_iter().map(Ok),
         limit,
         "0 test candidates found (static call edges only)",
@@ -272,7 +266,7 @@ fn collect_tests(
         for chunk in current.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!(
-                "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname
+                "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname, s.is_test
                  FROM edges e JOIN symbols s ON s.id = e.src_id
                  WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
             );
@@ -289,13 +283,14 @@ fn collect_tests(
                     r.get::<_, String>(3)?,
                     r.get::<_, i64>(4)?,
                     r.get::<_, String>(5)?,
+                    r.get::<_, i64>(6)?,
                 ))
             })?;
             for row in rows {
-                let (id, name, kind, path, line, qualname) = row?;
+                let (id, _name, kind, path, line, qualname, is_test) = row?;
                 if !seed_set.contains(&id)
                     && matches!(kind.as_str(), "function" | "method")
-                    && is_test_symbol_name(&name)
+                    && is_test != 0
                 {
                     tests.insert(id, path, line, qualname);
                 }
@@ -357,7 +352,6 @@ pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Resu
     let mut out = collect_output(
         conn,
         root,
-        &rel,
         rows,
         limit,
         "0 imports found (external and unresolved imports are omitted)",
@@ -398,7 +392,6 @@ pub fn callers(
         let mut out = collect_output(
             conn,
             root,
-            name,
             rows.into_iter().map(Ok),
             limit,
             "0 callers found (dynamic dispatch possible — grep fallback recommended)",
@@ -429,7 +422,6 @@ pub fn callers(
     collect_output(
         conn,
         root,
-        name,
         rows,
         limit,
         "0 callers found (dynamic dispatch possible — grep fallback recommended)",
@@ -678,7 +670,6 @@ pub fn implementers(
     let mut out = collect_output(
         conn,
         root,
-        name,
         rows,
         limit,
         "0 implementers found (resolved inherits edges only)",
@@ -728,15 +719,7 @@ pub fn callees(
                 detail: row.qualname,
             })
         });
-        return collect_output(
-            conn,
-            root,
-            name,
-            rows,
-            limit,
-            "0 callees found",
-            Some(total),
-        );
+        return collect_output(conn, root, rows, limit, "0 callees found", Some(total));
     }
     // depth > 1: recursive closure over call edges from the reached set.
     let mut params: Vec<rusqlite::types::Value> = ids
@@ -792,15 +775,7 @@ pub fn callees(
             detail: r.get::<_, String>(3)?,
         })
     })?;
-    collect_output(
-        conn,
-        root,
-        name,
-        rows,
-        limit,
-        "0 callees found",
-        Some(total),
-    )
+    collect_output(conn, root, rows, limit, "0 callees found", Some(total))
 }
 
 /// Shortest call path (Amendment 13): does `from` reach `to` through resolved
@@ -811,8 +786,7 @@ pub fn callees(
 /// visited-on-enqueue, parent = first discoverer. No limit surface: a single
 /// shortest chain has at most `depth` hops (recorded deviation). Output:
 /// caveat header, hop call-site pointers in path order, final chain line of
-/// resolved full qualnames. Payload-journaled (Amendment 10), `name` = the
-/// `from` argument.
+/// resolved full qualnames.
 pub fn path(
     conn: &Connection,
     root: &Path,
@@ -916,10 +890,6 @@ pub fn path(
         }
     }
     let stale = changed > 0;
-    // Payload capture (Amendment 10a): hop pointer text, byte-identical to
-    // the stdout data lines; `name` = the `from` argument. `shown` = `total`
-    // = hop count (no cap surface exists).
-    super::record_payload_meta(conn, from, &pointers, stale, hops, hops);
     crate::journal::record_result(hops, hops, hops, stale, 0);
     let mut out = Vec::with_capacity(hops + 4);
     out.push(PATH_CAVEAT.to_string());
@@ -1136,8 +1106,7 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         }
     }
     let stale = changed > 0;
-    // Payload pointers must be byte-identical to the stdout data lines
-    // (Amendment 10/G11), including the identity suffix added in R7.
+    // Caller/callee lines carry the identity suffix added in R7.
     let caller_lines: Vec<String> = callers
         .iter()
         .map(|(p, l, qn)| format!("{p}:{l} {qn}"))
@@ -1153,11 +1122,8 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
             format!("{p}:{l}{tag} {qn}")
         })
         .collect();
-    let mut pointers = caller_lines.clone();
-    pointers.extend(callee_lines.iter().cloned());
     let total = callers_total + callees_total;
-    let shown = pointers.len();
-    super::record_payload_meta(conn, name, &pointers, stale, shown, total);
+    let shown = caller_lines.len() + callee_lines.len();
     crate::journal::record_result(shown, shown, total, stale, 0);
     let mut out = vec![CONTEXT_CAVEAT.to_string()];
     if stale {

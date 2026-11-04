@@ -486,74 +486,6 @@ fn g10_initialize_tools_list_and_parity() {
         .count();
     assert_eq!(mcp_lines, 20, "{log}");
 
-    // Amendment 10a: MCP pointer calls append payload lines with surface=mcp;
-    // stats writes none. The callers payload pointers are byte-equal to the
-    // CLI reference stdout's data lines (G10 parity extends to the payload).
-    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
-    let mcp_payload = payload
-        .lines()
-        .filter(|l| l.contains("\"surface\":\"mcp\""))
-        .count();
-    assert_eq!(
-        mcp_payload, 13,
-        "callers+callers(depth2)+symbols(plain)+symbols(outline)+search+dead+path+callees+impact+context+imports+tests+complexity, not stats: {payload}"
-    );
-    let callers_line = payload
-        .lines()
-        .find(|l| l.contains("\"tool\":\"callers\"") && l.contains("\"surface\":\"mcp\""))
-        .unwrap();
-    assert!(
-        callers_line.contains("\"name\":\"normalize\""),
-        "{callers_line}"
-    );
-    let marker = "\"pointers\":[";
-    let s = callers_line.find(marker).unwrap() + marker.len();
-    let e = s + callers_line[s..].find("]}").unwrap();
-    let expected: String = String::from_utf8_lossy(&cli_callers.stdout)
-        .lines()
-        .filter(|l| !l.starts_with("aw: "))
-        .map(|p| format!("\"{p}\""))
-        .collect::<Vec<_>>()
-        .join(",");
-    assert_eq!(&callers_line[s..e], &expected, "payload byte-parity");
-
-    let _ = fs::remove_dir_all(&repo);
-}
-
-#[test]
-fn g10_usage_verify_via_mcp() {
-    // Amendment 10c on the MCP surface: usage with verify=true shares the CLI
-    // code path and reports the same three-state outcome.
-    let repo = fixture("mcp-verify");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
-    assert_eq!(build.status.code(), Some(0));
-
-    let mut srv = spawn(&repo);
-    let callers = rpc(
-        &mut srv,
-        1,
-        "tools/call",
-        json!({"name": "callers", "arguments": {"name": "normalize"}}),
-    );
-    assert_eq!(callers["result"]["isError"], false);
-    let verify = rpc(
-        &mut srv,
-        2,
-        "tools/call",
-        json!({"name": "usage", "arguments": {"verify": true, "limit": 10}}),
-    );
-    assert_eq!(verify["result"]["isError"], false);
-    let text = result_text(&verify);
-    assert!(
-        text.starts_with("aw usage --verify: 2 pointers sampled from 1 entries"),
-        "{text}"
-    );
-    assert!(text.contains("changed=0 fail=0"), "{text}");
     let _ = fs::remove_dir_all(&repo);
 }
 
@@ -867,4 +799,54 @@ fn mcp_build_rejects_symlinked_aw_directory() {
     assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
     assert!(!ext.join("index.db").exists());
     let _ = fs::remove_dir_all(&ext);
+}
+
+#[test]
+fn mcp_stats_path_matches_cli() {
+    // `stats` gained `--path`; MCP must accept the same argument and return
+    // the CLI's byte-identical scoped line.
+    let repo = fixture("stats-path");
+    fs::create_dir_all(repo.join("sub")).unwrap();
+    fs::write(
+        repo.join("sub/c.py"),
+        "def c1():\n    return c2()\n\ndef c2():\n    return 1\n",
+    )
+    .unwrap();
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["stats", "--path", "sub"])
+        .output()
+        .unwrap();
+    assert_eq!(cli.status.code(), Some(0));
+    let expected = String::from_utf8_lossy(&cli.stdout).into_owned();
+    assert!(
+        expected.starts_with("aw stats: scope=sub files="),
+        "CLI scoped stats: {expected}"
+    );
+
+    let mut srv = spawn(&repo);
+    let init = rpc(
+        &mut srv,
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18"}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    notification(&mut srv, "notifications/initialized");
+    let stats = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "stats", "arguments": {"path": "sub"}}),
+    );
+    assert_eq!(stats["result"]["isError"], false, "{stats}");
+    assert_eq!(result_text(&stats), expected);
 }

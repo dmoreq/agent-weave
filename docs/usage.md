@@ -42,7 +42,7 @@ aw impact src/build.rs --sites
 
 `callers` identifies call sites, not all textual references. `--depth N` follows the resolved reverse call closure and tags rows with their shortest depth. Each caller symbol appears once at its shortest depth; alternate longer routes are not repeated. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `impact` reverses the dependency direction: it finds files that depend on the target file, excluding that file itself.
 
-By default, impact uses calls and emits one row per caller file with a site count. Use `--sites` for individual sites, or extend the relationships and depth explicitly:
+By default, impact uses calls and emits one row per caller file with a site count. When that default finds nothing but the target file has importers or inheritors, the empty result names those counts and points at `--edges imports,inherits`. Use `--sites` for individual sites, or extend the relationships and depth explicitly:
 
 ```sh
 aw impact src/hash.rs --edges all --depth 3 --context --explain
@@ -110,11 +110,12 @@ Do not delete or refactor code solely because it appears here. Confirm runtime e
 
 ```sh
 aw stats
+aw stats --path src
 aw hotspots --path src --limit 10
 aw report --path src
 ```
 
-`stats` describes the index, not current runtime behavior. `report` combines totals, a package map, hotspots, and most-called symbols.
+`stats` describes the index, not current runtime behavior; `--path` scopes every counter to one prefix but leaves `db_bytes` and the version fields global. `report` combines totals, a package map, hotspots, and most-called symbols.
 
 `hotspots` combines file size, a file-level decision-count proxy, recent change counts, and fix-related commit counts. Without usable Git history, change and fix signals become zero; scores are not defect probabilities.
 
@@ -153,6 +154,6 @@ This guide makes no measured savings claim. See [Evaluation](EVALUATION.md) for 
 
 ## Keep local usage data under control
 
-Most commands append local usage metadata; pointer queries can also record displayed pointers. Use `aw --no-journal` or `AW_NO_JOURNAL=1` to disable both journals for an invocation.
+Most commands append local usage metadata. Use `aw --no-journal` or `AW_NO_JOURNAL=1` to disable the usage journal for an invocation.
 
-`aw usage` summarizes recorded activity. `aw usage --verify` checks a sample of recorded pointers, not the completeness of the graph; see [journal controls](cli-reference.md#journal-and-environment).
+`aw usage` summarizes recorded activity; see [journal controls](cli-reference.md#journal-and-environment).

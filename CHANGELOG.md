@@ -16,9 +16,59 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added
+
+- `symbols.is_test` (schema v7 -> v8): test classification computed once at
+  extraction from test paths (`tests/`, `test/`, `__tests__/`), test-shaped
+  names (`test_*`, `test` + uppercase) and files (`test_*.py`, `*_test.py`,
+  `*_test.go`, `*_test.dart`, `*.test.*`, `*.spec.*`), Rust `#[test]` and
+  `#[cfg(test)]` ancestry, and TS `describe`/`it` scope. `aw tests`, the
+  `dead --exclude-tests` filter, and the build-time `test_symbol_count`
+  counter now read the column instead of repeating name-shape SQL, so
+  Rust-attribute test functions (for example `fnv1a64_known_vectors`) are
+  recognized without `test_*` names. Assert-family macro bodies
+  (`assert!`, `assert_eq!`, `assert_ne!`, `debug_assert!`) now contribute
+  call edges from their token trees, bounded per site.
+
+**User impact:** `aw tests` finds attribute-only Rust test fns; `dead
+--exclude-tests` drops the same rows the v7 heuristics dropped plus
+attribute-classified tests. Callers that parse output see no shape changes.
+**Required action:** run `aw build` to replace v7 indexes with schema v8.
+Query opens on v7 exit 5.
+
+- Typed Python receiver calls (`x.m()` with `x: cls`) now also emit an
+  internal `type_ref` edge to the receiver's class. The incremental fast
+  path's dirty closure follows that edge, so a method added on an ancestor
+  class re-extracts carried callers and their MRO answer matches
+  `aw build --force` instead of staying stale. The edge participates in the
+  gap queries and in `aw dead` (a class referenced only through an
+  annotation is not dead); `impact --edges` and callers/callees traversal
+  keep their existing kinds. Output shapes are unchanged; edge totals grow
+  by one per typed receiver call site.
+
+- `aw impact <file>` in the default calls-only mode no longer answers a bare
+  `0 impacting files found` when the target file has importers or
+  inheritors. The empty result now carries the calls-only caveat header and
+  a detail line with the counts, for example `0 impacting files found
+  (calls only); 1 file(s) import and 0 file(s) inherit from this file —
+  rerun with --edges imports,inherits`. Exit code stays 1. Consumers that
+  match the old empty stderr byte-for-byte must accept the new
+  no-results detail; non-empty results are byte-identical.
+
+## [0.4.0] - 2026-11-05
+
 **User impact:** faster fresh builds, broader dependency navigation, and more reliable incremental resolution.
 **Required action:** run `aw build` to replace older indexes with schema v7. Query opens on v6 exit 5.
 Consumers that parse output must review the query-shape changes listed below before upgrading.
+
+### Removed
+
+- `aw usage --verify` and its `--limit` flag, and the MCP `usage` tool's
+  `verify`/`limit` arguments. `aw usage` (CLI and MCP) summarizes the journal
+  only.
+- The result-payload journal `.aw/usage-results.jsonl`: `aw` 0.4 no longer
+  writes or reads pointer payloads. A file left by 0.3 stays on disk and can
+  be deleted manually.
 
 ### Fixed — re-review hardening (2026-11-04)
 
@@ -39,9 +89,7 @@ Consumers that parse output must review the query-shape changes listed below bef
   journal readers are regular-file and byte bounded. MCP validates JSON-RPC
   envelopes and does not answer notifications.
 - Search counts the exact ∪ FTS union by symbol identity; impact ties use stable
-  semantic fields; `usage --verify` keeps the depth-1 name check but accepts
-  aliased call sites when the index has a resolved edge to the queried symbol,
-  and does not false-FAIL transitive caller pointers; the trust contract lists
+  semantic fields; the trust contract lists
   capped, stale, ambiguous, empty, and safety/review exceptions.
 - Root `lib.rs`/`main.rs` inline modules now use the crate-root namespace (`a`),
   not the file-module prefix (`lib.a`), so `crate::a` resolves consistently for

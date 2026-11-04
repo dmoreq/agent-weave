@@ -1,10 +1,8 @@
-//! Usage journal (Amendment 6) and result-payload journal (Amendment 10):
-//! one JSONL line per journaled invocation appended to `.aw/usage.log`, plus
-//! one self-contained pointer-payload line per successful pointer query
-//! appended to `.aw/usage-results.jsonl`. Best-effort by contract: a failed
-//! journal write is silently ignored and can never alter a command's output
-//! or exit code. Zero dependencies — the JSON line is hand-serialized; the
-//! summary reader extracts only the fixed keys we write.
+//! Usage journal: one JSONL line per journaled invocation appended to
+//! `.aw/usage.log`. Best-effort by contract: a failed journal write is
+//! silently ignored and can never alter a command's output or exit code.
+//! Zero dependencies — the JSON line is hand-serialized; the summary reader
+//! extracts only the fixed keys we write.
 
 use std::cell::RefCell;
 use std::fs::{self, OpenOptions};
@@ -19,13 +17,7 @@ pub fn usage_log_path(root: &Path) -> PathBuf {
     crate::db::aw_dir(root).join("usage.log")
 }
 
-/// Result-payload journal (Amendment 10): rendered pointers of the displayed
-/// set, one line per successful pointer query.
-pub fn payload_log_path(root: &Path) -> PathBuf {
-    crate::db::aw_dir(root).join("usage-results.jsonl")
-}
-
-/// Session/arm attribution (Amendment 10b): R1/R2 A/B tags, sanitized.
+/// Session/arm attribution: R1/R2 A/B tags, sanitized.
 fn env_tag(key: &str) -> String {
     std::env::var(key)
         .map(|v| v.trim().chars().take(64).collect())
@@ -45,12 +37,6 @@ struct Pending {
     stale: bool,
     session: String,
     arm: String,
-    // Payload fields (Amendment 10): set by record_payload on the success path
-    // of a pointer-returning query; empty pointers -> no payload line.
-    name: String,
-    pointers: Vec<String>,
-    built_at: u64,
-    source_rev: String,
 }
 
 thread_local! {
@@ -87,10 +73,6 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
             stale: false,
             session: env_tag("AW_SESSION"),
             arm: env_tag("AW_ARM"),
-            name: String::new(),
-            pointers: Vec::new(),
-            built_at: 0,
-            source_rev: String::new(),
         });
     });
 }
@@ -130,37 +112,10 @@ pub fn record_result(
     });
 }
 
-/// Capture the payload of a successful pointer query (Amendment 10a):
-/// the rendered pointer text of the displayed set — byte-identical to the
-/// query's stdout data lines — plus the index meta the pointers came from.
-/// Called from the query layer (`query::collect_output`, `query::symbols`);
-/// empty `pointers` writes no payload line at finalize time.
-pub fn record_payload(
-    name: &str,
-    pointers: &[String],
-    stale: bool,
-    shown: usize,
-    total: usize,
-    built_at: u64,
-    source_rev: &str,
-) {
-    PENDING.with(|p| {
-        if let Some(pending) = p.borrow_mut().as_mut() {
-            pending.name = name.to_string();
-            pending.pointers = pointers.to_vec();
-            pending.stale = stale;
-            pending.shown = shown;
-            pending.total = total;
-            pending.built_at = built_at;
-            pending.source_rev = source_rev.to_string();
-        }
-    });
-}
-
-/// Serialize and append the usage line, then the payload line when pointers
-/// were captured. Called exactly once per process, after the outcome is known.
-/// All I/O failures are swallowed by contract. A `None` root (repo discovery
-/// failed) skips the write — there is no `.aw/` location.
+/// Serialize and append the usage line. Called exactly once per process,
+/// after the outcome is known. All I/O failures are swallowed by contract.
+/// A `None` root (repo discovery failed) skips the write — there is no
+/// `.aw/` location.
 pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
@@ -187,9 +142,6 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         json_escape(&pending.arm),
     );
     append_line(&usage_log_path(root), &line);
-    if !pending.pointers.is_empty() {
-        append_line(&payload_log_path(root), &payload_line(&pending, ts));
-    }
 }
 
 fn append_line(path: &Path, line: &str) {
@@ -204,6 +156,12 @@ fn append_line(path: &Path, line: &str) {
         }
     }
     rotate_if_needed(path, ROTATE_BYTES);
+    // Whether `.aw` exists before this append: the journal seeds the gitignore
+    // marker only when IT creates the directory. A pre-existing `.aw` is owned
+    // by build/doctor (or the user) — appending must not touch its marker.
+    let aw_created_here = path
+        .parent()
+        .is_none_or(|dir| fs::symlink_metadata(dir).is_err());
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
@@ -214,6 +172,17 @@ fn append_line(path: &Path, line: &str) {
             Err(_) => return,
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // The journal self-created `.aw` (create_dir_all above): seed the
+            // tool-owned gitignore marker so the directory never leaks into
+            // `git status`. Best-effort — a non-git repo or unreadable marker
+            // must not fail the journal write.
+            if aw_created_here {
+                if let Some(aw) = path.parent() {
+                    if let Some(root) = aw.parent() {
+                        let _ = crate::db::ensure_aw_gitignore(root);
+                    }
+                }
+            }
             match OpenOptions::new().create_new(true).append(true).open(path) {
                 Ok(file) => file,
                 Err(_) => return,
@@ -265,30 +234,6 @@ fn read_log_bounded(path: &Path) -> Option<String> {
     let mut out = String::new();
     reader.read_to_string(&mut out).ok()?;
     Some(out)
-}
-
-/// Payload journal line (Amendment 10a): self-contained — replay verification
-/// needs no join with usage.log. Same `ts` as the usage line of the invocation.
-fn payload_line(p: &Pending, ts: u64) -> String {
-    let pointers = p
-        .pointers
-        .iter()
-        .map(|ptr| format!("\"{}\"", json_escape(ptr)))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"name\":\"{}\",\"session\":\"{}\",\"arm\":\"{}\",\"built_at\":{},\"source_rev\":\"{}\",\"stale\":{},\"shown\":{},\"total\":{},\"pointers\":[{pointers}]}}\n",
-        p.surface,
-        p.tool,
-        json_escape(&p.name),
-        json_escape(&p.session),
-        json_escape(&p.arm),
-        p.built_at,
-        json_escape(&p.source_rev),
-        p.stale,
-        p.shown,
-        p.total,
-    )
 }
 
 fn rotate_if_needed(path: &Path, max: u64) {
@@ -429,215 +374,6 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
             p(0.95),
         ));
     }
-    // Amendment 10 payload section: demand map over the result-payload journal
-    // (absent log just omits the section — usage stays valid on usage.log alone).
-    let (plines, _bytes) = payload_stats(root);
-    if plines > 0 {
-        let mut names: std::collections::BTreeMap<String, usize> = Default::default();
-        let mut n_pointers = 0usize;
-        for line in read_payload_log(root)
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-        {
-            if let Some((_tool, name, _built_at, pointers)) = parse_payload_line(line) {
-                *names.entry(name).or_default() += 1;
-                n_pointers += pointers.len();
-            }
-        }
-        out.push(format!(
-            "  payload: {plines} entries, {n_pointers} pointers"
-        ));
-        let mut top: Vec<(&String, &usize)> = names.iter().collect();
-        top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-        for (name, calls) in top.into_iter().take(5) {
-            out.push(format!("    {name}: {calls} calls"));
-        }
-    }
-    Ok(out)
-}
-
-// ---------------------------------------------------------------------------
-// `aw usage --verify` (Amendment 10c): replay sampled payload pointers
-// against current source; the open index separates CHANGED from OK/FAIL.
-// ---------------------------------------------------------------------------
-
-/// One parsed payload line: (tool, name, built_at, pointers).
-fn parse_payload_line(line: &str) -> Option<(String, String, u64, Vec<String>)> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    let tool = v.get("tool")?.as_str()?.to_string();
-    let name = v
-        .get("name")
-        .and_then(|x| x.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let built_at = v.get("built_at").and_then(|x| x.as_u64()).unwrap_or(0);
-    let pointers = v
-        .get("pointers")?
-        .as_array()?
-        .iter()
-        .filter_map(|p| p.as_str().map(str::to_string))
-        .collect();
-    Some((tool, name, built_at, pointers))
-}
-
-/// True when the index has a resolved call edge at this site to the queried
-/// bare name. Import aliases (`from a import leaf as l; l()`) do not spell the
-/// leaf name on the call line, so the text heuristic cannot judge them.
-fn site_calls_symbol(conn: &rusqlite::Connection, path: &str, line_no: usize, bare: &str) -> bool {
-    conn.query_row(
-        "SELECT EXISTS(
-             SELECT 1 FROM edges e
-             JOIN symbols ss ON ss.id = e.src_id
-             JOIN files f ON f.id = ss.file_id
-             JOIN symbols ds ON ds.id = e.dst_id
-             WHERE f.path = ?1 AND e.site_line = ?2 AND e.kind = 'calls'
-               AND (ds.name = ?3 OR ds.qualname = ?3 OR ds.qualname LIKE '%.' || ?3)
-         )",
-        rusqlite::params![path, line_no as i64, bare],
-        |r| r.get::<_, i64>(0),
-    )
-    .unwrap_or(0)
-        != 0
-}
-
-/// Split a rendered pointer into (path, 1-based line). Callers/callees/
-/// impact/dead render `path:line [tag]`; symbols renders
-/// `path:line kind qualname` — the first whitespace token carries the pointer.
-fn parse_pointer(ptr: &str) -> Option<(String, usize)> {
-    let ptr = ptr.strip_suffix(" [ambiguous]").unwrap_or(ptr);
-    let token = ptr.split_whitespace().next()?;
-    let (path, line) = token.rsplit_once(':')?;
-    Some((path.to_string(), line.parse().ok()?))
-}
-
-/// The bare segment of a queried name (`a.b`, `a::b`, `b` -> `b`).
-fn bare_name(name: &str) -> &str {
-    name.rsplit(['.', ':']).next().unwrap_or(name)
-}
-
-/// Both payload generations concatenated (rotation-aware readers).
-fn read_payload_log(root: &Path) -> String {
-    let mut content = String::new();
-    for gen in [".1", ""] {
-        let mut path = payload_log_path(root).into_os_string();
-        if !gen.is_empty() {
-            path.push(gen);
-        }
-        let path = PathBuf::from(path);
-        if let Some(c) = read_log_bounded(&path) {
-            content.push_str(&c);
-        }
-    }
-    content
-}
-
-/// Payload log health (doctor): (lines, bytes) across both generations.
-pub fn payload_stats(root: &Path) -> (usize, u64) {
-    let content = read_payload_log(root);
-    let lines = content.lines().filter(|l| !l.trim().is_empty()).count();
-    (lines, content.len() as u64)
-}
-
-/// Verify sampled payload pointers (Amendment 10c). Deterministic even-stride
-/// sample over payload entries; a file whose content differs from the index
-/// (`query::file_changed`) is CHANGED — unverifiable, never counted wrong.
-/// Unchanged files get structural checks: line in bounds, and for `callers`
-/// the line must mention the queried name's bare segment. Report-only.
-pub fn verify(
-    root: &Path,
-    conn: &rusqlite::Connection,
-    limit: usize,
-) -> crate::error::Result<Vec<String>> {
-    let limit = crate::query::clamp_limit(limit)?;
-    let entries: Vec<(String, String, u64, Vec<String>)> = read_payload_log(root)
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(parse_payload_line)
-        .collect();
-    if entries.is_empty() {
-        return Err(crate::error::AwError::NoResults(
-            "no payload entries — usage-results.jsonl is empty or absent".to_string(),
-        ));
-    }
-    let n_entries = entries.len();
-    let sampled: Vec<&(String, String, u64, Vec<String>)> = if n_entries <= limit {
-        entries.iter().collect()
-    } else {
-        (0..limit)
-            .map(|i| &entries[i * n_entries / limit])
-            .collect()
-    };
-    // Payload epoch: an entry recorded against a superseded index (a rebuild
-    // happened between query and verify) cannot PROVE a pointer wrong — its
-    // index is gone. Its structural failures degrade to CHANGED; structural
-    // passes still count OK. FAIL is reserved for the current epoch, where a
-    // failing pointer is proven wrong against the index it came from.
-    let cur_built_at: u64 = crate::db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-
-    let (mut ok, mut changed, mut fail) = (0usize, 0usize, 0usize);
-    let mut fail_lines: Vec<String> = Vec::new();
-    for (tool, name, built_at, pointers) in &sampled {
-        let stale_epoch = *built_at != 0 && cur_built_at != 0 && *built_at != cur_built_at;
-        let bare = bare_name(name);
-        for ptr in pointers {
-            let Some((path, line_no)) = parse_pointer(ptr) else {
-                // Unparseable text is a payload defect, not source drift.
-                fail += 1;
-                fail_lines.push(format!("FAIL {ptr} (unparseable pointer)"));
-                continue;
-            };
-            if crate::query::file_changed(conn, root, &path) {
-                changed += 1;
-                continue;
-            }
-            let text = match fs::read_to_string(root.join(&path)) {
-                Ok(c) => c,
-                Err(_) => {
-                    // Contradictory with file_changed=false — a race; unverifiable.
-                    changed += 1;
-                    continue;
-                }
-            };
-            let n_lines = text.lines().count();
-            if line_no == 0 || line_no > n_lines {
-                if stale_epoch {
-                    changed += 1;
-                } else {
-                    fail += 1;
-                    fail_lines.push(format!("FAIL {ptr} (line beyond {n_lines})"));
-                }
-                continue;
-            }
-            // A transitive caller's site line calls the next hop, not the
-            // queried leaf; name-mention applies to direct rows only. Level 1
-            // of a transitive closure is still a direct call site.
-            let depth = ptr.rsplit_once("[depth=").and_then(|(_, rest)| {
-                rest.split_once(']')
-                    .and_then(|(n, _)| n.parse::<usize>().ok())
-            });
-            let direct = depth.is_none() || depth == Some(1);
-            if tool == "callers" && !bare.is_empty() && direct {
-                let line_text = text.lines().nth(line_no - 1).unwrap_or("");
-                if !line_text.contains(bare) && !site_calls_symbol(conn, &path, line_no, bare) {
-                    if stale_epoch {
-                        changed += 1;
-                    } else {
-                        fail += 1;
-                        fail_lines.push(format!("FAIL {ptr} (line does not mention '{bare}')"));
-                    }
-                    continue;
-                }
-            }
-            ok += 1;
-        }
-    }
-    let mut out = vec![format!(
-        "aw usage --verify: {} pointers sampled from {n_entries} entries: ok={ok} changed={changed} fail={fail}",
-        ok + changed + fail
-    )];
-    out.extend(fail_lines);
     Ok(out)
 }
 
@@ -652,31 +388,6 @@ mod tests {
         assert_eq!(json_escape("a\nb"), "a\\nb");
         assert_eq!(json_escape("a\u{1}b"), "a\\u0001b");
         assert_eq!(json_escape("normal.text"), "normal.text");
-    }
-
-    #[test]
-    fn payload_parsing_helpers() {
-        let line = "{\"ts\":7,\"surface\":\"cli\",\"tool\":\"callers\",\"name\":\"a.b::c\",\"session\":\"\",\"arm\":\"\",\"built_at\":42,\"source_rev\":\"x\",\"stale\":false,\"shown\":2,\"total\":2,\"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}";
-        let (tool, name, built_at, pointers) = parse_payload_line(line).unwrap();
-        assert_eq!(tool, "callers");
-        assert_eq!(name, "a.b::c");
-        assert_eq!(built_at, 42);
-        assert_eq!(pointers, vec!["src/a.rs:7", "src/b.rs:12 [ambiguous]"]);
-        assert_eq!(parse_pointer("src/a.rs:7"), Some(("src/a.rs".into(), 7)));
-        assert_eq!(
-            parse_pointer("src/a.rs:12 [ambiguous]"),
-            Some(("src/a.rs".into(), 12))
-        );
-        assert_eq!(parse_pointer("junk"), None);
-        assert_eq!(parse_pointer("f.rs:x"), None);
-        assert_eq!(
-            parse_pointer("src/a.rs:1 module a.b"),
-            Some(("src/a.rs".into(), 1)),
-            "symbols form: first whitespace token"
-        );
-        assert_eq!(bare_name("a.b::c"), "c");
-        assert_eq!(bare_name("utils.normalize"), "normalize");
-        assert_eq!(bare_name("normalize"), "normalize");
     }
 
     #[test]
@@ -712,40 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn payload_line_is_self_contained_and_escaped() {
-        let p = Pending {
-            surface: "mcp",
-            tool: "callers".into(),
-            args: "{}".into(),
-            result_count: 2,
-            shown: 2,
-            total: 2,
-            ambiguous: 0,
-            stale: true,
-            session: "r1-t1".into(),
-            arm: "aw".into(),
-            name: "a.b".into(),
-            pointers: vec!["src/a.rs:7".into(), "src/b.rs:12 [ambiguous]".into()],
-            built_at: 42,
-            source_rev: "abc".into(),
-        };
-        let line = payload_line(&p, 7);
-        assert_eq!(
-            line,
-            "{\"ts\":7,\"surface\":\"mcp\",\"tool\":\"callers\",\"name\":\"a.b\",\
-             \"session\":\"r1-t1\",\"arm\":\"aw\",\"built_at\":42,\
-             \"source_rev\":\"abc\",\"stale\":true,\"shown\":2,\"total\":2,\
-             \"pointers\":[\"src/a.rs:7\",\"src/b.rs:12 [ambiguous]\"]}\n"
-        );
-        let (tool, name, built_at, pointers) = parse_payload_line(&line).unwrap();
-        assert_eq!(tool, "callers");
-        assert_eq!(name, "a.b");
-        assert_eq!(built_at, 42);
-        assert_eq!(pointers.len(), 2);
-    }
-
-    #[test]
-    fn usage_and_payload_parsing_unescapes_quoted_text() {
+    fn usage_parsing_unescapes_quoted_text() {
         let line = r#"{"tool":"search","args":{"terms":"say \"run\" \\ now"},"result_count":2,"exit_code":0,"latency_us":1200,"stale":true,"ambiguous":3}"#;
         let f = parse_usage_line(line).unwrap();
         assert_eq!(f.tool, "search");
@@ -753,11 +431,6 @@ mod tests {
         assert_eq!(f.latency_us, Some(1200));
         assert!(f.stale);
         assert_eq!(f.ambiguous, 3);
-
-        let payload =
-            r#"{"tool":"callers","name":"a","built_at":1,"pointers":["src/a.rs:1 C.\"m\" \\ ok"]}"#;
-        let (_, _, _, pointers) = parse_payload_line(payload).unwrap();
-        assert_eq!(pointers, vec![r#"src/a.rs:1 C."m" \ ok"#.to_string()]);
     }
 
     #[test]

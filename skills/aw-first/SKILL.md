@@ -76,7 +76,7 @@ verify their output before acting on it.
 | is this logic duplicated elsewhere | `aw clones [--min-lines N]` — candidates only, never proof |
 | which functions exceed complexity/length | `aw complexity --min-cyc 11` — syntax proxies, not cognitive complexity |
 | what is risky / unresolved | `aw hotspots`, `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
-| repository totals and structure | `aw stats`, `aw report` — build-time summaries, not freshness checks |
+| repository totals and structure | `aw stats [--path <dir>]`, `aw report` — build-time summaries, not freshness checks |
 | dead-code candidates | `aw dead` — candidate list only, never proof of deadness |
 
 ## Handling the contract behaviors

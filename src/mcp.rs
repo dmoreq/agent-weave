@@ -51,7 +51,7 @@ fn tools(all: bool) -> Value {
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "limit": limit}), &["file"])},
         {"name": "tests", "description": "Which tests reach this symbol or file — static call-edge candidates only",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
-        {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; sites=true lists every call site; edges/depth extend the dependency set",
+        {"name": "impact", "description": "Files that call into <file> — one row per caller file with a site count; an empty calls-only result names import/inherit counts; sites=true lists every call site; edges/depth extend the dependency set",
          "inputSchema": schema_obj(json!({"file": {"type": "string"}, "sites": {"type": "boolean"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "edges": {"type": "string"}, "context": {"type": "boolean"}, "explain": {"type": "boolean"}, "limit": limit}), &["file"])},
         {"name": "dead", "description": "Dead-code candidates (no resolved inbound calls/imports/inherits) — candidates, never proof; exclude_tests and path scope filters",
          "inputSchema": schema_obj(json!({"exclude_tests": {"type": "boolean"}, "path": {"type": "string"}, "limit": limit}), &[])},
@@ -71,13 +71,13 @@ fn tools(all: bool) -> Value {
          "inputSchema": schema_obj(json!({"min_lines": {"type": "integer", "minimum": 5}, "path": {"type": "string"}, "limit": limit}), &[])},
 
         {"name": "stats", "description": "Index totals: files, symbols, edges, parse errors, sizes",
-         "inputSchema": schema_obj(json!({}), &[])},
+         "inputSchema": schema_obj(json!({"path": {"type": "string"}}), &[])},
         {"name": "hotspots", "description": "Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density",
          "inputSchema": schema_obj(json!({"limit": {"type": "integer", "minimum": 1, "maximum": 100}, "path": {"type": "string"}}), &[])},
         {"name": "report", "description": "Four-section architecture report",
          "inputSchema": schema_obj(json!({"path": {"type": "string"}}), &[])},
-        {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates; verify=true replays sampled payload pointers",
-         "inputSchema": schema_obj(json!({"verify": {"type": "boolean"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10000}}), &[])},
+        {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates",
+         "inputSchema": schema_obj(json!({}), &[])},
     ]);
     if !all {
         if let Some(list) = v.as_array_mut() {
@@ -624,7 +624,11 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
         }
         "stats" => Ok(format!(
             "{}\n",
-            crate::insights::stats(&crate::db::open_for_query(root)?, root)?
+            crate::insights::stats(
+                &crate::db::open_for_query(root)?,
+                root,
+                arg_str(args, "path").as_deref(),
+            )?
         )),
         "hotspots" => Ok(join_lines(&crate::insights::hotspots(
             &crate::db::open_for_query(root)?,
@@ -637,22 +641,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             root,
             arg_str(args, "path").as_deref(),
         )?)),
-        "usage" => {
-            if args
-                .get("verify")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                let conn = crate::db::open_for_query(root)?;
-                Ok(join_lines(&crate::journal::verify(
-                    root,
-                    &conn,
-                    arg_usize(args, "limit", 50),
-                )?))
-            } else {
-                Ok(join_lines(&crate::journal::summary(root)?))
-            }
-        }
+        "usage" => Ok(join_lines(&crate::journal::summary(root)?)),
         _ => Err(AwError::Usage(format!("unknown tool '{tool}'"))),
     }
 }
@@ -760,6 +749,9 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
             out.push(("path", arg_str(args, "path").unwrap_or_default()));
             out.push(("limit", arg_usize(args, "limit", 10).to_string()));
         }
+        "stats" => {
+            out.push(("path", arg_str(args, "path").unwrap_or_default()));
+        }
         "implementers" => {
             out.push(("name", arg_str(args, "name").unwrap_or_default()));
             out.push(("limit", arg_usize(args, "limit", 50).to_string()));
@@ -831,16 +823,6 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
             ));
-        }
-        "usage" => {
-            if args
-                .get("verify")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-            {
-                out.push(("verify", "true".to_string()));
-                out.push(("limit", arg_usize(args, "limit", 50).to_string()));
-            }
         }
         _ => {}
     }

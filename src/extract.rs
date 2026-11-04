@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 7;
+pub const SCHEMA_VERSION: i32 = 8;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -238,6 +238,41 @@ pub struct NewSymbol {
     pub effective_loc: usize,
     /// Public-surface flag (Amendment 19); language rules in the spec.
     pub exported: bool,
+    /// Test-symbol flag (schema v8), classified once at extraction from path,
+    /// name shape, Rust `#[test]`/`#[cfg(test)]` context, and TS describe/it
+    /// scope. Consumers: `aw tests`, `aw dead --exclude-tests`, and the
+    /// build-time `test_symbol_count` meta counter.
+    pub is_test: bool,
+}
+
+/// Test classification (schema v8). One source of truth for every `is_test`
+/// writer; the set below covers every pattern the v7 dead-code predicate
+/// matched (`f.path LIKE 'tests/%' ... 'test\_%.py'`, `%.test.%`, `%.spec.%`,
+/// `%\_test.py`, `%\_test.dart`, plus `s.name` `test_*` / `test[A-Z]*`), so
+/// `is_test = 0` drops exactly the rows that predicate dropped. SQLite LIKE
+/// is ASCII case-insensitive and GLOB is case-sensitive; the helpers mirror
+/// that split.
+pub(crate) fn is_test_path(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    let file = lower.rsplit('/').next().unwrap_or(&lower);
+    let dir_part = &lower[..lower.len() - file.len()];
+    let dir_hit = dir_part
+        .split('/')
+        .any(|seg| matches!(seg, "tests" | "test" | "__tests__"));
+    let file_hit = (file.starts_with("test_") && file.ends_with(".py"))
+        || file.ends_with("_test.py")
+        || file.ends_with("_test.go")
+        || file.ends_with("_test.dart");
+    // The dotted shapes matched the whole v7 path (`%.test.%`, `%.spec.%`),
+    // so a directory such as `pkg.test/` is covered too.
+    let dotted_hit = lower.contains(".test.") || lower.contains(".spec.");
+    dir_hit || file_hit || dotted_hit
+}
+
+pub(crate) fn is_test_name(name: &str) -> bool {
+    // LIKE 'test\_%' is case-insensitive; GLOB 'test[A-Z]*' is not.
+    name.to_ascii_lowercase().starts_with("test_")
+        || (name.starts_with("test") && name.chars().nth(4).is_some_and(|c| c.is_ascii_uppercase()))
 }
 
 #[derive(Debug, Clone)]
@@ -382,6 +417,9 @@ pub struct FileExtraction {
     /// resolve against this, because stems may contain dots (x.test.ts).
     pub dir: String,
     pub is_package: bool,
+    /// Test-file classification (schema v8); every symbol of this file
+    /// inherits it (is_test_path).
+    pub is_test_file: bool,
     pub lang: Lang,
     pub symbols: Vec<NewSymbol>,
     /// contains edges (indices local to this file's symbols; offset on merge).
@@ -509,6 +547,7 @@ pub fn extract_file_with_code_lines(
         None
     };
     let mod_name = module.rsplit('.').next().unwrap_or(&module).to_string();
+    let is_test_file = is_test_path(rel);
     let dir = match rel.rfind('/') {
         Some(i) => rel[..i].replace('/', "."),
         None => String::new(),
@@ -519,6 +558,7 @@ pub fn extract_file_with_code_lines(
         crate_root,
         dir,
         is_package,
+        is_test_file,
         lang,
         symbols: vec![NewSymbol {
             kind: "module",
@@ -529,6 +569,7 @@ pub fn extract_file_with_code_lines(
             line_end: 1,
             signature: String::new(),
 
+            is_test: is_test_file,
             ..Default::default()
         }],
         edges: Vec::new(),

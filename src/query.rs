@@ -53,7 +53,7 @@ const IMPORTS_CAVEAT: &str =
     "aw: imports — resolved static imports only; external and unresolved imports are omitted";
 
 /// `aw tests` caveat (Amendment 19): static candidates only.
-const TESTS_CAVEAT: &str = "aw: test candidates — static resolved call edges only; Rust #[test] names outside test_*, TS describe/it callbacks, fixtures, and indirect tests may be missed";
+const TESTS_CAVEAT: &str = "aw: test candidates — static resolved call edges only; test classification covers test paths, test-shaped names, Rust #[test]/#[cfg(test)], and TS describe/it scope, but fixtures, generated tests, and indirect tests may still be missed";
 /// Forward search from every test is cheaper than a reverse graph walk when
 /// the test set is bounded; larger sets keep the reverse BFS.
 const FORWARD_TEST_LIMIT: usize = 20000;
@@ -92,7 +92,7 @@ fn has_test_candidates(conn: &Connection) -> Result<bool> {
         .query_row(
             "SELECT 1 FROM symbols
          WHERE kind IN ('function', 'method')
-           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')
+           AND is_test = 1
          LIMIT 1",
             [],
             |_| Ok(()),
@@ -107,13 +107,11 @@ fn total_test_symbols(conn: &Connection) -> Result<usize> {
             return Ok(n);
         }
     }
-    Ok(conn.query_row(
-        "SELECT COUNT(*) FROM symbols
-         WHERE kind IN ('function', 'method')
-           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')",
-        [],
-        |r| r.get::<_, i64>(0),
-    )? as usize)
+    Ok(
+        conn.query_row("SELECT COUNT(*) FROM symbols WHERE is_test = 1", [], |r| {
+            r.get::<_, i64>(0)
+        })? as usize,
+    )
 }
 
 fn is_callable_kind(kind: &str) -> bool {
@@ -248,7 +246,6 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<Candidate>
 
 /// Cap, then staleness-check the post-cap displayed set only (cost bounded by
 /// the displayed count): stat short-circuits, FNV-1a re-hash on mismatch.
-/// `name` is the query target recorded in the payload journal (Amendment 10).
 /// Render a search QueryOutput (header, hits, cap footer) as stdout lines.
 fn search_lines(out: QueryOutput) -> Result<Vec<String>> {
     // Every search exit path (exact, phrase, fuzzy) journals here, so an
@@ -291,7 +288,6 @@ fn derived_forms(tok: &str, out: &mut Vec<String>) {
 fn collect_output(
     conn: &Connection,
     root: &Path,
-    name: &str,
     rows: impl Iterator<Item = std::result::Result<Pointer, rusqlite::Error>>,
     limit: usize,
     empty_reason: &str,
@@ -332,38 +328,7 @@ fn collect_output(
         total,
         stale: changed > 0,
     };
-    record_payload_capture(conn, name, &out);
     Ok(out)
-}
-
-/// Payload journal capture (Amendment 10a): the rendered displayed set,
-/// byte-identical to stdout data lines, plus the index meta it came from.
-/// Best-effort like every journal write; runs before the dispatch site's
-/// `record_result`, which fills the same Pending fields consistently.
-fn record_payload_capture(conn: &Connection, name: &str, out: &QueryOutput) {
-    if out.pointers.is_empty() {
-        return;
-    }
-    let rendered: Vec<String> = out.pointers.iter().map(|p| p.render()).collect();
-    record_payload_meta(conn, name, &rendered, out.stale, out.shown, out.total);
-}
-
-/// Shared payload capture for renderers that hold rendered pointer strings
-/// rather than a `QueryOutput`. Keeps the empty-payload decision at the
-/// caller so Pending-field behavior stays unchanged.
-pub(crate) fn record_payload_meta(
-    conn: &Connection,
-    name: &str,
-    pointers: &[String],
-    stale: bool,
-    shown: usize,
-    total: usize,
-) {
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(name, pointers, stale, shown, total, built_at, &source_rev);
 }
 
 /// Render a QueryOutput exactly as the CLI prints it on stdout (header,
@@ -418,7 +383,10 @@ pub fn file_changed(conn: &Connection, root: &Path, rel: &str) -> bool {
         return true;
     };
     if mtime != stored_mtime {
-        let Ok(bytes) = std::fs::read(&abs) else {
+        // Same guard as the walk (regular file + hard 1 MiB cap): a FIFO,
+        // socket, or over-cap replacement must not block or blow up the
+        // re-hash. Any such oddity is conservatively treated as changed.
+        let Ok(bytes) = crate::walk::read_bounded(&abs) else {
             return true;
         };
         let hash = fnv1a64(&bytes) as i64;

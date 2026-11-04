@@ -88,6 +88,8 @@ pub fn db_new_path(root: &Path) -> PathBuf {
 /// Write the tool-owned `.aw/.gitignore` (`*`) on first build: the whole
 /// directory disappears from `git status` without touching the repo's own
 /// .gitignore (allowed write path per invariant 3's constant list).
+/// Fail-closed: a symlink, non-regular file (FIFO/device — rejected before
+/// any open), over-cap file, or wrong content is an error, never kept silent.
 pub fn ensure_aw_gitignore(root: &Path) -> Result<()> {
     let dir = ensure_aw_dir(root)?;
     let marker = dir.join(".gitignore");
@@ -96,7 +98,18 @@ pub fn ensure_aw_gitignore(root: &Path) -> Result<()> {
             "refusing symlinked .aw/.gitignore: {}",
             marker.display()
         ))),
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            // An existing marker must still be the tool's own: `read_bounded`
+            // rejects non-regular files before any open and caps the read.
+            let bytes = crate::walk::read_bounded(&marker)?;
+            if bytes != b"*\n" {
+                return Err(AwError::Internal(format!(
+                    "unexpected .aw/.gitignore content: {}",
+                    marker.display()
+                )));
+            }
+            Ok(())
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let mut file = fs::OpenOptions::new()
                 .write(true)
@@ -368,6 +381,7 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
         ("symbols", "effective_loc"),
         ("symbols", "exported"),
         ("symbols", "file_path"),
+        ("symbols", "is_test"),
         ("files", "generated"),
         ("unresolved_calls", "site_line"),
         ("unresolved_calls", "kind"),
@@ -591,7 +605,7 @@ pub fn gap_files_for_candidate_changes(
          FROM edges e
          JOIN symbols s ON s.id = e.src_id
          JOIN files f ON f.id = s.file_id
-         WHERE e.kind IN ('calls', 'imports', 'inherits')",
+         WHERE e.kind IN ('calls', 'imports', 'inherits', 'type_ref')",
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     for r in rows {
@@ -656,7 +670,7 @@ pub fn gap_files_for_new_names(
             "SELECT DISTINCT f.path, e.dst_name FROM edges e
              JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
              WHERE e.confidence = 'AMBIGUOUS'
-               AND e.kind IN ('calls', 'imports', 'inherits')",
+               AND e.kind IN ('calls', 'imports', 'inherits', 'type_ref')",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for r in rows {
@@ -800,8 +814,8 @@ pub fn carry_forward_unchanged(
         }
     }
     new.execute_batch(
-        "INSERT INTO symbols(id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
-         SELECT id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported
+        "INSERT INTO symbols(id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported, is_test)
+         SELECT id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported, is_test
          FROM olddb.symbols WHERE file_id IN (SELECT id FROM files);
          INSERT INTO edges(id, src_id, dst_id, dst_name, kind, confidence, site_line)
          SELECT id, src_id, dst_id, dst_name, kind, confidence, site_line
@@ -871,8 +885,8 @@ pub fn insert_symbols(
 ) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
     let mut stmt = conn.prepare(
-        "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, cyclomatic, branches, nesting, effective_loc, exported, is_test)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )?;
     for chunk in symbols.chunks(500) {
         for s in chunk {
@@ -889,7 +903,8 @@ pub fn insert_symbols(
                 s.branches as i64,
                 s.nesting as i64,
                 s.effective_loc as i64,
-                i64::from(s.exported)
+                i64::from(s.exported),
+                i64::from(s.is_test)
             ])?;
             ids.push(conn.last_insert_rowid());
         }
@@ -1017,7 +1032,7 @@ pub fn set_meta(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Read one meta-manifest value (payload journal records built_at/source_rev).
+/// Read one meta-manifest value (built_at, source_rev, counters).
 pub fn meta_get(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
         .ok()

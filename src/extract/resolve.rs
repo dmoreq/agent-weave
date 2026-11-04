@@ -626,6 +626,32 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                     .and_then(|v| v.first().copied())
                     .unwrap_or(fctx.module_sym_idx)
             };
+            // Type-only reference (Python): a typed receiver `x.m()` depends
+            // on the class of `x`, not just on the method the call resolves
+            // to. Emit a `type_ref` edge to that class regardless of the call
+            // outcome, so the incremental dirty closure re-extracts this file
+            // when the class's branch changes — otherwise a new MRO hit (a
+            // method added on an ancestor) stays hidden behind a carried edge.
+            if fctx.lang == Lang::Python {
+                if let Callee::Attr(parts) = &site.callee {
+                    if parts.len() >= 2 {
+                        if let Some(class_qn) =
+                            resolve_var_class(&t, fi, &parts[0], &site.scope_func, site.line)
+                        {
+                            if let Some(class_idx) = unique_class_index(&t, &class_qn) {
+                                t.edges.push(NewEdge {
+                                    src_idx,
+                                    dst_idx: Some(class_idx),
+                                    dst_name: class_qn,
+                                    kind: "type_ref",
+                                    confidence: "EXTRACTED",
+                                    site_line: site.line,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             match outcome {
                 Outcome::Extracted(dst) => {
                     // R6d A6: keep the edge to the class itself so
@@ -1387,6 +1413,19 @@ fn unique_class_exists(t: &Tables, qualname: &str) -> bool {
             .filter(|&&i| matches!(t.symbols[i].kind, "class" | "trait" | "interface"))
             .count()
             == 1
+    })
+}
+
+/// The single class/trait/interface index for a qualname, when exactly one
+/// exists. Mirrors `unique_class_exists` but returns the index for edge dst.
+fn unique_class_index(t: &Tables, qualname: &str) -> Option<usize> {
+    t.by_qualname.get(qualname).and_then(|v| {
+        let mut classes = v
+            .iter()
+            .copied()
+            .filter(|&i| matches!(t.symbols[i].kind, "class" | "trait" | "interface"));
+        let first = classes.next()?;
+        classes.next().is_none().then_some(first)
     })
 }
 

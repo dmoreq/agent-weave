@@ -123,7 +123,7 @@ fn tool_name(cmd: &cli::Cmd) -> &'static str {
         cli::Cmd::Files { .. } => "files",
         cli::Cmd::Search { .. } => "search",
         cli::Cmd::Clones { .. } => "clones",
-        cli::Cmd::Stats {} => "stats",
+        cli::Cmd::Stats { .. } => "stats",
         cli::Cmd::Hotspots { .. } => "hotspots",
         cli::Cmd::Report { .. } => "report",
         cli::Cmd::Doctor { .. } => "doctor",
@@ -248,7 +248,7 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             ("path", path.clone().unwrap_or_default()),
             ("limit", limit.to_string()),
         ],
-        cli::Cmd::Stats {} => vec![],
+        cli::Cmd::Stats { path } => vec![("path", path.clone().unwrap_or_default())],
         cli::Cmd::Hotspots { limit, path } => vec![
             ("limit", limit.to_string()),
             ("path", path.clone().unwrap_or_default()),
@@ -399,17 +399,10 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
-        cli::Cmd::Usage { verify, limit } => {
+        cli::Cmd::Usage {} => {
             let root = walk::discover_root(root_arg)?;
-            if verify {
-                let conn = db::open_for_query(&root)?;
-                for line in journal::verify(&root, &conn, limit)? {
-                    println!("{line}");
-                }
-            } else {
-                for line in journal::summary(&root)? {
-                    println!("{line}");
-                }
+            for line in journal::summary(&root)? {
+                println!("{line}");
             }
             Ok(())
         }
@@ -551,10 +544,10 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             }
             Ok(())
         }
-        cli::Cmd::Stats {} => {
+        cli::Cmd::Stats { path } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            println!("{}", insights::stats(&conn, &root)?);
+            println!("{}", insights::stats(&conn, &root, path.as_deref())?);
             journal::record_result(1, 1, 1, false, 0);
             Ok(())
         }

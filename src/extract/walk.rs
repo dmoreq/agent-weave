@@ -34,6 +34,9 @@ pub(super) struct WalkCtx {
     mod_stack: Vec<String>,   // inline `mod` qualnames (Rust)
     func_stack: Vec<String>,  // qualnames
     depth: usize,             // AST recursion depth (R6d Blocker 1 guard)
+    /// Test ancestry (schema v8): inside a Rust `#[test]`/`#[cfg(test)]` item
+    /// or a TS `describe(...)`/`it(...)` callback. Save/restore per scope.
+    test_scope: bool,
     /// Per-line byte bounds for the Python docstring adjustment, computed once
     /// per file instead of per callable.
     line_bounds: Vec<(usize, usize)>,
@@ -47,6 +50,7 @@ impl WalkCtx {
             mod_stack: Vec::new(),
             func_stack: Vec::new(),
             depth: 0,
+            test_scope: false,
             line_bounds: if lang == Lang::Python {
                 crate::parse::line_byte_bounds(src)
             } else {
@@ -344,6 +348,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 None => format!("{}.{}", fx.module, name),
             };
             let sym_idx = fx.symbols.len();
+            let item_is_test = fx.is_test_file
+                || ctx.test_scope
+                || crate::extract::is_test_name(&name)
+                || has_test_attr(node, src);
             fx.symbols.push(NewSymbol {
                 kind: "module",
                 name,
@@ -353,6 +361,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 line_start: node.start_position().row + 1,
                 line_end: node.end_position().row + 1,
 
+                is_test: item_is_test,
                 ..Default::default()
             });
             if let Some(pidx) = parent_symbol_idx(fx, ctx) {
@@ -367,7 +376,14 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             }
             ctx.mod_stack.push(qualname);
             if let Some(body) = node.child_by_field_name("body") {
+                // `#[cfg(test)] mod tests { ... }` (or any test-attributed
+                // item module): every symbol inside inherits the test flag.
+                let was_test_scope = ctx.test_scope;
+                if has_test_attr(node, src) {
+                    ctx.test_scope = true;
+                }
                 walk_children(body, src, fx, ctx);
+                ctx.test_scope = was_test_scope;
             }
             ctx.mod_stack.pop();
         }
@@ -383,6 +399,8 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 format!("{}.{}", ctx.class_stack.last().unwrap(), name)
             };
             let sym_idx = fx.symbols.len();
+            let item_is_test =
+                fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name);
             fx.symbols.push(NewSymbol {
                 kind: "module",
                 name,
@@ -392,6 +410,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 line_start: node.start_position().row + 1,
                 line_end: node.end_position().row + 1,
 
+                is_test: item_is_test,
                 ..Default::default()
             });
             if let Some(pidx) = parent_symbol_idx(fx, ctx) {
@@ -583,6 +602,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 branches: br,
                 nesting: nest,
                 effective_loc: loc,
+                is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
                 ..Default::default()
             });
             if let Some(params) = node.child_by_field_name("parameters") {
@@ -625,6 +645,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 line_start: start,
                 line_end: node.end_position().row + 1,
 
+                is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
                 ..Default::default()
             });
             if let Some(bases) = node.child_by_field_name("superclasses") {
@@ -669,6 +690,26 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
         }
         "call" | "call_expression" => {
             record_call(node, src, fx, ctx);
+            // TS/JS test frameworks: declarations inside describe/it callbacks
+            // are test-scoped (schema v8 is_test).
+            let ts_test_call = matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+                && matches!(
+                    node.child_by_field_name("function")
+                        .map(|f| text(f, src))
+                        .as_deref(),
+                    Some("describe" | "it")
+                );
+            if ts_test_call {
+                let was_test_scope = ctx.test_scope;
+                ctx.test_scope = true;
+                walk_children(node, src, fx, ctx);
+                ctx.test_scope = was_test_scope;
+            } else {
+                walk_children(node, src, fx, ctx);
+            }
+        }
+        "macro_invocation" if fx.lang == Lang::Rust => {
+            record_macro_calls(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
         }
         "import_statement" | "import_from_statement" => {
@@ -1144,6 +1185,166 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
     });
 }
 
+/// Rust `#[test]` / `#[cfg(test)]` on the item itself: attributes attach as
+/// preceding `attribute_item` siblings, so scan backwards past comments.
+fn has_test_attr(node: Node<'_>, src: &[u8]) -> bool {
+    let mut prev = node.prev_sibling();
+    while let Some(p) = prev {
+        match p.kind() {
+            "attribute_item" => {
+                let t = text(p, src);
+                if t.contains("#[test]") || t.contains("#[cfg(test)]") {
+                    return true;
+                }
+            }
+            "line_comment" | "block_comment" => {}
+            _ => return false,
+        }
+        prev = p.prev_sibling();
+    }
+    false
+}
+
+/// Assert-family macros parse as flat token trees, so calls inside them never
+/// surface as call_expression nodes (e.g. `assert_eq!(fnv1a64(b""), ...)`
+/// inside a `#[test]` fn). Scan the token text for `name(` and `a::b(` sites
+/// and record them through the regular call pipeline; the scan is bounded so
+/// a pathological token tree stays cheap (same spirit as MAX_AST_DEPTH).
+const MACRO_CALL_FAMILIES: &[&str] = &[
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+];
+const MAX_MACRO_TOKEN_TEXT: usize = 64 * 1024;
+const MAX_MACRO_CALLS_PER_SITE: usize = 128;
+
+fn record_macro_calls(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    let Some(mac) = node.child_by_field_name("macro") else {
+        return;
+    };
+    let macro_path = text(mac, src);
+    let macro_name = macro_path.rsplit("::").next().unwrap_or(&macro_path);
+    if !MACRO_CALL_FAMILIES.contains(&macro_name) {
+        return;
+    }
+    let mut cursor = node.walk();
+    let Some(tree) = node
+        .children(&mut cursor)
+        .find(|c| c.kind() == "token_tree")
+    else {
+        return;
+    };
+    let line = node.start_position().row + 1;
+    for callee in scan_macro_call_names(&text(tree, src)) {
+        let callee = if callee.contains("::") {
+            Callee::Attr(callee.split("::").map(str::to_string).collect())
+        } else {
+            Callee::Name(callee)
+        };
+        fx.calls.push(CallSite {
+            line,
+            scope_func: ctx.scope_func(),
+            scope_class: ctx.class_stack.last().cloned(),
+            scope_mod: ctx.mod_stack.last().cloned(),
+            callee,
+        });
+    }
+}
+
+/// Byte scanner over macro token text: captures identifier and `::`-path
+/// calls, skips string/char literals, and ignores method-call receivers
+/// (`x.f(`) whose receiver expression a text scan cannot reconstruct.
+fn scan_macro_call_names(raw: &str) -> Vec<String> {
+    let text = raw.get(..MAX_MACRO_TOKEN_TEXT).unwrap_or(raw);
+    let bytes = text.as_bytes();
+    let n = bytes.len();
+    let mut calls = Vec::new();
+    let mut i = 0;
+    // Last non-whitespace byte seen; `.`/`)` before an ident marks a method
+    // receiver or call result, not a plain path call.
+    let mut prev_nonspace = 0u8;
+    while i < n && calls.len() < MAX_MACRO_CALLS_PER_SITE {
+        match bytes[i] {
+            b'"' => i = skip_quoted(bytes, i, b'"'),
+            b'\'' => i = skip_char_or_lifetime(bytes, i),
+            b if is_ident_start(b) => {
+                let start = i;
+                while i < n && is_ident_char(bytes[i]) {
+                    i += 1;
+                }
+                let mut name = text[start..i].to_string();
+                // `a::b::c(` — walk the path to its final segment.
+                while i + 1 < n && bytes[i] == b':' && bytes[i + 1] == b':' {
+                    let seg = i + 2;
+                    let mut j = seg;
+                    while j < n && is_ident_char(bytes[j]) {
+                        j += 1;
+                    }
+                    if j == seg {
+                        break;
+                    }
+                    name.push_str("::");
+                    name.push_str(&text[seg..j]);
+                    i = j;
+                }
+                if i < n && bytes[i] == b'(' && prev_nonspace != b'.' && prev_nonspace != b')' {
+                    calls.push(name);
+                    prev_nonspace = b'(';
+                    i += 1;
+                }
+            }
+            _ => {
+                if !bytes[i].is_ascii_whitespace() {
+                    prev_nonspace = bytes[i];
+                }
+                i += 1;
+            }
+        }
+    }
+    calls
+}
+
+fn is_ident_start(b: u8) -> bool {
+    b == b'_' || b.is_ascii_alphabetic()
+}
+
+fn is_ident_char(b: u8) -> bool {
+    b == b'_' || b.is_ascii_alphanumeric()
+}
+
+fn skip_quoted(bytes: &[u8], start: usize, quote: u8) -> usize {
+    let mut i = start + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b if b == quote => return i + 1,
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+/// `'a'` char literal vs `'a` lifetime token: a char literal closes within a
+/// few bytes, a lifetime does not.
+fn skip_char_or_lifetime(bytes: &[u8], start: usize) -> usize {
+    let mut i = start + 1;
+    while i < bytes.len() && i - start <= 6 {
+        match bytes[i] {
+            b'\'' => return i + 1,
+            b'\\' => i += 2,
+            _ => i += 1,
+        }
+    }
+    // Lifetime: skip the quote plus the identifier that follows.
+    while i < bytes.len() && is_ident_char(bytes[i]) {
+        i += 1;
+    }
+    i
+}
+
 fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
     let line = node.start_position().row + 1;
     match node.kind() {
@@ -1528,6 +1729,10 @@ fn define_function(
         branches: br,
         nesting: nest,
         effective_loc: loc,
+        is_test: fx.is_test_file
+            || ctx.test_scope
+            || crate::extract::is_test_name(&name)
+            || (fx.lang == Lang::Rust && has_test_attr(node, src)),
         exported: matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
             && node
                 .parent()
@@ -1597,6 +1802,7 @@ fn define_class_ts(
         signature: signature_of(node, src),
         line_start: start,
         line_end: node.end_position().row + 1,
+        is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
         exported: matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
             && node
                 .parent()
@@ -1737,6 +1943,7 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
         branches: br,
         nesting: nest,
         effective_loc: loc,
+        is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
         ..Default::default()
     });
     if let Some(params) = node.child_by_field_name("parameters") {
@@ -1843,6 +2050,7 @@ fn record_ts_arrow_function(
         branches: br,
         nesting: nest,
         effective_loc: loc,
+        is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
         exported: ts_exported_ancestor(node),
     });
     // Module symbol contains it.

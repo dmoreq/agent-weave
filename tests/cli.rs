@@ -211,7 +211,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v7 — run aw build"),
+        stderr.contains("schema v99, binary expects v8 — run aw build"),
         "{stderr}"
     );
 }
@@ -404,6 +404,41 @@ fn impact_sites_empty_reason_keeps_edge_suffix() {
         stderr.contains("0 impacting files found (unresolved imports are omitted)"),
         "{stderr}"
     );
+}
+
+#[test]
+fn impact_default_empty_names_importers() {
+    // Default calls-only impact on a file with importers but no inbound calls
+    // must not be a bare zero: the detail names the importer count and the
+    // rerun hint, while the caveat header states the calls-only shape.
+    let repo = temp_repo("impact-importer");
+    write(&repo, "a.py", "def only():\n    return 1\n");
+    write(&repo, "b.py", "import a\n");
+    build(&repo);
+    let out = aw(&repo).args(["impact", "a.py"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("1 file(s) import and 0 file(s) inherit from this file"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("rerun with --edges imports,inherits"),
+        "{stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.starts_with("aw: impact — resolved static call edges only"),
+        "{stdout}"
+    );
+    // The named relationship is real: --edges imports finds the importer.
+    let out = aw(&repo)
+        .args(["impact", "a.py", "--edges", "imports"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("b.py"), "{stdout}");
 }
 
 #[test]
@@ -2013,11 +2048,6 @@ fn search_exact_first_merge_and_union_count_characterization() {
         String::from_utf8_lossy(&capped.stdout).contains("showing 1 of 3"),
         "union count changed: {capped:?}"
     );
-    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
-    assert!(
-        payload.contains("\"shown\":1") && payload.contains("\"total\":3"),
-        "payload shown/total changed: {payload}"
-    );
 }
 
 #[test]
@@ -2250,98 +2280,129 @@ fn journal_opt_out_via_env_and_flag() {
     assert!(stderr.contains("no journal entries"), "{stderr}");
 }
 
-/// Parse the `pointers` array of one hand-serialized payload line (Amendment 10).
-fn payload_pointers(line: &str) -> Vec<String> {
-    let marker = "\"pointers\":[";
-    let start = line.find(marker).expect("payload line carries pointers") + marker.len();
-    let end = start + line[start..].find("]}").expect("pointers array terminator");
-    let inner = &line[start..end];
-    if inner.is_empty() {
-        return Vec::new();
-    }
-    inner
-        .split("\",\"")
-        .map(|s| s.trim_matches('"').to_string())
-        .collect()
+#[test]
+fn usage_journal_creates_gitignore_marker() {
+    // The journal self-creates `.aw` on the first write; the tool-owned
+    // gitignore marker must exist so the directory never leaks into git status.
+    let repo = temp_repo("journal-gitignore");
+    write(&repo, "a.py", "def f(): pass\n");
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    };
+    // Baseline commit: `git status --porcelain` must be empty before the
+    // journal writes anything, so only `.aw` leakage could dirty it.
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "commit",
+        "-qm",
+        "init",
+    ]);
+
+    // `callers` fails with no index (exit 1) but still journals.
+    let out = aw(&repo).args(["callers", "f"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(repo.join(".aw/usage.log").exists(), "journal file written");
+    let marker = fs::read_to_string(repo.join(".aw/.gitignore")).unwrap();
+    assert_eq!(marker, "*\n", "tool-owned gitignore marker");
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&status.stdout).trim().is_empty(),
+        ".aw must be invisible to git: {:?}",
+        String::from_utf8_lossy(&status.stdout)
+    );
 }
 
+#[cfg(unix)]
 #[test]
-fn payload_log_written_for_pointer_tools_only() {
-    // Amendment 10a: callers/dead/symbols append self-contained payload lines;
-    // build/stats write none; pointers are byte-identical to stdout data lines.
-    let repo = fixture("payload");
-    build(&repo);
+fn fifo_gitignore_marker_fails_closed_without_hanging() {
+    // A FIFO at .aw/.gitignore is fail-closed: rejected before any open (no
+    // hang), left in place, and never written through.
+    use std::os::unix::fs::FileTypeExt;
+    let repo = temp_repo("fifo-gitignore");
+    write(&repo, "a.py", "def f(): pass\n");
+    fs::create_dir_all(repo.join(".aw")).unwrap();
     assert!(
-        !repo.join(".aw/usage-results.jsonl").exists(),
-        "build writes no payload line"
+        Command::new("mkfifo")
+            .arg(repo.join(".aw/.gitignore"))
+            .status()
+            .unwrap()
+            .success(),
+        "mkfifo failed"
     );
 
-    let out = aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    let data_lines: Vec<String> = stdout
-        .lines()
-        .filter(|l| !l.starts_with("aw: "))
-        .map(String::from)
-        .collect();
-    assert!(!data_lines.is_empty());
-
-    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
-    let mut lines = payload.lines();
-    let line = lines.next().unwrap();
-    assert!(line.contains("\"tool\":\"callers\""), "{line}");
-    assert!(line.contains("\"name\":\"normalize\""), "{line}");
-    assert!(line.contains("\"surface\":\"cli\""), "{line}");
-    assert!(line.contains("\"stale\":false"), "{line}");
-    assert!(line.contains("\"built_at\":"), "{line}");
-    assert!(line.contains("\"source_rev\":\""), "{line}");
-    assert_eq!(payload_pointers(line), data_lines, "byte-equal pointers");
-
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["dead"])
-        .output()
-        .unwrap();
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["symbols", "utils.py"])
-        .output()
-        .unwrap();
-    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_aw"));
+    cmd.arg("--root").arg(&repo).arg("build");
+    let out = output_with_timeout(cmd, 20).expect("build must not hang on a FIFO .aw/.gitignore");
     assert_eq!(
-        payload.lines().count(),
-        3,
-        "one payload line per pointer call"
+        out.status.code(),
+        Some(6),
+        "FIFO marker must fail closed: {out:?}"
     );
-    assert!(payload.contains("\"tool\":\"dead\""), "{payload}");
-    assert!(payload.contains("\"tool\":\"symbols\""), "{payload}");
+    let meta = fs::symlink_metadata(repo.join(".aw/.gitignore")).unwrap();
     assert!(
-        payload.contains("\"pointers\":[\"utils.py:1 module utils"),
-        "symbols data lines, no header/cap: {payload}"
+        meta.file_type().is_fifo(),
+        "marker must be left untouched, not replaced"
     );
+}
 
-    // Non-pointer tools journal to usage.log but add no payload line.
-    let before = payload.lines().count();
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["stats"])
-        .output()
-        .unwrap();
-    let after = fs::read_to_string(repo.join(".aw/usage-results.jsonl"))
-        .unwrap()
-        .lines()
-        .count();
-    assert_eq!(before, after, "stats writes no payload line");
+#[cfg(unix)]
+#[test]
+fn fifo_indexed_file_does_not_hang_doctor() {
+    // A FIFO replacing an indexed file must not block the staleness re-hash:
+    // file_changed reads through the same bounded guard as the walk
+    // (regular-file check + 1 MiB cap) and treats the oddity as changed. The
+    // indexed file is empty so its stored size matches the FIFO's stat size
+    // and the probe reaches the read path instead of short-circuiting on
+    // size.
+    use std::os::unix::fs::FileTypeExt;
+    let repo = temp_repo("fifo-doctor");
+    write(&repo, "empty.py", "");
+    build(&repo);
+    let fifo = repo.join("empty.py");
+    fs::remove_file(&fifo).unwrap();
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success(),
+        "mkfifo failed"
+    );
+    let meta = fs::symlink_metadata(&fifo).unwrap();
+    assert!(meta.file_type().is_fifo(), "fixture must be a FIFO");
+
+    let mut cmd = aw(&repo);
+    cmd.args(["doctor"]);
+    let out = output_with_timeout(cmd, 10)
+        .expect("doctor must not hang on an indexed file replaced by a FIFO");
+    assert_eq!(out.status.code(), Some(0), "doctor must succeed: {out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("stale ratio: 100.0%"),
+        "the FIFO must count as changed (1 of 1 files): {stdout}"
+    );
 }
 
 #[test]
-fn session_and_arm_tags_recorded_in_both_logs() {
-    // Amendment 10b: AW_SESSION/AW_ARM land in usage.log AND payload lines.
-    let repo = fixture("payload-tags");
+fn session_and_arm_tags_recorded_in_usage_log() {
+    // AW_SESSION/AW_ARM tags, sanitized, land in the usage log.
+    let repo = fixture("session-tags");
     build(&repo);
     aw(&repo)
         .env_remove("AW_NO_JOURNAL")
@@ -2353,236 +2414,6 @@ fn session_and_arm_tags_recorded_in_both_logs() {
     let usage = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
     assert!(usage.contains("\"session\":\"r1-task-1\""), "{usage}");
     assert!(usage.contains("\"arm\":\"aw\""), "{usage}");
-    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
-    assert!(payload.contains("\"session\":\"r1-task-1\""), "{payload}");
-    assert!(payload.contains("\"arm\":\"aw\""), "{payload}");
-}
-
-#[test]
-fn payload_opt_out_and_empty_or_ambiguous_writes_none() {
-    // Opt-out suppresses both journal files.
-    let repo = fixture("payload-optout");
-    aw(&repo)
-        .env("AW_NO_JOURNAL", "1")
-        .args(["build"])
-        .output()
-        .unwrap();
-    aw(&repo)
-        .env("AW_NO_JOURNAL", "1")
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    assert!(!repo.join(".aw/usage.log").exists());
-    assert!(!repo.join(".aw/usage-results.jsonl").exists());
-
-    // Empty result: journaled with exit 1, no payload line.
-    let repo = fixture("payload-empty");
-    build(&repo);
-    let out = aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["callers", "ghost"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(
-        !repo.join(".aw/usage-results.jsonl").exists(),
-        "empty result writes no payload"
-    );
-
-    // Ambiguous name: exit 2 with candidates on stdout, no payload line.
-    let repo = temp_repo("payload-ambig");
-    write(&repo, "a.py", "def dup():\n    return 1\n");
-    write(&repo, "b.py", "def dup():\n    return 2\n");
-    build(&repo);
-    let out = aw(&repo).args(["callers", "dup"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(2));
-    assert!(
-        !repo.join(".aw/usage-results.jsonl").exists(),
-        "ambiguous result writes no payload"
-    );
-}
-
-#[test]
-fn usage_verify_reports_ok_changed_fail() {
-    // Amendment 10c: fresh queries verify OK; an edit-after-build turns that
-    // file's pointers CHANGED (unverifiable, not wrong); a corrupt pointer
-    // (line beyond bounds) FAILs; the report is informational (exit 0).
-    let repo = fixture("verify");
-    build(&repo);
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["dead"])
-        .output()
-        .unwrap();
-
-    let out = aw(&repo).args(["usage", "--verify"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        stdout.contains("aw usage --verify: 5 pointers sampled from 2 entries"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("changed=0 fail=0"),
-        "all OK on a fresh build: {stdout}"
-    );
-
-    // Edit app.py (dead pointers include app.py:4; callers include app.py:6):
-    // the index still holds the old hash -> those pointers are CHANGED.
-    write(
-        &repo,
-        "app.py",
-        "from utils import normalize\n\ndef run():\n    return normalize('z')\n",
-    );
-    let out = aw(&repo).args(["usage", "--verify"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        stdout.contains("changed=2"),
-        "app.py pointers unverifiable: {stdout}"
-    );
-    assert!(stdout.contains("fail=0"), "changed is not fail: {stdout}");
-
-    // Corrupt one pointer beyond bounds -> FAIL, still exit 0.
-    let ppath = repo.join(".aw/usage-results.jsonl");
-    let payload = fs::read_to_string(&ppath)
-        .unwrap()
-        .replace("utils.py:5", "utils.py:9999");
-    fs::write(&ppath, payload).unwrap();
-    let out = aw(&repo).args(["usage", "--verify"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "report-only");
-    assert!(stdout.contains("fail=1"), "{stdout}");
-    assert!(
-        stdout.contains("FAIL utils.py:9999") && stdout.contains("(line beyond"),
-        "{stdout}"
-    );
-}
-
-#[test]
-fn usage_verify_stride_sample_and_empty_payload() {
-    // >limit entries sample exactly `limit` entries, deterministically.
-    let repo = fixture("verify-stride");
-    build(&repo);
-    for _ in 0..60 {
-        aw(&repo)
-            .env_remove("AW_NO_JOURNAL")
-            .args(["callers", "normalize"])
-            .output()
-            .unwrap();
-    }
-    let out = aw(&repo)
-        .args(["usage", "--verify", "--limit", "10"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    // 10 entries x 2 pointers each.
-    assert!(
-        stdout.contains("20 pointers sampled from 60 entries"),
-        "{stdout}"
-    );
-
-    // No payload at all: exit 1 with a reason.
-    let repo = fixture("verify-empty");
-    build(&repo);
-    let out = aw(&repo).args(["usage", "--verify"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("no payload entries"), "{stderr}");
-
-    // --limit 0 is a usage error (exit 2).
-    let repo = fixture("verify-limit0");
-    build(&repo);
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    let out = aw(&repo)
-        .args(["usage", "--verify", "--limit", "0"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
-fn usage_verify_epoch_rebuild_is_changed_not_fail() {
-    // A payload entry recorded against a superseded index (edit + rebuild
-    // between query and verify) cannot prove a pointer wrong: the untouched
-    // file's pointer still verifies OK, the edited file's is CHANGED, and no
-    // pointer becomes FAIL.
-    let repo = fixture("verify-epoch");
-    build(&repo);
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    write(
-        &repo,
-        "app.py",
-        "from utils import normalize\n\ndef run():\n    return normalize('z')\n",
-    );
-    build(&repo);
-    let out = aw(&repo).args(["usage", "--verify"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        stdout.contains("ok=1 changed=1 fail=0"),
-        "old-epoch pointers: {stdout}"
-    );
-    assert!(
-        !stdout.contains("FAIL"),
-        "no structural failures across epochs: {stdout}"
-    );
-}
-
-#[test]
-fn usage_summary_payload_section_and_doctor_health() {
-    // Amendment 10: usage summary carries the demand map over the payload log;
-    // doctor reports payload-journal volume (or its absence).
-    let repo = fixture("usage-payload");
-    build(&repo);
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    let out = aw(&repo).args(["usage"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        stdout.contains("payload: 1 entries, 2 pointers"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("normalize: 1 calls"), "{stdout}");
-
-    let out = aw(&repo).args(["doctor"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("payload journal: 1 lines, "), "{stdout}");
-
-    // No pointer queries yet -> absent line, and no payload section in usage.
-    let repo = fixture("usage-payload-absent");
-    build(&repo);
-    let out = aw(&repo).args(["usage"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        !stdout.contains("payload:"),
-        "no section without payload: {stdout}"
-    );
-    let out = aw(&repo).args(["doctor"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("payload journal: absent"),
-        "doctor states absence: {stdout}"
-    );
 }
 
 #[test]
@@ -2721,6 +2552,101 @@ fn p15_stats_hotspots_report() {
 }
 
 #[test]
+fn stats_path_scopes_counts() {
+    // `--path` scopes every counter; the global line keeps its byte shape
+    // (no `scope=` segment), and a scope with no indexed files is a
+    // no-results, not an empty success line.
+    let repo = temp_repo("stats-scope");
+    write(
+        &repo,
+        "a.py",
+        "def a1():\n    return a2()\n\ndef a2():\n    return 1\n",
+    );
+    write(
+        &repo,
+        "sub/c.py",
+        "def c1():\n    return c2()\n\ndef c2():\n    return 1\n",
+    );
+    write(&repo, "sub/e.py", "def e1():\n    return 1\n");
+    build(&repo);
+
+    let out = aw(&repo).args(["stats"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let global = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        global.starts_with("aw stats: files=3 generated=0 symbols=8 edges="),
+        "global stats: {global}"
+    );
+    assert!(
+        !global.contains("scope="),
+        "global stats must not carry a scope: {global}"
+    );
+
+    let out = aw(&repo).args(["stats", "--path", "sub"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let scoped = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        scoped.starts_with("aw stats: scope=sub files=2 generated=0 symbols=5 edges="),
+        "scoped stats: {scoped}"
+    );
+    assert!(
+        scoped.contains(" parse_errors=0 unresolved=0 "),
+        "scoped stats: {scoped}"
+    );
+
+    // Trailing-slash and ./-prefixed spellings normalize to the same scope.
+    let out = aw(&repo)
+        .args(["stats", "--path", "./sub/"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        scoped,
+        "./sub/ must normalize to sub"
+    );
+
+    // Scoped totals shrink with the scope on this fixture. Edge-kind totals
+    // are not pinned: new kinds extend both lines.
+    let field = |line: &str, key: &str| -> i64 {
+        let start = line.find(&format!("{key}=")).unwrap() + key.len() + 1;
+        line[start..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap()
+    };
+    assert!(
+        field(&scoped, "calls") < field(&global, "calls"),
+        "{scoped} vs {global}"
+    );
+    assert!(
+        field(&scoped, "edges") < field(&global, "edges"),
+        "{scoped} vs {global}"
+    );
+
+    let out = aw(&repo)
+        .args(["stats", "--path", "nope"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "aw: no-results: no indexed files in 'nope'\n"
+    );
+
+    let out = aw(&repo).args(["stats", "--path", "."]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("invalid scope '.'"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn partial_complexity_index_rebuilds_fresh() {
     // Amendment 19/20: an index missing a required index must disable the
     // fast path and rebuild, not fail carry-forward.
@@ -2781,10 +2707,10 @@ fn partial_v7_file_path_column_rebuilds_fresh() {
 }
 
 #[test]
-fn v6_database_rebuilds_to_v7() {
-    // Amendment 20: a v6 user_version disables the fast path; build rewrites
-    // the index at v7 instead of carrying v6 rows.
-    let repo = fixture("v6-to-v7");
+fn v6_database_rebuilds_to_v8() {
+    // A v6 user_version disables the fast path; build rewrites the index at
+    // the current schema version instead of carrying v6 rows.
+    let repo = fixture("v6-to-v8");
     build(&repo);
     let idx = repo.join(".aw/index.db");
     let status = std::process::Command::new("sqlite3")
@@ -2796,7 +2722,7 @@ fn v6_database_rebuilds_to_v7() {
     assert_eq!(out.status.code(), Some(5), "v6 query open must exit 5");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v6, binary expects v7 — run aw build"),
+        stderr.contains("schema v6, binary expects v8 — run aw build"),
         "{stderr}"
     );
     let (code, stdout, stderr) = build(&repo);
@@ -2807,8 +2733,8 @@ fn v6_database_rebuilds_to_v7() {
         .unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
-        "7",
-        "build did not stamp v7"
+        "8",
+        "build did not stamp v8"
     );
 }
 
@@ -3166,10 +3092,10 @@ fn clones_pair_generation_is_bounded() {
     build(&repo);
     let out = aw(&repo).args(["clones", "--limit", "5"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stderr.contains("lower bound"),
-        "cap note expected when regions exceed MAX_REGIONS_PER_GROUP: {stderr}"
+        stdout.contains("lower bound"),
+        "cap note expected on stdout when regions exceed MAX_REGIONS_PER_GROUP: {stdout}"
     );
 }
 
@@ -3449,13 +3375,6 @@ c.py:4 c.top\n\
 callees (showing 1 of 1):\n\
 a.py:1 a.target\n";
     assert_eq!(stdout, expected, "exact bytes");
-    // G11: payload pointers are byte-identical to the stdout data lines.
-    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
-    let last = payload.lines().last().unwrap();
-    assert_eq!(
-        payload_pointers(last),
-        vec!["c.py:4 c.top".to_string(), "a.py:1 a.target".to_string()]
-    );
 
     // Cap per section: two callers, --limit 1.
     write(
@@ -4691,35 +4610,6 @@ fn build_force_bypasses_parse_gate_and_help_says_so() {
 }
 
 #[test]
-fn usage_verify_transitive_callers_has_no_false_fail() {
-    let repo = temp_repo("transitive-verify");
-    write(&repo, "a.py", "def leaf(): pass\n");
-    write(
-        &repo,
-        "b.py",
-        "from a import leaf as l\n\ndef middle():\n    return l()\n",
-    );
-    write(
-        &repo,
-        "c.py",
-        "import b\n\ndef origin():\n    return b.middle()\n",
-    );
-    build(&repo);
-    let out = aw(&repo)
-        .args(["callers", "leaf", "--depth", "2"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-    let verify = aw(&repo)
-        .args(["usage", "--verify", "--limit", "100"])
-        .output()
-        .unwrap();
-    assert_eq!(verify.status.code(), Some(0), "{verify:?}");
-    let text = String::from_utf8_lossy(&verify.stdout);
-    assert!(text.contains("fail=0"), "{text}");
-}
-
-#[test]
 fn transitive_callers_use_shortest_depth_per_symbol() {
     let repo = temp_repo("callers-closure");
     write(
@@ -4863,30 +4753,6 @@ fn nested_function_inside_arrow_uses_arrow_binding() {
     assert!(
         !text.contains("sample.js:4"),
         "nested function escaped the arrow binding: {text}"
-    );
-}
-
-#[test]
-fn usage_verify_depth_one_still_checks_name() {
-    let repo = temp_repo("verify-depth-one");
-    write(&repo, "a.py", "def leaf(): pass\n");
-    write(&repo, "b.py", "import a\n");
-    build(&repo);
-    let payload = repo.join(".aw/usage-results.jsonl");
-    fs::write(
-        &payload,
-        "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"name\":\"leaf\",\"session\":\"\",\"arm\":\"\",\"built_at\":0,\"source_rev\":\"x\",\"stale\":false,\"shown\":1,\"total\":1,\"pointers\":[\"b.py:1 [depth=1]\"]}\n",
-    )
-    .unwrap();
-    let out = aw(&repo)
-        .args(["usage", "--verify", "--limit", "100"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        text.contains("fail=1"),
-        "depth-1 name check skipped: {text}"
     );
 }
 
@@ -5060,6 +4926,77 @@ fn incremental_and_fresh_edge_sets_match_after_removed_inheritance() {
     let text = String::from_utf8_lossy(&callers.stdout);
     assert!(text.contains("sample.keep"), "{text}");
     assert!(!text.contains("sample.invoke"), "{text}");
+}
+
+#[test]
+fn incremental_and_force_agree_on_typed_receiver() {
+    // arch-5: a typed receiver call `x.foo()` with `x: b.B` resolves through
+    // the MRO. Adding `Mid.foo` moves the answer from `a.A.foo` to
+    // `mid.Mid.foo`; the fast path must re-extract caller.py (its type_ref
+    // edge into b.py pulls b.py's change into the dirty closure) and agree
+    // with `build --force`. No edge-count hardcoding: the type_ref kind adds
+    // one edge per typed call site.
+    let repo = temp_repo("typed-receiver");
+    write(
+        &repo,
+        "a.py",
+        "class A:\n    def foo(self):\n        return 1\n",
+    );
+    write(
+        &repo,
+        "mid.py",
+        "from a import A\n\nclass Mid(A):\n    pass\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "from mid import Mid\n\nclass B(Mid):\n    pass\n",
+    );
+    write(
+        &repo,
+        "caller.py",
+        "from __future__ import annotations\n\ndef go(x: b.B):\n    return x.foo()\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["callees", "go"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("a.A.foo"),
+        "MRO hit before Mid.foo exists: {out:?}"
+    );
+
+    // Add Mid.foo: the MRO answer changes mid.py -> b.py (inherits) ->
+    // caller.py (type_ref) must all re-extract.
+    write(
+        &repo,
+        "mid.py",
+        "from a import A\n\nclass Mid(A):\n    def foo(self):\n        return 2\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let incremental = aw(&repo).args(["callees", "go"]).output().unwrap();
+    assert_eq!(incremental.status.code(), Some(0), "{incremental:?}");
+    let inc_stdout = String::from_utf8_lossy(&incremental.stdout);
+    assert!(
+        inc_stdout.contains("mid.py:4") && inc_stdout.contains("mid.Mid.foo"),
+        "incremental must heal the MRO answer: {inc_stdout}"
+    );
+    assert!(
+        !inc_stdout.contains("a.A.foo"),
+        "stale a.A.foo must be gone: {inc_stdout}"
+    );
+
+    let incremental_db = repo.join("incremental.db");
+    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
+    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(force.status.code(), Some(0), "{force:?}");
+    let fresh = aw(&repo).args(["callees", "go"]).output().unwrap();
+    assert_eq!(fresh.status.code(), Some(0), "{fresh:?}");
+    let fresh_stdout = String::from_utf8_lossy(&fresh.stdout);
+    assert!(
+        fresh_stdout.contains("mid.py:4") && fresh_stdout.contains("mid.Mid.foo"),
+        "fresh build answer: {fresh_stdout}"
+    );
 }
 
 #[test]

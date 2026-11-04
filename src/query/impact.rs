@@ -72,6 +72,27 @@ fn impact_empty_detail(kinds: &[&str]) -> String {
     .to_string()
 }
 
+/// Empty default (calls-only) detail: name the import/inherit files the
+/// calls-only default skipped, so a file that only has importers points the
+/// user at `--edges imports,inherits` instead of a bare zero.
+fn importer_caveat_detail(conn: &Connection, rel: &str) -> Result<String> {
+    let count_files = |kind: &str| -> Result<usize> {
+        Ok(conn.query_row(
+            "SELECT COUNT(DISTINCT sf.path) FROM edges e
+                 JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
+                 JOIN symbols ss ON ss.id = e.src_id JOIN files sf ON sf.id = ss.file_id
+                 WHERE df.path = ?1 AND e.kind = ?2",
+            rusqlite::params![rel, kind],
+            |r| r.get::<_, i64>(0),
+        )? as usize)
+    };
+    let imports = count_files("imports")?;
+    let inherits = count_files("inherits")?;
+    Ok(format!(
+        "0 impacting files found (calls only); {imports} file(s) import and {inherits} file(s) inherit from this file — rerun with --edges imports,inherits"
+    ))
+}
+
 #[allow(clippy::too_many_arguments)] // CLI surface; a params struct adds no value here.
 pub fn impact(
     conn: &Connection,
@@ -186,7 +207,12 @@ fn impact_direct_grouped(
                 detail: impact_empty_detail(ctx.kinds),
             });
         }
-        return Err(AwError::NoResults("0 impacting files found".to_string()));
+        // Default calls-only mode: a file with importers but no inbound calls
+        // is not a bare zero — name the skipped relationships.
+        return Err(AwError::NoResultsCaveated {
+            caveat: IMPACT_CALLS_CAVEAT,
+            detail: importer_caveat_detail(conn, ctx.rel)?,
+        });
     }
     let mut stmt = conn.prepare(&format!(
         "SELECT sf.path, MIN(e.site_line) AS line,
@@ -209,7 +235,6 @@ fn impact_direct_grouped(
     let out = collect_output(
         conn,
         root,
-        ctx.rel,
         rows,
         ctx.limit,
         "0 impacting files found",
@@ -273,7 +298,6 @@ fn impact_direct_sites(conn: &Connection, root: &Path, ctx: &ImpactCtx<'_>) -> R
     let out = collect_output(
         conn,
         root,
-        ctx.rel,
         rows,
         ctx.limit,
         "0 impacting files found",
@@ -337,7 +361,6 @@ fn impact_deep(conn: &Connection, root: &Path, ctx: &ImpactCtx<'_>) -> Result<Qu
     let mut out = collect_output(
         conn,
         root,
-        ctx.rel,
         pointers.into_iter().map(Ok),
         ctx.limit,
         "0 impacting files found",

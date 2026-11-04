@@ -221,7 +221,11 @@ pub enum Cmd {
         limit: usize,
     },
     /// Index totals: files, symbols, edges, parse errors, sizes
-    Stats {},
+    Stats {
+        /// Restrict counts to a repo-relative file or directory prefix
+        #[arg(long)]
+        path: Option<String>,
+    },
     /// Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density
     Hotspots {
         /// How many files to show (default 10, max 100)
@@ -245,15 +249,7 @@ pub enum Cmd {
         invalidate: bool,
     },
     /// Summarize the usage journal: calls, errors, latency, empty/stale rates.
-    /// --verify replays sampled payload pointers against current source.
-    Usage {
-        /// Replay-verify sampled payload pointers
-        #[arg(long)]
-        verify: bool,
-        /// Verify sample size (deterministic even stride over payload entries)
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-    },
+    Usage {},
     /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0)
     Mcp {
         /// Expose every tool instead of the core navigation set

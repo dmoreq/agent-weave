@@ -1,6 +1,6 @@
 [package]
 name = "agent-weave"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Local code knowledge index: who calls this, what does this call, what is impacted by this file."
 license = "MIT OR Apache-2.0"

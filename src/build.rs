@@ -473,9 +473,8 @@ pub fn run_build(
     crate::db::set_meta(
         &conn,
         "built_at",
-        // Millisecond precision: the payload journal (Amendment 10c) compares
-        // built_at epochs to tell superseded payload entries apart — sub-second
-        // builds must not collide on the same epoch value.
+        // Millisecond precision keeps consecutive sub-second rebuilds from
+        // colliding on the same epoch value.
         &std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis().to_string())
@@ -572,13 +571,10 @@ pub fn run_build(
         "callable_symbol_count",
         &callable_symbols.to_string(),
     )?;
-    let test_symbols: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM symbols
-         WHERE kind IN ('function', 'method')
-           AND (name GLOB 'test_*' OR name GLOB 'test[A-Z]*')",
-        [],
-        |r| r.get(0),
-    )?;
+    let test_symbols: i64 =
+        conn.query_row("SELECT COUNT(*) FROM symbols WHERE is_test = 1", [], |r| {
+            r.get(0)
+        })?;
     crate::db::set_meta(&conn, "test_symbol_count", &test_symbols.to_string())?;
     crate::db::set_meta(&conn, "unresolved_callee_count", &unres_total.to_string())?;
     conn.execute_batch("COMMIT")?;

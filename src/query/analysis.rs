@@ -26,17 +26,18 @@ pub fn dead(
        ),
        referenced_ids(id) AS MATERIALIZED (
            SELECT dst_id FROM edges
-            WHERE kind IN ('calls', 'imports', 'inherits') AND dst_id IS NOT NULL
+            WHERE kind IN ('calls', 'imports', 'inherits', 'type_ref')
+              AND dst_id IS NOT NULL
            UNION
            SELECT s2.id FROM edges e
              JOIN symbols s2 ON s2.qualname = e.dst_name
-            WHERE e.kind IN ('calls', 'imports', 'inherits')
+            WHERE e.kind IN ('calls', 'imports', 'inherits', 'type_ref')
               AND e.confidence = 'AMBIGUOUS'
            UNION
            SELECT s2.id FROM edges e
              JOIN symbols src ON src.id = e.src_id
              JOIN symbols s2 ON s2.name = e.dst_name AND s2.file_id = src.file_id
-            WHERE e.kind IN ('calls', 'imports', 'inherits')
+            WHERE e.kind IN ('calls', 'imports', 'inherits', 'type_ref')
               AND e.confidence = 'AMBIGUOUS'
        )";
     let mut predicate = "s.kind IN ('function', 'method', 'class', 'trait', 'interface')
@@ -48,19 +49,10 @@ pub fn dead(
            )"
     .to_string();
     if exclude_tests {
-        predicate.push_str(
-            " AND f.path NOT LIKE 'tests/%' AND f.path NOT LIKE '%/tests/%'
-              AND f.path NOT LIKE 'test/%' AND f.path NOT LIKE '%/test/%'
-              AND f.path NOT LIKE '__tests__/%' AND f.path NOT LIKE '%/__tests__/%'
-              AND f.path NOT LIKE 'test\\_%.py' ESCAPE '\\'
-              AND f.path NOT LIKE '%/test\\_%.py' ESCAPE '\\'
-              AND f.path NOT LIKE '%\\_test.py' ESCAPE '\\'
-              AND f.path NOT LIKE '%.test.%'
-              AND f.path NOT LIKE '%.spec.%'
-              AND f.path NOT LIKE '%\\_test.dart' ESCAPE '\\'
-              AND s.name NOT LIKE 'test\\_%' ESCAPE '\\'
-              AND s.name NOT GLOB 'test[A-Z]*'",
-        );
+        // Schema v8: `symbols.is_test` classifies once at extraction (test
+        // paths, test-shaped names/files, Rust test attributes, TS describe
+        // scope), so one column check replaces the v7 LIKE/GLOB list.
+        predicate.push_str(" AND s.is_test = 0");
     }
     let mut params: Vec<String> = Vec::new();
     if let Some(path) = path {
@@ -105,7 +97,6 @@ pub fn dead(
     let mut out = collect_output(
         conn,
         root,
-        "",
         rows,
         limit,
         "0 dead-code candidates found",
@@ -229,14 +220,6 @@ pub fn complexity(
         out.push(format!("showing {shown} of {total}"));
         eprintln!("[aw] capped at {shown} results ({total} total)");
     }
-    super::record_payload_meta(
-        conn,
-        path.unwrap_or("complexity"),
-        &data_lines,
-        stale,
-        shown,
-        total as usize,
-    );
     crate::journal::record_result(total as usize, shown, total as usize, stale, 0);
     Ok(out)
 }
@@ -605,9 +588,6 @@ pub fn symbols(
             text
         })
         .collect();
-    // Payload capture (Amendment 10a): the `path:line kind qualname` data
-    // lines only — never the staleness header or the cap footer.
-    super::record_payload_meta(conn, &rel, &data_lines, stale, shown, n_symbols);
     crate::journal::record_result(n_symbols, shown, n_symbols, stale, 0);
     let mut out = Vec::new();
     if stale {
@@ -708,7 +688,6 @@ fn symbols_directory(
     out.push(format!(
         "aw: dir {display} — {n_files} files, {total} symbols"
     ));
-    let mut data_lines = Vec::new();
     let mut last_path = "";
     for (path, (kind, qualname, line, signature, cyc, br, nest, loc)) in &rows {
         if path != last_path {
@@ -723,7 +702,6 @@ fn symbols_directory(
         if metrics {
             text.push_str(&format!(" cyc={cyc} branches={br} nest={nest} loc={loc}"));
         }
-        data_lines.push(text.clone());
         out.push(text);
     }
     let shown = rows.len();
@@ -731,7 +709,6 @@ fn symbols_directory(
         out.push(format!("showing {shown} of {total}"));
         eprintln!("[aw] capped at {shown} results ({total} total)");
     }
-    super::record_payload_meta(conn, dir, &data_lines, changed > 0, shown, total as usize);
     crate::journal::record_result(total as usize, shown, total as usize, changed > 0, 0);
     Ok(out)
 }
@@ -914,7 +891,7 @@ fn merge_search_pointers(exact: Vec<Pointer>, fts: Vec<Pointer>) -> Vec<Pointer>
 /// Symbol-level search (Amendment 12b): FTS5 `bm25()` over split identifier
 /// tokens. Hits are symbol identities — the tier field position stays empty
 /// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
-/// for cap, post-cap staleness, and payload capture.
+/// for cap and post-cap staleness.
 pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     let (toks, expr) = search_expr(conn, terms)?;
@@ -930,7 +907,6 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
             let out = collect_output(
                 conn,
                 root,
-                terms,
                 merged.into_iter().map(Ok::<_, rusqlite::Error>),
                 limit,
                 &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
@@ -942,7 +918,6 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     let out = collect_output(
         conn,
         root,
-        terms,
         fts_ptrs.into_iter().map(Ok::<_, rusqlite::Error>),
         limit,
         &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
@@ -954,9 +929,7 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
 /// Clone candidates (Amendment 12d): merge adjacent matching shingle windows
 /// per file, pair the merged regions, filter by `min_lines`, emit
 /// `pathA:startA-endA pathB:startB-endB` under the standard cap contract.
-/// Caveat line always first — candidates, never proof. NOT payload-journaled
-/// (Amendment 12 deviation: pair lines are not single pointers, so the
-/// `usage --verify` structural checks do not apply).
+/// Caveat line always first — candidates, never proof.
 type CloneGroup = Vec<(String, i64, i64)>;
 type ClonePair = (String, i64, i64, String, i64, i64);
 
@@ -1127,9 +1100,6 @@ fn render_clones(
             detail: "0 clone candidates found".to_string(),
         });
     }
-    if capped {
-        eprintln!("[aw] clone pair generation capped — result is a lower bound");
-    }
     let shown = pairs.len().min(limit);
     let displayed = &pairs[..shown];
     let files: std::collections::BTreeSet<&String> = displayed
@@ -1146,6 +1116,9 @@ fn render_clones(
     let stale = changed > 0;
     crate::journal::record_result(shown, shown, pairs.len(), stale, 0);
     let mut out = vec![CLONES_CAVEAT.to_string()];
+    if capped {
+        out.push("[aw] clone pair generation capped — result is a lower bound".to_string());
+    }
     if stale {
         out.push(format!(
             "aw: {changed} of {n_files} result files changed since build — run aw build"

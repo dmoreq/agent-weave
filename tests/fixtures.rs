@@ -176,6 +176,52 @@ fn or_fallback_construction_types_receiver() {
 }
 
 #[test]
+fn typed_receiver_emits_type_ref_edge() {
+    // Type-only reference (arch-5): `x.foo()` with `x: b.B` resolves through
+    // the MRO, but the incremental dirty closure also needs an edge to the
+    // receiver's class itself — a method added on an ancestor must re-extract
+    // the caller instead of hiding behind a carried edge. The edge is emitted
+    // regardless of the call outcome (Python only).
+    let sources = [
+        ("a.py", "class A:\n    def foo(self):\n        return 1\n"),
+        ("mid.py", "from a import A\n\nclass Mid(A):\n    pass\n"),
+        ("b.py", "from mid import Mid\n\nclass B(Mid):\n    pass\n"),
+        (
+            "caller.py",
+            "from __future__ import annotations\n\ndef go(x: b.B):\n    return x.foo()\n",
+        ),
+    ];
+    let files = sources
+        .into_iter()
+        .enumerate()
+        .map(|(index, (path, source))| {
+            let parsed = parse_source(source.as_bytes(), Lang::Python).unwrap();
+            extract_file(index, path, source.as_bytes(), &parsed)
+        })
+        .collect();
+    let resolution = resolve(files, Default::default());
+    let type_refs: Vec<_> = resolution
+        .edges
+        .iter()
+        .filter(|e| e.kind == "type_ref")
+        .collect();
+    assert_eq!(
+        type_refs.len(),
+        1,
+        "exactly one type_ref edge: {type_refs:?}"
+    );
+    assert_eq!(type_refs[0].dst_name, "b.B", "{type_refs:?}");
+    assert_eq!(type_refs[0].confidence, "EXTRACTED", "{type_refs:?}");
+    assert!(
+        resolution.edges.iter().any(|e| {
+            e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "a.A.foo"
+        }),
+        "MRO hit before Mid.foo exists: {:?}",
+        resolution.edges
+    );
+}
+
+#[test]
 fn diamond_mro_multi_match_is_ambiguous() {
     // Post-R2 review: two same-level MRO matches (diamond) must emit an
     // AMBIGUOUS calls edge, never silently drop the call site.

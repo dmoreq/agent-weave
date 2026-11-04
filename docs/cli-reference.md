@@ -32,7 +32,7 @@ aw [GLOBAL_OPTIONS] <COMMAND> [ARGUMENTS] [OPTIONS]
 | Option | Default | Meaning |
 |---|---|---|
 | `--root <PATH>` | Nearest ancestor of the working directory containing `.git` | Select the repository root; an explicit root must be a directory and need not contain `.git` |
-| `--no-journal` | Off | Disable both usage journals for this invocation |
+| `--no-journal` | Off | Disable the usage journal for this invocation |
 | `-h`, `--help` | Off | Print command help and exit successfully |
 | `-V`, `--version` | Off | Print the binary version and exit successfully; top-level option |
 
@@ -127,7 +127,7 @@ aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>]
     [--context] [--explain] [--limit <N>]
 ```
 
-Find files that depend on the indexed target file, not its outbound dependencies. Default rows group by caller file and include `(N sites)`; `--limit` uses the shared default and cap.
+Find files that depend on the indexed target file, not its outbound dependencies. Default rows group by caller file and include `(N sites)`; `--limit` uses the shared default and cap. An empty default (calls-only) result names how many files import or inherit from the target and points at `--edges imports,inherits`.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -163,7 +163,7 @@ aw tests <NAME_OR_FILE> [--depth <N>] [--limit <N>]
 
 Find statically reachable test candidates for a symbol or exact indexed file. `--depth` defaults to 10; `--limit` uses the shared default and cap.
 
-Candidate names start with `test_` or `test` followed by an uppercase letter. Rust `#[test]` names outside that pattern, TypeScript test callbacks, fixtures, and indirect tests can be missed. This command does not run tests.
+Candidates carry the index's test classification: test paths (`tests/`, `test/`, `__tests__/`), test-shaped names (`test_*`, `test` + uppercase), test-shaped files (`test_*.py`, `*_test.py`, `*_test.go`, `*_test.dart`, `*.test.*`, `*.spec.*`), Rust `#[test]`/`#[cfg(test)]` items, and TS `describe`/`it` scopes. Fixtures, generated tests, and indirect tests can be missed. This command does not run tests.
 
 ## Find symbols and files
 
@@ -217,9 +217,9 @@ List indexed paths with build-time symbol counts, byte sizes, and generated tagg
 aw dead [--exclude-tests] [--path <PATH>] [--limit <N>]
 ```
 
-List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, or inheritance references. Rows render `path:line qualname`. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
+List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, inheritance, or typed-receiver (`type_ref`) references. Rows render `path:line qualname`. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
 
-`--exclude-tests` applies path and name heuristics, not test-runner discovery. All switches default to off, `--path` defaults to absent, and `--limit` uses the shared default and cap.
+`--exclude-tests` drops rows carrying the index's test classification (test paths, test-shaped names and files, Rust `#[test]`/`#[cfg(test)]` items, TS `describe`/`it` scopes), not test-runner discovery. All switches default to off, `--path` defaults to absent, and `--limit` uses the shared default and cap.
 
 Always treat the output as candidates. Entry points, external consumers, dynamic dispatch, star imports, module-level imports, type references, and attribute references are not proven absent.
 
@@ -272,10 +272,10 @@ Rows identify both inclusive source ranges and enclosing symbols when available.
 ### `stats`
 
 ```text
-aw stats
+aw stats [--path <PATH>]
 ```
 
-No command-specific options. Print build-time file, generated-file, symbol, edge-kind, parse-error, and unresolved-call counts, plus database size and versions. This is not a freshness check.
+Print build-time file, generated-file, symbol, edge-kind, parse-error, and unresolved-call counts, plus database size and versions. This is not a freshness check. `--path` defaults to absent and scopes every counter to one repo-relative file or directory prefix; a scoped line inserts `scope=<PATH>` after `aw stats:`. `db_bytes` and the version fields always describe the whole index. A scope with no indexed files exits 1.
 
 ### `hotspots`
 
@@ -302,14 +302,10 @@ Print four sections: index overview, top packages by symbol count, five hotspots
 ### `usage`
 
 ```text
-aw usage [--verify] [--limit <N>]
+aw usage
 ```
 
-Without `--verify`, summarize invocation counts, errors, latency, empty/stale rates, and ambiguous-pointer counts. No index is needed; an empty journal returns exit 1.
-
-`--verify` defaults to off. It checks pointers from a deterministic, evenly spaced sample of payload entries against current source and the current index. `--limit` defaults to 50 sampled entries, cap 10000; it does not limit individual pointers and has no effect without `--verify`.
-
-Results count `ok`, `changed`, and `fail`. Changed source or superseded-index structural failures are unverifiable, not proven wrong. Checks include line bounds and, for caller pointers, a name check; they do not prove graph completeness or semantic correctness. A completed verification report can exit 0 even when its `fail` count is nonzero.
+Summarize invocation counts, errors, latency, empty/stale rates, and ambiguous-pointer counts. No index is needed; an empty journal returns exit 1.
 
 ### Local data and controls
 
@@ -317,14 +313,15 @@ Results count `ok`, `changed`, and `fail`. Changed source or superseded-index st
 |---|---|
 | `.aw/index.db` | Local SQLite index |
 | `.aw/usage.log` | Invocation metadata: tool, arguments, outcome, latency, and result counts |
-| `.aw/usage-results.jsonl` | Successful pointer-query payloads, displayed pointers, and index metadata |
-| `AW_NO_JOURNAL=1` | Disable both journals; equivalent to `--no-journal` |
+| `AW_NO_JOURNAL=1` | Disable the journal; equivalent to `--no-journal` |
 | `AW_SESSION` | Optional journal attribution, trimmed and capped at 64 characters |
 | `AW_ARM` | Optional comparison-group attribution, trimmed and capped at 64 characters |
 
+`aw` 0.3 wrote `.aw/usage-results.jsonl`; 0.4 no longer writes or reads it, and the file can be deleted manually.
+
 Journals stay local and rotate after exceeding 5 MiB to a `.1` generation. Writes are best-effort and do not change command results on failure. They can contain repository paths, symbol names, and displayed signatures; treat them as project data.
 
-The CLI does not journal `doctor`, `usage`, or the MCP server invocation itself. MCP tool calls can be journaled separately. `files`, `resolve`, and `unresolved` do not write pointer payloads. Opting out does not delete existing data.
+The CLI does not journal `doctor`, `usage`, or the MCP server invocation itself. MCP tool calls can be journaled separately. Opting out does not delete existing data.
 
 ## Serve an MCP client
 
@@ -366,7 +363,7 @@ Locations use repository-relative paths and 1-based line numbers. Definition ran
 | `6` | Internal failure, including I/O/database errors or unexpected panic | Preserve the diagnostic and report it |
 | `7` | Build exceeded the parse-error-rate threshold | Inspect source syntax and coverage; adjust the threshold only knowingly |
 
-Exit codes describe the operation, not certainty of analysis. `context` can succeed with empty relationship sections, and `usage --verify` reports verification failures as counters.
+Exit codes describe the operation, not certainty of analysis. `context` can succeed with empty relationship sections.
 
 ## Static-analysis boundaries
 
