@@ -62,6 +62,17 @@ fn notification(server: &mut Server, method: &str) {
     server.stdin.flush().unwrap();
 }
 
+fn send_raw(server: &mut Server, frame: &str) {
+    writeln!(server.stdin, "{frame}").unwrap();
+    server.stdin.flush().unwrap();
+}
+
+fn read_response(server: &mut Server) -> Value {
+    let mut line = String::new();
+    server.reader.read_line(&mut line).unwrap();
+    serde_json::from_str(&line).expect("valid JSON-RPC response")
+}
+
 fn result_text(resp: &Value) -> String {
     resp["result"]["content"][0]["text"]
         .as_str()
@@ -793,6 +804,43 @@ fn mcp_framing_survives_invalid_utf8_and_oversized_frames() {
         assert_eq!(resp["id"], id, "{second}");
         assert!(resp["result"]["tools"].is_array(), "{second}");
     }
+}
+
+#[test]
+fn notification_ping_has_no_response() {
+    let repo = fixture("notify-ping");
+    let mut srv = spawn(&repo);
+    send_raw(&mut srv, r#"{"jsonrpc":"2.0","method":"ping"}"#);
+    let resp = rpc(&mut srv, 1, "ping", json!({}));
+    assert_eq!(resp["id"], 1, "notification received a response: {resp}");
+}
+
+#[test]
+fn invalid_request_envelopes_return_minus_32600() {
+    let repo = fixture("invalid-envelope");
+    let mut srv = spawn(&repo);
+    send_raw(&mut srv, r#"{"jsonrpc":"2.0","id":2,"method":3}"#);
+    let resp = read_response(&mut srv);
+    assert_eq!(resp["id"], 2, "{resp}");
+    assert_eq!(resp["error"]["code"], -32600, "{resp}");
+    send_raw(&mut srv, r#"{"id":3,"method":"ping"}"#);
+    let resp = read_response(&mut srv);
+    assert_eq!(resp["id"], 3, "{resp}");
+    assert_eq!(resp["error"]["code"], -32600, "{resp}");
+    let resp = rpc(&mut srv, 4, "ping", json!({}));
+    assert_eq!(
+        resp["id"], 4,
+        "server sequencing broke after invalid frames: {resp}"
+    );
+}
+
+#[test]
+fn client_response_envelope_is_ignored() {
+    let repo = fixture("client-response");
+    let mut srv = spawn(&repo);
+    send_raw(&mut srv, r#"{"jsonrpc":"2.0","id":5,"result":{}}"#);
+    let resp = rpc(&mut srv, 6, "ping", json!({}));
+    assert_eq!(resp["id"], 6, "client response was answered: {resp}");
 }
 
 #[cfg(unix)]

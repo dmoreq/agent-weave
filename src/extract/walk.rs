@@ -65,9 +65,10 @@ pub(super) fn text(node: Node<'_>, src: &[u8]) -> String {
     node.utf8_text(src).unwrap_or("").to_string()
 }
 
-/// One-line signature (Amendment 12a): first line of the node's text,
-/// trimmed, hard cap 160 chars. Never spans the body: capture stops at the
-/// first newline, so the stored text is a header fragment by construction.
+/// One-line signature (Amendments 12a and 18): capture the declaration
+/// header, continue across line wraps inside a parameter list, stop at the
+/// body delimiter (`{`, `;`, or Python `:`), collapse whitespace, and cap
+/// 160 chars. Never stores the body.
 pub(super) fn signature_of(node: Node<'_>, src: &[u8]) -> String {
     let start = node.start_byte();
     let stop = src.len().min(start + 4096);
@@ -215,6 +216,16 @@ pub(super) fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             let inner = node.named_children(&mut cursor).next();
             inner.and_then(|ch| dotted_chain(ch, src))
         }
+        "type_annotation" => {
+            let inner = if let Some(ty) = node.child_by_field_name("type") {
+                Some(ty)
+            } else {
+                let mut cursor = node.walk();
+                let first = node.named_children(&mut cursor).next();
+                first
+            };
+            inner.and_then(|ch| dotted_chain(ch, src))
+        }
         "generic_type" => {
             // `Trait<T>`: use the first type identifier as the base name.
             let mut stack = vec![node];
@@ -326,6 +337,10 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             let parent = ctx.class_stack.last().or_else(|| ctx.mod_stack.last());
             let qualname = match parent {
                 Some(parent) => format!("{parent}.{name}"),
+                // A repo-root lib.rs/main.rs is the crate root; its inline
+                // modules share the file-module namespace (`a`, not `lib.a`),
+                // so `crate::a` resolves for file and inline modules alike.
+                None if fx.crate_root.as_deref() == Some("") => name.clone(),
                 None => format!("{}.{}", fx.module, name),
             };
             let sym_idx = fx.symbols.len();
@@ -444,8 +459,15 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
         }
         "variable_declarator" => {
             if !record_ts_arrow_function(node, src, fx, ctx) {
+                record_ts_variable_binding(node, src, fx, ctx);
                 walk_children(node, src, fx, ctx);
             }
+        }
+        "arrow_function" | "function_expression" if fx.lang != Lang::Python => {
+            let start = node.start_position().row + 1;
+            let end = node.end_position().row + 1;
+            collect_arrow_params(node, src, fx, &ctx.scope_func(), Some((start, end)));
+            walk_children(node, src, fx, ctx);
         }
         "new_expression" => {
             record_call(node, src, fx, ctx);
@@ -564,7 +586,7 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
                 ..Default::default()
             });
             if let Some(params) = node.child_by_field_name("parameters") {
-                collect_param_types(params, src, fx, &qualname);
+                collect_param_types(params, src, fx, &qualname, kind == "method");
             }
             if let Some(pidx) = parent_symbol_idx(fx, ctx) {
                 fx.edges.push(NewEdge {
@@ -633,6 +655,14 @@ fn walk_node(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Walk
             record_assignment(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
         }
+        "augmented_assignment" if fx.lang == Lang::Python => {
+            record_assignment(node, src, fx, ctx);
+            walk_children(node, src, fx, ctx);
+        }
+        "assignment_expression" if fx.lang != Lang::Python => {
+            record_reassignment(node, src, fx, ctx);
+            walk_children(node, src, fx, ctx);
+        }
         "let_declaration" if fx.lang == Lang::Rust => {
             record_rust_let(node, src, fx, ctx);
             walk_children(node, src, fx, ctx);
@@ -666,11 +696,24 @@ fn parent_symbol_idx(fx: &FileExtraction, ctx: &WalkCtx) -> Option<usize> {
     fx.symbols.iter().position(|s| s.qualname == qn)
 }
 
-fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+fn collect_param_types(
+    params: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    scope: &str,
+    is_method_receiver: bool,
+) {
     let mut cursor = params.walk();
     for p in params.children(&mut cursor) {
         if let Some(var) = param_binding(p, src) {
-            if var != "self" && var != "cls" && var != "this" {
+            if var == "self" || var == "cls" || var == "this" {
+                // Only the method's own implicit receiver is skipped; an
+                // explicit self/cls/this parameter of a nested function
+                // shadows the class receiver.
+                if !is_method_receiver {
+                    fx.locals.push((scope.to_string(), var));
+                }
+            } else {
                 fx.locals.push((scope.to_string(), var));
             }
         }
@@ -737,6 +780,52 @@ fn collect_param_types(params: Node<'_>, src: &[u8], fx: &mut FileExtraction, sc
     }
 }
 
+/// Arrow/function-expression parameters. A named module-level arrow owns its
+/// symbol scope (`range = None`); an anonymous nested callback is scoped by
+/// its source line range so it does not shadow calls outside the callback.
+fn collect_arrow_params(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    scope: &str,
+    range: Option<(usize, usize)>,
+) {
+    if let Some(params) = node.child_by_field_name("parameters") {
+        if range.is_some() {
+            let mut cursor = params.walk();
+            for p in params.children(&mut cursor) {
+                if let Some(var) = param_binding(p, src) {
+                    push_arrow_binding(fx, scope, var, range);
+                }
+            }
+        } else {
+            collect_param_types(params, src, fx, scope, false);
+        }
+    }
+    if let Some(param) = node.child_by_field_name("parameter") {
+        if let Some(var) = param_binding(param, src) {
+            push_arrow_binding(fx, scope, var, range);
+        }
+    }
+}
+
+fn push_arrow_binding(
+    fx: &mut FileExtraction,
+    scope: &str,
+    var: String,
+    range: Option<(usize, usize)>,
+) {
+    match range {
+        Some((start_line, end_line)) => fx.arrow_params.push(ArrowParam {
+            var,
+            scope_func: scope.to_string(),
+            start_line,
+            end_line,
+        }),
+        None => fx.locals.push((scope.to_string(), var)),
+    }
+}
+
 /// Binding name of a parameter node: identifier, named pattern, or typed name.
 fn param_binding(node: Node<'_>, src: &[u8]) -> Option<String> {
     if node.kind() == "identifier" {
@@ -786,6 +875,13 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
     let Some(left) = node.child_by_field_name("left") else {
         return;
     };
+    if matches!(
+        left.kind(),
+        "pattern_list" | "tuple_pattern" | "list_pattern" | "expression_list" | "list"
+    ) {
+        record_pattern_shadow(left, src, fx, ctx, node.start_position().row + 1);
+        return;
+    }
     let Some(right) = node.child_by_field_name("right") else {
         return;
     };
@@ -819,6 +915,7 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
                 var: text(left, src),
                 target_dotted: Vec::new(),
                 scope_func: ctx.scope_func(),
+                site_line: node.start_position().row + 1,
             });
         }
         return;
@@ -828,6 +925,7 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
             var: text(left, src),
             target_dotted: target,
             scope_func: ctx.scope_func(),
+            site_line: node.start_position().row + 1,
         }),
         "attribute" => {
             // self.field = Ctor(...) -> class-wide receiver typing.
@@ -882,23 +980,38 @@ fn record_rust_let(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
         }
         v
     };
-    let target = match value.kind() {
-        "call_expression" => value
-            .child_by_field_name("function")
-            .and_then(|f| dotted_chain(f, src)),
-        "struct_expression" => value
-            .child_by_field_name("name")
-            .and_then(|n| dotted_chain(n, src)),
-        _ => None,
-    };
-    let Some(mut chain) = target else {
+    let Some(chain) = rust_constructor_target(value, src, ctx) else {
         return;
     };
-    // Only conventional constructors type the receiver. An arbitrary
-    // associated function (`A::make() -> B`) says nothing about the returned
-    // type, so it must not be treated as `A`.
-    if !matches!(chain.last().map(String::as_str), Some("new" | "default")) {
-        return;
+    fx.assignments.push(Assignment {
+        var,
+        target_dotted: chain,
+        scope_func: ctx.scope_func(),
+        site_line: node.start_position().row + 1,
+    });
+}
+
+/// Constructor-shaped Rust value: `Foo::new()`, `Self::new()`, or a struct
+/// literal. An arbitrary associated function (`A::make() -> B`) says nothing
+/// about the returned type and must not type `A`.
+fn rust_constructor_target(value: Node<'_>, src: &[u8], ctx: &WalkCtx) -> Option<Vec<String>> {
+    let (mut chain, is_struct) = match value.kind() {
+        "call_expression" => (
+            value
+                .child_by_field_name("function")
+                .and_then(|f| dotted_chain(f, src))?,
+            false,
+        ),
+        "struct_expression" => (
+            value
+                .child_by_field_name("name")
+                .and_then(|n| dotted_chain(n, src))?,
+            true,
+        ),
+        _ => return None,
+    };
+    if !is_struct && !matches!(chain.last().map(String::as_str), Some("new" | "default")) {
+        return None;
     }
     // `Foo::new()` -> Foo; `crate::m::Foo::new()` -> crate::m::Foo.
     // A bare lowercase call (`make()`) has no knowable type.
@@ -906,23 +1019,76 @@ fn record_rust_let(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mu
     let type_like = matches!(head, "crate" | "self" | "super" | "Self")
         || head.chars().next().is_some_and(|c| c.is_uppercase());
     if !type_like {
-        return;
+        return None;
     }
     if head == "Self" {
-        if chain.len() != 1 {
-            return;
+        // `Self::new()` -> Self: drop the constructor segment before
+        // substituting the enclosing impl type.
+        if !is_struct {
+            if chain.len() < 2 {
+                return None;
+            }
+            chain.pop();
         }
-        let Some(class_qn) = ctx.class_stack.last() else {
-            return;
-        };
+        let class_qn = ctx.class_stack.last()?;
         chain = class_qn.split('.').map(str::to_string).collect();
-    } else if chain.len() >= 2 {
+    } else if !is_struct && chain.len() >= 2 {
         chain.pop();
     }
+    Some(chain)
+}
+
+/// TS/Rust `value = ...` reassignment. A direct constructor updates the
+/// receiver type; an unknown right-hand side records an empty binding so the
+/// later call cannot reuse an earlier type.
+/// Tuple/list destructuring binds every identifier as an unknown local. The
+/// binding shadows outer function names from its site line onward.
+fn record_pattern_shadow(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    ctx: &WalkCtx,
+    site_line: usize,
+) {
+    if node.kind() == "identifier" {
+        fx.assignments.push(Assignment {
+            var: text(node, src),
+            target_dotted: Vec::new(),
+            scope_func: ctx.scope_func(),
+            site_line,
+        });
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        record_pattern_shadow(child, src, fx, ctx, site_line);
+    }
+}
+
+fn record_reassignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+    let Some(left) = node.child_by_field_name("left") else {
+        return;
+    };
+    if left.kind() != "identifier" {
+        return;
+    }
+    let Some(right) = node.child_by_field_name("right") else {
+        return;
+    };
+    let target = match fx.lang {
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript if right.kind() == "new_expression" => {
+            right
+                .child_by_field_name("constructor")
+                .and_then(|c| dotted_chain(c, src))
+        }
+        Lang::Rust => rust_constructor_target(right, src, ctx),
+        _ => None,
+    };
     fx.assignments.push(Assignment {
-        var,
-        target_dotted: chain,
+        var: text(left, src),
+        target_dotted: target.unwrap_or_default(),
         scope_func: ctx.scope_func(),
+        site_line: node.start_position().row + 1,
     });
 }
 
@@ -1367,8 +1533,23 @@ fn define_function(
                 .parent()
                 .is_some_and(|p| p.kind() == "export_statement"),
     });
+    if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+        && ts_default_export_ancestor(node)
+    {
+        // `export default function work()` has no `worker.default` symbol;
+        // bind `default` to the real exported identity so a default import
+        // resolves to `worker.work`.
+        fx.aliases.push((
+            String::new(),
+            "default".to_string(),
+            ImportTarget::Symbol {
+                module: fx.module.clone(),
+                name: name.clone(),
+            },
+        ));
+    }
     if let Some(params) = node.child_by_field_name("parameters") {
-        collect_param_types(params, src, fx, &qualname);
+        collect_param_types(params, src, fx, &qualname, false);
     }
     if let Some(pidx) = parent_symbol_idx(fx, ctx) {
         fx.edges.push(NewEdge {
@@ -1559,7 +1740,7 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
         ..Default::default()
     });
     if let Some(params) = node.child_by_field_name("parameters") {
-        collect_param_types(params, src, fx, &qualname);
+        collect_param_types(params, src, fx, &qualname, true);
     }
     if let Some(pidx) = parent_symbol_idx(fx, ctx) {
         fx.edges.push(NewEdge {
@@ -1576,6 +1757,25 @@ fn define_method_ts(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &m
         walk_children(body, src, fx, ctx);
     }
     ctx.func_stack.pop();
+}
+
+/// True when a TS declaration is the target of `export default`.
+fn ts_default_export_ancestor(node: Node<'_>) -> bool {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if n.kind() == "export_statement" {
+            let mut cursor = n.walk();
+            return n.children(&mut cursor).any(|c| c.kind() == "default");
+        }
+        match n.kind() {
+            "variable_declarator"
+            | "lexical_declaration"
+            | "variable_declaration"
+            | "parenthesized_expression" => cur = n.parent(),
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// True when a TS declaration is wrapped by an `export` statement.
@@ -1654,10 +1854,57 @@ fn record_ts_arrow_function(
         confidence: "EXTRACTED",
         site_line: start,
     });
-    ctx.func_stack.push(qualname);
+    ctx.func_stack.push(qualname.clone());
+    collect_arrow_params(value, src, fx, &qualname, None);
     walk_children(value, src, fx, ctx);
     ctx.func_stack.pop();
     true
+}
+
+/// TS `const value = new C()` receiver binding. A plain call
+/// (`const value = factory()`) has no knowable constructed type and is ignored.
+fn record_ts_variable_binding(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    ctx: &mut WalkCtx,
+) {
+    if !matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+        return;
+    }
+    let Some(name) = node
+        .child_by_field_name("name")
+        .and_then(|n| pattern_name(n, src))
+    else {
+        return;
+    };
+    if let Some(ty) = node.child_by_field_name("type") {
+        if let Some(chain) = dotted_chain(ty, src) {
+            fx.params.push(ParamType {
+                var: name.clone(),
+                ann_dotted: chain,
+                scope_func: ctx.scope_func(),
+            });
+        }
+    }
+    let Some(value) = node.child_by_field_name("value") else {
+        return;
+    };
+    if value.kind() != "new_expression" {
+        return;
+    }
+    let Some(chain) = value
+        .child_by_field_name("constructor")
+        .and_then(|c| dotted_chain(c, src))
+    else {
+        return;
+    };
+    fx.assignments.push(Assignment {
+        var: name,
+        target_dotted: chain,
+        scope_func: ctx.scope_func(),
+        site_line: node.start_position().row + 1,
+    });
 }
 
 /// TS/TSX/JSX static ESM imports. Relative sources resolve by module path;
@@ -1964,13 +2211,13 @@ fn emit_use_leaf(
             if let Some((name, parent)) = full.split_last() {
                 if parent.is_empty() {
                     fx.aliases.push((
-                        String::new(),
+                        ctx.scope.to_string(),
                         binding,
                         ImportTarget::ModuleRoot { path: qn },
                     ));
                 } else {
                     fx.aliases.push((
-                        String::new(),
+                        ctx.scope.to_string(),
                         binding,
                         ImportTarget::Symbol {
                             module: parent.join("."),
@@ -2000,7 +2247,7 @@ fn emit_use_leaf(
         },
     });
     fx.aliases.push((
-        String::new(),
+        ctx.scope.to_string(),
         alias.unwrap_or_else(|| name.clone()),
         ImportTarget::Symbol {
             module,

@@ -42,8 +42,9 @@ CREATE TABLE symbols(
     file_path TEXT NOT NULL DEFAULT '',
     line_start INTEGER NOT NULL,
     line_end INTEGER NOT NULL,
-    -- One-line signature (Amendment 12a): first line of the symbol's node
-    -- text, trimmed, hard cap 160 chars. Empty for module symbols. No bodies.
+    -- One-line signature (Amendments 12a and 18): declaration header with
+    -- line-wrapped parameters, whitespace collapsed, hard cap 160 chars.
+    -- Empty for module symbols. No bodies.
     signature TEXT NOT NULL DEFAULT '',
     -- Per-symbol metrics (Amendment 19); 0 for non-callables.
     cyclomatic INTEGER NOT NULL DEFAULT 0,
@@ -51,6 +52,7 @@ CREATE TABLE symbols(
     nesting INTEGER NOT NULL DEFAULT 0,
     effective_loc INTEGER NOT NULL DEFAULT 0,
     -- Public-surface flag (Amendment 19); language rules in the spec.
+    -- Retained for schema compatibility; no current CLI/MCP surface reads it.
     exported INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE edges(

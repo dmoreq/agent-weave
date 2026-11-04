@@ -1,8 +1,8 @@
 //! MCP stdio server (Amendment 8): newline-delimited JSON-RPC 2.0 over
 //! stdin/stdout, spawned by the agent host — aw still spawns no daemons.
-//! Tools map 1:1 to CLI subcommands and return the CLI's byte-identical
-//! stdout text. Every tool call journals with `surface:"mcp"` (J2). The
-//! process itself is not journaled.
+//! Tools correspond to CLI subcommands and return the CLI's byte-identical
+//! stdout text; `--all-tools` controls the exposed set. Every tool call
+//! journals with `surface:"mcp"` (J2). The process itself is not journaled.
 
 use std::io::{BufRead, Read, Write};
 use std::path::Path;
@@ -160,14 +160,41 @@ pub fn serve(
             }
         };
         let id = msg.get("id").cloned();
-        let Some(method) = msg
-            .get("method")
-            .and_then(|m| m.as_str())
-            .map(str::to_string)
-        else {
-            continue; // a response or malformed frame — no reply
-        };
         let is_notification = id.is_none();
+        if !msg.is_object() {
+            write_error(&mut out, None, -32600, "invalid request")?;
+            continue;
+        }
+        if msg.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
+            if !is_notification {
+                write_error(
+                    &mut out,
+                    id,
+                    -32600,
+                    "invalid request: jsonrpc must be \"2.0\"",
+                )?;
+            }
+            continue;
+        }
+        let Some(method_value) = msg.get("method") else {
+            // A client response carries result/error and no method; ignore it.
+            // Any other envelope without a method is an invalid request.
+            if !is_notification && msg.get("result").is_none() && msg.get("error").is_none() {
+                write_error(&mut out, id, -32600, "invalid request: missing method")?;
+            }
+            continue;
+        };
+        let Some(method) = method_value.as_str().map(str::to_string) else {
+            if !is_notification {
+                write_error(
+                    &mut out,
+                    id,
+                    -32600,
+                    "invalid request: method must be a string",
+                )?;
+            }
+            continue;
+        };
         match method.as_str() {
             "initialize" => {
                 let requested = msg
@@ -181,11 +208,21 @@ pub fn serve(
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
                 });
-                write_result(&mut out, id, result)?;
+                if !is_notification {
+                    write_result(&mut out, id, result)?;
+                }
             }
             "notifications/initialized" => {}
-            "ping" => write_result(&mut out, id, json!({}))?,
-            "tools/list" => write_result(&mut out, id, json!({"tools": tools(all_tools)}))?,
+            "ping" => {
+                if !is_notification {
+                    write_result(&mut out, id, json!({}))?;
+                }
+            }
+            "tools/list" => {
+                if !is_notification {
+                    write_result(&mut out, id, json!({"tools": tools(all_tools)}))?;
+                }
+            }
             "tools/call" => {
                 let params = msg.get("params").cloned().unwrap_or(Value::Null);
                 let tool_name = params
@@ -241,11 +278,13 @@ pub fn serve(
                     exit_code,
                     started.elapsed().as_micros() as u64,
                 );
-                write_result(
-                    &mut out,
-                    id,
-                    json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
-                )?;
+                if !is_notification {
+                    write_result(
+                        &mut out,
+                        id,
+                        json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
+                    )?;
+                }
             }
             _ => {
                 if !is_notification {

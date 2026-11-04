@@ -23,10 +23,9 @@ use crate::extract::{CarriedIndex, CarriedSymbol, NewSymbol, SCHEMA_VERSION};
 /// crate versions by build.rs (R6d A8: a hand-maintained string had already
 /// drifted from the lock). The identity gates the fast path.
 pub const GRAMMAR_VERSION: &str = env!("AW_GRAMMAR_VERSION");
-/// Signature-capture revision (R7/Amendment 18): indexes whose stored
-/// signatures predate the multi-line capture are fully re-extracted once.
-/// This is not a schema change — the table shape is unchanged.
-pub const SIGNATURE_VERSION: &str = "2";
+/// Extraction revision: older indexes must be re-extracted when capture or
+/// resolution rules change. This does not change the table shape.
+pub const SIGNATURE_VERSION: &str = "3";
 /// Per-symbol metric-rule version (Amendment 19); a mismatch disables the fast path.
 pub const METRICS_VERSION: &str = "1";
 
@@ -134,6 +133,17 @@ impl Drop for RootLock {
     }
 }
 
+#[cfg(unix)]
+fn link_count(meta: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    meta.nlink()
+}
+
+#[cfg(not(unix))]
+fn link_count(_: &fs::Metadata) -> u64 {
+    1
+}
+
 ///Exclusive flock over `.aw/build.lock` for the whole build (CUJ6).
 pub struct BuildLock {
     _root_lock: RootLock,
@@ -149,6 +159,12 @@ impl BuildLock {
             Ok(meta) if meta.file_type().is_symlink() => {
                 return Err(AwError::Internal(format!(
                     "refusing symlinked build lock: {}",
+                    lock_path.display()
+                )));
+            }
+            Ok(meta) if !meta.is_file() || link_count(&meta) > 1 => {
+                return Err(AwError::Internal(format!(
+                    "refusing unsafe build lock: {}",
                     lock_path.display()
                 )));
             }
@@ -176,6 +192,13 @@ impl BuildLock {
             Err(e) => return Err(e.into()),
         };
         reject_symlink(&lock_path, "build lock")?;
+        let meta = file.metadata()?;
+        if !meta.is_file() || link_count(&meta) > 1 {
+            return Err(AwError::Internal(format!(
+                "refusing unsafe build lock: {}",
+                lock_path.display()
+            )));
+        }
         match file.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => {
@@ -529,15 +552,37 @@ pub fn symbol_qualname_files(conn: &Connection) -> Result<HashMap<String, HashSe
     Ok(out)
 }
 
+/// Qualnames declared by the given old-index files. Bounds candidate
+/// invalidation to the files that actually changed.
+pub fn qualnames_for_files(old: &Connection, files: &[String]) -> Result<HashSet<String>> {
+    let mut out = HashSet::new();
+    for chunk in files.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT DISTINCT s.qualname
+             FROM symbols s JOIN files f ON f.id = s.file_id
+             WHERE f.path IN ({placeholders})"
+        );
+        let mut stmt = old.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
+            r.get::<_, String>(0)
+        })?;
+        for r in rows {
+            out.insert(r?);
+        }
+    }
+    Ok(out)
+}
+
 /// Carried files whose edges or unresolved sites mention a qualname whose
-/// candidate set just grew. Those sites may now be ambiguous even though they
-/// were resolved before the build; re-extract them so the incremental result
-/// matches a fresh build.
+/// candidate set changed (grew, shrank, or was renamed). Those sites may now
+/// be ambiguous or resolve to a different candidate; re-extract them so the
+/// incremental result matches a fresh build.
 pub fn gap_files_for_candidate_changes(
     old: &Connection,
-    duplicate_qualnames: &HashSet<String>,
+    changed_qualnames: &HashSet<String>,
 ) -> Result<HashSet<String>> {
-    if duplicate_qualnames.is_empty() {
+    if changed_qualnames.is_empty() {
         return Ok(HashSet::new());
     }
     let mut out = HashSet::new();
@@ -551,7 +596,7 @@ pub fn gap_files_for_candidate_changes(
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     for r in rows {
         let (path, dst) = r?;
-        if duplicate_qualnames.contains(&dst) {
+        if changed_qualnames.contains(&dst) {
             out.insert(path);
         }
     }
@@ -562,7 +607,7 @@ pub fn gap_files_for_candidate_changes(
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     for r in rows {
         let (path, dst) = r?;
-        if duplicate_qualnames.contains(&dst) {
+        if changed_qualnames.contains(&dst) {
             out.insert(path);
         }
     }
@@ -695,23 +740,23 @@ pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedI
         });
     }
     let mut inherits = Vec::new();
-    let placeholders = rels.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let mut stmt = old.prepare(&format!(
-        "SELECT s.qualname, e.dst_name
-         FROM edges e JOIN symbols s ON s.id = e.src_id
-         JOIN files f ON f.id = s.file_id
-         WHERE e.kind = 'inherits' AND e.dst_name IS NOT NULL
-           AND f.path IN ({placeholders})"
-    ))?;
-    let rel_params: Vec<&str> = rels.iter().map(String::as_str).collect();
-    let pairs = stmt
-        .query_map(
-            rusqlite::params_from_iter(rel_params.iter().copied()),
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-        )?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    for (sub, base) in pairs {
-        inherits.push((sub, base));
+    let mut rel_params: Vec<&str> = rels.iter().map(String::as_str).collect();
+    rel_params.sort_unstable();
+    for chunk in rel_params.chunks(500) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let mut stmt = old.prepare(&format!(
+            "SELECT s.qualname, e.dst_name
+             FROM edges e JOIN symbols s ON s.id = e.src_id
+             JOIN files f ON f.id = s.file_id
+             WHERE e.kind = 'inherits' AND e.dst_name IS NOT NULL
+               AND f.path IN ({placeholders})"
+        ))?;
+        let pairs = stmt.query_map(rusqlite::params_from_iter(chunk.iter().copied()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for p in pairs {
+            inherits.push(p?);
+        }
     }
     Ok(CarriedIndex { symbols, inherits })
 }
@@ -1075,6 +1120,44 @@ mod tests {
         fs::rename(db_new_path(&dir), db_path(&dir)).unwrap();
         let err = open_for_query(&dir).unwrap_err();
         assert_eq!(err.exit_code(), 5);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_carried_chunks_large_path_sets() {
+        let dir = std::env::temp_dir().join(format!("aw-db-carried-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let conn = create_fresh(&dir).unwrap();
+        conn.execute(
+            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes)
+             VALUES (1, 'a.py', 1, 0, 0, 'ok', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO symbols(id, kind, name, qualname, file_id, line_start, line_end)
+             VALUES (1, 'class', 'B', 'a.B', 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO edges(id, src_id, dst_id, dst_name, kind, confidence, site_line)
+             VALUES (1, 1, NULL, 'Base', 'inherits', 'EXTRACTED', 1)",
+            [],
+        )
+        .unwrap();
+
+        // More paths than the default SQLite variable limit; only a.py exists.
+        let mut rels: HashSet<String> = (0..33_000).map(|i| format!("f{i}.py")).collect();
+        rels.insert("a.py".to_string());
+        let index = load_carried(&conn, &rels).unwrap();
+        assert!(index.symbols.iter().any(|s| s.qualname == "a.B"));
+        assert_eq!(
+            index.inherits,
+            vec![("a.B".to_string(), "Base".to_string())]
+        );
+        drop(conn);
         let _ = fs::remove_dir_all(&dir);
     }
 }

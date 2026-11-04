@@ -227,8 +227,9 @@ pub struct NewSymbol {
     /// 1-based lines (tree-sitter rows are 0-based; offset at emission).
     pub line_start: usize,
     pub line_end: usize,
-    /// One-line signature (Amendment 12a): first line of the node's text,
-    /// trimmed, hard cap 160 chars. Empty for module/synthetic symbols.
+    /// One-line signature (Amendments 12a and 18): declaration header with
+    /// line-wrapped parameters, whitespace collapsed, hard cap 160 chars.
+    /// Empty for module/synthetic symbols. No body text.
     pub signature: String,
     /// Per-symbol metrics (Amendment 19); 0 for non-callables.
     pub cyclomatic: usize,
@@ -324,6 +325,9 @@ struct Assignment {
     var: String,
     target_dotted: Vec<String>,
     scope_func: String,
+    /// 1-based line of the assignment; resolution uses the latest binding at
+    /// or before each call site, not the file's final assignment.
+    site_line: usize,
 }
 
 /// `self.field = Ctor(...)` inside a class body: receiver typing for
@@ -338,6 +342,15 @@ struct ParamType {
     var: String,
     ann_dotted: Vec<String>,
     scope_func: String,
+}
+
+/// Parameter of an anonymous arrow/function expression, scoped by source line
+/// range rather than a named symbol.
+struct ArrowParam {
+    var: String,
+    scope_func: String,
+    start_line: usize,
+    end_line: usize,
 }
 
 struct CallSite {
@@ -385,6 +398,8 @@ pub struct FileExtraction {
     /// (scope_func, var) for parameters and local bindings that shadow outer
     /// names during bare-name resolution.
     locals: Vec<(String, String)>,
+    /// Anonymous callback parameters, scoped by line range.
+    arrow_params: Vec<ArrowParam>,
     self_fields: Vec<SelfField>,
     /// (scope_func, bound name, target): function-local imports stay local.
     aliases: Vec<(String, String, ImportTarget)>,
@@ -523,6 +538,7 @@ pub fn extract_file_with_code_lines(
         assignments: Vec::new(),
         params: Vec::new(),
         locals: Vec::new(),
+        arrow_params: Vec::new(),
         self_fields: Vec::new(),
         aliases: Vec::new(),
         stars: Vec::new(),

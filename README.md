@@ -37,7 +37,8 @@ per group. Simply making aw available did not produce the same saving.
 Other experiments found that benefits depend on the task and host/model.
 Symbol search and duplicate detection did not consistently reduce effort;
 test and API lookups did not show savings in their narrow measured tasks.
-These are reported historical results, not measurements of every current build.
+These are reported historical results for those task shapes, not
+feature-level verdicts or measurements of every current build.
 See [Evaluation](docs/EVALUATION.md) for comparisons, sample sizes, limitations,
 and what can be checked from the public repository.
 

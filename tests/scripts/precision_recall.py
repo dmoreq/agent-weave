@@ -15,7 +15,7 @@ verification (aw emits only EXTRACTED-tier pointers for these queries).
 Wilson 95% intervals are computed from the binomial standard formulas.
 
 Usage: precision_recall.py <vihap-root> <aw-binary> <ground-truth.md>
-Exit 0 always; prints the gate verdict.
+Exit 0 when the historical gate passes; prints the gate verdict.
 """
 import math
 import re
@@ -93,6 +93,7 @@ def main():
                 callee_pointers[t] = aw_callers(aw, root, t)
 
     hits = 0
+    site_hits = 0
     misses = []
     for gid, caller, callee, _ in scored:
         # Constructor rows: a class without an explicit __init__ keeps the
@@ -101,6 +102,8 @@ def main():
         if callee.endswith(".__init__"):
             targets.append(callee[: -len(".__init__")])
         target_data = [callee_pointers[t] for t in targets]
+        if any(pointers is not None and caller in pointers for pointers, _ in target_data):
+            site_hits += 1
         hit = False
         for pointers, candidates in target_data:
             if candidates is not None and callee in candidates:
@@ -143,6 +146,8 @@ def main():
     print("| gate | value | wilson 95% | target | verdict |")
     print("|------|-------|------------|--------|---------|")
     print(f"| recall | {hits}/{len(scored)} = {recall:.0%} | [{rlo:.0%}, {rhi:.0%}] | >= 70% | {'PASS' if recall >= 0.70 else 'FAIL'} |")
+    site_recall, site_lo, site_hi = wilson(site_hits, len(scored))
+    print(f"| caller-site recall (no ambiguity credit) | {site_hits}/{len(scored)} = {site_recall:.0%} | [{site_lo:.0%}, {site_hi:.0%}] | informational | — |")
     print(f"| precision (call-site verified) | {verified}/{total_checked} = {precision:.0%} | [{plo:.0%}, {phi:.0%}] | >= 80% | {'PASS' if precision >= 0.80 else 'FAIL'} |")
     print(f"| EXTRACTED-tier precision | {precision:.0%} | [{plo:.0%}, {phi:.0%}] | >= 95% | {'PASS' if precision >= 0.95 else 'FAIL'} |")
     print(f"dynamic rows excluded: {', '.join(r[0] for r in dynamic) or 'none'}")

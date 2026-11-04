@@ -95,6 +95,29 @@ fn import_x_as_y_binds_module_root() {
 }
 
 #[test]
+fn long_chain_respects_local_module_shadowing() {
+    let module = "def f(): pass\n";
+    let app =
+        "import pkg.mod\ndef shadowed(pkg):\n    pkg.mod.f()\ndef control():\n    pkg.mod.f()\n";
+    let files = [("pkg/mod.py", module), ("app.py", app)]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (path, source))| {
+            let parsed = parse_source(source.as_bytes(), Lang::Python).unwrap();
+            extract_file(index, path, source.as_bytes(), &parsed)
+        })
+        .collect();
+    let resolution = resolve(files, Default::default());
+    let sites: Vec<_> = resolution
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == "calls" && edge.dst_name == "pkg.mod.f")
+        .map(|edge| edge.site_line)
+        .collect();
+    assert_eq!(sites, vec![5]);
+}
+
+#[test]
 fn factory_nested_constructor_types_nothing() {
     // R1: obj = factory(A()) must NOT type obj as A.
     let src = r#"class A:

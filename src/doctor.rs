@@ -119,9 +119,11 @@ fn report_orphans(root: &Path) {
     // A leftover lock file after a completed build is normal: the advisory
     // flock is released on drop. Only a lock another process still holds is
     // actionable, so probe it instead of testing path existence.
-    if let Ok(file) = std::fs::File::open(&lock) {
-        if matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)) {
-            println!("  lock file: {} held by a running build", lock.display());
+    if std::fs::symlink_metadata(&lock).is_ok_and(|meta| meta.is_file()) {
+        if let Ok(file) = std::fs::File::open(&lock) {
+            if matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)) {
+                println!("  lock file: {} held by a running build", lock.display());
+            }
         }
     }
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {

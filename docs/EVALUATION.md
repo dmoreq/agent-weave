@@ -10,9 +10,15 @@ The earlier introduction incorrectly described all results as measurements of th
 
 The earlier search table also conflated two metrics from `search_recall.py`. Mean query recall was **0.775**; pooled symbol recall was **22/28 = 0.786**. Queries have different expected-set sizes, so these values need not match.
 
+The historical search scorer used permissive substring matching. Its reported
+results have not been recomputed using the current identity-aware matching.
+The historical caller gate also counts an ambiguous candidate as a hit; the
+scorer now reports caller-site recall separately without that credit. Neither
+change retroactively verifies the private historical results.
+
 ## Summary
 
-Historical experiments found better navigation recall with aw and lower input-token use with query-first routing on one host. Feature-specific savings varied by task and host; test lookup and API inventory did not show savings in the measured tasks.
+Historical experiments found better navigation recall with aw and lower input-token use with query-first routing on one host. Feature-specific savings varied by task and host; test lookup and API inventory did not show savings in their narrow measured task shapes. A negative result in one shape is not a feature-level verdict.
 
 | Question | Reported finding | Scope |
 |---|---|---|
@@ -151,6 +157,18 @@ A later replication prohibited **all aw commands in controls**, unlike the initi
 The target was five runs per arm/host. The agy imports control instead reports the median of six correct runs, excluding one wrong answer and one forbidden-aw run. Other cells report five correct runs per arm; no token-saving claim accompanies this replication.
 
 Concurrent journals were contaminated, so control validity was checked from transcripts. Imports savings appeared on all three tested hosts; dependency-impact savings remained host-dependent. The small initial battery does not justify removing features that lacked savings on one task shape.
+
+### Task-shape results are not feature-level verdicts
+
+A negative delta means the feature did not reduce effort in that one task
+shape; it does not establish that the feature has no value. The feature
+review records the dispositions and the missing shapes: `tests` needs a
+depth>1 transitive test-selection task; API inventory needs a directory or
+multi-file export task; `clones` is partial in its seeded fixture; `dead`
+and `complexity` have no utility task. The review recorded no REMOVE
+decision; it demoted `search` filters and the `aw api` surface (later
+removed). See [the P8 feature review](baselines/reviews/R14-p8/README.md)
+and the [2026-11-02 utility battery](baselines/agent-utility-2026-11-02.md).
 
 ## 4. Static accuracy and coverage
 

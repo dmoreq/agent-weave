@@ -1,0 +1,1503 @@
+{
+  "revision": "c8eecb3b36f851c78e8a144c08809cb96de674d3",
+  "baseline_revision": "1439a9e63f6483343ce69bfa2cda1369ed451be3",
+  "date": "2026-11-04",
+  "platform": "macOS",
+  "rustc": "rustc 1.94.1 (e408947bf 2026-03-25)",
+  "gates": [
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "seconds": 1.08,
+      "output_tail": []
+    },
+    {
+      "command": "cargo clippy --locked --all-targets -- -D warnings",
+      "exit_code": 0,
+      "seconds": 19.8,
+      "output_tail": [
+        "    Checking hashlink v0.12.2",
+        "    Checking regex v1.13.1",
+        "    Checking fallible-streaming-iterator v0.1.9",
+        "    Checking fallible-iterator v0.3.0",
+        "    Checking bitflags v2.13.2",
+        "    Checking streaming-iterator v0.1.9",
+        "   Compiling agent-weave v0.3.0 (<scratch>/snapshot)",
+        "    Checking smallvec v1.16.4",
+        "    Checking rusqlite v0.41.1",
+        "    Checking ignore v0.4.34",
+        "    Checking clap v4.6.7",
+        "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.65s"
+      ]
+    },
+    {
+      "command": "cargo test --locked",
+      "exit_code": 0,
+      "seconds": 46.38,
+      "output_tail": [
+        "test missing_required_argument_returns_invalid_params ... ok",
+        "test resolve_empty_names_and_non_strings_are_tool_errors ... ok",
+        "test g10_initialize_tools_list_and_parity ... ok",
+        "",
+        "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s",
+        "",
+        "   Doc-tests agent_weave",
+        "",
+        "running 0 tests",
+        "",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        ""
+      ]
+    },
+    {
+      "command": "bash tests/scripts/allowlist_check.sh Cargo.lock",
+      "exit_code": 0,
+      "seconds": 0.13,
+      "output_tail": [
+        "G5 allowlist: every locked package is allowlisted — PASS"
+      ]
+    },
+    {
+      "command": "bash tests/scripts/write_path_check.sh",
+      "exit_code": 0,
+      "seconds": 0.34,
+      "output_tail": [
+        "G5 write-path: writes confined to aw_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"
+      ]
+    },
+    {
+      "command": "python3 -I tests/scripts/test_public_export.py",
+      "exit_code": 0,
+      "seconds": 1.32,
+      "output_tail": [
+        "........",
+        "----------------------------------------------------------------------",
+        "Ran 8 tests in 1.008s",
+        "",
+        "OK"
+      ]
+    }
+  ],
+  "rust_test_summaries": [
+    "test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s",
+    "test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s",
+    "test result: ok. 136 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.65s",
+    "test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+    "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.13s",
+    "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s"
+  ],
+  "original_replay": {
+    "checks": [
+      {
+        "id": "C1",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C1-second-scope",
+        "pass": true,
+        "note": "Opposite local-import control"
+      },
+      {
+        "id": "C2",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C3",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C4",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C5",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C6",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C6-method-edge",
+        "pass": true,
+        "note": "Nested class method relationship"
+      },
+      {
+        "id": "C7",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "C8",
+        "pass": true,
+        "note": "Original minimal fixture through CLI"
+      },
+      {
+        "id": "A2",
+        "pass": true,
+        "note": "All normalized edges equal after removed base"
+      },
+      {
+        "id": "A3",
+        "pass": false,
+        "note": "All normalized edges equal after candidate addition"
+      },
+      {
+        "id": "S2",
+        "pass": true,
+        "note": "Nonempty path-scoped unresolved report"
+      },
+      {
+        "id": "S3",
+        "pass": true,
+        "note": "invalid-utf8"
+      },
+      {
+        "id": "S4",
+        "pass": true,
+        "note": "oversized-boundary"
+      },
+      {
+        "id": "S4-later-newline",
+        "pass": true,
+        "note": "oversized-later"
+      },
+      {
+        "id": "S1-directory-symlink",
+        "pass": true,
+        "note": "External files unchanged; CLI exit=6"
+      },
+      {
+        "id": "S1-lock-symlink",
+        "pass": true,
+        "note": "External files unchanged; CLI exit=6"
+      },
+      {
+        "id": "S1-journal-symlink",
+        "pass": true,
+        "note": "External files unchanged; CLI exit=0"
+      },
+      {
+        "id": "S5",
+        "pass": true,
+        "note": "Root lock blocks invalidation without deleting index"
+      },
+      {
+        "id": "E1",
+        "pass": true,
+        "note": "(False, 'duplicate items after normalization')"
+      },
+      {
+        "id": "H1-missing",
+        "pass": true,
+        "note": "{'runid': 'host-arm-r1-S1', 'arm': 'arm', 'task': 'S1', 'ok': False, 'why': 'hops None != 0'}"
+      },
+      {
+        "id": "H1-null",
+        "pass": true,
+        "note": "{'runid': 'host-arm-r1-S1', 'arm': 'arm', 'task': 'S1', 'ok': False, 'why': 'hops None != 0'}"
+      },
+      {
+        "id": "H1-zero",
+        "pass": true,
+        "note": "{'runid': 'host-arm-r1-S1', 'arm': 'arm', 'task': 'S1', 'ok': True, 'why': ''}"
+      }
+    ],
+    "commands": [
+      {
+        "case": "local-imports",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=3 symbols=7 edges=10 parse_errors=0 unresolved=0 carried=0 wall=0.05s (walk=0.01s parse=0.00s extract=0.00s db=0.03s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "local-imports",
+        "arguments": [
+          "callers",
+          "a.f"
+        ],
+        "exit_code": 0,
+        "stdout": "app.py:3 app.left\n",
+        "stderr": ""
+      },
+      {
+        "case": "local-imports",
+        "arguments": [
+          "callers",
+          "b.f"
+        ],
+        "exit_code": 0,
+        "stdout": "app.py:7 app.right\n",
+        "stderr": ""
+      },
+      {
+        "case": "parameter-shadow",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=3 edges=2 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.02s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "parameter-shadow",
+        "arguments": [
+          "callers",
+          "target"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+      },
+      {
+        "case": "receiver-reassign",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=4 edges=4 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.02s parse=0.00s extract=0.00s db=0.03s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "receiver-reassign",
+        "arguments": [
+          "callers",
+          "A.m"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+      },
+      {
+        "case": "rust-factory",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=7 edges=7 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.01s parse=0.01s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "rust-factory",
+        "arguments": [
+          "callees",
+          "run"
+        ],
+        "exit_code": 0,
+        "stdout": "lib.rs:4 lib.A.make\n",
+        "stderr": ""
+      },
+      {
+        "case": "arrow-owner",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=3 edges=3 parse_errors=0 unresolved=0 carried=0 wall=0.04s (walk=0.01s parse=0.01s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "arrow-owner",
+        "arguments": [
+          "callers",
+          "helper"
+        ],
+        "exit_code": 0,
+        "stdout": "sample.ts:2 sample.run\n",
+        "stderr": ""
+      },
+      {
+        "case": "nested-class",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=5 edges=6 parse_errors=0 unresolved=0 carried=0 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "nested-class",
+        "arguments": [
+          "symbols",
+          "sample.py"
+        ],
+        "exit_code": 0,
+        "stdout": "sample.py:1 module sample\nsample.py:1 function sample.outer\nsample.py:2 class sample.outer.C\nsample.py:3 method sample.outer.C.m\nsample.py:4 method sample.outer.C.run\n",
+        "stderr": ""
+      },
+      {
+        "case": "nested-class",
+        "arguments": [
+          "callees",
+          "run"
+        ],
+        "exit_code": 0,
+        "stdout": "sample.py:3 sample.outer.C.m\n",
+        "stderr": ""
+      },
+      {
+        "case": "receiver-module-shadow",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=2 symbols=5 edges=5 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "receiver-module-shadow",
+        "arguments": [
+          "callers",
+          "tools.execute"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+      },
+      {
+        "case": "class-ambiguity",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=5 edges=4 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.02s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "class-ambiguity",
+        "arguments": [
+          "callees",
+          "run"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "aw: no-results: 0 callees found\n"
+      },
+      {
+        "case": "removed-base",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=5 edges=6 parse_errors=0 unresolved=0 carried=0 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "removed-base",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=5 edges=4 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "removed-base",
+        "arguments": [
+          "callers",
+          "A.foo"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+      },
+      {
+        "case": "removed-base",
+        "arguments": [
+          "build",
+          "--force"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=5 edges=4 parse_errors=0 unresolved=1 carried=0 wall=0.05s (walk=0.02s parse=0.00s extract=0.00s db=0.03s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "added-candidate",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=2 symbols=4 edges=5 parse_errors=0 unresolved=0 carried=0 wall=0.05s (walk=0.02s parse=0.00s extract=0.00s db=0.03s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "added-candidate",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=3 symbols=6 edges=7 parse_errors=0 unresolved=0 carried=1 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "added-candidate",
+        "arguments": [
+          "build",
+          "--force"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=3 symbols=6 edges=7 parse_errors=0 unresolved=0 carried=0 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "scoped-unresolved",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=1 carried=0 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "scoped-unresolved",
+        "arguments": [
+          "unresolved",
+          "--path",
+          "src"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: unresolved=1 callees in 1 files, 1 distinct names (internal=0)\ntop unresolved names:\n  receiver.unknown_method n=1\nsrc/sample.py unresolved=1\n",
+        "stderr": ""
+      },
+      {
+        "case": "scoped-unresolved",
+        "arguments": [
+          "mcp"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"error\":{\"code\":-32700,\"message\":\"parse error\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n",
+        "stderr": ""
+      },
+      {
+        "case": "scoped-unresolved",
+        "arguments": [
+          "mcp"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"error\":{\"code\":-32600,\"message\":\"frame too large\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n",
+        "stderr": ""
+      },
+      {
+        "case": "scoped-unresolved",
+        "arguments": [
+          "mcp"
+        ],
+        "exit_code": 0,
+        "stdout": "{\"error\":{\"code\":-32600,\"message\":\"frame too large\"},\"id\":null,\"jsonrpc\":\"2.0\"}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n",
+        "stderr": ""
+      },
+      {
+        "case": "directory-symlink",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 6,
+        "stdout": "",
+        "stderr": "aw: internal: refusing symlinked .aw directory: <scratch>/probes/directory-symlink/.aw\n"
+      },
+      {
+        "case": "lock-symlink",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 6,
+        "stdout": "",
+        "stderr": "aw: internal: refusing symlinked build lock: <scratch>/probes/lock-symlink/.aw/build.lock\n"
+      },
+      {
+        "case": "journal-symlink",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=0 carried=0 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "locked-invalidate",
+        "arguments": [
+          "build"
+        ],
+        "exit_code": 0,
+        "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=0 carried=0 wall=0.04s (walk=0.02s parse=0.00s extract=0.00s db=0.02s)\n",
+        "stderr": ""
+      },
+      {
+        "case": "locked-invalidate",
+        "arguments": [
+          "doctor",
+          "--invalidate"
+        ],
+        "exit_code": 4,
+        "stdout": "",
+        "stderr": "aw: locked: build in progress (pid 0) — retry after it exits\n"
+      }
+    ]
+  },
+  "new_probes": [
+    {
+      "case": "added-candidate-detail",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=2 symbols=4 edges=5 parse_errors=0 unresolved=0 carried=0 wall=0.05s (walk=0.02s parse=0.00s extract=0.00s db=0.03s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "added-candidate-detail",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=3 symbols=6 edges=7 parse_errors=0 unresolved=0 carried=1 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "added-candidate-detail",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "caller.py:4 [ambiguous] foo\n",
+      "stderr": ""
+    },
+    {
+      "case": "added-candidate-detail",
+      "arguments": [
+        "build",
+        "--force"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=3 symbols=6 edges=7 parse_errors=0 unresolved=0 carried=0 wall=0.04s (walk=0.02s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "added-candidate-detail",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "caller.py:4 [ambiguous] foo\n",
+      "stderr": ""
+    },
+    {
+      "case": "added-candidate-detail",
+      "incremental_only": [
+        [
+          "caller.py",
+          "caller",
+          "pkg/__init__.py",
+          "pkg",
+          "imports",
+          "EXTRACTED",
+          "pkg",
+          1
+        ],
+        [
+          "caller.py",
+          "caller",
+          "pkg/__init__.py",
+          "pkg.foo",
+          "imports",
+          "EXTRACTED",
+          "pkg.foo",
+          1
+        ]
+      ],
+      "fresh_only": [
+        [
+          "caller.py",
+          "caller",
+          "pkg.py",
+          "pkg",
+          "imports",
+          "EXTRACTED",
+          "pkg",
+          1
+        ],
+        [
+          "caller.py",
+          "caller",
+          "pkg.py",
+          "pkg.foo",
+          "imports",
+          "EXTRACTED",
+          "pkg.foo",
+          1
+        ]
+      ]
+    },
+    {
+      "case": "callers-closure",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=4 edges=7 parse_errors=0 unresolved=0 carried=0 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "callers-closure",
+      "arguments": [
+        "callers",
+        "target"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.py:2 sample.target\nsample.py:5 sample.branch\nsample.py:8 sample.origin\n",
+      "stderr": ""
+    },
+    {
+      "case": "callers-closure",
+      "arguments": [
+        "callers",
+        "target",
+        "--depth",
+        "2"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: transitive callers — resolved static call edges only; depth 2\nsample.py:5 sample.branch [depth=1]\nsample.py:8 sample.origin [depth=1]\n",
+      "stderr": ""
+    },
+    {
+      "case": "callers-closure",
+      "arguments": [
+        "callers",
+        "branch"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.py:9 sample.origin\n",
+      "stderr": ""
+    },
+    {
+      "case": "callers-closure",
+      "arguments": [
+        "callers",
+        "branch",
+        "--depth",
+        "2"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: transitive callers — resolved static call edges only; depth 2\nsample.py:9 sample.origin [depth=1]\n",
+      "stderr": ""
+    },
+    {
+      "case": "gap-inbound",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=2 symbols=4 edges=5 parse_errors=0 unresolved=1 carried=0 wall=0.05s (walk=0.02s parse=0.01s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "gap-inbound",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "a.py:3 a.entry\n",
+      "stderr": ""
+    },
+    {
+      "case": "gap-inbound",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=3 symbols=6 edges=5 parse_errors=0 unresolved=0 carried=1 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "gap-inbound",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callees found\n"
+    },
+    {
+      "case": "gap-inbound",
+      "arguments": [
+        "build",
+        "--force"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=3 symbols=6 edges=8 parse_errors=0 unresolved=0 carried=0 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "gap-inbound",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "a.py:3 a.entry\n",
+      "stderr": ""
+    },
+    {
+      "case": "removed-candidate",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=3 symbols=6 edges=7 parse_errors=0 unresolved=0 carried=0 wall=0.03s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "removed-candidate",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "caller.py:4 [ambiguous] foo\n",
+      "stderr": ""
+    },
+    {
+      "case": "removed-candidate",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=2 symbols=4 edges=6 parse_errors=0 unresolved=0 carried=2 wall=0.05s (walk=0.03s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "removed-candidate",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "caller.py:4 [ambiguous] foo\n",
+      "stderr": ""
+    },
+    {
+      "case": "removed-candidate",
+      "arguments": [
+        "build",
+        "--force"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=2 symbols=4 edges=5 parse_errors=0 unresolved=0 carried=0 wall=0.06s (walk=0.03s parse=0.00s extract=0.00s db=0.03s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "removed-candidate",
+      "arguments": [
+        "callees",
+        "invoke"
+      ],
+      "exit_code": 0,
+      "stdout": "pkg.py:1 pkg.foo\n",
+      "stderr": ""
+    },
+    {
+      "case": "ancestor-symlink",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=0 carried=0 wall=0.04s (walk=0.01s parse=0.00s extract=0.00s db=0.02s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "ancestor-symlink",
+      "arguments": [
+        "symbols",
+        "pkg/a.py"
+      ],
+      "exit_code": 0,
+      "stdout": "pkg/a.py:1 module pkg.a\npkg/a.py:1 function pkg.a.external_marker\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW1",
+      "case": "assignment-shadow",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=3 edges=3 parse_errors=0 unresolved=0 carried=0 wall=0.59s (walk=0.08s parse=0.01s extract=0.00s db=0.49s)\n",
+      "stderr": "",
+      "sources": {
+        "sample.py": "def target(): pass\n\ndef go():\n    target = None\n    target()\n"
+      }
+    },
+    {
+      "id": "CNEW1",
+      "case": "assignment-shadow",
+      "arguments": [
+        "callers",
+        "target"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.py:5 sample.go\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW2",
+      "case": "local-qualified-import",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=2 symbols=7 edges=9 parse_errors=0 unresolved=2 carried=0 wall=0.34s (walk=0.09s parse=0.00s extract=0.00s db=0.24s)\n",
+      "stderr": "",
+      "sources": {
+        "helpers.py": "def run(): pass\n\nclass C:\n    def run(self): pass\n",
+        "app.py": "def go():\n    import helpers as h\n    h.run()\n\ndef constructed():\n    from helpers import C\n    value = C()\n    value.run()\n"
+      }
+    },
+    {
+      "id": "CNEW2",
+      "case": "local-qualified-import",
+      "arguments": [
+        "callees",
+        "go"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callees found\n"
+    },
+    {
+      "id": "CNEW2",
+      "case": "local-qualified-import",
+      "arguments": [
+        "callees",
+        "constructed"
+      ],
+      "exit_code": 0,
+      "stdout": "helpers.py:3 helpers.C\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW3",
+      "case": "typescript-receivers",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=5 edges=5 parse_errors=0 unresolved=2 carried=0 wall=0.18s (walk=0.07s parse=0.00s extract=0.00s db=0.11s)\n",
+      "stderr": "",
+      "sources": {
+        "sample.ts": "class C { run() {} }\nfunction typed(value: C) { value.run(); }\nfunction constructed() {\n  const value = new C();\n  value.run();\n}\n"
+      }
+    },
+    {
+      "id": "CNEW3",
+      "case": "typescript-receivers",
+      "arguments": [
+        "callers",
+        "C.run"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+    },
+    {
+      "id": "CNEW3",
+      "case": "typescript-receivers",
+      "arguments": [
+        "callees",
+        "typed"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callees found\n"
+    },
+    {
+      "id": "CNEW3",
+      "case": "typescript-receivers",
+      "arguments": [
+        "callees",
+        "constructed"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.ts:1 sample.C\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW4",
+      "case": "typescript-default",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=2 symbols=4 edges=3 parse_errors=0 unresolved=1 carried=0 wall=0.10s (walk=0.05s parse=0.00s extract=0.00s db=0.04s)\n",
+      "stderr": "",
+      "sources": {
+        "worker.ts": "export default function work() {}\n",
+        "app.ts": "import execute from \"./worker\";\nexport function go() { execute(); }\n"
+      }
+    },
+    {
+      "id": "CNEW4",
+      "case": "typescript-default",
+      "arguments": [
+        "callers",
+        "worker.work"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+    },
+    {
+      "id": "CNEW4",
+      "case": "typescript-default",
+      "arguments": [
+        "callees",
+        "go"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callees found\n"
+    },
+    {
+      "id": "CNEW5",
+      "case": "rust-constructors",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=7 edges=7 parse_errors=0 unresolved=2 carried=0 wall=0.07s (walk=0.03s parse=0.00s extract=0.00s db=0.03s)\n",
+      "stderr": "",
+      "sources": {
+        "lib.rs": "struct A { value: i32 }\nstruct B;\nimpl A {\n    fn new() -> Self { Self { value: 0 } }\n    fn render(&self) {}\n    fn go() {\n        let literal = A { value: 1 };\n        literal.render();\n        let constructed = Self::new();\n        constructed.render();\n    }\n}\nimpl B { fn render(&self) {} }\n"
+      }
+    },
+    {
+      "id": "CNEW5",
+      "case": "rust-constructors",
+      "arguments": [
+        "callees",
+        "go"
+      ],
+      "exit_code": 0,
+      "stdout": "lib.rs:4 lib.A.new\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW5",
+      "case": "rust-constructors",
+      "arguments": [
+        "callers",
+        "A.render"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+    },
+    {
+      "id": "CNEW6",
+      "case": "ordered-bindings",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=6 edges=9 parse_errors=0 unresolved=0 carried=0 wall=0.10s (walk=0.03s parse=0.00s extract=0.00s db=0.07s)\n",
+      "stderr": "",
+      "sources": {
+        "sample.py": "class A:\n    def run(self): pass\n\nclass B:\n    def run(self): pass\n\ndef go():\n    value = A()\n    value.run()\n    value = B()\n    value.run()\n"
+      }
+    },
+    {
+      "id": "CNEW6",
+      "case": "ordered-bindings",
+      "arguments": [
+        "callers",
+        "A.run"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+    },
+    {
+      "id": "CNEW6",
+      "case": "ordered-bindings",
+      "arguments": [
+        "callers",
+        "B.run"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.py:9 sample.go\nsample.py:11 sample.go\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW7",
+      "case": "annotation-reassign",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=6 edges=7 parse_errors=0 unresolved=0 carried=0 wall=0.05s (walk=0.02s parse=0.00s extract=0.00s db=0.03s)\n",
+      "stderr": "",
+      "sources": {
+        "sample.py": "class A:\n    def run(self): pass\n\nclass B:\n    def run(self): pass\n\ndef go(value: A):\n    value = B()\n    value.run()\n"
+      }
+    },
+    {
+      "id": "CNEW7",
+      "case": "annotation-reassign",
+      "arguments": [
+        "callees",
+        "go"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.py:2 sample.A.run\nsample.py:4 sample.B\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW8",
+      "case": "arrow-parameter",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=3 edges=3 parse_errors=0 unresolved=0 carried=0 wall=0.11s (walk=0.04s parse=0.00s extract=0.00s db=0.07s)\n",
+      "stderr": "",
+      "sources": {
+        "sample.js": "function target() {}\nconst go = (target) => target();\n"
+      }
+    },
+    {
+      "id": "CNEW8",
+      "case": "arrow-parameter",
+      "arguments": [
+        "callers",
+        "target"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.js:2 sample.go\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW9",
+      "case": "nested-self-shadow",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=5 edges=6 parse_errors=0 unresolved=0 carried=0 wall=0.12s (walk=0.05s parse=0.00s extract=0.00s db=0.06s)\n",
+      "stderr": "",
+      "sources": {
+        "sample.py": "class C:\n    def run(self): pass\n    def outer(self, other):\n        def inner(self):\n            self.run()\n        inner(other)\n"
+      }
+    },
+    {
+      "id": "CNEW9",
+      "case": "nested-self-shadow",
+      "arguments": [
+        "callers",
+        "C.run"
+      ],
+      "exit_code": 0,
+      "stdout": "sample.py:5 sample.C.outer.inner\n",
+      "stderr": ""
+    },
+    {
+      "id": "CNEW10",
+      "case": "rust-inline-import",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=9 edges=8 parse_errors=0 unresolved=0 carried=0 wall=0.09s (walk=0.04s parse=0.00s extract=0.00s db=0.04s)\n",
+      "stderr": "",
+      "sources": {
+        "lib.rs": "mod a { pub fn target() {} }\nmod b { pub fn target() {} }\nmod left {\n    use crate::a::target;\n    pub fn go() { target(); }\n}\nmod right {\n    use crate::b::target;\n    pub fn go() { target(); }\n}\n"
+      }
+    },
+    {
+      "id": "CNEW10",
+      "case": "rust-inline-import",
+      "arguments": [
+        "callers",
+        "lib.a.target"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+    },
+    {
+      "id": "CNEW10",
+      "case": "rust-inline-import",
+      "arguments": [
+        "callers",
+        "lib.b.target"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "aw: no-results: 0 callers found (dynamic dispatch possible — grep fallback recommended)\n"
+    },
+    {
+      "case": "hardlink-lock",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=0 carried=0 wall=0.13s (walk=0.03s parse=0.02s extract=0.00s db=0.06s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "hardlink-lock",
+      "sentinel_changed": true
+    },
+    {
+      "case": "fifo-writer",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=0 carried=0 wall=0.07s (walk=0.02s parse=0.00s extract=0.00s db=0.05s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "fifo-writer",
+      "arguments": [
+        "symbols",
+        "sample.py"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "stdout": "sample.py:1 module sample\nsample.py:1 function sample.task\n",
+      "stderr": ""
+    },
+    {
+      "case": "fifo-reader",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "timed_out": false,
+      "stdout": "aw: built index: files=1 symbols=2 edges=1 parse_errors=0 unresolved=0 carried=0 wall=0.06s (walk=0.02s parse=0.00s extract=0.00s db=0.03s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "fifo-reader",
+      "arguments": [
+        "doctor"
+      ],
+      "exit_code": -9,
+      "timed_out": true,
+      "stdout": "aw: doctor report for <scratch>/probes/fifo-reader\n  integrity: ok\n  schema version: 7\n  aw version: 0.3.0\n  grammar version: py-0.25.0+ts-0.23.2+js-0.25.0+rs-0.23.3\n  built at: 1793741665095\n  source rev: unknown\n  parse coverage: 0/1 files with errors (0.0%)\n  stale ratio: 0.0% of indexed files changed on disk\n  db size: 110592 bytes (target < 52428800)\n",
+      "stderr": ""
+    },
+    {
+      "case": "export-symlink",
+      "external_sentinel_changed": true,
+      "before_sha256": "1460194d56839555c998586fd8544c7d9fb95aeabc80b84eeff28264febbe5dc",
+      "after_sha256": "00db9662e355ae98000dc2da06c942b5b12d70f875b33fffb97d8ab5f2ef4127"
+    },
+    {
+      "case": "allowlist-missing-input",
+      "exit_code": 0,
+      "stdout": "G5 allowlist: every locked package is allowlisted — PASS\n",
+      "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\nFileNotFoundError: [Errno 2] No such file or directory: '<scratch>/missing.lock'\n"
+    },
+    {
+      "case": "carried-sql-limit",
+      "exit_code": 0,
+      "stdout": "carried_paths=1000 result=ok\ncarried_paths=32767 result=aw: internal: database error: too many SQL variables in SELECT s.qualname, e.dst_name",
+      "stderr": "",
+      "stdout_sha256": "0565dcce455b1bd59c757f2515d92c53ba5be681fc33579eb8fa34b53de9c211",
+      "stdout_bytes": 65879,
+      "stdout_truncated": true
+    },
+    {
+      "case": "transitive-verify",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=4 edges=5 parse_errors=0 unresolved=0 carried=0 wall=0.35s (walk=0.03s parse=0.02s extract=0.01s db=0.27s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "transitive-verify",
+      "arguments": [
+        "callers",
+        "leaf",
+        "--depth",
+        "2"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: transitive callers — resolved static call edges only; depth 2\nsample.py:5 sample.middle [depth=1]\nsample.py:8 sample.origin [depth=2]\n",
+      "stderr": ""
+    },
+    {
+      "case": "transitive-verify",
+      "arguments": [
+        "usage",
+        "--verify"
+      ],
+      "exit_code": 0,
+      "stdout": "aw usage --verify: 2 pointers sampled from 1 entries: ok=1 changed=0 fail=1\nFAIL sample.py:8 sample.origin [depth=2] (line does not mention 'leaf')\n",
+      "stderr": ""
+    },
+    {
+      "case": "search-overcount",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=3 symbols=6 edges=3 parse_errors=0 unresolved=0 carried=0 wall=0.06s (walk=0.01s parse=0.00s extract=0.00s db=0.05s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "search-overcount",
+      "arguments": [
+        "search",
+        "run",
+        "--limit",
+        "1"
+      ],
+      "exit_code": 0,
+      "stdout": "a.py:1 a.run def run()\nshowing 1 of 5\n",
+      "stderr": "[aw] capped at 1 results (5 total)\n"
+    },
+    {
+      "case": "rust-inline-import-src",
+      "arguments": [
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "aw: built index: files=1 symbols=9 edges=14 parse_errors=0 unresolved=0 carried=0 wall=0.07s (walk=0.01s parse=0.02s extract=0.00s db=0.04s)\n",
+      "stderr": ""
+    },
+    {
+      "case": "rust-inline-import-src",
+      "arguments": [
+        "callees",
+        "left.go"
+      ],
+      "exit_code": 0,
+      "stdout": "src/lib.rs:2 src.b.target\n",
+      "stderr": ""
+    },
+    {
+      "case": "rust-inline-import-src",
+      "arguments": [
+        "callees",
+        "right.go"
+      ],
+      "exit_code": 0,
+      "stdout": "src/lib.rs:2 src.b.target\n",
+      "stderr": ""
+    },
+    {
+      "case": "rust-inline-import-src",
+      "arguments": [
+        "symbols",
+        "src/lib.rs"
+      ],
+      "exit_code": 0,
+      "stdout": "src/lib.rs:1 module src\nsrc/lib.rs:1 module src.a\nsrc/lib.rs:1 function src.a.target\nsrc/lib.rs:2 module src.b\nsrc/lib.rs:2 function src.b.target\nsrc/lib.rs:3 module src.left\nsrc/lib.rs:5 function src.left.go\nsrc/lib.rs:7 module src.right\nsrc/lib.rs:9 function src.right.go\n",
+      "stderr": ""
+    },
+    {
+      "case": "scoped-unresolved",
+      "arguments": [
+        "mcp"
+      ],
+      "exit_code": 0,
+      "stdout": "{\"id\":null,\"jsonrpc\":\"2.0\",\"result\":{}}\n{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{}}\n",
+      "stderr": ""
+    },
+    {
+      "case": "impact-rowid-order",
+      "exit_code": 0,
+      "stdout": "module_id=1 function_id=2 caller.py:1 [imports depth=1]\nmodule_id=2 function_id=1 caller.py:1 [calls depth=1]\n",
+      "stderr": ""
+    }
+  ],
+  "final_fixture_sources": {
+    "rust-constructors": {
+      "lib.rs": "struct A { value: i32 }\nstruct B;\nimpl A {\n    fn new() -> Self { Self { value: 0 } }\n    fn render(&self) {}\n    fn go() {\n        let literal = A { value: 1 };\n        literal.render();\n        let constructed = Self::new();\n        constructed.render();\n    }\n}\nimpl B { fn render(&self) {} }\n"
+    },
+    "journal-symlink": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "added-candidate": {
+      "caller.py": "from pkg import foo\n\ndef invoke():\n    foo()\n",
+      "pkg.py": "def foo():\n    pass\n",
+      "pkg/__init__.py": "def foo():\n    pass\n"
+    },
+    "removed-candidate": {
+      "caller.py": "from pkg import foo\n\ndef invoke():\n    foo()\n",
+      "pkg.py": "def foo():\n    pass\n"
+    },
+    "fifo-reader": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "locked-invalidate": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "parameter-shadow": {
+      "sample.py": "def target(): pass\n\ndef run(target):\n    target()\n"
+    },
+    "lock-symlink": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "gap-inbound": {
+      "newmod.py": "def helper():\n    pass\n",
+      "a.py": "import newmod\n\ndef entry():\n    return newmod.helper()\n",
+      "b.py": "from a import entry\n\ndef invoke():\n    entry()\n"
+    },
+    "typescript-receivers": {
+      "sample.ts": "class C { run() {} }\nfunction typed(value: C) { value.run(); }\nfunction constructed() {\n  const value = new C();\n  value.run();\n}\n"
+    },
+    "ancestor-external": {
+      "a.py": "def external_marker():\n    pass\n"
+    },
+    "added-candidate-detail": {
+      "caller.py": "from pkg import foo\n\ndef invoke():\n    foo()\n",
+      "pkg.py": "def foo():\n    pass\n",
+      "pkg/__init__.py": "def foo():\n    pass\n"
+    },
+    "annotation-reassign": {
+      "sample.py": "class A:\n    def run(self): pass\n\nclass B:\n    def run(self): pass\n\ndef go(value: A):\n    value = B()\n    value.run()\n"
+    },
+    "directory-symlink": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "scoped-unresolved": {
+      "src/sample.py": "def task(receiver):\n    receiver.unknown_method()\n"
+    },
+    "rust-inline-import-src": {
+      "src/lib.rs": "mod a { pub fn target() {} }\nmod b { pub fn target() {} }\nmod left {\n    use crate::a::target;\n    pub fn go() { target(); }\n}\nmod right {\n    use crate::b::target;\n    pub fn go() { target(); }\n}\n"
+    },
+    "ordered-bindings": {
+      "sample.py": "class A:\n    def run(self): pass\n\nclass B:\n    def run(self): pass\n\ndef go():\n    value = A()\n    value.run()\n    value = B()\n    value.run()\n"
+    },
+    "arrow-parameter": {
+      "sample.js": "function target() {}\nconst go = (target) => target();\n"
+    },
+    "assignment-shadow": {
+      "sample.py": "def target(): pass\n\ndef go():\n    target = None\n    target()\n"
+    },
+    "local-imports": {
+      "a.py": "def f(): pass\n",
+      "b.py": "def f(): pass\n",
+      "app.py": "def left():\n    from a import f\n    f()\n\ndef right():\n    from b import f\n    f()\n"
+    },
+    "hardlink-lock": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "callers-closure": {
+      "sample.py": "def target():\n    target()\n\ndef branch():\n    target()\n\ndef origin():\n    target()\n    branch()\n"
+    },
+    "rust-factory": {
+      "lib.rs": "struct A;\nstruct B;\nimpl A {\n    fn make() -> B { B }\n    fn render(&self) {}\n}\nimpl B { fn render(&self) {} }\nfn run() {\n    let value = A::make();\n    value.render();\n}\n"
+    },
+    "removed-base": {
+      "sample.py": "class A:\n    def foo(self):\n        pass\n\nclass B:\n    pass\n\ndef invoke(b: B):\n    b.foo()\n"
+    },
+    "arrow-owner": {
+      "sample.ts": "function helper() {}\nconst run = () => helper();\n"
+    },
+    "export-symlink-source": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "search-overcount": {
+      "a.py": "def run():\n    pass\n",
+      "c.py": "def run():\n    pass\n",
+      "b.py": "def run():\n    pass\n"
+    },
+    "nested-self-shadow": {
+      "sample.py": "class C:\n    def run(self): pass\n    def outer(self, other):\n        def inner(self):\n            self.run()\n        inner(other)\n"
+    },
+    "class-ambiguity": {
+      "sample.py": "if flag:\n    class A:\n        def render(self): pass\nelse:\n    class A:\n        pass\n\ndef run(value: A):\n    value.render()\n"
+    },
+    "receiver-module-shadow": {
+      "tools.py": "def execute(): pass\n",
+      "app.py": "import tools\nfrom external import External\n\nclass C(External):\n    pass\n\ndef run():\n    tools = C()\n    tools.execute()\n"
+    },
+    "transitive-verify": {
+      "sample.py": "def leaf():\n    pass\n\ndef middle():\n    leaf()\n\ndef origin():\n    middle()\n"
+    },
+    "receiver-reassign": {
+      "sample.py": "class A:\n    def m(self): pass\n\ndef run(other):\n    obj = A()\n    obj = other\n    obj.m()\n"
+    },
+    "nested-class": {
+      "sample.py": "def outer():\n    class C:\n        def m(self): pass\n        def run(self):\n            self.m()\n    return C()\n"
+    },
+    "typescript-default": {
+      "app.ts": "import execute from \"./worker\";\nexport function go() { execute(); }\n",
+      "worker.ts": "export default function work() {}\n"
+    },
+    "export-symlink-output": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "fifo-writer": {
+      "sample.py": "def task():\n    pass\n"
+    },
+    "local-qualified-import": {
+      "app.py": "def go():\n    import helpers as h\n    h.run()\n\ndef constructed():\n    from helpers import C\n    value = C()\n    value.run()\n",
+      "helpers.py": "def run(): pass\n\nclass C:\n    def run(self): pass\n"
+    },
+    "rust-inline-import": {
+      "lib.rs": "mod a { pub fn target() {} }\nmod b { pub fn target() {} }\nmod left {\n    use crate::a::target;\n    pub fn go() { target(); }\n}\nmod right {\n    use crate::b::target;\n    pub fn go() { target(); }\n}\n"
+    }
+  },
+  "thin_library_probe_sources": {
+    "carried_probe.rs": "use std::collections::HashSet;\n\nfn main() {\n    let connection = rusqlite::Connection::open_in_memory().unwrap();\n    connection.execute_batch(include_str!(\"snapshot/schema.sql\")).unwrap();\n    for count in [1000, 32767] {\n        let paths: HashSet<String> = (0..count).map(|index| format!(\"file_{index}.py\")).collect();\n        match agent_weave::db::load_carried(&connection, &paths) {\n            Ok(_) => println!(\"carried_paths={count} result=ok\"),\n            Err(error) => println!(\"carried_paths={count} result={error}\"),\n        }\n    }\n}\n",
+    "impact_probe.rs": "use std::path::Path;\n\nfn main() {\n    for (module_id, function_id) in [(1, 2), (2, 1)] {\n        let connection = rusqlite::Connection::open_in_memory().unwrap();\n        connection.execute_batch(include_str!(\"snapshot/schema.sql\")).unwrap();\n        connection.execute_batch(include_str!(\"snapshot/schema_indexes.sql\")).unwrap();\n        connection.execute_batch(\n            \"INSERT INTO files(id,path,size,mtime,content_hash,parse_status,error_nodes)\n             VALUES(1,'target.py',0,0,0,'ok',0),(2,'caller.py',0,0,0,'ok',0);\"\n        ).unwrap();\n        connection.execute(\n            \"INSERT INTO symbols(id,kind,name,qualname,file_id,file_path,line_start,line_end)\n             VALUES(?1,'module','target','target',1,'target.py',1,1)\", [module_id]\n        ).unwrap();\n        connection.execute(\n            \"INSERT INTO symbols(id,kind,name,qualname,file_id,file_path,line_start,line_end)\n             VALUES(?1,'function','f','target.f',1,'target.py',1,1)\", [function_id]\n        ).unwrap();\n        connection.execute_batch(\n            \"INSERT INTO symbols(id,kind,name,qualname,file_id,file_path,line_start,line_end)\n             VALUES(3,'module','caller','caller',2,'caller.py',1,1);\"\n        ).unwrap();\n        for (destination, name, kind) in [\n            (module_id, \"target\", \"imports\"),\n            (function_id, \"target.f\", \"imports\"),\n            (function_id, \"target.f\", \"calls\"),\n        ] {\n            connection.execute(\n                \"INSERT INTO edges(src_id,dst_id,dst_name,kind,confidence,site_line)\n                 VALUES(3,?1,?2,?3,'EXTRACTED',1)\",\n                rusqlite::params![destination, name, kind]\n            ).unwrap();\n        }\n        let output = agent_weave::query::impact(\n            &connection, Path::new(\".\"), \"target.py\", 50, false, 2, \"all\", false, true\n        ).unwrap();\n        for pointer in output.pointers {\n            println!(\"module_id={module_id} function_id={function_id} {}\", pointer.render());\n        }\n    }\n}\n"
+  },
+  "external_action_metadata": {
+    "url": "https://raw.githubusercontent.com/taiki-e/install-action/1919c4a95903d2c33e4a221102edca87309fc14b/action.yml",
+    "method": "Read-only HTTP fetch of pinned public metadata; action not installed or executed.",
+    "excerpt": "inputs:\n  tool:\n    description: Tools to install (whitespace or comma separated list)\n    required: true\n    # default: #publish:tool\n"
+  },
+  "coverage_counts": {
+    "metadata-only": 19,
+    "full-read": 63,
+    "historical-inventoried-or-bounded-sample": 1932,
+    "collection-reviewed-no-per-file-read-spans": 39,
+    "contract-sections-reviewed": 5
+  },
+  "closure_counts": {
+    "VERIFIED_ORIGINAL_CASE": 29,
+    "PARTIAL": 1,
+    "IMPROVED_LIMITED": 2,
+    "DEFERRED": 5
+  },
+  "review_limitations": [
+    "Two peer requests failed provider quota and were not counted as completed.",
+    "Successful fallback peers used GPT-6.1 Terra.",
+    "CNEW7/CNEW10 peer wording contested with explicit source/output/layout evidence in the register.",
+    "No new agent-utility benchmark, OOM probe, Linux/MSRV run, or live release.",
+    "Historical artifacts not comprehensively revalidated."
+  ],
+  "final_workspace_guard": {
+    "status": "FAIL_CONCURRENT_TRACKED_CHANGES",
+    "observed_modified_paths": [
+      "README.md",
+      "docs/EVALUATION.md",
+      "schema.sql",
+      "src/extract.rs",
+      "src/extract/walk.rs",
+      "src/mcp.rs"
+    ],
+    "scope": "Snapshot c8eecb3 remains hash-verified. Concurrent uncommitted changes were not reviewed, tested, reverted or overwritten."
+  }
+}

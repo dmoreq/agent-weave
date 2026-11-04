@@ -29,6 +29,16 @@ class PublicExportTests(unittest.TestCase):
             self.assertFalse((scripts / "public_export.py").exists())
             self.assertFalse((scripts / "test_public_export.py").exists())
 
+    def test_scrub_rejects_symlink_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            sentinel = output / "sentinel.txt"
+            sentinel.write_text("keep\n")
+            (output / "link.md").symlink_to(sentinel)
+            with self.assertRaises(SystemExit):
+                public_export.scrub(output)
+            self.assertEqual(sentinel.read_text(), "keep\n")
+
     def test_export_excludes_reports_and_baselines(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -150,6 +160,27 @@ class PublicExportTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 public_export.export(source, out)
             self.assertEqual(sentinel.read_text(), "keep\n")
+
+    def test_allowlist_checker_fails_closed(self):
+        script = Path(__file__).with_name("allowlist_check.sh")
+        missing = subprocess.run(
+            ["bash", str(script), "/definitely/missing.lock"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("cannot read input", missing.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            lock = Path(temporary) / "Cargo.lock"
+            lock.write_text('[[package]]\nname = "definitely-not-allowed"\n')
+            unlisted = subprocess.run(
+                ["bash", str(script), str(lock)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(unlisted.returncode, 0)
+            self.assertIn("definitely-not-allowed", unlisted.stderr)
 
 
 if __name__ == "__main__":

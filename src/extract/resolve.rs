@@ -7,6 +7,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::*;
 
+/// (scope_func, var) -> ordered (site_line, constructor target chain).
+type BindingEvents = HashMap<(String, String), Vec<(usize, Vec<String>)>>;
+
 struct FileCtx {
     module: String,
     lang: Lang,
@@ -16,11 +19,13 @@ struct FileCtx {
     aliases: HashMap<String, Vec<(String, ImportTarget)>>,
     /// (scope_func, var) parameters/locals that shadow outer names.
     locals: HashSet<(String, String)>,
+    /// Anonymous callback parameters, scoped by source line range.
+    arrow_params: Vec<ArrowParam>,
     stars: Vec<(String, usize)>,
     from_import_parents: HashSet<(usize, String)>,
     unresolved_inherits: Vec<(String, usize)>,
-    /// (scope_func, var) -> constructor target chain; later assignment wins.
-    assignments: HashMap<(String, String), Vec<String>>,
+    /// (scope_func, var) -> ordered (site_line, constructor target chain).
+    assignments: BindingEvents,
     /// (scope_func, var) -> annotation chain.
     params: HashMap<(String, String), Vec<String>>,
     /// (class qualname, field) -> constructor target chain.
@@ -151,9 +156,15 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             aliases.entry(alias).or_default().push((scope, target));
         }
         let locals: HashSet<(String, String)> = fx.locals.into_iter().collect();
-        let mut assignments = HashMap::new();
+        let mut assignments: BindingEvents = HashMap::new();
         for a in fx.assignments {
-            assignments.insert((a.scope_func, a.var), a.target_dotted);
+            assignments
+                .entry((a.scope_func, a.var))
+                .or_default()
+                .push((a.site_line, a.target_dotted));
+        }
+        for events in assignments.values_mut() {
+            events.sort_by_key(|(line, _)| *line);
         }
         let mut params = HashMap::new();
         for p in fx.params {
@@ -171,6 +182,7 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
             module_sym_idx: base,
             aliases,
             locals,
+            arrow_params: fx.arrow_params,
             stars: fx.stars,
             from_import_parents: fx.from_import_parents,
             unresolved_inherits: fx.unresolved_inherits,
@@ -443,22 +455,43 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
                         continue; // the star edge below is the canonical one
                     }
                     if let Some(dsts) = t.by_qualname.get(path) {
-                        let module = dsts
+                        let modules: Vec<usize> = dsts
                             .iter()
                             .copied()
-                            .find(|&i| t.symbols[i].kind == "module");
-                        let fallback = dsts
+                            .filter(|&i| t.symbols[i].kind == "module")
+                            .collect();
+                        let others: Vec<usize> = dsts
                             .iter()
                             .copied()
-                            .find(|&i| t.symbols[i].kind != "module");
-                        if let Some(dst) = module.or(fallback) {
-                            if dst != fctx.module_sym_idx {
+                            .filter(|&i| t.symbols[i].kind != "module")
+                            .collect();
+                        let candidates = if modules.is_empty() {
+                            &others
+                        } else {
+                            &modules
+                        };
+                        match candidates.as_slice() {
+                            [dst] if *dst != fctx.module_sym_idx => {
                                 t.edges.push(NewEdge {
                                     src_idx: fctx.module_sym_idx,
-                                    dst_idx: Some(dst),
+                                    dst_idx: Some(*dst),
                                     dst_name: path.clone(),
                                     kind: "imports",
                                     confidence: "EXTRACTED",
+                                    site_line: cand.line,
+                                });
+                            }
+                            [] => {}
+                            _ => {
+                                // Duplicate module/symbol candidates are
+                                // genuinely ambiguous; never pick one by
+                                // fresh/carried insertion order.
+                                t.edges.push(NewEdge {
+                                    src_idx: fctx.module_sym_idx,
+                                    dst_idx: None,
+                                    dst_name: path.clone(),
+                                    kind: "imports",
+                                    confidence: "AMBIGUOUS",
                                     site_line: cand.line,
                                 });
                             }
@@ -768,6 +801,11 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             let method = chain[1].clone();
             // self/cls (Python) and this (TS) inside a class body.
             if chain[0] == "self" || chain[0] == "cls" || chain[0] == "this" {
+                // An explicit self/cls/this parameter of a nested function
+                // shadows the owning method's implicit receiver.
+                if is_local_binding(fctx, site, &chain[0]) {
+                    return Outcome::Unresolved;
+                }
                 let Some(class_qn) = &site.scope_class else {
                     return Outcome::Unresolved;
                 };
@@ -778,7 +816,9 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                     if let Some(field_chain) =
                         fctx.self_fields.get(&(class_qn.clone(), chain[1].clone()))
                     {
-                        if let Some(field_class) = resolve_class_of_chain(t, fi, field_chain) {
+                        if let Some(field_class) =
+                            resolve_class_of_chain(t, fi, field_chain, &site.scope_func)
+                        {
                             return mro_outcome(t, &field_class, &chain[2]);
                         }
                     }
@@ -803,19 +843,25 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             // Receiver typing takes precedence over module interpretation
             // (Amendment 7b): a local binding shadows a same-named module.
             if chain.len() == 2 {
-                if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
+                if let Some(var_class) =
+                    resolve_var_class(t, fi, &chain[0], &site.scope_func, site.line)
+                {
                     // A typed local receiver shadows a same-named module even
                     // when the method miss leaves the call unresolved.
                     return mro_outcome(t, &var_class, &method);
                 }
+            }
+            // A local binding shadows a module even in longer attribute chains.
+            if is_local_binding(fctx, site, &chain[0]) {
+                return Outcome::Unresolved;
             }
             // Class-attribute call: Class.m(...) or pkg.Class.m(...).
             // R1 fix: a module-bound first segment (import x as y / from pkg
             // import mod) must NOT enter the class branch — `mod.K()` is a
             // constructor through the module path, not a method lookup. And a
             // class-path miss falls through to the module path.
-            if !chain_is_module_start(t, fi, &chain[0]) {
-                if let Some(class_qn) = resolve_class_of_chain(t, fi, chain) {
+            if !chain_is_module_start(t, fi, &chain[0], &site.scope_func) {
+                if let Some(class_qn) = resolve_class_of_chain(t, fi, chain, &site.scope_func) {
                     if chain.len() == 2 {
                         let out = mro_outcome(t, &class_qn, &method);
                         if !matches!(out, Outcome::Unresolved) {
@@ -827,9 +873,12 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 // (Amendment 18). Resolve the single segment as a class, then
                 // the method through its MRO.
                 if chain.len() == 2 {
-                    if let Some(class_qn) =
-                        resolve_class_of_chain(t, fi, std::slice::from_ref(&chain[0]))
-                    {
+                    if let Some(class_qn) = resolve_class_of_chain(
+                        t,
+                        fi,
+                        std::slice::from_ref(&chain[0]),
+                        &site.scope_func,
+                    ) {
                         let out = mro_outcome(t, &class_qn, &method);
                         if !matches!(out, Outcome::Unresolved) {
                             return out;
@@ -838,7 +887,9 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 }
                 // Receiver typed by constructor assignment or annotation.
                 if chain.len() == 2 {
-                    if let Some(var_class) = resolve_var_class(t, fi, &chain[0], &site.scope_func) {
+                    if let Some(var_class) =
+                        resolve_var_class(t, fi, &chain[0], &site.scope_func, site.line)
+                    {
                         return mro_outcome(t, &var_class, &method);
                     }
                 }
@@ -878,7 +929,8 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
             // Rust crate::path::call — map crate:: to the crate root dir.
             if chain[0] == "crate" {
                 if let Some(root) = &fctx.crate_root {
-                    let out = module_chain_outcome(t, fi, &root_chain(root, chain));
+                    let out =
+                        module_chain_outcome(t, fi, &root_chain(root, chain), &site.scope_func);
                     if !matches!(out, Outcome::Unresolved) {
                         return out;
                     }
@@ -897,7 +949,7 @@ fn raw_resolve_call(t: &Tables, fi: usize, site: &CallSite) -> Outcome {
                 return Outcome::Unresolved;
             }
             // Module-qualified call through the alias map / module tree.
-            let out = module_chain_outcome(t, fi, chain);
+            let out = module_chain_outcome(t, fi, chain, &site.scope_func);
             if !matches!(out, Outcome::Unresolved) {
                 return out;
             }
@@ -996,9 +1048,9 @@ fn root_chain(root: &str, chain: &[String]) -> Vec<String> {
 }
 
 /// Does the first chain segment bind to a module (alias or bare indexed name)?
-fn chain_is_module_start(t: &Tables, fi: usize, first: &str) -> bool {
+fn chain_is_module_start(t: &Tables, fi: usize, first: &str, scope: &str) -> bool {
     let fctx = &t.file_ctx[fi];
-    match file_alias(fctx, first) {
+    match nearest_alias_scoped(fctx, scope, first).map(|(_, target)| target) {
         Some(ImportTarget::ModuleRoot { .. }) | Some(ImportTarget::Module { .. }) => true,
         Some(ImportTarget::Symbol { module, name }) => {
             t.module_paths.contains(&format!("{module}.{name}"))
@@ -1051,11 +1103,28 @@ fn file_alias<'a>(fctx: &'a FileCtx, name: &str) -> Option<&'a ImportTarget> {
 /// A parameter or local variable in the current or an enclosing function
 /// shadows module and file-level bindings. Python class scope is not lexical.
 fn is_local_binding(fctx: &FileCtx, site: &CallSite, name: &str) -> bool {
+    // Anonymous callback parameters shadow only inside their line range.
+    if fctx.arrow_params.iter().any(|p| {
+        (p.scope_func == site.scope_func
+            || site.scope_func.starts_with(&format!("{}.", p.scope_func)))
+            && p.var == name
+            && p.start_line <= site.line
+            && site.line <= p.end_line
+    }) {
+        return true;
+    }
     let mut scope = site.scope_func.as_str();
     while !scope.is_empty() && scope != fctx.module {
         let key = (scope.to_string(), name.to_string());
         if fctx.locals.contains(&key) {
             return true;
+        }
+        // An assignment shadows only from its own line onward; a later
+        // assignment must not erase an earlier valid bare call.
+        if let Some(events) = fctx.assignments.get(&key) {
+            if events.iter().any(|(line, _)| *line <= site.line) {
+                return true;
+            }
         }
         let Some((parent, _)) = scope.rsplit_once('.') else {
             break;
@@ -1151,21 +1220,56 @@ fn mro_outcome(t: &Tables, class_qn: &str, method: &str) -> Outcome {
     Outcome::Unresolved
 }
 
-/// Receiver typing: annotation first, then constructor assignment (exact
-/// function scope, then module scope).
-fn resolve_var_class(t: &Tables, fi: usize, var: &str, scope: &str) -> Option<String> {
-    let fctx = &t.file_ctx[fi];
-    if let Some(ann) = fctx.params.get(&(scope.to_string(), var.to_string())) {
-        return resolve_class_of_chain(t, fi, ann);
+/// Latest annotation or assignment at or before `site_line` in one scope.
+/// `include_params` treats a parameter annotation as a binding at line 0.
+fn latest_binding<'a>(
+    fctx: &'a FileCtx,
+    scope: &str,
+    var: &str,
+    site_line: usize,
+    include_params: bool,
+) -> Option<&'a Vec<String>> {
+    let mut best: Option<(usize, &'a Vec<String>)> = None;
+    if include_params {
+        if let Some(ann) = fctx.params.get(&(scope.to_string(), var.to_string())) {
+            best = Some((0, ann));
+        }
     }
-    for s in [scope, ""] {
-        if let Some(target) = fctx.assignments.get(&(s.to_string(), var.to_string())) {
-            // An unknown or unresolved local assignment blocks the outer
-            // module binding; it must not fall back to a stale class.
+    if let Some(events) = fctx.assignments.get(&(scope.to_string(), var.to_string())) {
+        for (line, target) in events {
+            if *line <= site_line && best.is_none_or(|(best_line, _)| *line >= best_line) {
+                best = Some((*line, target));
+            }
+        }
+    }
+    best.map(|(_, target)| target)
+}
+
+/// Receiver typing at a call site: the latest annotation or assignment at or
+/// before `site_line`. The exact function scope wins; module scope is the
+/// fallback. A later assignment never changes an earlier call.
+fn resolve_var_class(
+    t: &Tables,
+    fi: usize,
+    var: &str,
+    scope: &str,
+    site_line: usize,
+) -> Option<String> {
+    let fctx = &t.file_ctx[fi];
+    if let Some(target) = latest_binding(fctx, scope, var, site_line, true) {
+        // An unknown local assignment blocks the outer module binding; it
+        // must not fall back to a stale class.
+        if target.is_empty() {
+            return None;
+        }
+        return resolve_class_of_chain(t, fi, target, scope);
+    }
+    if !scope.is_empty() {
+        if let Some(target) = latest_binding(fctx, "", var, site_line, false) {
             if target.is_empty() {
                 return None;
             }
-            return resolve_class_of_chain(t, fi, target);
+            return resolve_class_of_chain(t, fi, target, scope);
         }
     }
     None
@@ -1197,10 +1301,10 @@ fn resolve_base_chain(
             None => break,
         }
     }
-    resolve_class_of_chain(t, fi, chain)
+    resolve_class_of_chain(t, fi, chain, "")
 }
 
-fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<String> {
+fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String], scope: &str) -> Option<String> {
     if chain.is_empty() {
         return None;
     }
@@ -1227,7 +1331,7 @@ fn resolve_class_of_chain(t: &Tables, fi: usize, chain: &[String]) -> Option<Str
         return Some(local);
     }
     // 2. Alias map.
-    if let Some(target) = file_alias(fctx, &chain[0]) {
+    if let Some(target) = nearest_alias_scoped(fctx, scope, &chain[0]).map(|(_, target)| target) {
         match target {
             ImportTarget::Symbol { module, name } => {
                 let qn = format!("{module}.{name}");
@@ -1330,30 +1434,31 @@ fn longest_module_prefix(
 }
 
 /// `module.func(...)`, `pkg.mod.Class.m(...)` — resolve through the module tree.
-fn module_chain_outcome(t: &Tables, fi: usize, chain: &[String]) -> Outcome {
+fn module_chain_outcome(t: &Tables, fi: usize, chain: &[String], scope: &str) -> Outcome {
     let fctx = &t.file_ctx[fi];
-    let start: Option<String> = match file_alias(fctx, &chain[0]) {
-        Some(ImportTarget::ModuleRoot { path }) => Some(path.clone()),
-        Some(ImportTarget::Module { .. }) => None,
-        Some(ImportTarget::Symbol { module, name }) => {
-            let qn = format!("{module}.{name}");
-            if t.module_paths.contains(&qn) {
-                return chain_from_module(t, qn, &chain[1..]);
+    let start: Option<String> =
+        match nearest_alias_scoped(fctx, scope, &chain[0]).map(|(_, target)| target) {
+            Some(ImportTarget::ModuleRoot { path }) => Some(path.clone()),
+            Some(ImportTarget::Module { .. }) => None,
+            Some(ImportTarget::Symbol { module, name }) => {
+                let qn = format!("{module}.{name}");
+                if t.module_paths.contains(&qn) {
+                    return chain_from_module(t, qn, &chain[1..]);
+                }
+                // Imported class: ImportedClass.method(...)
+                if class_exists(t, &qn) && chain.len() == 2 {
+                    return mro_outcome(t, &qn, &chain[1]);
+                }
+                return Outcome::Unresolved;
             }
-            // Imported class: ImportedClass.method(...)
-            if class_exists(t, &qn) && chain.len() == 2 {
-                return mro_outcome(t, &qn, &chain[1]);
+            None => {
+                if t.module_paths.contains(&chain[0]) {
+                    Some(chain[0].clone())
+                } else {
+                    None
+                }
             }
-            return Outcome::Unresolved;
-        }
-        None => {
-            if t.module_paths.contains(&chain[0]) {
-                Some(chain[0].clone())
-            } else {
-                None
-            }
-        }
-    };
+        };
     let Some(start_module) = start else {
         return Outcome::Unresolved;
     };

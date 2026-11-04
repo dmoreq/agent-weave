@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -196,12 +196,19 @@ fn append_line(path: &Path, line: &str) {
     if is_symlink(path) || path.parent().is_some_and(is_symlink) {
         return;
     }
+    // Reject FIFOs/devices and hardlinks before any open: append must never
+    // block or modify an external inode through a link.
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if !meta.is_file() || has_multiple_links(&meta) {
+            return;
+        }
+    }
     rotate_if_needed(path, ROTATE_BYTES);
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
     let mut file = match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => return,
+        Ok(meta) if !meta.is_file() || has_multiple_links(&meta) => return,
         Ok(_) => match OpenOptions::new().append(true).open(path) {
             Ok(file) => file,
             Err(_) => return,
@@ -214,8 +221,13 @@ fn append_line(path: &Path, line: &str) {
         }
         Err(_) => return,
     };
-    // Re-check after open: a path swapped to a symlink must not receive the
-    // append through the opened target.
+    // Re-check after open: a path swapped to a symlink, FIFO, or hardlink
+    // must not receive the append through the opened target.
+    if let Ok(meta) = file.metadata() {
+        if !meta.is_file() || has_multiple_links(&meta) {
+            return;
+        }
+    }
     if is_symlink(path) {
         return;
     }
@@ -226,6 +238,33 @@ fn is_symlink(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|meta| meta.file_type().is_symlink())
         .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn has_multiple_links(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    meta.nlink() > 1
+}
+
+#[cfg(not(unix))]
+fn has_multiple_links(_: &fs::Metadata) -> bool {
+    false
+}
+
+/// Bounded reader for one journal generation: reject non-regular files and
+/// cap allocation at 16 MiB even when the file is oversized or growing.
+const MAX_LOG_READ: u64 = 16 * 1024 * 1024;
+
+fn read_log_bounded(path: &Path) -> Option<String> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let file = fs::File::open(path).ok()?;
+    let mut reader = file.take(MAX_LOG_READ);
+    let mut out = String::new();
+    reader.read_to_string(&mut out).ok()?;
+    Some(out)
 }
 
 /// Payload journal line (Amendment 10a): self-contained — replay verification
@@ -332,7 +371,7 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
             p.push(gen);
             PathBuf::from(p)
         };
-        if let Ok(content) = fs::read_to_string(&path) {
+        if let Some(content) = read_log_bounded(&path) {
             lines.push_str(&content);
         }
     }
@@ -441,6 +480,26 @@ fn parse_payload_line(line: &str) -> Option<(String, String, u64, Vec<String>)> 
     Some((tool, name, built_at, pointers))
 }
 
+/// True when the index has a resolved call edge at this site to the queried
+/// bare name. Import aliases (`from a import leaf as l; l()`) do not spell the
+/// leaf name on the call line, so the text heuristic cannot judge them.
+fn site_calls_symbol(conn: &rusqlite::Connection, path: &str, line_no: usize, bare: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM edges e
+             JOIN symbols ss ON ss.id = e.src_id
+             JOIN files f ON f.id = ss.file_id
+             JOIN symbols ds ON ds.id = e.dst_id
+             WHERE f.path = ?1 AND e.site_line = ?2 AND e.kind = 'calls'
+               AND (ds.name = ?3 OR ds.qualname = ?3 OR ds.qualname LIKE '%.' || ?3)
+         )",
+        rusqlite::params![path, line_no as i64, bare],
+        |r| r.get::<_, i64>(0),
+    )
+    .unwrap_or(0)
+        != 0
+}
+
 /// Split a rendered pointer into (path, 1-based line). Callers/callees/
 /// impact/dead render `path:line [tag]`; symbols renders
 /// `path:line kind qualname` — the first whitespace token carries the pointer.
@@ -464,7 +523,8 @@ fn read_payload_log(root: &Path) -> String {
         if !gen.is_empty() {
             path.push(gen);
         }
-        if let Ok(c) = fs::read_to_string(PathBuf::from(path)) {
+        let path = PathBuf::from(path);
+        if let Some(c) = read_log_bounded(&path) {
             content.push_str(&c);
         }
     }
@@ -550,9 +610,17 @@ pub fn verify(
                 }
                 continue;
             }
-            if tool == "callers" && !bare.is_empty() {
+            // A transitive caller's site line calls the next hop, not the
+            // queried leaf; name-mention applies to direct rows only. Level 1
+            // of a transitive closure is still a direct call site.
+            let depth = ptr.rsplit_once("[depth=").and_then(|(_, rest)| {
+                rest.split_once(']')
+                    .and_then(|(n, _)| n.parse::<usize>().ok())
+            });
+            let direct = depth.is_none() || depth == Some(1);
+            if tool == "callers" && !bare.is_empty() && direct {
                 let line_text = text.lines().nth(line_no - 1).unwrap_or("");
-                if !line_text.contains(bare) {
+                if !line_text.contains(bare) && !site_calls_symbol(conn, &path, line_no, bare) {
                     if stale_epoch {
                         changed += 1;
                     } else {

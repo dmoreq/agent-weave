@@ -52,18 +52,20 @@ pub fn run_build(
             // Dual-key (Amendment 9): (mtime, size) mismatch, but same size and
             // same content hash -> carry (the CI cache-restore case). One
             // read+hash instead of parse+extract.
-            Some((_om, osz, oh)) if *osz == f.size as i64 => match std::fs::read(&f.abs) {
-                Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == *oh => {
-                    carried.insert(f.rel.clone());
-                    mtime_updates.insert(f.rel.clone(), mtime);
+            Some((_om, osz, oh)) if *osz == f.size as i64 => {
+                match crate::walk::read_bounded(&f.abs) {
+                    Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == *oh => {
+                        carried.insert(f.rel.clone());
+                        mtime_updates.insert(f.rel.clone(), mtime);
+                    }
+                    _ => fresh.push(crate::walk::WalkedFile {
+                        abs: f.abs.clone(),
+                        rel: f.rel.clone(),
+                        size: f.size,
+                        mtime,
+                    }),
                 }
-                _ => fresh.push(crate::walk::WalkedFile {
-                    abs: f.abs.clone(),
-                    rel: f.rel.clone(),
-                    size: f.size,
-                    mtime,
-                }),
-            },
+            }
             _ => fresh.push(crate::walk::WalkedFile {
                 abs: f.abs.clone(),
                 rel: f.rel.clone(),
@@ -172,10 +174,11 @@ pub fn run_build(
         let old_qual_files = crate::db::symbol_qualname_files(c)?;
         let mut new_names: std::collections::HashSet<String> = Default::default();
         let mut duplicate_quals: std::collections::HashSet<String> = Default::default();
+        let mut fresh_qual_files: HashMap<String, HashSet<String>> = HashMap::new();
         for fx in &extractions {
             let rel = fresh
                 .get(fx.file_idx)
-                .map(|f| f.rel.as_str())
+                .map(|f| f.rel.clone())
                 .unwrap_or_default();
             for sym in &fx.symbols {
                 if !old_quals.contains(&sym.qualname) {
@@ -186,16 +189,54 @@ pub fn run_build(
                 {
                     duplicate_quals.insert(sym.qualname.clone());
                 }
+                fresh_qual_files
+                    .entry(sym.qualname.clone())
+                    .or_default()
+                    .insert(rel.clone());
+            }
+        }
+        // ANEW2: a candidate set changes when a defining file is added,
+        // removed, or renamed. A shrink leaves no resolved edge for the dirty
+        // closure to follow, so find carried sites that still name the old
+        // qualname and re-extract them.
+        let changed: Vec<String> = fresh
+            .iter()
+            .map(|f| f.rel.clone())
+            .chain(
+                old_map
+                    .keys()
+                    .filter(|rel| !by_rel.contains_key(rel.as_str()))
+                    .cloned(),
+            )
+            .collect();
+        let old_changed_quals = crate::db::qualnames_for_files(c, &changed)?;
+        let mut changed_quals = duplicate_quals;
+        for q in &old_changed_quals {
+            let Some(old_files) = old_qual_files.get(q) else {
+                continue;
+            };
+            let mut new_files: std::collections::HashSet<&str> = old_files
+                .iter()
+                .filter(|p| carried.contains(*p))
+                .map(String::as_str)
+                .collect();
+            if let Some(files) = fresh_qual_files.get(q) {
+                new_files.extend(files.iter().map(String::as_str));
+            }
+            if new_files.len() != old_files.len()
+                || new_files.iter().any(|p| !old_files.contains(*p))
+            {
+                changed_quals.insert(q.clone());
             }
         }
         let mut gap = std::collections::HashSet::new();
         if !new_names.is_empty() {
             gap.extend(crate::db::gap_files_for_new_names(c, &new_names)?);
         }
-        if !duplicate_quals.is_empty() {
+        if !changed_quals.is_empty() {
             gap.extend(crate::db::gap_files_for_candidate_changes(
                 c,
-                &duplicate_quals,
+                &changed_quals,
             )?);
         }
         if !gap.is_empty() {
@@ -215,6 +256,7 @@ pub fn run_build(
             second.sort_by(|a, b| a.rel.cmp(&b.rel));
             if !second.is_empty() {
                 let base = fresh.len();
+                let mut healed: Vec<String> = second.iter().map(|f| f.rel.clone()).collect();
                 let (mut r2, mut e2, mut s2, err2, sec2) = extract_units(&second, base)?;
                 fresh.extend(second);
                 fresh_rows.append(&mut r2);
@@ -222,6 +264,40 @@ pub fn run_build(
                 fresh_shingles.append(&mut s2);
                 fresh_error_files += err2;
                 extract_secs_sum += sec2;
+
+                // ANEW1: gap healing moves carried files to fresh after the
+                // initial dirty closure. Their inbound callers are still
+                // carried and point at the old symbol ids, so re-apply the
+                // inbound closure to each newly fresh set until it is stable.
+                while !healed.is_empty() {
+                    let inbound = crate::db::dirty_closure(c, &healed)?;
+                    let mut third: Vec<crate::walk::WalkedFile> = Vec::new();
+                    for rel in inbound {
+                        if carried.remove(&rel) {
+                            if let Some(f) = by_rel.get(rel.as_str()) {
+                                third.push(crate::walk::WalkedFile {
+                                    abs: f.abs.clone(),
+                                    rel: f.rel.clone(),
+                                    size: f.size,
+                                    mtime: f.mtime,
+                                });
+                            }
+                        }
+                    }
+                    third.sort_by(|a, b| a.rel.cmp(&b.rel));
+                    if third.is_empty() {
+                        break;
+                    }
+                    let base = fresh.len();
+                    let (mut r3, mut e3, mut s3, err3, sec3) = extract_units(&third, base)?;
+                    healed = third.iter().map(|f| f.rel.clone()).collect();
+                    fresh.extend(third);
+                    fresh_rows.append(&mut r3);
+                    extractions.append(&mut e3);
+                    fresh_shingles.append(&mut s3);
+                    fresh_error_files += err3;
+                    extract_secs_sum += sec3;
+                }
             }
         }
     }
@@ -596,7 +672,7 @@ fn extract_units(
                         let mut parser = crate::parse::ParserSlot::new();
                         for (local, f) in chunk.into_iter().enumerate() {
                             let idx = base_idx + chunk_no * chunk_len + local;
-                            let bytes = std::fs::read(&f.abs)?;
+                            let bytes = crate::walk::read_bounded(&f.abs)?;
                             let lang = crate::parse::Lang::from_rel(&f.rel);
                             let tree = parser.parse(&bytes, lang)?;
                             let crate::parse::SyntaxStats {

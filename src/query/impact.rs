@@ -587,13 +587,18 @@ impl ImpactTop {
         qualname: String,
         src_kind: String,
     ) {
-        let record = (path.clone(), depth, line, kind, qualname, src_kind);
-        match self.seen.get(&path) {
-            Some((_, old_depth, old_line, _, _, _)) if (*old_depth, *old_line) <= (depth, line) => {
+        // Depth and site line are the primary key. On an exact tie, compare
+        // stable semantic fields so the representative does not depend on
+        // SQL row order or rowid/file-id assignment.
+        let replace = match self.seen.get(&path) {
+            None => true,
+            Some(old) => {
+                (depth, line, &kind, &qualname, &src_kind) < (old.1, old.2, &old.3, &old.4, &old.5)
             }
-            _ => {
-                self.seen.insert(path, record);
-            }
+        };
+        if replace {
+            self.seen
+                .insert(path.clone(), (path, depth, line, kind, qualname, src_kind));
         }
     }
 
@@ -611,5 +616,53 @@ impl ImpactTop {
         let mut records = heap.into_vec();
         records.sort_by(|a, b| a.0.cmp(&b.0));
         (total, records)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn impact_top_ties_are_deterministic() {
+        let mut first = ImpactTop::new(10);
+        first.insert(
+            "p".into(),
+            1,
+            5,
+            "imports".into(),
+            "q".into(),
+            "function".into(),
+        );
+        first.insert(
+            "p".into(),
+            1,
+            5,
+            "calls".into(),
+            "q".into(),
+            "function".into(),
+        );
+        let (_, records) = first.finish();
+        assert_eq!(records[0].3, "calls");
+
+        let mut second = ImpactTop::new(10);
+        second.insert(
+            "p".into(),
+            1,
+            5,
+            "calls".into(),
+            "q".into(),
+            "function".into(),
+        );
+        second.insert(
+            "p".into(),
+            1,
+            5,
+            "imports".into(),
+            "q".into(),
+            "function".into(),
+        );
+        let (_, records) = second.finish();
+        assert_eq!(records[0].3, "calls");
     }
 }

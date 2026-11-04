@@ -344,20 +344,26 @@ fn record_payload_capture(conn: &Connection, name: &str, out: &QueryOutput) {
     if out.pointers.is_empty() {
         return;
     }
+    let rendered: Vec<String> = out.pointers.iter().map(|p| p.render()).collect();
+    record_payload_meta(conn, name, &rendered, out.stale, out.shown, out.total);
+}
+
+/// Shared payload capture for renderers that hold rendered pointer strings
+/// rather than a `QueryOutput`. Keeps the empty-payload decision at the
+/// caller so Pending-field behavior stays unchanged.
+pub(crate) fn record_payload_meta(
+    conn: &Connection,
+    name: &str,
+    pointers: &[String],
+    stale: bool,
+    shown: usize,
+    total: usize,
+) {
     let built_at = db::meta_get(conn, "built_at")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    let rendered: Vec<String> = out.pointers.iter().map(|p| p.render()).collect();
-    crate::journal::record_payload(
-        name,
-        &rendered,
-        out.stale,
-        out.shown,
-        out.total,
-        built_at,
-        &source_rev,
-    );
+    crate::journal::record_payload(name, pointers, stale, shown, total, built_at, &source_rev);
 }
 
 /// Render a QueryOutput exactly as the CLI prints it on stdout (header,

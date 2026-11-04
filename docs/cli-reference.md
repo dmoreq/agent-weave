@@ -98,7 +98,7 @@ Resolved callees point to definitions; ambiguous callee entries can point to the
 aw callers <NAME> [--limit <N>] [--depth <N>]
 ```
 
-Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target.
+Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. Each caller symbol appears once at its shortest depth; a symbol reached by a shorter route is not repeated on a longer route, and its inbound edges are expanded once. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target.
 
 ### `callees <NAME>`
 

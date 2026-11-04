@@ -606,6 +606,26 @@ fn pre_signature_version_index_rebuilds_once() {
 }
 
 #[test]
+fn older_extraction_revision_rebuilds_once() {
+    let repo = fixture("extraction-upgrade");
+    assert_eq!(build(&repo).0, 0);
+    let db = repo.join(".aw/index.db");
+    let status = Command::new("python3")
+        .arg("-c")
+        .arg("import sqlite3, sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"UPDATE meta SET value='2' WHERE key='signature_version'\"); c.commit()")
+        .arg(db)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let (code, first, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(first.contains("carried=0"), "{first}");
+    let (code, second, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(second.contains("carried=3"), "{second}");
+}
+
+#[test]
 fn noop_build_leaves_the_index_untouched() {
     // R7 L4: a build with zero changed/deleted files must not rewrite the
     // database (0.05-0.06 s of a 0.10 s build at 2.2k files).
@@ -1945,6 +1965,62 @@ fn symbols_outline_adds_signature_and_default_stays_byte_identical() {
 }
 
 #[test]
+fn search_limit_counts_union_by_identity() {
+    let repo = temp_repo("search-overcount");
+    write(&repo, "a.py", "def run(): pass\n");
+    write(&repo, "b.py", "def run(): pass\n");
+    write(&repo, "c.py", "def run(): pass\ndef run_build(): pass\n");
+    build(&repo);
+    let out = aw(&repo)
+        .args(["search", "run", "--limit", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("showing 1 of 4"), "{text}");
+}
+
+#[test]
+fn search_exact_first_merge_and_union_count_characterization() {
+    let repo = temp_repo("search-characterize");
+    write(&repo, "a.py", "def run(): pass\n");
+    write(&repo, "b.py", "def run(): pass\n");
+    write(&repo, "c.py", "def run_build(): pass\n");
+    build(&repo);
+    let out = aw(&repo)
+        .args(["search", "run", "--limit", "10"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    let exact = lines
+        .iter()
+        .position(|line| line.contains(" a.run ") || line.contains(" b.run "))
+        .expect("exact run row");
+    let prefix = lines
+        .iter()
+        .position(|line| line.contains(" c.run_build "))
+        .expect("prefix run_build row");
+    assert!(exact < prefix, "exact-first merge order broken: {lines:?}");
+
+    let capped = aw(&repo)
+        .args(["search", "run", "--limit", "1"])
+        .output()
+        .unwrap();
+    assert_eq!(capped.status.code(), Some(0), "{capped:?}");
+    assert!(
+        String::from_utf8_lossy(&capped.stdout).contains("showing 1 of 3"),
+        "union count changed: {capped:?}"
+    );
+    let payload = fs::read_to_string(repo.join(".aw/usage-results.jsonl")).unwrap();
+    assert!(
+        payload.contains("\"shown\":1") && payload.contains("\"total\":3"),
+        "payload shown/total changed: {payload}"
+    );
+}
+
+#[test]
 fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     let repo = fixture("search");
     build(&repo);
@@ -3131,6 +3207,54 @@ fn incremental_build_heals_resolution_gaps() {
 }
 
 #[test]
+fn gap_healing_reapplies_inbound_closure() {
+    // ANEW1: a gap-healed file is re-extracted after the initial dirty
+    // closure. Its inbound caller stays carried and points at the old symbol
+    // ids, so the build must re-apply the inbound closure to the healed file.
+    let repo = temp_repo("gap-inbound");
+    write(
+        &repo,
+        "a.py",
+        "import missing\n\ndef entry():\n    return missing.foo()\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "import a\n\ndef invoke():\n    return a.entry()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let before = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(before.status.code(), Some(0), "{before:?}");
+    assert!(
+        String::from_utf8_lossy(&before.stdout).contains("a.entry"),
+        "{before:?}"
+    );
+
+    // The new symbol heals a.py after the dirty closure; b.py must be
+    // re-extracted so its copied edge survives the fresh a.entry ids.
+    write(&repo, "missing.py", "def foo():\n    pass\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let after = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(after.status.code(), Some(0), "{after:?}");
+    assert!(
+        String::from_utf8_lossy(&after.stdout).contains("a.entry"),
+        "incremental lost the inbound edge: {after:?}"
+    );
+
+    let incremental_db = repo.join("incremental.db");
+    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
+    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(force.status.code(), Some(0), "{force:?}");
+    assert_eq!(
+        dump_edges(&incremental_db),
+        dump_edges(&repo.join(".aw/index.db")),
+        "incremental and fresh edge sets differ"
+    );
+}
+
+#[test]
 fn constructor_calls_attribute_to_the_class() {
     // R6d A6: `Widget()` must be a caller of the class (not only __init__),
     // so `callers Class` works and `dead` does not list an instantiated class.
@@ -4063,10 +4187,17 @@ fn added_duplicate_candidate_invalidates_resolved_edges() {
         "incremental build kept a stale resolved edge: {after:?}"
     );
 
+    let incremental_db = repo.join("incremental.db");
+    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
     let force = aw(&repo).args(["build", "--force"]).output().unwrap();
     assert_eq!(force.status.code(), Some(0));
     let forced = aw(&repo).args(["callees", "invoke"]).output().unwrap();
     assert_eq!(after.stdout, forced.stdout);
+    assert_eq!(
+        dump_edges(&incremental_db),
+        dump_edges(&repo.join(".aw/index.db")),
+        "incremental and fresh edge sets differ"
+    );
 
     let ctx = aw(&repo).args(["context", "invoke"]).output().unwrap();
     assert_eq!(ctx.status.code(), Some(0), "{ctx:?}");
@@ -4076,6 +4207,286 @@ fn added_duplicate_candidate_invalidates_resolved_edges() {
         "{text}"
     );
     assert!(text.contains("[ambiguous] foo"), "{text}");
+}
+
+#[test]
+fn removed_duplicate_candidate_invalidates_ambiguous_sites() {
+    // ANEW2: removing one of two same-qualname candidates must re-extract
+    // carried callers with ambiguous edges; a null-destination edge is not in
+    // the resolved-edge dirty closure.
+    let repo = temp_repo("removed-candidate");
+    write(
+        &repo,
+        "caller.py",
+        "from pkg import foo\n\ndef invoke():\n    foo()\n",
+    );
+    write(&repo, "pkg.py", "def foo():\n    pass\n");
+    write(&repo, "pkg/__init__.py", "def foo():\n    pass\n");
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let ambiguous = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(ambiguous.status.code(), Some(0), "{ambiguous:?}");
+    assert!(
+        String::from_utf8_lossy(&ambiguous.stdout).contains("[ambiguous] foo"),
+        "{ambiguous:?}"
+    );
+
+    fs::remove_file(repo.join("pkg/__init__.py")).unwrap();
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let after = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    assert_eq!(after.status.code(), Some(0), "{after:?}");
+    let text = String::from_utf8_lossy(&after.stdout);
+    assert!(
+        !text.contains("[ambiguous]"),
+        "incremental kept the ambiguous edge: {after:?}"
+    );
+    assert!(text.contains("pkg.foo"), "{after:?}");
+
+    let incremental_db = repo.join("incremental.db");
+    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
+    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    assert_eq!(force.status.code(), Some(0), "{force:?}");
+    assert_eq!(
+        dump_edges(&incremental_db),
+        dump_edges(&repo.join(".aw/index.db")),
+        "incremental and fresh edge sets differ"
+    );
+}
+
+#[test]
+fn assignment_shadows_bare_callable_name() {
+    let repo = temp_repo("assignment-shadow");
+    write(
+        &repo,
+        "sample.py",
+        "def target():\n    pass\n\ndef go():\n    target = None\n    target()\n\ndef control():\n    target()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.control"), "{text}");
+    assert!(
+        !text.contains("sample.go"),
+        "assignment-shadowed call resolved: {text}"
+    );
+}
+
+#[test]
+fn arrow_parameter_shadows_global_function() {
+    let repo = temp_repo("arrow-parameter");
+    write(
+        &repo,
+        "sample.js",
+        "function target() {}\nconst go = (target) => target();\nfunction control() { target(); }\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.control"), "{text}");
+    assert!(
+        !text.contains("sample.go"),
+        "arrow parameter did not shadow: {text}"
+    );
+}
+
+#[test]
+fn nested_self_parameter_shadows_receiver() {
+    let repo = temp_repo("nested-self-shadow");
+    write(
+        &repo,
+        "sample.py",
+        "class C:\n    def run(self):\n        pass\n\n    def outer(self):\n        def inner(self):\n            self.run()\n        inner(self)\n\n    def ok(self):\n        self.run()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "C.run"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.C.ok"), "{text}");
+    assert!(
+        !text.contains("sample.C.outer.inner"),
+        "nested self shadow resolved: {text}"
+    );
+}
+
+#[test]
+fn ordered_bindings_resolve_at_call_site() {
+    let repo = temp_repo("ordered-bindings");
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def run(self): pass\n\nclass B:\n    def run(self): pass\n\ndef go():\n    value = A()\n    value.run()\n    value = B()\n    value.run()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let a = aw(&repo).args(["callers", "A.run"]).output().unwrap();
+    assert_eq!(a.status.code(), Some(0), "{a:?}");
+    let atext = String::from_utf8_lossy(&a.stdout);
+    assert!(
+        atext.contains("sample.py:9"),
+        "first call must use A: {atext}"
+    );
+    assert!(
+        !atext.contains("sample.py:11"),
+        "later assignment changed the first call: {atext}"
+    );
+    let b = aw(&repo).args(["callers", "B.run"]).output().unwrap();
+    assert_eq!(b.status.code(), Some(0), "{b:?}");
+    let btext = String::from_utf8_lossy(&b.stdout);
+    assert!(
+        btext.contains("sample.py:11"),
+        "second call must use B: {btext}"
+    );
+    assert!(
+        !btext.contains("sample.py:9"),
+        "earlier assignment leaked: {btext}"
+    );
+}
+
+#[test]
+fn annotation_is_initial_binding_not_override() {
+    let repo = temp_repo("annotation-reassign");
+    write(
+        &repo,
+        "sample.py",
+        "class A:\n    def run(self): pass\n\nclass B:\n    def run(self): pass\n\ndef go(value: A):\n    value = B()\n    value.run()\n\ndef keep(value: A):\n    value.run()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let go = aw(&repo).args(["callees", "go"]).output().unwrap();
+    assert_eq!(go.status.code(), Some(0), "{go:?}");
+    let gtext = String::from_utf8_lossy(&go.stdout);
+    assert!(gtext.contains("sample.B.run"), "{gtext}");
+    assert!(
+        !gtext.contains("sample.A.run"),
+        "annotation overrode reassignment: {gtext}"
+    );
+    let keep = aw(&repo).args(["callees", "keep"]).output().unwrap();
+    assert_eq!(keep.status.code(), Some(0), "{keep:?}");
+    assert!(
+        String::from_utf8_lossy(&keep.stdout).contains("sample.A.run"),
+        "{keep:?}"
+    );
+}
+
+#[test]
+fn typescript_receiver_annotations_and_construction() {
+    let repo = temp_repo("typescript-receivers");
+    write(
+        &repo,
+        "sample.ts",
+        "class C { run() {} }\nfunction typed(value: C) { value.run(); }\nfunction constructed() {\n  const value = new C();\n  value.run();\n}\nfunction make(): C { return new C(); }\nfunction annotated() {\n  const value: C = make();\n  value.run();\n}\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "C.run"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.typed"), "{text}");
+    assert!(text.contains("sample.constructed"), "{text}");
+    assert!(text.contains("sample.annotated"), "{text}");
+}
+
+#[test]
+fn rust_struct_literal_and_self_new_type_receiver() {
+    let repo = temp_repo("rust-constructors");
+    write(
+        &repo,
+        "lib.rs",
+        "struct A { value: i32 }\nstruct B;\nimpl A {\n    fn new() -> Self { Self { value: 0 } }\n    fn render(&self) {}\n    fn go() {\n        let literal = A { value: 1 };\n        literal.render();\n        let constructed = Self::new();\n        constructed.render();\n    }\n}\nimpl B { fn render(&self) {} }\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let a = aw(&repo).args(["callers", "A.render"]).output().unwrap();
+    assert_eq!(a.status.code(), Some(0), "{a:?}");
+    assert!(
+        String::from_utf8_lossy(&a.stdout).contains("lib.A.go"),
+        "{a:?}"
+    );
+    let b = aw(&repo).args(["callers", "B.render"]).output().unwrap();
+    assert_eq!(b.status.code(), Some(1), "{b:?}");
+}
+
+#[test]
+fn local_qualified_import_and_class_receiver() {
+    let repo = temp_repo("local-qualified-import");
+    write(
+        &repo,
+        "helpers.py",
+        "def run(): pass\n\nclass C:\n    def run(self): pass\n",
+    );
+    write(
+        &repo,
+        "app.py",
+        "def go():\n    import helpers as h\n    h.run()\n\ndef constructed():\n    from helpers import C\n    value = C()\n    value.run()\n\ndef shadow(h):\n    h.run()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let run = aw(&repo).args(["callers", "helpers.run"]).output().unwrap();
+    assert_eq!(run.status.code(), Some(0), "{run:?}");
+    let runtext = String::from_utf8_lossy(&run.stdout);
+    assert!(runtext.contains("app.go"), "{runtext}");
+    assert!(
+        !runtext.contains("app.shadow"),
+        "parameter shadow leaked: {runtext}"
+    );
+    let method = aw(&repo).args(["callers", "C.run"]).output().unwrap();
+    assert_eq!(method.status.code(), Some(0), "{method:?}");
+    assert!(
+        String::from_utf8_lossy(&method.stdout).contains("app.constructed"),
+        "{method:?}"
+    );
+}
+
+#[test]
+fn typescript_default_export_binds_default_import() {
+    let repo = temp_repo("typescript-default");
+    write(&repo, "worker.ts", "export default function work() {}\n");
+    write(
+        &repo,
+        "app.ts",
+        "import execute from \"./worker\";\nexport function go() { execute(); }\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let out = aw(&repo).args(["callers", "work"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("app.go"), "{text}");
+}
+
+#[test]
+fn rust_inline_module_aliases_do_not_leak() {
+    let src = "mod a { pub fn target() {} }\nmod b { pub fn target() {} }\nmod left {\n    use crate::a::target;\n    pub fn go() { target(); }\n}\nmod right {\n    use crate::b::target;\n    pub fn go() { target(); }\n}\n";
+    for (name, file, left_qn, right_qn) in [
+        (
+            "rust-inline-src",
+            "src/lib.rs",
+            "src.left.go",
+            "src.right.go",
+        ),
+        ("rust-inline-root", "lib.rs", "left.go", "right.go"),
+    ] {
+        let repo = temp_repo(name);
+        write(&repo, file, src);
+        let (code, stdout, stderr) = build(&repo);
+        assert_eq!(code, 0, "{name}: {stdout}{stderr}");
+        let a = aw(&repo).args(["callers", "a.target"]).output().unwrap();
+        assert_eq!(a.status.code(), Some(0), "{name}: {a:?}");
+        let atext = String::from_utf8_lossy(&a.stdout);
+        assert!(atext.contains(left_qn), "{name}: {atext}");
+        assert!(!atext.contains(right_qn), "{name} left leaked: {atext}");
+        let b = aw(&repo).args(["callers", "b.target"]).output().unwrap();
+        assert_eq!(b.status.code(), Some(0), "{name}: {b:?}");
+        let btext = String::from_utf8_lossy(&b.stdout);
+        assert!(btext.contains(right_qn), "{name}: {btext}");
+        assert!(!btext.contains(left_qn), "{name} right leaked: {btext}");
+    }
 }
 
 #[test]
@@ -4222,6 +4633,32 @@ fn local_receiver_blocks_shadowed_module() {
 }
 
 #[test]
+fn local_binding_blocks_long_module_chain() {
+    let repo = temp_repo("long-module-shadow");
+    write(&repo, "pkg/mod.py", "def f(): pass\n");
+    write(
+        &repo,
+        "app.py",
+        "import pkg.mod\ndef shadowed(pkg):\n    pkg.mod.f()\ndef control():\n    pkg.mod.f()\n",
+    );
+    let (code, stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let shadowed = aw(&repo)
+        .args(["callees", "app.shadowed"])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&shadowed.stdout).contains("pkg.mod.f"),
+        "{shadowed:?}"
+    );
+    let control = aw(&repo).args(["callees", "app.control"]).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&control.stdout).contains("pkg.mod.f"),
+        "{control:?}"
+    );
+}
+
+#[test]
 fn ambiguous_class_does_not_pick_one_method() {
     let repo = temp_repo("class-ambiguity");
     write(
@@ -4251,6 +4688,329 @@ fn build_force_bypasses_parse_gate_and_help_says_so() {
     let doctor = aw(&repo).args(["doctor", "--help"]).output().unwrap();
     let text = String::from_utf8_lossy(&doctor.stdout);
     assert!(text.contains("entire .aw"), "{text}");
+}
+
+#[test]
+fn usage_verify_transitive_callers_has_no_false_fail() {
+    let repo = temp_repo("transitive-verify");
+    write(&repo, "a.py", "def leaf(): pass\n");
+    write(
+        &repo,
+        "b.py",
+        "from a import leaf as l\n\ndef middle():\n    return l()\n",
+    );
+    write(
+        &repo,
+        "c.py",
+        "import b\n\ndef origin():\n    return b.middle()\n",
+    );
+    build(&repo);
+    let out = aw(&repo)
+        .args(["callers", "leaf", "--depth", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let verify = aw(&repo)
+        .args(["usage", "--verify", "--limit", "100"])
+        .output()
+        .unwrap();
+    assert_eq!(verify.status.code(), Some(0), "{verify:?}");
+    let text = String::from_utf8_lossy(&verify.stdout);
+    assert!(text.contains("fail=0"), "{text}");
+}
+
+#[test]
+fn transitive_callers_use_shortest_depth_per_symbol() {
+    let repo = temp_repo("callers-closure");
+    write(
+        &repo,
+        "sample.py",
+        "def leaf(): pass\n\ndef self_rec():\n    self_rec()\n\ndef left():\n    leaf()\n\ndef right():\n    left()\n\ndef top():\n    right()\n    leaf()\n",
+    );
+    build(&repo);
+    let out = aw(&repo)
+        .args(["callers", "leaf", "--depth", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.left [depth=1]"), "{text}");
+    assert!(text.contains("sample.top [depth=1]"), "{text}");
+    assert!(text.contains("sample.right [depth=2]"), "{text}");
+    assert!(!text.contains("sample.top [depth=2]"), "{text}");
+    let self_direct = aw(&repo).args(["callers", "self_rec"]).output().unwrap();
+    assert_eq!(self_direct.status.code(), Some(0), "{self_direct:?}");
+    assert!(
+        String::from_utf8_lossy(&self_direct.stdout).contains("sample.self_rec"),
+        "{self_direct:?}"
+    );
+    // The queried symbol is the closure seed: its self-call is not repeated
+    // in transitive rows.
+    let self_deep = aw(&repo)
+        .args(["callers", "self_rec", "--depth", "2"])
+        .output()
+        .unwrap();
+    assert_eq!(self_deep.status.code(), Some(1), "{self_deep:?}");
+    assert!(
+        String::from_utf8_lossy(&self_deep.stderr).contains("0 callers found"),
+        "{self_deep:?}"
+    );
+}
+
+#[test]
+fn later_assignment_does_not_shadow_earlier_call() {
+    let repo = temp_repo("assignment-after-call");
+    write(
+        &repo,
+        "sample.py",
+        "def target(): pass\n\ndef go():\n    target()\n    target = None\n",
+    );
+    build(&repo);
+    let callers = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(callers.status.code(), Some(0), "{callers:?}");
+    assert!(
+        String::from_utf8_lossy(&callers.stdout).contains("sample.go"),
+        "{callers:?}"
+    );
+    let callees = aw(&repo).args(["callees", "go"]).output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&callees.stdout).contains("sample.target"),
+        "{callees:?}"
+    );
+}
+
+#[test]
+fn reassignment_updates_receiver_type_ts_and_rust() {
+    let ts = temp_repo("ts-reassignment");
+    write(
+        &ts,
+        "sample.ts",
+        "class A { run() {} }\nclass B { run() {} }\nfunction go() {\n  let value = new A();\n  value = new B();\n  value.run();\n}\n",
+    );
+    build(&ts);
+    let a = aw(&ts).args(["callers", "A.run"]).output().unwrap();
+    assert_eq!(a.status.code(), Some(1), "{a:?}");
+    let b = aw(&ts).args(["callers", "B.run"]).output().unwrap();
+    assert_eq!(b.status.code(), Some(0), "{b:?}");
+    assert!(
+        String::from_utf8_lossy(&b.stdout).contains("sample.go"),
+        "{b:?}"
+    );
+
+    let rs = temp_repo("rust-reassignment");
+    write(
+        &rs,
+        "lib.rs",
+        "struct A;\nstruct B;\nimpl A { fn new() -> Self { A } fn render(&self) {} }\nimpl B { fn new() -> Self { B } fn render(&self) {} }\nfn go() {\n    let mut value = A::new();\n    value = B::new();\n    value.render();\n}\n",
+    );
+    build(&rs);
+    let a = aw(&rs).args(["callers", "A.render"]).output().unwrap();
+    assert_eq!(a.status.code(), Some(1), "{a:?}");
+    let b = aw(&rs).args(["callers", "B.render"]).output().unwrap();
+    assert_eq!(b.status.code(), Some(0), "{b:?}");
+    assert!(
+        String::from_utf8_lossy(&b.stdout).contains("lib.go"),
+        "{b:?}"
+    );
+}
+
+#[test]
+fn tuple_and_augmented_assignments_shadow_bare_names() {
+    let repo = temp_repo("pattern-shadow");
+    write(
+        &repo,
+        "sample.py",
+        "def target(): pass\n\ndef go():\n    target += 1\n    target()\n\ndef go2():\n    target, other = None, None\n    target()\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "tuple/augmented assignment did not shadow: {out:?}"
+    );
+}
+
+#[test]
+fn nested_arrow_parameter_shadows_only_inside_callback() {
+    let repo = temp_repo("nested-arrow");
+    write(
+        &repo,
+        "sample.js",
+        "function target() {}\nfunction go() {\n  const cb = (target) => target();\n  target();\n}\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.js:4"), "outside call lost: {text}");
+    assert!(!text.contains("sample.js:3"), "arrow shadow leaked: {text}");
+}
+
+#[test]
+fn nested_function_inside_arrow_uses_arrow_binding() {
+    let repo = temp_repo("nested-arrow-function");
+    write(
+        &repo,
+        "sample.js",
+        "function target() {}\nfunction go() {\n  const cb = (target) => {\n    function inner() { target(); }\n    inner();\n  };\n  target();\n}\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("sample.js:7"), "outside call lost: {text}");
+    assert!(
+        !text.contains("sample.js:4"),
+        "nested function escaped the arrow binding: {text}"
+    );
+}
+
+#[test]
+fn usage_verify_depth_one_still_checks_name() {
+    let repo = temp_repo("verify-depth-one");
+    write(&repo, "a.py", "def leaf(): pass\n");
+    write(&repo, "b.py", "import a\n");
+    build(&repo);
+    let payload = repo.join(".aw/usage-results.jsonl");
+    fs::write(
+        &payload,
+        "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"name\":\"leaf\",\"session\":\"\",\"arm\":\"\",\"built_at\":0,\"source_rev\":\"x\",\"stale\":false,\"shown\":1,\"total\":1,\"pointers\":[\"b.py:1 [depth=1]\"]}\n",
+    )
+    .unwrap();
+    let out = aw(&repo)
+        .args(["usage", "--verify", "--limit", "100"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("fail=1"),
+        "depth-1 name check skipped: {text}"
+    );
+}
+
+#[cfg(unix)]
+fn output_with_timeout(mut cmd: std::process::Command, secs: u64) -> Option<std::process::Output> {
+    use std::io::Read;
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    out.read_to_string(&mut stdout).ok();
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    err.read_to_string(&mut stderr).ok();
+                }
+                return Some(std::process::Output {
+                    status,
+                    stdout: stdout.into_bytes(),
+                    stderr: stderr.into_bytes(),
+                });
+            }
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn hardlinked_build_lock_does_not_touch_external_file() {
+    let repo = temp_repo("hardlink-lock");
+    write(&repo, "a.py", "def f(): pass\n");
+    let sentinel = std::env::temp_dir().join(format!("aw-sentinel-lock-{}", std::process::id()));
+    fs::write(&sentinel, b"keep\n").unwrap();
+    fs::create_dir_all(repo.join(".aw")).unwrap();
+    fs::hard_link(&sentinel, repo.join(".aw/build.lock")).unwrap();
+    let out = aw(&repo).args(["build"]).output().unwrap();
+    assert_ne!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(fs::read(&sentinel).unwrap(), b"keep\n");
+    let _ = fs::remove_file(&sentinel);
+}
+
+#[cfg(unix)]
+#[test]
+fn hardlinked_journal_does_not_touch_external_file() {
+    let repo = temp_repo("hardlink-journal");
+    write(&repo, "a.py", "def f(): pass\n");
+    build(&repo);
+    let sentinel = std::env::temp_dir().join(format!("aw-sentinel-journal-{}", std::process::id()));
+    fs::write(&sentinel, b"keep\n").unwrap();
+    fs::remove_file(repo.join(".aw/usage.log")).ok();
+    fs::hard_link(&sentinel, repo.join(".aw/usage.log")).unwrap();
+    let out = aw(&repo).args(["symbols", "a.py"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(fs::read(&sentinel).unwrap(), b"keep\n");
+    let _ = fs::remove_file(&sentinel);
+}
+
+#[cfg(unix)]
+#[test]
+fn fifo_journal_does_not_hang_build() {
+    let repo = temp_repo("fifo-writer");
+    write(&repo, "a.py", "def f(): pass\n");
+    fs::create_dir_all(repo.join(".aw")).unwrap();
+    let status = std::process::Command::new("mkfifo")
+        .arg(repo.join(".aw/usage.log"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let mut cmd = aw(&repo);
+    cmd.args(["build"]);
+    let out = output_with_timeout(cmd, 5).expect("build hung on a FIFO journal");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn fifo_journal_reader_does_not_hang() {
+    let repo = temp_repo("fifo-reader");
+    write(&repo, "a.py", "def f(): pass\n");
+    build(&repo);
+    fs::remove_file(repo.join(".aw/usage.log")).ok();
+    let status = std::process::Command::new("mkfifo")
+        .arg(repo.join(".aw/usage.log"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let mut cmd = aw(&repo);
+    cmd.args(["usage"]);
+    let out = output_with_timeout(cmd, 5).expect("usage hung on a FIFO journal");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn fifo_build_lock_does_not_hang_doctor() {
+    let repo = temp_repo("fifo-doctor-lock");
+    write(&repo, "a.py", "def f(): pass\n");
+    assert_eq!(build(&repo).0, 0);
+    let lock = repo.join(".aw/build.lock");
+    fs::remove_file(&lock).unwrap();
+    assert!(Command::new("mkfifo")
+        .arg(&lock)
+        .status()
+        .unwrap()
+        .success());
+    let mut cmd = aw(&repo);
+    cmd.arg("doctor");
+    let out = output_with_timeout(cmd, 5).expect("doctor hung on a FIFO lock");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
 }
 
 fn dump_edges(db: &Path) -> String {

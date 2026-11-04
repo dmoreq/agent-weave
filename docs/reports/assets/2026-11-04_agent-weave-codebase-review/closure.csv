@@ -1,0 +1,38 @@
+id,original_severity,status,scope
+S1,Critical,VERIFIED_ORIGINAL_CASE,Directory/lock/journal symlink sentinel checks passed; hardlink and active replacement are different cases.
+S2,Important,VERIFIED_ORIGINAL_CASE,Nonempty scoped-unresolved CLI passed.
+S3,Important,VERIFIED_ORIGINAL_CASE,Invalid UTF-8 followed by ping preserved the ping.
+S4,Important,VERIFIED_ORIGINAL_CASE,Both oversized-frame boundaries preserved the ping.
+S5,Important,VERIFIED_ORIGINAL_CASE,Held root flock blocked invalidation and preserved index.
+A2,Important,VERIFIED_ORIGINAL_CASE,Removed base produced equal complete normalized edge sets after incremental and forced builds.
+A3,Important,PARTIAL,Calls are ambiguous in both modes; complete edges differ in import destination (QNEW-A3).
+A4,Important,VERIFIED_ORIGINAL_CASE,Cursor implementation inspected and comment-work regression passed in the full Rust run.
+C1,Important,VERIFIED_ORIGINAL_CASE,Original two local bare imports have correct independent destinations.
+C2,Important,VERIFIED_ORIGINAL_CASE,Original parameter-shadow case has no false target edge.
+C3,Important,VERIFIED_ORIGINAL_CASE,Original constructor-to-unknown reassignment has no stale method edge.
+C4,Important,VERIFIED_ORIGINAL_CASE,Original arbitrary Rust factory does not fabricate A.render.
+C5,Important,VERIFIED_ORIGINAL_CASE,Original arrow body has one owner.
+C6,Important,VERIFIED_ORIGINAL_CASE,Original nested class has qualified methods and method edge.
+C7,Important,VERIFIED_ORIGINAL_CASE,Original known receiver does not fall back to shadowed module.
+C8,Important,VERIFIED_ORIGINAL_CASE,Original ambiguous class does not emit certain A.render.
+D1,Important,VERIFIED_ORIGINAL_CASE,Release workflow specifies repository explicitly; live publication not run.
+D2,Important,VERIFIED_ORIGINAL_CASE,CLI/MCP force help discloses bypass; corresponding regression passed.
+D3,Important,VERIFIED_ORIGINAL_CASE,CLI help states destructive directory scope; implementation inspected.
+D4,Important,VERIFIED_ORIGINAL_CASE,Public-document scan and independent document inspection found no prior prohibited identifiers.
+D5,Important,VERIFIED_ORIGINAL_CASE,Context descriptions/caveat acknowledge ambiguous entries.
+D6,Suggestion,VERIFIED_ORIGINAL_CASE,Current reference and skill document dotted suffix lookup.
+D7,Suggestion,VERIFIED_ORIGINAL_CASE,Current AGENTS exit-code contract lists parse abort as7.
+E1,Important,VERIFIED_ORIGINAL_CASE,Duplicate normalized scorer answer rejected by actual function.
+T1,Important,VERIFIED_ORIGINAL_CASE,Atomic sequence gives per-invocation fixture paths; full suite passed.
+T2,Important,VERIFIED_ORIGINAL_CASE,Nonempty/overlap destination tests passed; export symlink is a different residual hazard.
+T3,Important,IMPROVED_LIMITED,Inspection status and seeded marked-child control improved; all descendant coverage not proved.
+T4,Important,VERIFIED_ORIGINAL_CASE,Injected scanner-error regression passed; allowlist helper has a separate fail-open defect.
+T5,Suggestion,VERIFIED_ORIGINAL_CASE,Whitespace-preserving fixture and existing fixture suite passed.
+R1,Important,IMPROVED_LIMITED,Phase decomposition inspected; no universal effective-LOC/cognitive-complexity certification.
+R2,Important,VERIFIED_ORIGINAL_CASE,Side-effect-free direct loaders reused by context; parity regression passed.
+R3,Suggestion,DEFERRED,Optional behavior-preserving maintainability work remains deferred.
+R4,Suggestion,DEFERRED,Optional behavior-preserving maintainability work remains deferred.
+R5,Suggestion,DEFERRED,Optional behavior-preserving maintainability work remains deferred.
+R6,Suggestion,DEFERRED,Optional behavior-preserving maintainability work remains deferred.
+M1,Suggestion,DEFERRED,Optional behavior-preserving maintainability work remains deferred.
+H1,Important,VERIFIED_ORIGINAL_CASE,Missing/null rejected; explicit zero accepted by actual historical scorer.

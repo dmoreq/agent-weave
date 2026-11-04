@@ -91,11 +91,15 @@ Read [Evaluation](EVALUATION.md) before applying measured benefits to another ho
 
 ## Trust contract
 
-When an `aw` query exits 0, accept the returned navigation fields as ground
-truth for the question it answers. Do not repeat the same lookup with grep or a
-second `aw` call. Treat `tests`, `dead`, and `unresolved` as candidates, not
-proofs. Source reads remain required for behavioral claims, edits, safety, and
-review. The full policy is in [`aw-first/SKILL.md`](../skills/aw-first/SKILL.md).
+When an `aw` query exits 0, treat its navigation fields as candidates, not ground
+truth. Static resolution can return false positives even when the index is
+current and results are not capped or ambiguous. Avoid repeating a complete
+lookup merely for navigation; verify individual relationships against source
+when correctness matters. Treat `tests`, `dead`, and `unresolved` as candidates,
+not proofs. Re-run or read source when
+a result is capped, stale, ambiguous, or empty, when the question needs a field
+the output does not carry, or for behavioral claims, edits, safety, and review.
+The full policy is in [`aw-first/SKILL.md`](../skills/aw-first/SKILL.md).
 
 ## Local data and removal
 

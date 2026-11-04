@@ -2,6 +2,7 @@
 //! `.aw/` skipped unconditionally, per-file size cap 1 MB (skipped + counted),
 //! extension allowlist per language generation.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -109,6 +110,8 @@ fn git_visible_paths(root: &Path) -> Option<Vec<String>> {
 fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
     let mut files = Vec::new();
     let mut skipped_large = 0usize;
+    let root_canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut parent_contained: HashMap<PathBuf, bool> = HashMap::new();
     for rel in rels {
         if rel.split('/').any(|seg| seg == ".aw") {
             continue;
@@ -121,6 +124,21 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
             continue;
         }
         let path = root.join(rel);
+        // An ancestor component can be a symlink even when the leaf is a
+        // regular file. Check the canonical parent stays inside the canonical
+        // root before any metadata or read, so a tracked path cannot expose
+        // content outside the repository.
+        let parent = path.parent().unwrap_or(root);
+        let contained = *parent_contained
+            .entry(parent.to_path_buf())
+            .or_insert_with(|| {
+                std::fs::canonicalize(parent)
+                    .map(|p| p.starts_with(&root_canon))
+                    .unwrap_or(false)
+            });
+        if !contained {
+            continue;
+        }
         // symlink_metadata does not follow links, so a symlink to a source
         // file is skipped rather than indexed under a second path.
         let Ok(metadata) = std::fs::symlink_metadata(&path) else {
@@ -152,6 +170,46 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
         files,
         skipped_large,
     }
+}
+
+/// Read a file with a hard allocation bound. The walk captured the size, but
+/// the file can grow or be replaced before this read. `take(MAX_FILE_SIZE + 1)`
+/// prevents an unbounded allocation, and an over-cap result is an error rather
+/// than a truncated parse.
+pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read;
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if !meta.is_file() {
+            return Err(AwError::Internal(format!(
+                "not a regular file: {}",
+                path.display()
+            )));
+        }
+    }
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(AwError::Internal(format!(
+            "not a regular file: {}",
+            path.display()
+        )));
+    }
+    if meta.len() > MAX_FILE_SIZE {
+        return Err(AwError::Internal(format!(
+            "file exceeds the 1 MiB cap after walk: {}",
+            path.display()
+        )));
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    let mut reader = file.take(MAX_FILE_SIZE + 1);
+    reader.read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_FILE_SIZE {
+        return Err(AwError::Internal(format!(
+            "file grew past the 1 MiB cap during read: {}",
+            path.display()
+        )));
+    }
+    Ok(bytes)
 }
 
 /// Fallback discovery when git cannot answer: `ignore`'s textual rules.
@@ -262,6 +320,56 @@ mod tests {
         assert_eq!(rels, vec!["a.py", "sub/b.py"]);
         assert_eq!(stats.skipped_large, 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_bounded_rejects_over_cap() {
+        let dir = std::env::temp_dir().join(format!("aw-walk-bounded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("huge.py");
+        write(&path, &[b'a'; MAX_FILE_SIZE as usize + 1]);
+        let err = read_bounded(&path).unwrap_err();
+        assert_eq!(err.exit_code(), 6);
+        assert!(read_bounded(&dir.join("missing.py")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_git_visible_skips_ancestor_symlink() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("aw-walk-symlink-{}", std::process::id()));
+        let external =
+            std::env::temp_dir().join(format!("aw-walk-external-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&external);
+        write(&dir.join("pkg/a.py"), b"def inside(): pass\n");
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = std::process::Command::new("git")
+            .args(["add", "pkg/a.py"])
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        write(&external.join("a.py"), b"def external_marker(): pass\n");
+        std::fs::remove_dir_all(dir.join("pkg")).unwrap();
+        symlink(&external, dir.join("pkg")).unwrap();
+
+        let stats = walk(&dir, &["py"]).unwrap();
+        assert!(
+            stats.files.iter().all(|f| f.rel != "pkg/a.py"),
+            "ancestor symlink was indexed: {:?}",
+            stats.files.iter().map(|f| &f.rel).collect::<Vec<_>>()
+        );
+        assert!(stats.files.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&external);
     }
 
     #[test]

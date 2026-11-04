@@ -20,6 +20,34 @@ changes bump the minor while 0.x is unstable.
 **Required action:** run `aw build` to replace older indexes with schema v7. Query opens on v6 exit 5.
 Consumers that parse output must review the query-shape changes listed below before upgrading.
 
+### Fixed — re-review hardening (2026-11-04)
+
+- Incremental builds re-apply the inbound dirty closure after gap healing,
+  invalidate ambiguous sites when a candidate is removed or renamed, and choose
+  duplicate import candidates deterministically (`AMBIGUOUS` instead of an
+  insertion-order pick). `load_carried` queries are chunked, and file reads are
+  bounded at 1 MiB even if a file grows after discovery. Incremental and forced
+  builds should agree on normalized edge sets.
+- Source discovery rejects a tracked path whose ancestor is a symlink outside the
+  repository root.
+- Resolution fixes: assignment and arrow-parameter shadowing, nested
+  `self`/`cls`/`this` parameters, ordered bindings at each call site,
+  annotation-as-initial-binding, TS type annotations and `new C()`, Rust struct
+  literals and `Self::new()`, scoped import aliases, default exports, and Rust
+  inline-module aliases.
+- Lock and journal files reject FIFO, device, symlink, and hardlinked targets;
+  journal readers are regular-file and byte bounded. MCP validates JSON-RPC
+  envelopes and does not answer notifications.
+- Search counts the exact ∪ FTS union by symbol identity; impact ties use stable
+  semantic fields; `usage --verify` keeps the depth-1 name check but accepts
+  aliased call sites when the index has a resolved edge to the queried symbol,
+  and does not false-FAIL transitive caller pointers; the trust contract lists
+  capped, stale, ambiguous, empty, and safety/review exceptions.
+- Root `lib.rs`/`main.rs` inline modules now use the crate-root namespace (`a`),
+  not the file-module prefix (`lib.a`), so `crate::a` resolves consistently for
+  file and inline modules. Duplicate module/symbol import candidates are
+  reported as `AMBIGUOUS` instead of one arbitrary candidate.
+
 ### Added — transitive callers (2026-11-03)
 
 - `aw callers <name> --depth N` follows the resolved reverse call closure up to

@@ -4,8 +4,11 @@
 set -euo pipefail
 LOCK="${1:-Cargo.lock}"
 LIST="$(dirname "$0")/allowlist.txt"
-set +e
-extra=$(python3 - "$LOCK" "$LIST" <<'PY'
+if [ ! -r "$LOCK" ] || [ ! -r "$LIST" ]; then
+  echo "G5 allowlist: cannot read input: $LOCK or $LIST" >&2
+  exit 1
+fi
+if ! extra=$(python3 - "$LOCK" "$LIST" <<'PY'
 import re, sys
 lock = open(sys.argv[1]).read()
 allowed = set(open(sys.argv[2]).read().split())
@@ -13,8 +16,10 @@ names = set(re.findall(r'^name = "([^"]+)"$', lock, re.M))
 for n in sorted(names - allowed):
     print(n)
 PY
-)
-set -e
+); then
+  echo "G5 allowlist: input read failed" >&2
+  exit 1
+fi
 if [ -n "$extra" ]; then
   echo "G5 allowlist: packages not in tests/scripts/allowlist.txt:" >&2
   echo "$extra" >&2

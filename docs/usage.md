@@ -40,7 +40,7 @@ aw impact src/build.rs --sites
 
 `context` returns a definition range, caller sites, and callee definitions. Its per-section limit defaults to 10; an empty caller or callee section still permits a successful result.
 
-`callers` identifies call sites, not all textual references. `--depth N` follows the resolved reverse call closure and tags rows with their shortest depth. `impact` reverses the dependency direction: it finds files that depend on the target file, excluding that file itself.
+`callers` identifies call sites, not all textual references. `--depth N` follows the resolved reverse call closure and tags rows with their shortest depth. Each caller symbol appears once at its shortest depth; alternate longer routes are not repeated. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `impact` reverses the dependency direction: it finds files that depend on the target file, excluding that file itself.
 
 By default, impact uses calls and emits one row per caller file with a site count. Use `--sites` for individual sites, or extend the relationships and depth explicitly:
 

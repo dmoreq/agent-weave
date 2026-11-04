@@ -919,11 +919,7 @@ pub fn path(
     // Payload capture (Amendment 10a): hop pointer text, byte-identical to
     // the stdout data lines; `name` = the `from` argument. `shown` = `total`
     // = hop count (no cap surface exists).
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(from, &pointers, stale, hops, hops, built_at, &source_rev);
+    super::record_payload_meta(conn, from, &pointers, stale, hops, hops);
     crate::journal::record_result(hops, hops, hops, stale, 0);
     let mut out = Vec::with_capacity(hops + 4);
     out.push(PATH_CAVEAT.to_string());
@@ -1161,11 +1157,7 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     pointers.extend(callee_lines.iter().cloned());
     let total = callers_total + callees_total;
     let shown = pointers.len();
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(name, &pointers, stale, shown, total, built_at, &source_rev);
+    super::record_payload_meta(conn, name, &pointers, stale, shown, total);
     crate::journal::record_result(shown, shown, total, stale, 0);
     let mut out = vec![CONTEXT_CAVEAT.to_string()];
     if stale {

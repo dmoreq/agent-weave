@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,20 @@ def wilson(p: float, n: int, z: float = 1.959963985) -> tuple[float, float]:
     return ((center - spread) / denom, (center + spread) / denom)
 
 
+def count_matches(expected: list[str], stdout: str) -> int:
+    """Match each expected suffix to at most one returned symbol identity."""
+    symbols = [match.group(1) for line in stdout.splitlines()
+               if (match := re.match(r"^\S+:\d+\s+(\S+)", line))]
+    matched = 0
+    for name in sorted(expected, key=len, reverse=True):
+        for index, symbol in enumerate(symbols):
+            if symbol == name or symbol.endswith("." + name):
+                symbols.pop(index)
+                matched += 1
+                break
+    return matched
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", required=True)
@@ -42,6 +57,8 @@ def main() -> int:
     args = ap.parse_args()
 
     rows = [json.loads(l) for l in Path(args.queries).read_text().splitlines() if l.strip()]
+    if not rows or any(not row.get("expect") for row in rows):
+        ap.error("queries and expected symbol lists must not be empty")
     roots = {"aw": args.aw_root, "vihap": args.vihap_root}
 
     print("| query | hits | expects | recall |")
@@ -56,15 +73,10 @@ def main() -> int:
             capture_output=True,
             text=True,
         )
-        stdout = out.stdout
-        got = 0
-        for expect in row["expect"]:
-            # qualname suffix match against the pointer text; qualnames in
-            # search output appear after `path:line ` — match on any line.
-            tail = expect.split(".", 1)[-1] if "." in expect else expect
-            needle = expect.split(".")[-1] if expect.split(".")[-1] == tail else tail
-            if any(expect in l or f" {needle}" in l for l in stdout.splitlines()):
-                got += 1
+        if out.returncode not in (0, 1):
+            print(f"search failed for {row['query']!r}: exit {out.returncode}", file=sys.stderr)
+            return 1
+        got = count_matches(row["expect"], out.stdout)
         n = len(row["expect"])
         per_query.append((row["query"], got, n))
         hits_total += got

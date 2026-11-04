@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Báo cáo Phản biện Kỹ thuật & Kinh tế học Token — agent-weave (aw / kg)</title>
+  <style>
+    :root, :root[data-theme="light"] {
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-subtle: #f1f5f9;
+      --bg-hover: #e2e8f0;
+      --text-primary: #0f172a;
+      --text-secondary: #334155;
+      --text-muted: #64748b;
+      --border: #cbd5e1;
+      --border-subtle: #e2e8f0;
+      --accent: #0284c7;
+      --accent-subtle: #e0f2fe;
+      --accent-text: #0369a1;
+      --status-ok: #15803d;
+      --status-ok-bg: #dcfce7;
+      --status-warn: #b45309;
+      --status-warn-bg: #fef3c7;
+      --status-bad: #b91c1c;
+      --status-bad-bg: #fee2e2;
+      --status-info: #1d4ed8;
+      --status-info-bg: #dbeafe;
+      --code-bg: #f1f5f9;
+      --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg-page: #0b0f19;
+        --bg-card: #111827;
+        --bg-subtle: #1e293b;
+        --bg-hover: #334155;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+        --border: #334155;
+        --border-subtle: #1e293b;
+        --accent: #38bdf8;
+        --accent-subtle: #0c4a6e;
+        --accent-text: #7dd3fc;
+        --status-ok: #4ade80;
+        --status-ok-bg: rgba(21, 128, 61, 0.25);
+        --status-warn: #fbbf24;
+        --status-warn-bg: rgba(180, 83, 9, 0.25);
+        --status-bad: #f87171;
+        --status-bad-bg: rgba(185, 28, 28, 0.25);
+        --status-info: #60a5fa;
+        --status-info-bg: rgba(29, 78, 216, 0.25);
+        --code-bg: #1e293b;
+        --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --bg-page: #0b0f19;
+      --bg-card: #111827;
+      --bg-subtle: #1e293b;
+      --bg-hover: #334155;
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --border-subtle: #1e293b;
+      --accent: #38bdf8;
+      --accent-subtle: #0c4a6e;
+      --accent-text: #7dd3fc;
+      --status-ok: #4ade80;
+      --status-ok-bg: rgba(21, 128, 61, 0.25);
+      --status-warn: #fbbf24;
+      --status-warn-bg: rgba(180, 83, 9, 0.25);
+      --status-bad: #f87171;
+      --status-bad-bg: rgba(185, 28, 28, 0.25);
+      --status-info: #60a5fa;
+      --status-info-bg: rgba(29, 78, 216, 0.25);
+      --code-bg: #1e293b;
+      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg-page);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a {
+      color: var(--accent-text);
+      text-decoration: none;
+      border-bottom: 1px dotted var(--accent);
+    }
+
+    a:hover {
+      border-bottom-style: solid;
+    }
+
+    code, pre, .mono {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.85rem;
+    }
+
+    code {
+      background-color: var(--code-bg);
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .tabular {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Header & Toolbar */
+    header.report-header {
+      background-color: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 1.5rem 1rem;
+    }
+
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .header-top {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .title-group h1 {
+      margin: 0 0 0.35rem 0;
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    .title-group .subtitle {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.9375rem;
+      max-width: 72ch;
+    }
+
+    .meta-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+    }
+
+    .meta-tags {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    button.btn {
+      background-color: var(--bg-subtle);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: background-color 0.15s ease;
+    }
+
+    button.btn:hover {
+      background-color: var(--bg-hover);
+    }
+
+    button.btn-primary {
+      background-color: var(--accent-subtle);
+      color: var(--accent-text);
+      border-color: var(--accent);
+    }
+
+    /* Sticky Nav */
+    nav.section-nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background-color: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0.5rem 1.5rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    nav.section-nav ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      max-width: 1120px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    nav.section-nav a {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      border-bottom: none;
+      padding: 0.25rem 0;
+    }
+
+    nav.section-nav a:hover {
+      color: var(--accent-text);
+    }
+
+    /* Main Content */
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    section.report-section {
+      margin-bottom: 2.25rem;
+    }
+
+    .section-header {
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .section-header h2 {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .section-header .section-tag {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+
+    /* Badges & Pills */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pill-ok {
+      background-color: var(--status-ok-bg);
+      color: var(--status-ok);
+      border: 1px solid var(--status-ok);
+    }
+
+    .pill-warn {
+      background-color: var(--status-warn-bg);
+      color: var(--status-warn);
+      border: 1px solid var(--status-warn);
+    }
+
+    .pill-bad {
+      background-color: var(--status-bad-bg);
+      color: var(--status-bad);
+      border: 1px solid var(--status-bad);
+    }
+
+    .pill-info {
+      background-color: var(--status-info-bg);
+      color: var(--status-info);
+      border: 1px solid var(--status-info);
+    }
+
+    /* Cards & Grids */
+    .card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .thesis-box {
+      background-color: var(--bg-card);
+      border-left: 4px solid var(--accent);
+      border-top: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      border-radius: 0 8px 8px 0;
+      padding: 1.15rem 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .thesis-box p {
+      margin: 0;
+      max-width: 75ch;
+      color: var(--text-primary);
+      font-size: 0.975rem;
+    }
+
+    . thesis-box p + p {
+      margin-top: 0.65rem;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .kpi-card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.15rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .kpi-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.03em;
+      margin-bottom: 0.35rem;
+    }
+
+    .kpi-value {
+      font-size: 1.65rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+      margin-bottom: 0.4rem;
+    }
+
+    .kpi-foot {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 0.45rem;
+      margin-top: 0.25rem;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 1.25rem;
+    }
+
+    @media (max-width: 640px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Blockquote */
+    blockquote {
+      margin: 0.75rem 0;
+      padding: 0.65rem 1rem;
+      background-color: var(--bg-subtle);
+      border-left: 3px solid var(--text-muted);
+      color: var(--text-secondary);
+      font-style: italic;
+      font-size: 0.875rem;
+      border-radius: 0 6px 6px 0;
+    }
+
+    blockquote cite {
+      display: block;
+      margin-top: 0.35rem;
+      font-style: normal;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Tables */
+    .table-wrap {
+      overflow-x: auto;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.875rem;
+    }
+
+    th, td {
+      padding: 0.7rem 0.9rem;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: top;
+    }
+
+    th {
+      background-color: var(--bg-subtle);
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    th.sortable {
+      cursor: pointer;
+    }
+
+    th.sortable:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tbody tr:hover {
+      background-color: var(--bg-subtle);
+    }
+
+    /* Filter Bar */
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .filter-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .filter-btn {
+      padding: 0.3rem 0.65rem;
+      font-size: 0.78rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background-color: var(--bg-card);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-weight: 500;
+    }
+
+    .filter-btn.active {
+      background-color: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+    }
+
+    .search-input {
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background-color: var(--bg-card);
+      color: var(--text-primary);
+      font-size: 0.8125rem;
+      min-width: 220px;
+    }
+
+    /* Progressive Disclosure Details */
+    details.disclosure {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 0.85rem;
+      overflow: hidden;
+    }
+
+    details.disclosure summary {
+      padding: 0.85rem 1.15rem;
+      font-weight: 600;
+      cursor: pointer;
+      background-color: var(--bg-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      list-style: none;
+    }
+
+    details.disclosure summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.disclosure summary::after {
+      content: "▾";
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      transition: transform 0.15s ease;
+    }
+
+    details.disclosure:not([open]) summary::after {
+      transform: rotate(-90deg);
+    }
+
+    details.disclosure .details-body {
+      padding: 1.1rem 1.25rem;
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    /* Interactive Simulator */
+    .sim-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 1.25rem;
+      align-items: center;
+    }
+
+    @media (max-width: 768px) {
+      .sim-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .slider-row {
+      margin-bottom: 0.9rem;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    /* Visual Bar Meter */
+    .delta-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      min-width: 160px;
+    }
+
+    .delta-bar {
+      height: 8px;
+      border-radius: 4px;
+    }
+
+    .delta-neg {
+      background-color: var(--status-ok);
+    }
+
+    .delta-pos {
+      background-color: var(--status-bad);
+    }
+
+    /* Lists */
+    ul.tight-list {
+      margin: 0.4rem 0;
+      padding-left: 1.25rem;
+    }
+
+    ul.tight-list li {
+      margin-bottom: 0.35rem;
+      max-width: 72ch;
+    }
+
+    /* Print Styles */
+    @media print {
+      .no-print, nav, button, .toolbar, .filter-bar, .sim-controls {
+        display: none !important;
+      }
+      body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 10pt;
+        line-height: 1.4;
+      }
+      main, header.report-header, .container {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+      }
+      details:not([open]) > *:not(summary) {
+        display: block !important;
+      }
+      section, .card, .kpi-card, table, figure, details {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        box-shadow: none !important;
+      }
+      h1, h2, h3 {
+        break-after: avoid;
+      }
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        opacity: 1 !important;
+      }
+      @page {
+        margin: 14mm 12mm;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="report-header">
+    <div class="container">
+      <div class="header-top">
+        <div class="title-group">
+          <h1>Báo cáo Phản biện Kỹ thuật &amp; Kinh tế học Token: <code>agent-weave</code> (<code>aw</code> / <code>kg</code>)</h1>
+          <p class="subtitle">Đánh giá độc lập theo khung Red-Team (<code>CLAIM → EXTRACT → DOUBT → RECONCILE</code>) về cách trình bày, giới hạn kiến trúc Tree-sitter/SQLite và tỷ lệ tiết kiệm token thực tế trên Coding Agent.</p>
+        </div>
+        <div class="toolbar no-print">
+          <button type="button" class="btn btn-primary" id="btn-copy-md" title="Sao chép bản tóm tắt Markdown vào Clipboard">📋 Copy Summary (MD)</button>
+          <button type="button" class="btn" id="btn-toggle-details">📂 Thu gọn / Mở rộng tất cả</button>
+          <button type="button" class="btn" id="btn-theme">🌓 Đổi giao diện Sáng/Tối</button>
+          <button type="button" class="btn" id="btn-print">🖨️ In / Xuất PDF</button>
+        </div>
+      </div>
+      <div class="meta-bar">
+        <div class="meta-tags">
+          <span class="pill pill-warn">Verdict: Có giá trị ngách (Conditional ROI)</span>
+          <span><strong>Target:</strong> <a href="file:///Users/quy.doan/Workspace/kg"><code>/Users/quy.doan/Workspace/kg</code></a> (v0.3.0, Schema v7)</span>
+          <span class="tabular"><strong>Ngày kiểm toán:</strong> 2026-11-04</span>
+        </div>
+        <div class="mono tabular">23 CLI Subcommands • 21 MCP Tools (8 Core) • 4 Ngôn ngữ (Py/TS/JS/Rust)</div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="section-nav no-print" aria-label="Điều hướng mục">
+    <ul>
+      <li><a href="#executive-rollup">1. Tổng quan &amp; KPI</a></li>
+      <li><a href="#presentation-features">2. Trình bày &amp; Kiến trúc</a></li>
+      <li><a href="#adversarial-critique">3. Phản biện Red-Team</a></li>
+      <li><a href="#token-breakdown">4. Quy đổi % Token theo Hoạt động</a></li>
+      <li><a href="#interactive-sim">5. Mô phỏng ROI Thực tế</a></li>
+      <li><a href="#verdict-playbook">6. Kết luận &amp; Khuyến nghị</a></li>
+    </ul>
+  </nav>
+
+  <main>
+    <!-- SECTION 1: EXECUTIVE ROLLUP -->
+    <section id="executive-rollup" class="report-section">
+      <div class="section-header">
+        <h2>1. Luận điểm Cốt lõi &amp; Chỉ số Thực nghiệm (Executive Rollup)</h2>
+        <span class="section-tag">EVIDENCE: docs/EVALUATION.md • skills/aw-first/SKILL.md</span>
+      </div>
+
+      <div class="thesis-box">
+        <p><strong>Kết luận trực diện:</strong> Mức tiết kiệm token của <code>agent-weave</code> (<code>aw</code>) là <strong>có thật (-27,3% input tokens ở pha điều hướng) nhưng hoàn toàn không tự động</strong>. Nếu chỉ gắn MCP hoặc CLI cho Coding Agent mà không nạp kèm chính sách định tuyến bắt buộc (<a href="file:///Users/quy.doan/Workspace/kg/skills/aw-first/SKILL.md"><code>skills/aw-first/SKILL.md</code></a>), số lượt gọi tool của agent bị đội lên <strong>+73,3%</strong> và mức giảm input token gần như bằng không (<strong>-2,8%</strong>).</p>
+        <p>Khi quy đổi ra <strong>toàn bộ vòng đời một phiên làm việc thực tế của Coding Agent</strong> (bao gồm đọc thân hàm, viết code/diff, chạy test và cập nhật lại index), <code>aw</code> giúp giảm ròng khoảng <strong>5,7% tổng lượng token ở 30% nav share (tối đa ~8% ở 40%) theo mô hình ước tính</strong>. Công cụ phát huy giá trị cao nhất ở bài toán truy vết chuỗi gọi hàm sâu (<code>aw path</code>, <code>aw callers</code>) trên monorepo tĩnh, nhưng <strong>không có lợi thế ổn định hoặc có thể làm tăng token cục bộ</strong> đối với các tác vụ tìm kiếm ngữ nghĩa, đọc file nhỏ hoặc kiểm toán code.</p>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label">Điều hướng Có định tuyến (Query-First)</div>
+            <div class="kpi-value tabular" style="color: var(--status-ok);">-27,3%</div>
+          </div>
+          <div class="kpi-foot tabular">
+            Giảm từ <strong>1.058.613</strong> xuống <strong>769.306</strong> input tokens/run khi ép dùng <code>aw-first</code> (<a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>EVALUATION.md</code></a>).
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label">Gắn Tool Tự do (Unrouted Tool Tax)</div>
+            <div class="kpi-value tabular" style="color: var(--status-bad);">+73,3% calls</div>
+          </div>
+          <div class="kpi-foot tabular">
+            Tăng từ <strong>20,6</strong> lên <strong>35,7</strong> tool calls/run; input tokens chỉ giảm <strong>2,8%</strong> do agent gọi kép cả <code>aw</code> lẫn <code>grep</code>.
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label">Độ phủ Điểm gọi (Navigation Recall)</div>
+            <div class="kpi-value tabular" style="color: var(--accent-text);">98,6% <span style="font-size: 0.95rem; color: var(--text-muted);">vs 81,9%</span></div>
+          </div>
+          <div class="kpi-foot tabular">
+            Cải thiện <strong>+16,7 điểm %</strong> so với chỉ dùng <code>grep</code> nhờ bắt được alias import và kế thừa tĩnh.
+          </div>
+        </div>
+
+        <div class="kpi-card">
+          <div>
+            <div class="kpi-label">Tỷ lệ Cạnh không phân giải được</div>
+            <div class="kpi-value tabular" style="color: var(--status-warn);">51,8% – 90,4%</div>
+          </div>
+          <div class="kpi-foot tabular">
+            Các điểm gọi động (dynamic dispatch, untyped receiver, external libs) bị bỏ qua trên 6 tập codebase thực nghiệm.
+          </div>
+        </div>
+      </div>
+
+      <!-- Inline SVG Visual Comparison -->
+      <div class="card">
+        <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1rem;">So sánh Thực nghiệm Điều hướng: Không dùng <code>aw</code> vs. Gắn <code>aw</code> Tự do vs. Định tuyến <code>aw-first</code></h3>
+        <svg viewBox="0 0 920 225" width="100%" height="auto" role="img" aria-label="Biểu đồ so sánh Input Tokens, Tool Calls và Recall giữa 3 chế độ">
+          <style>
+            .svg-label { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; fill: var(--text-secondary); }
+            .svg-title { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13px; font-weight: 700; fill: var(--text-primary); }
+            .svg-num { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; font-weight: 600; fill: var(--text-primary); }
+          </style>
+          <!-- Left panel: Input Tokens -->
+          <text x="10" y="22" class="svg-title">Trung bình Input Tokens / Phiên điều hướng (Thấp hơn là tốt hơn)</text>
+          
+          <text x="10" y="60" class="svg-label">1. No aw (Chỉ grep/read)</text>
+          <rect x="175" y="45" width="240" height="22" rx="4" fill="#64748b" />
+          <text x="423" y="60" class="svg-num">1.058.613 (100%)</text>
+
+          <text x="10" y="100" class="svg-label">2. aw Unrouted (Tự do)</text>
+          <rect x="175" y="85" width="233" height="22" rx="4" fill="#d97706" />
+          <text x="416" y="100" class="svg-num">1.028.665 (-2,8%)</text>
+
+          <text x="10" y="140" class="svg-label">3. aw Query-First (Skill)</text>
+          <rect x="175" y="125" width="174" height="22" rx="4" fill="#16a34a" />
+          <text x="357" y="140" class="svg-num">769.306 (-27,3%)</text>
+
+          <text x="10" y="185" class="svg-label" style="font-style: italic;">Nguồn: docs/EVALUATION.md (Mục 2 — Corpus A, Grok Build 1.0.70, 10 runs/nhánh).</text>
+
+          <!-- Divider -->
+          <line x1="540" y1="10" x2="540" y2="205" stroke="var(--border)" stroke-dasharray="4 4" />
+
+          <!-- Right panel: Tool Calls & Recall -->
+          <text x="565" y="22" class="svg-title">Số lượt Gọi Tool &amp; Độ chính xác (Recall)</text>
+
+          <text x="565" y="60" class="svg-label">No aw:</text>
+          <rect x="655" y="45" width="95" height="22" rx="4" fill="#64748b" />
+          <text x="758" y="60" class="svg-num">20,6 calls | 81,9% recall</text>
+
+          <text x="565" y="100" class="svg-label">aw Unrouted:</text>
+          <rect x="655" y="85" width="165" height="22" rx="4" fill="#dc2626" />
+          <text x="826" y="100" class="svg-num">35,7 calls | 98,6%</text>
+
+          <text x="565" y="140" class="svg-label">aw Query-First:</text>
+          <rect x="655" y="125" width="115" height="22" rx="4" fill="#0284c7" />
+          <text x="778" y="140" class="svg-num">24,9 calls | 98,6%</text>
+
+          <text x="565" y="185" class="svg-label">Model turns giảm từ 20,2 → 17,2 lượt ở chế độ Query-First.</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- SECTION 2: PRESENTATION & ARCHITECTURE -->
+    <section id="presentation-features" class="report-section">
+      <div class="section-header">
+        <h2>2. Đánh giá Cách trình bày &amp; Kiến trúc Tính năng Kỹ thuật</h2>
+        <span class="section-tag">SOURCE: README.md • AGENTS.md • Cargo.toml • src/mcp.rs</span>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <h3 style="margin-top: 0; font-size: 1.05rem;">Điểm sáng trong Cách trình bày (<a href="file:///Users/quy.doan/Workspace/kg/README.md"><code>README.md</code></a> &amp; <a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>EVALUATION.md</code></a>)</h3>
+          <ul class="tight-list">
+            <li><span class="pill pill-ok">FACT</span> <strong>Chống thổi phồng (Anti-Hype Documentation):</strong> Ngay trang đầu của <a href="file:///Users/quy.doan/Workspace/kg/README.md"><code>README.md</code></a> đặt mục <em>"Know what the answer does not prove"</em>, khẳng định rõ kết quả rỗng không chứng minh hàm không được gọi ở runtime.</li>
+            <li><span class="pill pill-ok">FACT</span> <strong>Tự bạch sai số thực nghiệm:</strong> Mục mở đầu <a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>docs/EVALUATION.md</code></a> công khai đính chính việc phiên bản tài liệu cũ gộp chung kết quả của nhiều schema khác nhau và nhầm lẫn giữa <em>Mean Query Recall (0.775)</em> với <em>Pooled Recall (0.786)</em>.</li>
+            <li><span class="pill pill-info">DECISION</span> <strong>Tách biệt 3 tầng tích hợp:</strong> Trong <a href="file:///Users/quy.doan/Workspace/kg/docs/agent-integration.md"><code>docs/agent-integration.md</code></a>, tác giả phân định rạch ròi giữa <strong>CLI</strong> (thực thi lệnh), <strong>MCP Server</strong> (cung cấp schema qua stdio) và <strong>Skill <code>aw-first</code></strong> (luật định tuyến và hợp đồng tin cậy).</li>
+          </ul>
+          <blockquote>
+            "These are workflow differences, not a promise of complete coverage or universal savings. Existing editor references, language servers, and grep may already answer a small question efficiently."
+            <cite>— Trích <a href="file:///Users/quy.doan/Workspace/kg/README.md"><code>README.md</code> (dòng 24–27)</a></cite>
+          </blockquote>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-top: 0; font-size: 1.05rem;">Kiến trúc Kỹ thuật &amp; Kỷ luật An toàn (<a href="file:///Users/quy.doan/Workspace/kg/AGENTS.md"><code>AGENTS.md</code></a> &amp; <a href="file:///Users/quy.doan/Workspace/kg/src/mcp.rs"><code>src/mcp.rs</code></a>)</h3>
+          <ul class="tight-list">
+            <li><span class="pill pill-ok">FACT</span> <strong>Zero-Daemon, Zero-Network, Zero-Unsafe:</strong> Binary viết bằng Rust đồng bộ (<a href="file:///Users/quy.doan/Workspace/kg/Cargo.toml"><code>Cargo.toml</code></a> chỉ dùng <code>clap</code>, <code>tree-sitter</code>, <code>rusqlite</code> bundled, <code>ignore</code>, <code>serde_json</code>). Tốc độ build ~2.025 files (85.050 symbols) đạt <strong>1,87 – 1,99 giây</strong> (best/median dưới load average 41,66–53,89; cần đo lại trên host yên tĩnh).</li>
+            <li><span class="pill pill-ok">FACT</span> <strong>Cơ chế Cô lập Ghi đĩa (Write Confinement):</strong> Mọi thao tác ghi chỉ diễn ra trong thư mục <code>.aw/</code> và bị kiểm soát tự động bởi script <a href="file:///Users/quy.doan/Workspace/kg/tests/scripts/write_path_check.sh"><code>tests/scripts/write_path_check.sh</code></a>.</li>
+            <li><span class="pill pill-info">DECISION</span> <strong>Cắt tỉa bề mặt MCP mặc định:</strong> Trong <a href="file:///Users/quy.doan/Workspace/kg/src/mcp.rs"><code>src/mcp.rs</code> (dòng 19–21)</a>, hằng số <code>CORE_TOOLS</code> chỉ phơi bày <strong>8 công cụ điều hướng cốt lõi</strong> thay vì toàn bộ 21 MCP tool, ngăn chặn việc làm tràn ngữ cảnh của agent bằng các công cụ kiểm toán nhiễu.</li>
+          </ul>
+          <blockquote>
+            "enforce query-first routing strictly on proven high-ROI graph commands (build, path, context, callers, callees, impact, imports); keep noisy or human-audit commands (tests, dead, complexity, hotspots, report, stats, files) out of mandatory agent routing."
+            <cite>— Trích <a href="file:///Users/quy.doan/Workspace/kg/AGENTS.md"><code>AGENTS.md</code> (dòng 48–50)</a></cite>
+          </blockquote>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: ADVERSARIAL CRITIQUE -->
+    <section id="adversarial-critique" class="report-section">
+      <div class="section-header">
+        <h2>3. Phản biện Red-Team: Kiểm chứng Lời hứa Tiết kiệm Token (<code>CLAIM → EXTRACT → DOUBT → RECONCILE</code>)</h2>
+        <span class="section-tag">METHOD: Critic-Review • Doubt-Driven Development</span>
+      </div>
+
+      <details class="disclosure" open>
+        <summary>
+          <span><strong>Bước 1 &amp; 2 (CLAIM &amp; EXTRACT):</strong> Bóc tách Giả thuyết Cốt lõi và Hợp đồng Kinh tế học Token</span>
+          <span class="pill pill-info">Core Contract</span>
+        </summary>
+        <div class="details-body">
+          <div class="grid-2">
+            <div>
+              <h4 style="margin: 0 0 0.4rem 0;">CLAIM (Giả thuyết của dự án)</h4>
+              <p style="margin: 0;">Xây dựng đồ thị tĩnh cục bộ (<code>.aw/index.db</code>) giúp Coding Agent trả lời ngay các câu hỏi về quan hệ gọi hàm và phụ thuộc bằng danh sách tọa độ <code>path:line</code>, từ đó tránh phải chạy <code>grep</code> lặp đi lặp lại và đọc toàn bộ nội dung nhiều file không liên quan.</p>
+            </div>
+            <div>
+              <h4 style="margin: 0 0 0.4rem 0;">CONTRACT (Điều kiện bắt buộc để tiết kiệm Token thật)</h4>
+              <p style="margin: 0;">Phương trình tiết kiệm ròng: <code>Token_Saved(Bớt đọc file + Bớt bước mò đường) &gt; Token_Cost(MCP Schema + Skill Prompt + Lệnh aw + Fallback khi aw mù + Rebuild sau khi sửa code)</code>.</p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="disclosure" open>
+        <summary>
+          <span><strong>Bước 3 (DOUBT):</strong> 5 Phản biện sắc lạnh bóc trần giới hạn thực tế của <code>aw</code></span>
+          <span class="pill pill-bad">5 Điểm nghẽn Thực chứng</span>
+        </summary>
+        <div class="details-body">
+          <ol class="tight-list" style="max-width: 95ch;">
+            <li>
+              <strong>Thuế "Gọi Kép" khi thiếu Kỹ luật Định tuyến (The Double-Verification Tax):</strong>
+              Trong thực nghiệm tại <a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>docs/EVALUATION.md</code> (Mục 2)</a>, khi agent được cấp <code>aw</code> nhưng không bị khóa bởi <code>Trust Contract</code>, agent xem <code>aw</code> như một gợi ý phụ: nó gọi <code>aw</code> (3,7 lần/run) rồi vẫn gọi thêm <code>grep</code> và đọc file để tự kiểm chứng, đẩy tổng số tool calls từ <strong>20,6 lên 35,7 lượt (+73,3%)</strong>.
+            </li>
+            <li>
+              <strong>Độ mù Phân giải Tĩnh 51,8% – 90,4% đẩy Agent vào bẫy Fallback tốn kém gấp đôi:</strong>
+              Theo <a href="file:///Users/quy.doan/Workspace/kg/src/extract/resolve.rs"><code>src/extract/resolve.rs</code> (dòng 676–805)</a>, bộ phân giải chỉ nối được cạnh khi gọi trực tiếp theo tên module, <code>self/cls/this</code> trong thân lớp, hoặc biến cục bộ được gán trực tiếp từ constructor (<code>obj = Class()</code>). Mọi lời gọi qua Dependency Injection, callback, higher-order function, dynamic dispatch, hoặc phương thức trả về từ hàm factory (như lỗi <code>C4</code> trong <a href="file:///Users/quy.doan/Workspace/kg/docs/reports/2026-11-03_agent-weave-review-findings.md"><code>review-findings.md</code></a>) đều rơi vào <code>Outcome::Unresolved</code>. Khi 1 cạnh giữa đường bị đứt, <code>aw path A B</code> báo không có đường đi; agent vừa mất token gọi <code>aw</code>, vừa phải quay lại chạy <code>grep</code> từ đầu.
+            </li>
+            <li>
+              <strong>Ngụy biện "Chỉ đếm pha Điều hướng" (Navigation-Only Benchmark Bias):</strong>
+              Con số <strong>-27,3% input tokens</strong> được đo trên 5 bài tập chỉ yêu cầu <em>liệt kê danh sách điểm gọi</em>. Trong thực tế, Coding Agent không chỉ liệt kê tọa độ mà phải <strong>đọc thân hàm để hiểu logic và sửa code</strong>. Vì bảng <code>symbols</code> trong <a href="file:///Users/quy.doan/Workspace/kg/schema.sql"><code>schema.sql</code> (dòng 43–45)</a> chỉ lưu tối đa 160 ký tự dòng chữ ký đầu tiên (<code>signature</code>) và không lưu thân hàm, agent bắt buộc phải dùng <code>view_file</code> / <code>read_file</code> để đọc mã nguồn trước khi sửa.
+            </li>
+            <li>
+              <strong>Chi phí Ngữ cảnh Cố định (Fixed System Prompt Overhead) và Chi phí Rebuild:</strong>
+              Nạp 8 tool schemas từ <a href="file:///Users/quy.doan/Workspace/kg/src/mcp.rs"><code>src/mcp.rs</code></a> cùng nội dung <a href="file:///Users/quy.doan/Workspace/kg/skills/aw-first/SKILL.md"><code>skills/aw-first/SKILL.md</code></a> tiêu tốn khoảng <strong>1.200 – 1.800 input tokens trên mỗi lượt gọi model</strong> (tương đương 24.000 – 36.000 cached/uncached input tokens cho một phiên 20 turns). Hơn nữa, mỗi khi agent sửa 1 file, index lập tức bị cũ (stale) và agent phải tốn thêm 1 lượt gọi tool <code>aw build</code> trước khi truy vấn tiếp.
+            </li>
+            <li>
+              <strong>Sự phụ thuộc nặng nề vào Host/Model và Nhiễu từ các Lệnh Phụ:</strong>
+              Trong <a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>docs/EVALUATION.md</code> (Mục 3)</a>, cùng một tính năng <code>search</code> giúp giảm 28% token trên Grok trong retest signature/delegation (identifier lookup chỉ +0,2%) nhưng lại làm <strong>tăng +10% token trên zcode</strong>; lệnh <code>tests</code> làm tăng <strong>+89% tool calls trên agy</strong>; lệnh API inventory làm tăng <strong>+14% đến +125% tool calls</strong> trên cả 3 host.
+            </li>
+          </ol>
+        </div>
+      </details>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Phân loại (RECONCILE)</th>
+              <th>Phát hiện Trọng tâm</th>
+              <th>Bằng chứng Xác thực trong Repo</th>
+              <th>Hành động Bắt buộc</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill pill-bad">1. Critical Flaw</span></td>
+              <td><strong>Tích hợp MCP/CLI trần không kèm Skill định tuyến</strong> làm tăng +73% số lượt gọi tool mà không giảm token.</td>
+              <td><a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>docs/EVALUATION.md</code> (Bảng Mục 2)</a>: 35,7 calls vs 20,6 calls ở nhánh <code>no aw</code>.</td>
+              <td>Không bao giờ bật <code>aw mcp</code> đơn lẻ; bắt buộc nạp <code>Trust Contract</code> từ <a href="file:///Users/quy.doan/Workspace/kg/skills/aw-first/SKILL.md"><code>SKILL.md</code></a>.</td>
+            </tr>
+            <tr>
+              <td><span class="pill pill-warn">2. Actionable Gap</span></td>
+              <td><strong>13 non-core MCP tool; AGENTS.md loại 7 lệnh khỏi routing bắt buộc</strong> khi để Coding Agent tự do sử dụng.</td>
+              <td><a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>docs/EVALUATION.md</code> (Mục 3)</a>: <code>tests</code> (+89% calls), <code>API inventory</code> (+125% calls), <code>search</code> (recall 0.775).</td>
+              <td>Khóa chặt agent ở 7 lệnh điều hướng cốt lõi; tuyệt đối không bật cờ <code>--all-tools</code> trên MCP.</td>
+            </tr>
+            <tr>
+              <td><span class="pill pill-info">3. Explicit Trade-off</span></td>
+              <td><strong>Tree-sitter AST không có Type Inference sâu</strong> như LSP (<code>rust-analyzer</code>, <code>pyright</code>, <code>tsserver</code>).</td>
+              <td><a href="file:///Users/quy.doan/Workspace/kg/src/extract/resolve.rs"><code>src/extract/resolve.rs</code></a> &amp; <a href="file:///Users/quy.doan/Workspace/kg/docs/reports/2026-11-03_agent-weave-codebase-review.md"><code>codebase-review.md</code></a>.</td>
+              <td>Chấp nhận đánh đổi để lấy tốc độ index ~2 giây và zero-config; dùng <code>grep</code>/LSP khi gặp dynamic dispatch.</td>
+            </tr>
+            <tr>
+              <td><span class="pill pill-ok">4. What Works (Anchor)</span></td>
+              <td><strong>Truy vết đường gọi hàm (<code>path</code>) và ngữ cảnh bao quanh (<code>context</code>, <code>callers</code>, <code>imports</code>)</strong> cực kỳ hiệu quả.</td>
+              <td><a href="file:///Users/quy.doan/Workspace/kg/docs/EVALUATION.md"><code>docs/EVALUATION.md</code> (Mục 3)</a>: <code>path</code> giảm 57%–86% tool calls và 36%–63% input tokens trên route tasks; synthetic chains có -12% trên OpenCode.</td>
+              <td>Giữ làm vũ khí chủ lực khi agent cần dò luồng thực thi hoặc đánh giá tác động trước khi refactor.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 4: QUANTITATIVE TOKEN BREAKDOWN BY CODING AGENT ACTIVITY -->
+    <section id="token-breakdown" class="report-section">
+      <div class="section-header">
+        <h2>4. Bảng Quy đổi % Tiết kiệm / Lãng phí Token theo Hoạt động của Coding Agent</h2>
+        <span class="section-tag">INTERACTIVE MATRIX: Lọc &amp; Sắp xếp theo ROI</span>
+      </div>
+
+      <div class="filter-bar no-print">
+        <div class="filter-group" role="group" aria-label="Bộ lọc mức độ hiệu quả">
+          <button type="button" class="filter-btn active" data-filter="all">Tất cả hoạt động (6)</button>
+          <button type="button" class="filter-btn" data-filter="positive">Tiết kiệm thật — ROI Dương (2)</button>
+          <button type="button" class="filter-btn" data-filter="neutral">Hòa vốn / Phụ thuộc ngữ cảnh (1)</button>
+          <button type="button" class="filter-btn" data-filter="negative">Lãng phí / Không có giá trị (3)</button>
+        </div>
+        <input type="search" id="activity-search" class="search-input" placeholder="Tìm hoạt động hoặc lệnh aw..." aria-label="Tìm kiếm hoạt động">
+      </div>
+
+      <div class="table-wrap">
+        <table id="activity-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="activity">Hoạt động chính của Coding Agent ↕</th>
+              <th class="sortable tabular" data-sort="share">Tỷ trọng Phiên ↕</th>
+              <th>Lệnh <code>aw</code> sử dụng</th>
+              <th class="sortable tabular" data-sort="delta">Biến thiên Input Token ↕</th>
+              <th>Biến thiên Lượt gọi Tool</th>
+              <th>Đánh giá Phản biện &amp; Giá trị Thực tế</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-category="positive" data-activity="1. Truy vết luồng gọi hàm đa tầng (Call-Chain & Route Tracing)" data-share="11.9" data-delta="-49.5">
+              <td><strong>1. Truy vết luồng gọi hàm đa tầng</strong><br><span style="font-size: 0.78rem; color: var(--text-muted);">Call-Chain &amp; Route Tracing (từ điểm vào API tới tầng DB/core)</span></td>
+              <td class="tabular"><strong>10% – 15%</strong></td>
+              <td><code>aw path</code><br><code>aw callees --depth N</code></td>
+              <td class="tabular">
+                <div class="delta-bar-wrap">
+                  <div class="delta-bar delta-neg" style="width: 75px;"></div>
+                  <strong style="color: var(--status-ok);">-36% đến -63% (route tasks; synthetic -12% trên OpenCode)</strong>
+                </div>
+              </td>
+              <td class="tabular"><span class="pill pill-ok">-57% đến -86% calls</span></td>
+              <td><strong>Giá trị cao nhất.</strong> Thay vì đọc 5–10 file trung gian để lần theo từng bước nhảy, 1 lệnh <code>aw path A B</code> trả về ngay chuỗi <code>path:line</code> ngắn nhất. Đạt hiệu quả đồng nhất trên cả 4 host (Grok, OpenCode, agy, zcode).</td>
+            </tr>
+
+            <tr data-category="positive" data-activity="2. Đánh giá phạm vi ảnh hưởng trước khi Refactor (Caller & Impact Discovery)" data-share="16.7" data-delta="-30.1">
+              <td><strong>2. Đánh giá phạm vi ảnh hưởng khi Refactor</strong><br><span style="font-size: 0.78rem; color: var(--text-muted);">Caller, Surrounding Context &amp; File Dependency Discovery</span></td>
+              <td class="tabular"><strong>15% – 20%</strong></td>
+              <td><code>aw context</code><br><code>aw callers</code><br><code>aw impact</code><br><code>aw imports</code></td>
+              <td class="tabular">
+                <div class="delta-bar-wrap">
+                  <div class="delta-bar delta-neg" style="width: 48px;"></div>
+                  <strong style="color: var(--status-warn);">+1,9% đến -62,0%</strong>
+                </div>
+              </td>
+              <td class="tabular"><span class="pill pill-warn">-76% đến 0% calls</span></td>
+              <td><strong>Có giá trị rõ rệt.</strong> Gom chữ ký hàm, danh sách callers/callees trực tiếp và các file phụ thuộc vào một kết quả gọn, lọc bỏ nhiễu văn bản trùng tên của <code>grep</code> và nâng Recall từ 81,9% lên 98,6%.</td>
+            </tr>
+
+            <tr data-category="neutral" data-activity="3. Tìm kiếm ký hiệu theo tên hoặc từ khóa (Symbol & Keyword Search)" data-share="11.9" data-delta="-18.5">
+              <td><strong>3. Tìm kiếm ký hiệu theo từ khóa</strong><br><span style="font-size: 0.78rem; color: var(--text-muted);">Identifier &amp; Vocabulary Lookup</span></td>
+              <td class="tabular"><strong>10% – 15%</strong></td>
+              <td><code>aw search</code><br><code>aw resolve</code></td>
+              <td class="tabular">
+                <div class="delta-bar-wrap">
+                  <div class="delta-bar delta-pos" style="width: 24px;"></div>
+                  <strong style="color: var(--status-warn);">-47% đến +10%</strong>
+                </div>
+              </td>
+              <td class="tabular"><span class="pill pill-warn">-38% đến +3% calls</span></td>
+              <td><strong>Bất ổn cao / Không vượt trội <code>ripgrep</code>.</strong> Bảng <code>symbols_fts</code> chỉ đánh chỉ mục tên định danh và dòng chữ ký, hoàn toàn không tìm được chuỗi lỗi, hằng số hay logic bên trong thân hàm (Mean Recall chỉ đạt 77,5%).</td>
+            </tr>
+
+            <tr data-category="negative" data-activity="4. Khảo sát cấu trúc file & Kiểm kê API (File Outline & API Inventory)" data-share="7.1" data-delta="5.4">
+              <td><strong>4. Khảo sát cấu trúc file &amp; Kiểm kê API</strong><br><span style="font-size: 0.78rem; color: var(--text-muted);">File Structure &amp; Exported Surface Inventory</span></td>
+              <td class="tabular"><strong>5% – 10%</strong></td>
+              <td><code>aw symbols --outline</code><br><code>aw files</code></td>
+              <td class="tabular">
+                <div class="delta-bar-wrap">
+                  <div class="delta-bar delta-pos" style="width: 32px;"></div>
+                  <strong style="color: var(--status-bad);">-15,9% đến +26,6%</strong>
+                </div>
+              </td>
+              <td class="tabular"><span class="pill pill-bad">+14% đến +125% calls</span></td>
+              <td><strong>Phản tác dụng trên file vừa và nhỏ.</strong> Thực nghiệm 2026-11-03 cho thấy bắt agent gọi <code>aw</code> để kiểm kê API làm tăng vọt số lượt gọi tool trên cả Grok (+14%), zcode (+29%) và agy (+125%) vì chữ ký bị cắt ở 160 ký tự, buộc agent phải đọc lại file gốc. Số đo lấy từ <code>kg api</code> đã bị remove; <code>symbols --outline</code>/<code>files</code> là surface thay thế, chưa có A/B trực tiếp.</td>
+            </tr>
+
+            <tr data-category="negative" data-activity="5. Chọn lọc Test, tìm Dead Code & Code trùng lặp (Candidate Heuristics)" data-share="4.8" data-delta="-3.5">
+              <td><strong>5. Tìm Test liên quan, Dead Code &amp; Clones</strong><br><span style="font-size: 0.78rem; color: var(--text-muted);">Static Reachability &amp; Shingle Heuristics</span></td>
+              <td class="tabular"><strong>~5%</strong></td>
+              <td><code>aw tests</code><br><code>aw dead</code><br><code>aw clones</code><br><code>aw complexity</code></td>
+              <td class="tabular">
+                <div class="delta-bar-wrap">
+                  <div class="delta-bar delta-pos" style="width: 45px;"></div>
+                  <strong style="color: var(--status-bad);">-39% đến +32% (Hỗn hợp; dead/complexity chưa đo)</strong>
+                </div>
+              </td>
+              <td class="tabular"><span class="pill pill-bad">-18% đến +89% calls</span></td>
+              <td><strong>Không có giá trị tiết kiệm token cho Agent.</strong> <code>aw tests</code> bỏ sót test không bắt đầu bằng <code>test_*</code> hoặc callback <code>describe/it</code> trong TS; kết quả chỉ là ứng viên phỏng đoán nên agent vẫn phải đọc file kiểm chứng lại.</td>
+            </tr>
+
+            <tr data-category="negative" data-activity="6. Đọc hiểu thân hàm, viết Code/Diff, chạy Test & Rebuild Index" data-share="47.6" data-delta="3.5">
+              <td><strong>6. Đọc hiểu logic, Viết Code/Diff &amp; Chạy Test</strong><br><span style="font-size: 0.78rem; color: var(--text-muted);">Source Reading, Patching, Verification &amp; Index Rebuild</span></td>
+              <td class="tabular"><strong>45% – 55%</strong></td>
+              <td><code>aw build</code><br><em>(cộng chi phí nền MCP/Skill)</em></td>
+              <td class="tabular">
+                <div class="delta-bar-wrap">
+                  <div class="delta-bar delta-pos" style="width: 15px;"></div>
+                  <strong style="color: var(--status-bad);">+2% đến +5% (Chi phí nền)</strong>
+                </div>
+              </td>
+              <td class="tabular"><span class="pill pill-warn">+1 đến +3 calls/phiên</span></td>
+              <td><strong>Hoàn toàn không giảm token.</strong> <code>aw</code> không lưu thân hàm và không kiểm chứng hành vi runtime. Agent vẫn phải đọc code gốc, sinh diff, chạy test và tốn thêm lệnh <code>aw build</code> để làm mới index sau khi sửa code.</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr style="background-color: var(--bg-subtle); font-weight: 700;">
+              <td>TỔNG HỢP THEO MÔ HÌNH ƯỚC TÍNH (không phải weighted average của bảng)</td>
+              <td class="tabular">100%</td>
+              <td>Bộ 7 lệnh <code>aw-first</code></td>
+              <td class="tabular" style="color: var(--status-ok);">Giảm ròng ~5,7% ở 30% nav share (tối đa ~8% ở 40%)</td>
+              <td class="tabular">Tương đương (~0% đến +8% calls)</td>
+              <td>Tiết kiệm ~27% ở riêng pha điều hướng (chiếm ~30% phiên), sau khi trừ chi phí nền MCP/Skill và rebuild còn tiết kiệm ròng <strong>~5,7% ở 30% nav share; ~8% ở 40%</strong>.</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION 5: INTERACTIVE ROI SIMULATOR -->
+    <section id="interactive-sim" class="report-section no-print">
+      <div class="section-header">
+        <h2>5. Bộ Mô phỏng Kinh tế học Token (Interactive Token ROI Calculator)</h2>
+        <span class="section-tag">CLIENT-SIDE SIMULATION</span>
+      </div>
+
+      <div class="card">
+        <div class="sim-grid">
+          <div class="sim-controls">
+            <p style="margin-top: 0; font-size: 0.875rem; color: var(--text-secondary);">Điều chỉnh đặc thù công việc của bạn để ước tính mức tiết kiệm (hoặc lãng phí) token thực tế khi trang bị <code>aw</code> cho Coding Agent:</p>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sim-nav-share">Tỷ trọng Điều hướng &amp; Truy vết luồng trong phiên (%)</label>
+                <span id="val-nav-share" class="mono tabular">30%</span>
+              </div>
+              <input type="range" id="sim-nav-share" min="5" max="80" step="5" value="30">
+            </div>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sim-static-clarity">Độ tĩnh của Codebase (Tỷ lệ lời gọi phân giải được %)</label>
+                <span id="val-static-clarity" class="mono tabular">45%</span>
+              </div>
+              <input type="range" id="sim-static-clarity" min="10" max="85" step="5" value="45">
+            </div>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sim-mode">Chế độ Tích hợp Agent</label>
+              </div>
+              <select id="sim-mode" class="search-input" style="width: 100%;">
+                <option value="skill_cli">Tối ưu: CLI + Skill aw-first (Không bật MCP Server — Overhead thấp nhất)</option>
+                <option value="skill_mcp" selected>Chuẩn: 8 Core MCP Tools + Skill aw-first (Theo khuyến nghị của repo)</option>
+                <option value="unrouted_mcp">Sai lầm phổ biến: Bật MCP (hoặc --all-tools) nhưng KHÔNG nạp Skill aw-first</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card" style="background-color: var(--bg-subtle); border-color: var(--border);">
+            <div class="kpi-label">Ước tính Biến thiên Tổng Input Token Toàn phiên</div>
+            <div id="sim-result-pct" class="kpi-value tabular" style="font-size: 2rem; color: var(--status-ok);">-5,7%</div>
+            <p id="sim-result-desc" style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: var(--text-secondary);">
+              Trên một phiên tiêu chuẩn 1.000.000 input tokens, bạn tiết kiệm ròng khoảng <strong>56.900 tokens</strong>.
+            </p>
+            <div style="margin-top: 0.85rem; padding-top: 0.75rem; border-top: 1px solid var(--border); font-size: 0.8rem;" class="tabular" id="sim-breakdown">
+              • Tiết kiệm từ điều hướng đồ thị: <strong>-81.900 tokens</strong><br>
+              • Chi phí nền Schema/Skill &amp; Fallback: <strong>+25.000 tokens</strong>
+            </div>
+          </div>
+        </div>
+        <p style="margin: 0.85rem 0 0 0; font-size: 0.78rem; color: var(--text-muted);">
+          Mô hình: 27,3% là delta của workload navigation-only; simulator nhân theo nav share. KPI -2,8% (unrouted) là cùng workload, không phải toàn phiên.
+        </p>
+      </div>
+    </section>
+
+    <!-- SECTION 6: VERDICT & PLAYBOOK -->
+    <section id="verdict-playbook" class="report-section">
+      <div class="section-header">
+        <h2>6. Kết luận Thẳng thắn &amp; Cấu hình Thực chiến cho Coding Agent</h2>
+        <span class="section-tag">DECISION MATRIX</span>
+      </div>
+
+      <div class="grid-2">
+        <div class="card" style="border-top: 3px solid var(--status-bad);">
+          <h3 style="margin-top: 0; font-size: 1.05rem; color: var(--status-bad);">Khi nào <code>aw</code> CHẲNG CÓ GIÁ TRỊ GÌ (Nên tắt hẳn)?</h3>
+          <ul class="tight-list">
+            <li><strong>Repository nhỏ (&lt; 100 files) hoặc làm việc cục bộ trên 1–2 file đã biết:</strong> <code>ripgrep</code> (<code>rg</code>) + đọc file trực tiếp luôn nhanh hơn và tốn ít lượt gọi model hơn.</li>
+            <li><strong>Codebase nặng tính động (Dynamic/Metaprogramming):</strong> Dự án dùng nhiều Jupyter Notebooks (độ phủ chỉ 10%–19%), Python monkey-patching/decorators phức tạp, hoặc chuỗi callback ẩn danh.</li>
+            <li><strong>Tác vụ viết tính năng mới thuần túy hoặc sửa lỗi UI/CSS/SQL:</strong> Nơi nút cổ chai nằm ở việc đọc hiểu tài liệu/logic nghiệp vụ và chạy trình biên dịch/test chứ không phải tìm ai gọi hàm nào.</li>
+            <li><strong>Agent Host không hỗ trợ nạp Skill / System Instructions tùy chỉnh:</strong> Nếu chỉ cắm được MCP Server mà không ép được luật <code>aw-first</code>, bật <code>aw</code> sẽ làm agent tốn thêm 73% lượt gọi tool.</li>
+          </ul>
+        </div>
+
+        <div class="card" style="border-top: 3px solid var(--status-ok);">
+          <h3 style="margin-top: 0; font-size: 1.05rem; color: var(--status-ok);">Khi nào <code>aw</code> THỰC SỰ ĐÁNG GIÁ &amp; Cách dùng Tối ưu?</h3>
+          <ul class="tight-list">
+            <li><strong>Monorepo / Backend quy mô vừa và lớn (500 – 10.000+ files) bằng Rust, TypeScript hoặc Python có Type Hint:</strong> Đặc biệt hiệu quả khi dò luồng thực thi xuyên tầng (<code>aw path</code>) hoặc kiểm tra tác động trước khi đổi chữ ký hàm (<code>aw callers</code>, <code>aw context</code>, <code>aw impact</code>).</li>
+            <li><strong>Mẹo tối ưu hóa Token cao nhất (Bỏ qua MCP, dùng CLI + Skill):</strong> Thay vì chạy <code>aw mcp</code> (tốn ~1.000 tokens JSON schema ở mọi turn), chỉ cần cài binary <code>aw</code> vào <code>PATH</code> và nạp <a href="file:///Users/quy.doan/Workspace/kg/skills/aw-first/SKILL.md"><code>skills/aw-first/SKILL.md</code></a> để agent gọi trực tiếp <code>aw path</code> / <code>aw callers</code> qua công cụ Bash sẵn có.</li>
+            <li><strong>Chỉ giữ đúng 7 lệnh trong Routing:</strong> <code>build</code>, <code>path</code>, <code>context</code>, <code>callers</code>, <code>callees</code>, <code>impact</code>, <code>imports</code>. Bỏ qua toàn bộ các lệnh kiểm toán (<code>dead</code>, <code>clones</code>, <code>tests</code>, <code>complexity</code>, <code>hotspots</code>) đối với Coding Agent.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const REPORT_DATA = {
+      markdownSummary: `# Tóm tắt Phản biện Kỹ thuật & Kinh tế học Token: agent-weave (aw / kg)
+
+- **Kết luận cốt lõi:** Tiết kiệm token là **có thật (-27,3% input tokens ở pha điều hướng)** nhưng **chỉ khi đi kèm chính sách định tuyến bắt buộc (\`skills/aw-first/SKILL.md\`)**. Nếu chỉ gắn tool tự do không định tuyến, số lượt gọi tool tăng **+73,3%** và mức giảm token chỉ đạt **-2,8%**.
+- **Quy đổi ra toàn phiên làm việc của Coding Agent:** Giảm ròng khoảng **5,7% tổng lượng token ở 30% nav share (tối đa ~8% ở 40%)** (do pha điều hướng đồ thị chỉ chiếm ~25%–35% phiên làm việc; 65%–75% còn lại là đọc thân hàm, sinh bản vá, chạy test và rebuild index).
+- **Hoạt động hiệu quả nhất (ROI Dương):**
+  1. Truy vết luồng gọi hàm đa tầng (\`aw path\`, \`aw callees --depth N\`): **-36% đến -63% input tokens** (route tasks; synthetic -12% trên OpenCode), **-57% đến -86% tool calls**.
+  2. Đánh giá phạm vi ảnh hưởng trước khi Refactor (\`aw callers\`, \`aw context\`, \`aw impact\`, \`aw imports\`): **-62% đến +1,9% input tokens**, tăng độ phủ tìm điểm gọi (Recall) từ **81,9% lên 98,6%**.
+- **Hoạt động không có giá trị hoặc gây lãng phí (ROI Âm):**
+  1. Kiểm kê API / Đọc khung file nhỏ (\`aw symbols --outline\`): **Làm tăng +14% đến +125% lượt gọi tool**.
+  2. Tìm test / dead code / code trùng (\`aw tests\`, \`aw dead\`, \`aw clones\`): **-39% đến +89% lượt gọi tool** (tests/clones; dead chưa đo) vì kết quả chỉ là phỏng đoán.
+  3. Tìm kiếm từ khóa (\`aw search\`): Recall chỉ đạt **77,5%**, không tìm được nội dung trong thân hàm.
+- **Khuyến nghị cấu hình:** Chỉ bật 7 lệnh cốt lõi (\`build\`, \`path\`, \`context\`, \`callers\`, \`callees\`, \`impact\`, \`imports\`) kèm \`aw-first/SKILL.md\`; ưu tiên gọi qua CLI trong Bash thay vì mở \`--all-tools\` trên MCP.`
+    };
+
+    // 1. Theme Toggle
+    const btnTheme = document.getElementById('btn-theme');
+    btnTheme.addEventListener('click', () => {
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
+      const isDarkOS = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      let next = 'dark';
+      if (current === 'dark' || (!current && isDarkOS)) {
+        next = 'light';
+      }
+      root.setAttribute('data-theme', next);
+    });
+
+    // 2. Expand / Collapse All Details
+    const btnToggleDetails = document.getElementById('btn-toggle-details');
+    let allExpanded = true;
+    btnToggleDetails.addEventListener('click', () => {
+      allExpanded = !allExpanded;
+      document.querySelectorAll('details.disclosure').forEach(d => {
+        d.open = allExpanded;
+      });
+    });
+
+    // 3. Print / PDF
+    document.getElementById('btn-print').addEventListener('click', () => {
+      window.print();
+    });
+
+    // 4. Copy Markdown Summary
+    const btnCopyMd = document.getElementById('btn-copy-md');
+    btnCopyMd.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(REPORT_DATA.markdownSummary);
+        const orig = btnCopyMd.textContent;
+        btnCopyMd.textContent = '✅ Đã chép Markdown!';
+        setTimeout(() => { btnCopyMd.textContent = orig; }, 2000);
+      } catch (err) {
+        alert('Không thể truy cập clipboard tự động.');
+      }
+    });
+
+    // 5. Table Filtering & Search
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    const searchInput = document.getElementById('activity-search');
+    const tableRows = document.querySelectorAll('#activity-table tbody tr');
+    let currentFilter = 'all';
+
+    function applyTableFilters() {
+      const query = searchInput.value.trim().toLowerCase();
+      tableRows.forEach(row => {
+        const cat = row.getAttribute('data-category');
+        const text = row.textContent.toLowerCase();
+        const matchesCat = (currentFilter === 'all') || (cat === currentFilter);
+        const matchesSearch = !query || text.includes(query);
+        row.style.display = (matchesCat && matchesSearch) ? '' : 'none';
+      });
+    }
+
+    filterButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentFilter = btn.getAttribute('data-filter');
+        applyTableFilters();
+      });
+    });
+
+    searchInput.addEventListener('input', applyTableFilters);
+
+    // 6. Table Sorting
+    const sortableHeaders = document.querySelectorAll('#activity-table th.sortable');
+    let sortState = { key: null, asc: true };
+
+    sortableHeaders.forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.getAttribute('data-sort');
+        if (sortState.key === key) {
+          sortState.asc = !sortState.asc;
+        } else {
+          sortState.key = key;
+          sortState.asc = true;
+        }
+        const tbody = document.querySelector('#activity-table tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        rows.sort((a, b) => {
+          if (key === 'activity') {
+            const va = a.getAttribute('data-activity');
+            const vb = b.getAttribute('data-activity');
+            return sortState.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+          } else {
+            const va = parseFloat(a.getAttribute('data-' + key));
+            const vb = parseFloat(b.getAttribute('data-' + key));
+            return sortState.asc ? va - vb : vb - va;
+          }
+        });
+        rows.forEach(r => tbody.appendChild(r));
+      });
+    });
+
+    // 7. Interactive Token ROI Simulator
+    const sliderNav = document.getElementById('sim-nav-share');
+    const sliderClarity = document.getElementById('sim-static-clarity');
+    const selectMode = document.getElementById('sim-mode');
+    const valNav = document.getElementById('val-nav-share');
+    const valClarity = document.getElementById('val-static-clarity');
+    const resultPct = document.getElementById('sim-result-pct');
+    const resultDesc = document.getElementById('sim-result-desc');
+    const breakdownEl = document.getElementById('sim-breakdown');
+
+    function updateSimulation() {
+      const navShare = parseInt(sliderNav.value, 10) / 100;
+      const clarity = parseInt(sliderClarity.value, 10) / 100;
+      const mode = selectMode.value;
+
+      valNav.textContent = Math.round(navShare * 100) + '%';
+      valClarity.textContent = Math.round(clarity * 100) + '%';
+
+      // Base navigation saving rate at 45% static clarity in benchmark = 27.3%
+      const effectiveNavSavingRate = 0.273 * (clarity / 0.45);
+      let grossSavingPct = navShare * effectiveNavSavingRate * 100;
+      let overheadPct = 2.5; // Default MCP + Skill + rebuild overhead
+
+      if (mode === 'skill_cli') {
+        overheadPct = 1.1; // CLI + Skill only (no MCP tool schema tax)
+      } else if (mode === 'unrouted_mcp') {
+        grossSavingPct = navShare * (0.028 * (clarity / 0.45)) * 100;
+        overheadPct = 0.0; // measured unrouted delta already includes the double-call tax
+      }
+
+      // Net delta (negative means saving tokens, positive means wasting tokens)
+      const netDeltaPct = overheadPct - grossSavingPct;
+      const baseTokens = 1000000;
+      const grossTokens = Math.round(baseTokens * (grossSavingPct / 100));
+      const overheadTokens = Math.round(baseTokens * (overheadPct / 100));
+      const netTokens = overheadTokens - grossTokens;
+
+      const sign = netDeltaPct > 0 ? '+' : '';
+      resultPct.textContent = sign + netDeltaPct.toFixed(1).replace('.', ',') + '%';
+
+      if (netDeltaPct < -1.0) {
+        resultPct.style.color = 'var(--status-ok)';
+        resultDesc.innerHTML = 'Trên một phiên tiêu chuẩn 1.000.000 input tokens, bạn <strong>tiết kiệm ròng khoảng ' + Math.abs(netTokens).toLocaleString('vi-VN') + ' tokens</strong>.';
+      } else if (netDeltaPct <= 1.5) {
+        resultPct.style.color = 'var(--status-warn)';
+        resultDesc.innerHTML = 'Gần như <strong>hòa vốn token</strong> (chênh lệch ' + Math.abs(netTokens).toLocaleString('vi-VN') + ' tokens), nhưng vẫn hưởng lợi về độ phủ tìm điểm gọi (Recall).';
+      } else {
+        resultPct.style.color = 'var(--status-bad)';
+        resultDesc.innerHTML = 'Cấu hình này làm <strong>tốn thêm khoảng ' + Math.abs(netTokens).toLocaleString('vi-VN') + ' tokens</strong> trên mỗi 1.000.000 input tokens do chi phí gọi kép và schema.';
+      }
+
+      breakdownEl.innerHTML =
+        '• Tiết kiệm từ điều hướng đồ thị: <strong>-' + grossTokens.toLocaleString('vi-VN') + ' tokens</strong><br>' +
+        '• Chi phí nền Schema/Skill, Rebuild &amp; Fallback: <strong>+' + overheadTokens.toLocaleString('vi-VN') + ' tokens</strong>';
+    }
+
+    sliderNav.addEventListener('input', updateSimulation);
+    sliderClarity.addEventListener('input', updateSimulation);
+    selectMode.addEventListener('change', updateSimulation);
+    updateSimulation();
+  </script>
+</body>
+</html>

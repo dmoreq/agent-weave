@@ -18,7 +18,7 @@ source before making behavioral claims or edits; the index is not a substitute f
 | question | command |
 |----------|---------|
 | is there a current index | `aw build` — rebuild after source edits before trusting pointers |
-| who calls this symbol | `aw callers <name>` — lines are `path:line qualname`; add `--depth N` for the transitive reverse call closure, tagged `[depth=N]` |
+| who calls this symbol | `aw callers <name>` — lines are `path:line qualname`; add `--depth N` for the transitive reverse call closure, tagged `[depth=N]` at each caller symbol's shortest depth; the seed is excluded from transitive rows |
 | what does this call (transitive) | `aw callees <name> --depth N` |
 | does A reach B, via which call sites | `aw path <from> <to>` — one shortest route; reverse question = swap the arguments |
 | what surrounds this symbol (callers + callees + signature) | `aw context <name>` — one call replaces composing callers/callees by hand |
@@ -35,16 +35,25 @@ for correctness, safety, or review takes precedence over avoiding duplicate navi
 
 ## Trust Contract
 
-When an `aw` command exits 0, accept its output as ground truth for the fields
-it returns. Do NOT re-verify with grep, read, or a second `aw` call unless:
+Treat resolved navigation rows as candidates, even when the index is current
+and the result is not capped or ambiguous. Static resolution can produce both
+false positives and missing relationships.
 
-- The output is explicitly marked as "candidates only" (`aw tests`, `aw dead`), OR
-- The question asks for something not in the output fields.
+Avoid repeating a complete lookup merely for navigation. Verify individual
+relationships against source when the answer requires confidence in them.
 
-Commands where output IS ground truth (do not re-verify):
+Verify with source or grep when:
+
+- the output is explicitly marked as "candidates only" (`aw tests`, `aw dead`, `aw unresolved`),
+- the result is capped (`showing N of M`), stale, ambiguous, or empty,
+- the question asks for a field the output does not carry,
+- you need behavioral, safety, or review evidence, or
+- a row conflicts with current source.
+
+Commands returning resolved navigation rows:
 `callers`, `callees`, `context`, `implementers`, `imports`, `impact`, `path`, `symbols`
 
-Commands where output IS candidates (may require source read to filter):
+Commands whose output is candidates:
 `tests`, `dead`, `unresolved`
 
 This contract covers navigation answers only. Source reads remain required for

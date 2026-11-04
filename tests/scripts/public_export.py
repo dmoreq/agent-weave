@@ -115,6 +115,8 @@ def export(src: Path, out: Path) -> None:
 
 def scrub(out: Path) -> None:
     for path in out.rglob("*"):
+        if path.is_symlink():
+            raise SystemExit(f"refusing symlink in export: {path}")
         if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
             continue
         text = path.read_text(errors="replace")
@@ -125,6 +127,8 @@ def scrub(out: Path) -> None:
     # token. Never apply this to .yml/.toml/.py (it broke the CI guard and
     # the Cargo exclude in round 2).
     for path in out.rglob("*.md"):
+        if path.is_symlink():
+            continue
         t = path.read_text(errors="replace")
         t = re.sub(r"\[([^\]]+)\]\([^)]*(?:docs/)?baselines[^)]*\)", r"\1", t)
         t = t.replace("docs/baselines/", "evidence/").replace("baselines/", "evidence/")

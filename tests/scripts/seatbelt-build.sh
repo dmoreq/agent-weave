@@ -2,24 +2,48 @@
 # G5 invariant 1 (macOS): the build must complete with network fully denied,
 # and the sandbox must actually block a network probe (negative control).
 # R6e Blocker 1: the previous version wrote a profile but never applied it.
+# The probe targets a controlled local endpoint so a positive control can
+# prove the endpoint is reachable and the probe itself works before the
+# sandbox is expected to deny it.
 set -euo pipefail
 AW="$1"; REPO="$2"
 PROFILE="$(mktemp -t aw-seatbelt.XXXXXX).sb"
-trap 'rm -f "$PROFILE"' EXIT
+PORT="${AW_SEATBELT_PORT:-49152}"
+SERVER_PID=""
+cleanup() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
+  rm -f "$PROFILE"
+}
+trap cleanup EXIT
 cat > "$PROFILE" <<'SB'
 (version 1)
 (allow default)
 (deny network*)
 SB
 
+# Controlled reachable endpoint. The positive control runs without the
+# profile; a setup/probe error must fail the gate instead of masquerading as
+# successful isolation.
+/usr/bin/python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
+SERVER_PID=$!
+disown "$SERVER_PID" 2>/dev/null || true
+sleep 0.5
+if ! /usr/bin/python3 - "$PORT" <<'PY'
+import socket, sys
+socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=3)
+PY
+then
+  echo "G5 seatbelt: positive control cannot reach the local endpoint — probe/setup failed" >&2
+  exit 1
+fi
+
 # Positive: build succeeds under the profile.
 sandbox-exec -f "$PROFILE" "$AW" build --root "$REPO" >/dev/null
 
-# Negative control: a network probe under the SAME profile must fail. If it
-# succeeds, the sandbox is not enforcing anything and this gate is red.
-if sandbox-exec -f "$PROFILE" /usr/bin/python3 - <<'PY' 2>/dev/null
-import socket
-socket.create_connection(("1.1.1.1", 443), timeout=3)
+# Negative control: the same local probe under the SAME profile must fail.
+if sandbox-exec -f "$PROFILE" /usr/bin/python3 - "$PORT" <<'PY' 2>/dev/null
+import socket, sys
+socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=3)
 print("NETWORK REACHED")
 PY
 then

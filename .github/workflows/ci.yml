@@ -26,6 +26,7 @@ jobs:
       - run: cargo build --locked --release
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
+      - run: python3 -I tests/scripts/test_recall_scorers.py
       - run: bash tests/scripts/allowlist_check.sh Cargo.lock
       - run: bash tests/scripts/write_path_check.sh
 
@@ -55,6 +56,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2
+        with:
+          tool: cargo-audit
       - run: cargo audit
 
   network-deny-macos:
@@ -77,17 +80,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - run: cargo build --locked --release
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
-      - name: network namespace denies egress (negative control first)
+      - name: network namespace denies egress (positive control + build)
         run: |
           mkdir -p "$RUNNER_TEMP/aw-fixture"
           printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/aw-fixture/a.py"
-          if bwrap --unshare-net --dev-bind / / python3 -c \
-            "import socket; socket.create_connection(('1.1.1.1',443),2)"; then
-            echo "negative control reached the network — namespace not enforced" >&2
-            exit 1
-          fi
-          bwrap --unshare-net --dev-bind / / target/release/aw build --root "$RUNNER_TEMP/aw-fixture"
-          echo "G5 network-namespace: build ok, egress blocked — PASS"
+          bash tests/scripts/linux-netns-build.sh target/release/aw "$RUNNER_TEMP/aw-fixture"
 
   self-gt:
     runs-on: ubuntu-latest

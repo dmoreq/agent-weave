@@ -229,18 +229,13 @@ pub fn complexity(
         out.push(format!("showing {shown} of {total}"));
         eprintln!("[aw] capped at {shown} results ({total} total)");
     }
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(
+    super::record_payload_meta(
+        conn,
         path.unwrap_or("complexity"),
         &data_lines,
         stale,
         shown,
         total as usize,
-        built_at,
-        &source_rev,
     );
     crate::journal::record_result(total as usize, shown, total as usize, stale, 0);
     Ok(out)
@@ -612,19 +607,7 @@ pub fn symbols(
         .collect();
     // Payload capture (Amendment 10a): the `path:line kind qualname` data
     // lines only — never the staleness header or the cap footer.
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(
-        &rel,
-        &data_lines,
-        stale,
-        shown,
-        n_symbols,
-        built_at,
-        &source_rev,
-    );
+    super::record_payload_meta(conn, &rel, &data_lines, stale, shown, n_symbols);
     crate::journal::record_result(n_symbols, shown, n_symbols, stale, 0);
     let mut out = Vec::new();
     if stale {
@@ -748,42 +731,40 @@ fn symbols_directory(
         out.push(format!("showing {shown} of {total}"));
         eprintln!("[aw] capped at {shown} results ({total} total)");
     }
-    let built_at = db::meta_get(conn, "built_at")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let source_rev = db::meta_get(conn, "source_rev").unwrap_or_default();
-    crate::journal::record_payload(
-        dir,
-        &data_lines,
-        changed > 0,
-        shown,
-        total as usize,
-        built_at,
-        &source_rev,
-    );
+    super::record_payload_meta(conn, dir, &data_lines, changed > 0, shown, total as usize);
     crate::journal::record_result(total as usize, shown, total as usize, changed > 0, 0);
     Ok(out)
 }
 
-/// Symbol-level search (Amendment 12b): FTS5 `bm25()` over split identifier
-/// tokens. Hits are symbol identities — the tier field position stays empty
-/// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
-/// for cap, post-cap staleness, and payload capture.
-pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
-    let limit = clamp_limit(limit)?;
-    // OR of prefix terms, bm25-ranked (Amendment 12b): rows matching more
-    // and rarer tokens rank higher — natural-language fit without brittle
-    // all-token AND requirements.
+/// Cardinality of the exact ∪ FTS result set by symbol identity. The capped
+/// page overlap cannot stand in for the full overlap.
+fn search_union_total(conn: &Connection, exact_name: &str, fts_expr: &str) -> Result<usize> {
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM (
+             SELECT s.id FROM symbols s WHERE (s.name = ?1 OR s.qualname = ?1)
+             UNION
+             SELECT s.id FROM symbols_fts ft JOIN symbols s ON s.id = ft.rowid
+              WHERE symbols_fts MATCH ?2
+         )",
+        rusqlite::params![exact_name, fts_expr],
+        |r| r.get(0),
+    )?;
+    Ok(n as usize)
+}
+
+/// Bound the OR expression (R6f Important 7): FTS5 cost is quadratic in the
+/// number of prefix terms under OR.
+const SEARCH_MAX_TERMS: usize = 32;
+
+/// Build the OR prefix expression and apply the qualified-identity fast path.
+fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String)> {
     let mut toks: Vec<String> = crate::extract::split_ident(terms)
         .split_whitespace()
         .map(|t| t.to_string())
         .collect();
-    // Bound the OR expression (R6f Important 7): FTS5 cost is quadratic in
-    // the number of prefix terms under OR.
-    const MAX_TERMS: usize = 32;
-    if toks.len() > MAX_TERMS {
-        toks.truncate(MAX_TERMS);
-        eprintln!("[aw] search terms capped at {MAX_TERMS}");
+    if toks.len() > SEARCH_MAX_TERMS {
+        toks.truncate(SEARCH_MAX_TERMS);
+        eprintln!("[aw] search terms capped at {SEARCH_MAX_TERMS}");
     }
     let mut expr = toks
         .iter()
@@ -808,9 +789,34 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
             expr = phrase;
         }
     }
-    // Amendment 14b: hits carry the stored one-line signature after the
-    // qualname — the agent no longer needs a follow-up `symbols` call to
-    // learn what the hit is. Empty signature keeps the 12b byte shape.
+    Ok((toks, expr))
+}
+
+/// Map a search row to the shared pointer shape. Amendment 14b: hits carry
+/// the stored one-line signature after the qualname; an empty signature keeps
+/// the 12b byte shape.
+fn search_pointer(r: &rusqlite::Row<'_>) -> rusqlite::Result<Pointer> {
+    let qualname: String = r.get(2)?;
+    let signature: String = r.get(3)?;
+    Ok(Pointer {
+        file: r.get::<_, String>(0)?,
+        line: r.get::<_, i64>(1)?,
+        tag: "",
+        detail: if signature.is_empty() {
+            qualname
+        } else {
+            format!("{qualname} {signature}")
+        },
+    })
+}
+
+/// FTS page, total, and the expression actually used (morphology fallback).
+fn search_fts_page(
+    conn: &Connection,
+    toks: &[String],
+    mut expr: String,
+    limit: usize,
+) -> Result<(Vec<Pointer>, usize, String)> {
     let mut total: usize = conn.query_row(
         "SELECT COUNT(*) FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid JOIN files f ON f.id = s.file_id
@@ -823,12 +829,12 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
     // zero hits, so recall improves without changing ranked results.
     if total == 0 {
         let mut variants: Vec<String> = Vec::new();
-        for tok in &toks {
+        for tok in toks {
             derived_forms(tok, &mut variants);
         }
         variants.retain(|v| !v.is_empty() && v.len() >= 3);
         variants.dedup();
-        variants.truncate(MAX_TERMS);
+        variants.truncate(SEARCH_MAX_TERMS);
         if !variants.is_empty() {
             let alt = variants
                 .iter()
@@ -856,76 +862,71 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
          -- carried builds, so bm25 alone is not deterministic (R6d A9).
          ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
     ))?;
-    // Rank a bounded candidate set in Rust (R7): bm25 sees one text column,
-    // so a full parameter list can outrank the symbol's own name. Re-rank by
-    // how many query tokens occur in the qualname (prefix either way), then
-    // keep bm25 order as the stable tie-break. The cap bounds the work.
-    let rows = stmt.query_map([&expr], |r| {
-        let qualname: String = r.get(2)?;
-        let signature: String = r.get(3)?;
-        Ok(Pointer {
-            file: r.get::<_, String>(0)?,
-            line: r.get::<_, i64>(1)?,
-            tag: "",
-            detail: if signature.is_empty() {
-                qualname
-            } else {
-                format!("{qualname} {signature}")
-            },
-        })
-    })?;
-    let fts_ptrs: Vec<Pointer> = rows.collect::<std::result::Result<_, _>>()?;
-    // Exact-identity path (R7): a single token that is an exact symbol name
-    // or qualname returns those identities first. The FTS matches stay
-    // appended (deduplicated) so `search run` still finds `run_build` after
-    // an exact `run` symbol, instead of discarding every prefix match.
+    let rows = stmt.query_map([&expr], search_pointer)?;
+    let ptrs = rows.collect::<std::result::Result<_, _>>()?;
+    Ok((ptrs, total, expr))
+}
+
+/// Exact-identity page and total, empty when the exact set has no rows.
+fn search_exact_page(
+    conn: &Connection,
+    exact_name: &str,
+    limit: usize,
+) -> Result<(Vec<Pointer>, usize)> {
+    let exact_total: usize = conn.query_row(
+        "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE (s.name = ?1 OR s.qualname = ?1)",
+        [exact_name],
+        |r| r.get::<_, i64>(0),
+    )? as usize;
+    if exact_total == 0 {
+        return Ok((Vec::new(), 0));
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.path, s.line_start, s.qualname, s.signature
+         FROM symbols s JOIN files f ON f.id = s.file_id
+         WHERE (s.name = ?1 OR s.qualname = ?1)
+         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
+    ))?;
+    let ptrs = stmt
+        .query_map([exact_name], search_pointer)?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok((ptrs, exact_total))
+}
+
+/// Exact identities first, then the deduplicated FTS page.
+fn merge_search_pointers(exact: Vec<Pointer>, fts: Vec<Pointer>) -> Vec<Pointer> {
+    let mut seen: std::collections::HashSet<(String, i64, String)> =
+        std::collections::HashSet::new();
+    let mut merged = Vec::with_capacity(exact.len() + fts.len());
+    for p in exact {
+        seen.insert((p.file.clone(), p.line, p.detail.clone()));
+        merged.push(p);
+    }
+    for p in fts {
+        if seen.insert((p.file.clone(), p.line, p.detail.clone())) {
+            merged.push(p);
+        }
+    }
+    merged
+}
+
+/// Symbol-level search (Amendment 12b): FTS5 `bm25()` over split identifier
+/// tokens. Hits are symbol identities — the tier field position stays empty
+/// (only call-edge pointers carry ` [ambiguous]`). Reuses `collect_output`
+/// for cap, post-cap staleness, and payload capture.
+pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
+    let limit = clamp_limit(limit)?;
+    let (toks, expr) = search_expr(conn, terms)?;
+    let (fts_ptrs, total, expr) = search_fts_page(conn, &toks, expr, limit)?;
     if toks.len() == 1 {
         let exact_name = toks.join(" ");
-        let exact_total: usize = conn.query_row(
-            "SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id
-             WHERE (s.name = ?1 OR s.qualname = ?1)",
-            [exact_name.as_str()],
-            |r| r.get::<_, i64>(0),
-        )? as usize;
+        let (exact_ptrs, exact_total) = search_exact_page(conn, &exact_name, limit)?;
         if exact_total > 0 {
-            let mut stmt = conn.prepare(&format!(
-                "SELECT f.path, s.line_start, s.qualname, s.signature
-                 FROM symbols s JOIN files f ON f.id = s.file_id
-                 WHERE (s.name = ?1 OR s.qualname = ?1)
-                 ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
-            ))?;
-            let exact_ptrs: Vec<Pointer> = stmt
-                .query_map([exact_name.as_str()], |r| {
-                    let qualname: String = r.get(2)?;
-                    let signature: String = r.get(3)?;
-                    Ok(Pointer {
-                        file: r.get::<_, String>(0)?,
-                        line: r.get::<_, i64>(1)?,
-                        tag: "",
-                        detail: if signature.is_empty() {
-                            qualname
-                        } else {
-                            format!("{qualname} {signature}")
-                        },
-                    })
-                })?
-                .collect::<std::result::Result<_, _>>()?;
-            let mut seen: std::collections::HashSet<(String, i64, String)> =
-                std::collections::HashSet::new();
-            let mut merged = Vec::with_capacity(exact_ptrs.len() + fts_ptrs.len());
-            for p in exact_ptrs {
-                seen.insert((p.file.clone(), p.line, p.detail.clone()));
-                merged.push(p);
-            }
-            let mut overlap = 0usize;
-            for p in fts_ptrs {
-                if seen.insert((p.file.clone(), p.line, p.detail.clone())) {
-                    merged.push(p);
-                } else {
-                    overlap += 1;
-                }
-            }
-            let merged_total = exact_total + total.saturating_sub(overlap);
+            let merged = merge_search_pointers(exact_ptrs, fts_ptrs);
+            // The capped page overlap is not the full overlap: count the
+            // union of exact and FTS identities.
+            let merged_total = search_union_total(conn, &exact_name, &expr)?;
             let out = collect_output(
                 conn,
                 root,

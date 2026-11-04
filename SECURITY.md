@@ -21,3 +21,12 @@ We aim to acknowledge reports within 7 days.
   panics are isolated.
 - The index stores symbol names, signatures, paths, and call edges. It does
   not store source file bodies.
+
+## Local filesystem assumptions
+
+aw defends against pre-positioned symlinks, non-regular journal targets (such
+as FIFOs), and hardlinked lock or journal files where it can. Those checks
+reduce accidental and racing replacement, but they are not a sandbox against an
+actively hostile local actor that can rename or replace paths inside `.aw/` in
+synchronized ways while a process is running. Run aw only on repositories and
+local state you trust; use OS-level isolation for a hostile local actor.
