@@ -1,154 +1,99 @@
 ---
 name: aw-first
-description: Routing policy for code agents with the aw code index available. Use when locating callers, callees, the impact of a change, the call route between two symbols, a symbol's surroundings, or a file's imports. Query aw first for those questions; use source reads and grep to verify results or investigate gaps, ambiguity, result caps, and staleness.
+description: Routing policy for code agents with the aw code index available. Use when locating callers, callees, the impact of a change, the call route between two symbols, a symbol's surroundings, a file's imports, discovering existing helpers before writing new code, detecting duplicate functions, checking telemetry savings, or retrieving session decisions and developer preferences. Query aw first for those questions; use source reads and grep to verify results or investigate gaps, ambiguity, result caps, and staleness.
 ---
 
-# aw-first navigation
+# aw-first routing policy
 
-aw indexes supported source files' symbols and static relationships into `.aw/index.db`.
+`aw` indexes supported source files' symbols and static relationships into `.aw/index.db`.
 Results describe the indexed, resolved subset, not every runtime relationship.
 See [Evaluation](../../docs/EVALUATION.md) for measurement scope and limitations,
-and [Agent integration](../../docs/agent-integration.md) for setup.
+and [Agent integration](../../docs/agent-integration.md) for host setup.
 
-## Routing (binding)
+## Binding Routing
 
-For these questions, **query aw first** for navigation pointers. Read the pointed-to
-source before making behavioral claims or edits; the index is not a substitute for source evidence.
+For these questions, **query aw first** before running general grep searches or dumping full source files. Read the pointed-to source lines before making behavioral claims or edits; the index is not a substitute for source evidence.
 
-| question | command |
-|----------|---------|
-| is there a current index | `aw build` — rebuild after source edits before trusting pointers |
-| who calls this symbol | `aw callers <name>` — lines are `path:line qualname`; add `--depth N` for the transitive reverse call closure, tagged `[depth=N]` at each caller symbol's shortest depth; the seed is excluded from transitive rows |
-| what does this call (transitive) | `aw callees <name> --depth N` |
-| does A reach B, via which call sites | `aw path <from> <to>` — one shortest route; reverse question = swap the arguments |
-| what surrounds this symbol (callers + callees + signature) | `aw context <name>` — one call replaces composing callers/callees by hand |
-| which files depend on a file | `aw impact <file>` lists files that call into it; add `--edges calls,imports,inherits --depth N` for the resolved dependency closure |
-| what does this file import | `aw imports <file>` — outbound resolved imports |
+| Question / Intent | Command / Tool | Purpose & Usage |
+|---|---|---|
+| Index currency | `aw build` | Rebuild after source edits before trusting pointers (~0.02s incremental rebuild). |
+| Who calls this symbol | `aw callers <name>` | Pointer list `path:line qualname`; add `--depth N` for the transitive reverse call closure (tagged `[depth=N]`). |
+| What does this call (transitive) | `aw callees <name> --depth N` | Outgoing call closure over resolved static edges. |
+| Does A reach B, via which call sites | `aw path <from> <to>` | Shortest route over resolved call edges. Swap arguments for reverse query. |
+| Symbol surroundings | `aw context <name>` | Definition range + signature + direct callers + direct callees in one call. |
+| Which files depend on a file | `aw impact <file>` | Files that call into target; add `--edges calls,imports,inherits --depth N` for extended closure. |
+| What does this file import | `aw imports <file>` | Outbound resolved imports for an indexed file. |
+| Discover canonical helper (Pre-Write) | `aw search '<terms>'` | Concise Interface Cards (`path:line kind qualname signature [callers=N]`). Prioritize functions with high caller count to prevent duplicate code. |
+| Detect duplicate functions (Post-Edit) | `aw reuse [paths...]` | Four calibrated detectors: callee footprint ($C_{dup} \ge 80\%$), interface similarity, client bypass, 1-caller wrappers. |
+| Session handoff & developer preferences | `aw mem query [terms]` | Retrieve prior decisions, handoffs, and developer preferences from `.aw/memory.db` and global `~/.aw/memory.db`. |
+| Session telemetry & token ROI | `aw usage [--quality]` | Review query counts, p50/p95 latency, error rates, and estimated tokens saved. |
 
-These seven commands are the measured, validated routing set. Other aw commands
-exist, but they are not mandatory agent routing; use them only as described below.
-
-Avoid repeating a complete lookup with grep when a current, unambiguous aw result
-already answers it. Use source reads or grep for focused verification, missing
-relationships, unsupported syntax, or conflicting evidence. Verification required
-for correctness, safety, or review takes precedence over avoiding duplicate navigation.
+Avoid repeating a complete lookup with grep when a current, unambiguous `aw` result already answers it. Use source reads or grep for focused verification, missing relationships, unsupported syntax, or conflicting evidence. Verification required for correctness, safety, or review takes precedence over avoiding duplicate navigation.
 
 ## Trust Contract
 
-Treat resolved navigation rows as candidates, even when the index is current
-and the result is not capped or ambiguous. Static resolution can produce both
-false positives and missing relationships.
+Treat resolved navigation rows as candidates, even when the index is current and the result is not capped or ambiguous. Static resolution can produce both false positives and missing relationships.
 
-Avoid repeating a complete lookup merely for navigation. Verify individual
-relationships against source when the answer requires confidence in them.
+Avoid repeating a complete lookup merely for navigation. Verify individual relationships against source when the answer requires confidence in them.
 
 Verify with source or grep when:
-
 - the output is explicitly marked as "candidates only" (`aw reuse`, `aw unresolved`),
 - the result is capped (`showing N of M`), stale, ambiguous, or empty,
 - the question asks for a field the output does not carry,
 - you need behavioral, safety, or review evidence, or
 - a row conflicts with current source.
 
-Commands returning resolved navigation rows:
+### Commands returning resolved navigation rows
 `callers`, `callees`, `context`, `imports`, `impact`, `path`, `symbols`, `search`
 
-Commands whose output is candidates:
-`reuse`, `unresolved`
+### Commands whose output is candidates
+`reuse`, `unresolved`, `mem query`, `mem get`
 
-This contract covers navigation answers only. Source reads remain required for
-behavioral claims, edits, safety, and review.
+This contract covers navigation answers only. Source reads remain required for behavioral claims, edits, safety, and review.
 
-## Secondary tools (optional)
+## Secondary & Maintenance Tools
 
-Reach for these when the seven routed commands do not answer the question. They are
-diagnostic or inventory surfaces: their precision and utility vary by repository, so
-verify their output before acting on it.
+Reach for these when the routed commands do not answer the question:
 
-| question | command |
-|----------|---------|
-| what is in this file / its signatures | `aw symbols <file> [--outline]` — deterministic inventory of one indexed file |
-| find a symbol by (partial) name or signature vocabulary | `aw search <terms>` — interface cards (`path:line kind qualname signature [callers=N]`), BM25 weighted by caller count |
-| what is in this directory | `aw symbols <dir> --outline` |
-| anti-reinvention / code reuse candidates | `aw reuse [paths...]` — candidate duplicate functions, callee footprint overlap, and utility abstraction opportunities |
-| where did resolution fail | `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
-| repository totals | `aw stats [--path <dir>]` — build-time summary, not a freshness check |
-| session performance, speed & ROI telemetry | `aw usage [--quality]` — check query counts, p50/p95 latency, error rates, token savings, and anti-reinvention effectiveness (or MCP `usage`) |
+| Question | Command |
+|---|---|
+| File inventory & signatures | `aw symbols <file> [--outline]` — deterministic definition list of one indexed file |
+| Directory definitions | `aw symbols <dir> --outline` — definition inventory across directory prefix |
+| Where did resolution fail | `aw unresolved` — summaries; `aw unresolved --names` lists sites; `[internal]` indicates resolver gaps |
+| Repository totals | `aw stats [--path <dir>]` — build-time summary, not a freshness check |
 
-## Project memory (optional, not navigation routing)
+## Project Memory Operations
 
-aw keeps agent-authored project notes in `.aw/memory.db` (local) and developer profile/cross-project preferences in `~/.aw/memory.db` (global) — decisions, gotchas, facts, and conventions that survive rebuilds. Memory is NOT part of the binding routing table above; use it deliberately:
+`aw` carries agent-authored project notes in `.aw/memory.db` (local) and developer profile/cross-project preferences in `~/.aw/memory.db` (global) — decisions, gotchas, facts, and conventions that survive rebuilds:
 
-- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...] [--global]`)
-  when a decision was settled after real investigation, a gotcha cost genuine
-  debugging time, or a task ends with conclusions that are not yet in committed
-  docs. Use `--global` to persist cross-project conventions, developer profile,
-  or stack preferences into `~/.aw/memory.db`. Keys are stable identities (e.g. `resolver-confidence-tiers`);
-  `--refs` takes the qualnames/paths the note is about.
-- **Query** (`aw mem query <terms>`; `--all` lists by recency; add `--global` to search only global store)
-  at session start and before re-investigating an area you suspect was already worked through.
-  Without `--global`, queries seamlessly search **both** local and global stores:
-  global rows are tagged with `[global]`, and local notes take precedence (shadowing global keys).
-- **Maintain**: rewrite under the same key to supersede; `--supersedes <key>`
-  records a cross-key replacement; `--scope session` (default TTL 7 days,
-  `--ttl` overrides) keeps transient scratch out of durable memory; `aw mem
-  get <key> [--global]`, `aw mem delete <key> [--global]`, `aw mem export [--global]` (JSONL backup),
-  `aw mem gc [--global]` (purge expired session notes + >30-day superseded revisions).
+- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...] [--global]`):
+  Record when a decision is settled after real investigation, a gotcha cost debugging time, or a task ends with conclusions not yet in committed documentation. Use `--global` to persist cross-project conventions or developer profiles into `~/.aw/memory.db`.
+- **Query** (`aw mem query <terms>`; `--all` lists by recency; add `--global` to search only global store):
+  Run at session start and before re-investigating an area worked on previously. Without `--global`, queries seamlessly search **both** local and global stores: global rows carry `[global]`, and local notes take precedence (shadowing colliding global keys).
+- **Maintain**:
+  Rewrite under the same key to update a note revision; `--supersedes <key>` records a cross-key replacement; `--scope session` (default TTL 7 days, `--ttl` overrides) keeps transient scratch out of durable memory. Use `aw mem get <key> [--global]`, `aw mem delete <key> [--global]`, `aw mem export [--global]` (JSONL backup), and `aw mem gc [--global]` (purge expired session notes and >30-day superseded revisions).
 
-Trust note: notes are agent-authored claims, same standing as this contract's
-candidates — verify against source before any behavioral claim. The output
-caveat line says so on every mem command.
+## Handling Contract Behaviors
 
-## Handling the contract behaviors
+1. **Exit 2 (Ambiguous Name)**: A bare name matched several symbols. `aw` prints `path:line qualname` candidates. Re-query with the fully qualified name (`Class.method` or `module.function`) — never guess. Grepping the bare name instead silently mixes all of them.
+2. **`showing N of M` on the last line**: When N < M, the result was capped. List commands default to 50; `context` defaults to 10 per section (max 50). Re-run with `--limit <M>` where supported (max 10000). If the cap still excludes results, narrow supported path filters or inspect source.
+3. **`aw path` outcomes**: Endpoints accept an exact bare name or full qualname; a unique dotted suffix such as `Class.method` also resolves. `symbol '<name>' not in index` indicates the input form was wrong or the symbol is absent. Recover with `aw search` or `aw symbols <file>`. Exit 2 names the failing endpoint.
+4. **Static-Surface Caveats**: Every `aw` result covers the indexed, resolved subset only. Successful cases do not establish complete repository coverage; a negative is not proof.
 
-1. **Exit 2 (ambiguous name)**: a bare name matched several symbols. aw prints
-   `path:line qualname` candidates. Re-query with the fully qualified name
-   (`pkg.mod.symbol` or `Class.method`) — never guess which one you meant.
-   Grepping the bare name instead silently mixes all of them.
-2. **`showing N of M` on the last line**: when N < M, the result was capped.
-   Most list commands default to 50; `context` defaults to 10 per section and allows 50.
-   Re-run with `--limit <M>` where supported (usually max 10000).
-   If the cap still excludes results, narrow supported path filters or inspect source; do not claim a complete set.
-3. **`aw path` outcomes**: endpoints accept an exact bare name or full
-   qualname; a unique dotted suffix such as `Class.method` also resolves, while
-   several suffix matches stay ambiguous — `symbol '<name>' not in index` means
-   the input form was wrong or the symbol is absent. Recover with `aw search` or
-   `aw symbols <file>`. Exit 2 names the failing endpoint (`as the from|to
-   endpoint`) — resolve it the same way, then re-query.
-   `'q1' and 'q2' resolve to the same symbol` means both arguments landed on
-   one symbol. `no call path ... at any depth` is a definitive negative
-   within resolved edges; `within depth D; a longer path may exist` means
-   the cap stopped the search (max 10 hops). A K-hop route fails if ANY hop
-   edge is unresolved. No path in the resolved graph does not prove no runtime
-   connection. Inspect `callees`/`callers` and source or grep for missing hops
-   instead of repeating an unchanged `path` query.
-4. **Static-surface caveats**: every aw result covers the indexed, resolved
-   subset only. Successful cases do not establish complete repository coverage;
-   a negative is not proof. Secondary tools inherit the same limit: `dead`
-   is a candidate list.
-
-## Staleness discipline
+## Staleness Discipline
 
 After you edit code, run `aw build` before further navigation queries.
-If a query prints
-`aw: K of N result files changed since build — run aw build`, rebuild before
-trusting those pointers. Staleness checks cover displayed result files, not every
-file that could change the answer. No warning does not prove the index is current.
+If a query prints:
+`aw: K of N result files changed since build — run aw build`
+rebuild before trusting those pointers. Staleness checks cover displayed result files, not every file that could change the answer.
 
-## When aw is NOT the tool
+## When aw is NOT the Tool
 
-- Semantic questions ("where is behavior X implemented") — aw resolves names,
-  not meanings. Grep/read.
-- Dynamic dispatch, untyped attribute calls, external-library calls — aw may
-  leave these unresolved. Unresolved sites can also indicate resolver gaps.
-  Follow `grep fallback recommended` with source inspection; do not treat an
-  unresolved-site share as a measure of all supported behavior or query recall.
-- Questions about code in another repository — the index is per-repo.
+- Semantic questions ("where is behavior X implemented") — `aw` resolves names and identifiers, not arbitrary behavioral natural language descriptions. Use search or grep.
+- Dynamic dispatch, untyped attribute calls, external library calls — static resolution can leave these unresolved. Inspect source or grep for dynamic behaviors.
+- Code in another repository — the index covers the current local repository only.
 
-## Cheap context hygiene
+## Context Hygiene
 
-- Pointers lead with `path:line`; a trailing identity names the call site —
-  open only the lines you need (`sed -n`), not whole files, when the pointer
-  answers the question.
-- `aw symbols <file> --outline` replaces most "read the file to see its
-  structure" reads when you only need the definition inventory.
+- Pointers lead with `path:line`; open only the lines you need (`sed -n` or line range reads), not whole files.
+- `aw symbols <file> --outline` replaces reading full files when you only need the definition inventory and signatures.

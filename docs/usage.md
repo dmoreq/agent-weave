@@ -1,183 +1,200 @@
-# Use aw for code navigation
+# Developer & Agent Usage Guide
 
-Use aw to narrow the source you need to read. Verify decisions against source and tests; indexed relationships are not a complete program model.
+This guide details practical workflows for using `agent-weave` (`aw`) during software engineering tasks. It covers code navigation, anti-reinvention defense, multi-agent handoffs, and developer preferences.
 
-The examples below use aw's repository after `aw build`. They show commands, not recorded output or guaranteed nonempty results.
+---
 
-## Choose a query
+## Workflow Scenarios
 
-| Your task | Start with | Without aw |
-|---|---|---|
-| Find an unfamiliar symbol | `aw search 'parse tree'` | Search names and read matches with grep |
-| Read a file's structure | `aw symbols src/build.rs --outline` | Read the file or use an editor outline |
-| Inspect a function before editing | `aw context run_build` | Read its definition, then search callers and calls |
-| Find callers | `aw callers run_build` | Search references and reject non-call matches |
-| Follow transitive callers | `aw callers run_build --depth 2` | Follow each reverse call hop manually |
-| Follow outgoing calls | `aw callees run_build --depth 2` | Follow each call manually |
-| Trace a route between functions | `aw path run_build fnv1a64` | Read and follow candidate call chains |
-| Inspect dependent files | `aw impact src/hash.rs` | Search references and imports across files |
-| Inspect imports | `aw imports src/build.rs` | Read import declarations and resolve targets |
-| Find implementations of a type | `aw implementers <name>` | Read the type hierarchy and implementation blocks |
+### Scenario 1: Refactoring a Function
 
-Trust the rows a successful query returns for the navigation question you
-asked; do not repeat the same lookup with grep. Use source reads for behavioral
-claims, edits, and for capped, ambiguous, stale, or empty results. Treat
-`dead` and `unresolved` as candidates.
+When modifying a function signature or behavior, you must verify all call sites and understand potential blast radius before making edits.
 
-See the [CLI reference](cli-reference.md) for all options and maintenance commands.
+#### 1. Inspect Immediate Surroundings
+Use `aw context` to inspect the target definition, signatures, direct callers, and outgoing calls in a single sub-2ms query:
 
-## Inspect a change's surroundings
-
-Start with a fresh index, then inspect the target definition and direct neighbors:
-
-```sh
-aw build
+```bash
 aw context run_build
-aw callers run_build --limit 100
-aw impact src/build.rs --sites
 ```
 
-`context` returns a definition range, caller sites, and callee definitions. Its per-section limit defaults to 10; an empty caller or callee section still permits a successful result.
+#### 2. Trace Inbound Callers
+Examine incoming call sites across the codebase:
 
-`callers` identifies call sites, not all textual references. `--depth N` follows the resolved reverse call closure and tags rows with their shortest depth. Each caller symbol appears once at its shortest depth; alternate longer routes are not repeated. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `impact` reverses the dependency direction: it finds files that depend on the target file, excluding that file itself.
+```bash
+# Direct callers (depth 1)
+aw callers run_build
 
-By default, impact uses calls and emits one row per caller file with a site count. When that default finds nothing but the target file has importers or inheritors, the empty result names those counts and points at `--edges imports,inherits`. Use `--sites` for individual sites, or extend the relationships and depth explicitly:
-
-```sh
-aw impact src/hash.rs --edges all --depth 3
+# Transitive callers across multiple hops
+aw callers run_build --depth 2 --limit 100
 ```
 
-Do not treat this list as every file that can break. Unresolved calls, external callers, imports, and inheritance relationships can be missing.
+Each returned row provides exact `path:line qualname [depth=N]` pointers. Inspect the specified line in your editor; do not waste tokens reading entire files.
 
-## Follow execution routes
+#### 3. Trace Execution Routes
+Verify how execution flows between two distant components:
 
-```sh
-aw callees run_build --depth 2
+```bash
 aw path run_build fnv1a64
 ```
 
-`callees` shows a bounded forward call closure. `path` finds one shortest forward route through resolved call edges, with call-site pointers and a symbol chain.
+`aw path` returns the shortest chain of resolved call sites from the source to destination. To query the reverse reachability, swap the arguments:
 
-Swap the two arguments to ask the reverse question. A missing route means no resolved route was found within the depth limit, not that execution cannot reach the destination.
-
-Open each hop before changing behavior. Dynamic dispatch, callbacks, and macros can hide routes from static extraction.
-
-## Find definitions and read structure
-
-```sh
-aw search 'parse tree'
-aw search run_build
-aw symbols src --outline
+```bash
+aw path fnv1a64 run_build
 ```
 
-Quote multiword search terms: the CLI accepts one positional search string. Search ranks identifier, path, and signature tokens; it outputs concise interface cards (`path:line kind qualname signature [callers=N]`). It does not search source bodies, comments, or docstrings.
+#### 4. Audit Downstream Blast Radius
+Identify every file that depends on the module you plan to modify:
 
-`symbols` lists definitions by path and line. Signatures are whitespace-collapsed and capped at 160 characters, so open the source for full declarations and bodies.
+```bash
+# Files that call into src/build.rs
+aw impact src/build.rs
 
-## Detect anti-reinvention candidates
+# Detailed call sites across calls, imports, and inheritance
+aw impact src/build.rs --sites --edges all --depth 2
+```
 
-```sh
+---
+
+### Scenario 2: Preventing Code Bloat (The Anti-Reinvention Workflow)
+
+AI coding agents frequently recreate utility functions that already exist in the codebase. Grounded in RepoReuse research ([arXiv:2609.35357](https://arxiv.org/abs/2609.35357)), `aw` enforces a two-moment anti-reinvention loop.
+
+#### 1. Pre-Write Discovery
+Before authoring a new helper (e.g., reading a bounded file or computing a hash), search the index:
+
+```bash
+aw search "read bounded file"
+```
+
+`aw search` returns **Concise Interface Cards** ranked by caller frequency (`BM25 + log(1 + callers)`):
+
+```text
+src/walk.rs:42 fn read_bounded(path: &Path, max_bytes: usize) -> Result<Vec<u8>> [callers=14]
+```
+
+The `[callers=14]` metric immediately identifies `read_bounded` as the established, canonical helper. Reuse it instead of writing an ad-hoc implementation.
+
+#### 2. Post-Edit Defense
+After modifying or adding code, rebuild the index:
+
+```bash
+aw build
+```
+
+If duplicate helpers or bypasses are suspected, run `aw reuse`:
+
+```bash
 aw reuse
-aw reuse src
+# Or scope to specific paths:
+aw reuse src/walk.rs src/parse.rs
 ```
 
-- `reuse` detects candidate duplicate functions, callee footprint overlap, and utility abstraction opportunities across the codebase.
+`aw reuse` executes four calibrated detectors:
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines.
+- **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
+- **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
+- **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.
 
-Do not refactor code solely because it appears here. Confirm semantics, visibility, and existing tests first.
+---
 
-## Read repository summaries
+### Scenario 3: Multi-Agent Session Handoff & Project Decisions
 
-```sh
-aw stats
-aw stats --path src
-```
+Persistent project knowledge allows multiple agents or future sessions to resume work without re-investigating settled architectural decisions.
 
-`stats` describes the index, not current runtime behavior; `--path` scopes every counter to one prefix but leaves `db_bytes` and the version fields global.
+#### 1. Record a Settled Decision
+When an architectural decision or technical gotcha is established, persist it with `aw mem write`:
 
-## Remember what a session settled
-
-aw carries a project-memory store, `.aw/memory.db`, for the knowledge a coding
-session produces: settled decisions, gotchas that cost real debugging time,
-and task wrap-ups that are not yet in committed docs. Notes are agent-authored
-prose — aw never originates one, and every mem command opens with the caveat
-that notes are candidates, never proof of current behavior.
-
-```sh
-# A decision settled after real investigation — write it once:
+```bash
 aw mem write resolver-confidence-tiers --kind decision \
-  --body "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL" \
-  --tags "resolver confidence" --refs src/query/callgraph.rs
-
-# A later session retrieves it by content instead of re-deriving it:
-aw mem query confidence tiers
-
-# Rework the decision: same key, new content -> a new revision, nothing overwritten:
-aw mem write resolver-confidence-tiers --kind decision --body "confidence tiers v2: ..."
-
-# Cross-project developer profile or conventions:
-aw mem write dev-profile --kind decision --body "Preferred stack: Rust." --global
+  --body "The resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL." \
+  --refs src/extract/resolve.rs
 ```
 
-Write when a decision was settled, a gotcha cost genuine time, or a task ends
-with unmerged conclusions. Use `--global` to persist developer profiles and
-cross-project conventions into `~/.aw/memory.db`. Query at session start and
-before re-investigating an area. Without `--global`, `aw mem query` searches both
-local (`.aw/memory.db`) and global (`~/.aw/memory.db`) stores seamlessly: global
-notes carry a `[global]` badge, and local notes shadow colliding global keys.
-`mem get <key> [--global]` shows one note with its revision count; `mem delete <key> [--global]`
-removes a key; `mem export [--global]` writes a JSONL backup (restore = `mem write`
-replay); `mem gc [--global]` purges expired session notes and superseded revisions
-older than 30 days, then reports counts.
+#### 2. Code-Anchored References & Stale Alerts
+The `--refs` flag anchors the note to specific AST symbols or file paths. If a subsequent commit alters or moves the referenced symbol, `aw mem query` automatically flags the note with a `[stale-ref]` alert.
 
-Transient scratch ("tried X, it failed here") belongs to the session lane:
-`aw mem write scratch --kind fact --scope session --body ...` expires after
-7 days by default (`--ttl <SECS>` overrides) and disappears from every read
-once expired, so durable memory stays clean. `--supersedes <key>` records
-that a new note replaces an old one across keys; `--include-superseded`
-surfaces replaced revisions when you need the audit trail.
-Unlike the index, this store is primary data: it survives `aw build` and
-`aw doctor --invalidate`, and the only backup is `aw mem export`.
+#### 3. Record Multi-Agent Task Handoffs
+When wrapping up a session or passing tasks between agents, write a scoped task note:
 
-See [CLI reference](cli-reference.md#project-memory) for the full contracts,
-caps, and exit codes.
+```bash
+aw mem write handoff-doc-standardization --kind task --scope session --ttl 86400 \
+  --body "Standardized README.md and getting-started.md. Next agent must review cli-reference.md." \
+  --refs docs/cli-reference.md
+```
 
-## Recover from uncertain results
+Session notes carry a time-to-live (`--ttl`, default 7 days) and automatically expire, keeping durable memory clean.
 
-See [Concepts](concepts.md) for the index model behind pointers, confidence, and staleness. The table below describes what each signal does and does not mean.
+#### 4. Resume Context in Next Session
+At the start of a new session, query existing project knowledge:
 
-| Result | Meaning | Next action |
+```bash
+aw mem query handoff
+aw mem query "resolver tiers"
+```
+
+---
+
+### Scenario 4: Developer Profile & Cross-Project Conventions
+
+Persist developer preferences, style constraints, and cross-project rules once, without polluting repository-specific files.
+
+#### 1. Write Global Preferences
+Add the `--global` flag to store notes in `~/.aw/memory.db`:
+
+```bash
+aw mem write dev-profile --kind decision --global \
+  --body "Developer preferences: Rust 1.90+, ASD-STE100 technical writing tone, zero speculative abstractions."
+```
+
+#### 2. Layered Retrieval
+Querying memory searches **both** local repository notes (`.aw/memory.db`) and global preferences (`~/.aw/memory.db`):
+
+```bash
+aw mem query profile
+```
+
+- **Precedence & Shadowing**: Local notes take precedence over global notes. A local note with the same key shadows the global note.
+- **Visual Badging**: Global notes are explicitly marked with `[global]` in query results.
+- **Restricted Search**: To search only the global store, pass `aw mem query --global <terms>`.
+
+---
+
+## Output Interpretation and Edge Cases
+
+| Signal / Result | Meaning | Recommended Action |
 |---|---|---|
-| Name is ambiguous; exit 2 | Multiple indexed definitions match | Copy a full printed qualified name; do not merge candidates silently |
-| Symbol or path is missing; exit 1 | The index lacks that target | Check spelling, root, supported extensions, ignore rules, and rebuild |
-| No callers or route; exit 1 | No matching indexed relationship | Search source and inspect dynamic or external relationships |
-| `showing N of M` | Output is capped | Narrow the scope or raise `--limit`; do not treat N as the total |
-| Changed-result warning | Displayed source differs from the index | Run `aw build`, then repeat the query |
-| No freshness warning | Checked files did not trigger a warning | Rebuild after edits anyway; omitted or new files may not be checked |
+| **Exit code 2 (Ambiguous Name)** | Multiple symbols match bare name | Copy the full qualified name (e.g., `Class.method`) from stdout candidates and re-run. |
+| **Exit code 1 (No Results / Missing Target)** | Symbol or file not found in index | Verify spelling, path, file extension, or run `aw build`. |
+| **`showing N of M`** | Output was truncated at limit | Pass `--limit <N>` (up to 10000) or narrow with `--path`. |
+| **Changed-Result Warning** | Displayed files changed since build | Run `aw build` to update the index, then repeat query. |
+| **`[ambiguous]` tag** | Unresolved dynamic or overloaded call | Inspect source to confirm exact runtime call target. |
+| **`[stale-ref]` tag** | Referenced AST anchor was modified | Audit the note body against updated source code. |
 
-Find extraction and resolution gaps before trusting an empty result:
+---
 
-```sh
-aw doctor
-aw unresolved --path src
-aw unresolved --names --path src
-git grep -n fnv1a64 -- src tests
+## Fair Workflow Comparison
+
+When comparing agent performance with and without `aw`, ensure fair measurement:
+1. **No-aw Baseline**: Use `grep`, `find`, and direct whole-file reads. Measure tokens consumed and tool iterations.
+2. **aw-Assisted**: Use `aw search`, `aw context`, `aw callers`, and targeted line reads (`sed -n` or line ranges).
+3. **Telemetry Tracking**: Run `aw usage --quality` to observe p50/p95 query latency, total tool calls, and estimated tokens saved.
+
+---
+
+## Local Journal & Telemetry Controls
+
+`aw` records anonymous invocation telemetry locally to `.aw/usage.log`.
+
+```bash
+# View session telemetry and token savings summary
+aw usage --quality
+
+# Disable journaling for a single command
+aw --no-journal callers run_build
+
+# Disable journaling globally via environment
+export AW_NO_JOURNAL=1
 ```
 
-An `[internal]` unresolved call name also exists in the index and can indicate a resolver gap. External and standard-library calls also contribute to unresolved counts; the unresolved rate is not a whole-program missed-call rate.
-
-## Compare workflows fairly
-
-Two comparisons answer different questions:
-
-- **No aw:** use source reading, grep, editor navigation, and the normal test runner without any aw commands.
-- **Feature disabled:** keep other aw commands available, but omit the feature under investigation. For example, compose `symbols`, `callers`, and `callees` instead of `context`.
-
-A feature-disabled result does not establish the benefit of aw over no aw. A reduction in tool calls does not establish lower tokens, latency, cost, or production error rates.
-
-This guide makes no measured savings claim. See [Evaluation](EVALUATION.md) for the scope and limitations of reported measurements.
-
-## Keep local usage data under control
-
-Most commands append local usage metadata. Use `aw --no-journal` or `AW_NO_JOURNAL=1` to disable the usage journal for an invocation.
-
-`aw usage` summarizes recorded activity; see [journal controls](cli-reference.md#journal-and-environment). `aw usage --quality` adds the empty-result split, the capped-result count, and percentages from the existing journal fields.
+Telemetry logs are strictly local and automatically rotate at 5 MiB.

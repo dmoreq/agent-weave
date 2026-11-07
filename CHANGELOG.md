@@ -18,6 +18,16 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
+- **Documentation standardization & 3 USPs overhaul.** Complete public GitHub
+  showcase landing page in `README.md` with badges, 3 USPs deep-dive (sub-2ms
+  deterministic navigation, real-time anti-reinvention engine based on RepoReuse
+  `arXiv:2609.35357`, and zero-token layered memory based on Zero-Mem
+  `arXiv:2607.29377`), comparison matrix, 60-second quickstart, and 1-click MCP
+  configs. Aligned task-oriented guides (`docs/getting-started.md`,
+  `docs/usage.md`), CLI reference for 10 core commands matching schema v10
+  (`docs/cli-reference.md`), agent integration and real-time telemetry
+  (`docs/agent-integration.md`), sitemap (`docs/README.md`), and updated agent
+  routing policy (`skills/aw-first/SKILL.md`).
 - **Cross-project global memory: `aw mem --global`.** aw now supports a global
   memory store in `~/.aw/memory.db` (`$AW_GLOBAL_DIR/memory.db`) for developer
   profiles, personal preferences, and cross-project conventions. Transparent
@@ -38,7 +48,7 @@ changes bump the minor while 0.x is unstable.
   the recovery path for the primary memory store.
 - **MCP `mem_write` + `mem_query` join the default tool set** (owner decision
   OQ1); `mem_get`, `mem_delete`, `mem_gc`, and `mem_export` sit behind
-  `--all-tools` (23 tools total, ten by default). The `aw-first` skill gains
+  `--all-tools` (17 tools total, 13 by default). The `aw-first` skill gains
   a non-mandatory "Project memory" section.
 - **Memory lifecycle (Phase 2, OQ2 default TTL 7 days).** `--scope session`
   expires after a TTL (`--ttl <SECS>`, default 604800 = 7 days) and drops out

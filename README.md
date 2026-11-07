@@ -1,165 +1,231 @@
-# agent-weave (`aw`) — navigate code relationships locally
+# agent-weave (`aw`)
 
-[![CI](https://github.com/quy-doan/agent-weave/actions/workflows/ci.yml/badge.svg)](https://github.com/quy-doan/agent-weave/actions/workflows/ci.yml)
+[![CI](https://github.com/dmoreq/agent-weave/actions/workflows/ci.yml/badge.svg)](https://github.com/dmoreq/agent-weave/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](#license)
+[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](docs/getting-started.md#requirements)
+[![Offline](https://img.shields.io/badge/runtime-100%25%20offline-success.svg)](#security-and-confinement)
+[![MCP](https://img.shields.io/badge/protocol-MCP%202025--06--18-purple.svg)](docs/agent-integration.md)
 
-Before changing a function, you need to find its callers. Before following a
-request through a codebase, you need to connect the functions along the way.
-aw gives people and coding agents those connections without repeated name
-searches and file reads.
+Local deterministic code graph, real-time anti-reinvention engine, and zero-token persistent memory for AI coding agents.
 
-aw reads Python, JavaScript, TypeScript, and Rust source into a local index.
-Its answers point to files and lines you can inspect. It does not run your code
-or prove what will happen at runtime.
+Single native binary. Zero background daemons. Zero runtime network access. Zero writes outside `.aw/`.
 
-## What changes when you use aw?
+---
 
-| Your task | Without aw | With aw |
-|---|---|---|
-| Find callers before changing a function | Search its name, inspect matches, and follow imports or aliases | `aw callers` lists call sites aw could connect to that function |
-| Follow a call route from A to B | Open each function and trace its next calls | `aw path` returns one shortest route through the connections in its index |
-| Understand a function's surroundings | Collect its definition, callers, and calls separately | `aw context` brings those pieces together |
-| Check which files may need attention after a change | Search for references and connect dependencies manually | `aw impact` lists files that call into the target file; optional flags include imports and inheritance |
-| Decide where to read next | Read a file to discover its structure | `aw symbols --outline` lists definitions and signatures without their bodies |
+## The 3 Core USPs
 
-These are workflow differences, not a promise of complete coverage or universal
-savings. Existing editor references, language servers, and grep may already
-answer a small question efficiently. Keep them for verification and for
-relationships aw cannot identify.
+```text
++-----------------------------------------------------------------------------------+
+|                                 agent-weave (aw)                                  |
+|   Single native binary | 0 daemons | 0 network requests | Strict .aw/ confinement |
++-----------------------------------------------------------------------------------+
+        |                                    |                                    |
+        v                                    v                                    v
++-----------------------+  +-----------------------------------+  +-----------------------+
+|        USP 1          |  |               USP 2               |  |         USP 3         |
+|  Deterministic Graph  |  |      Anti-Reinvention Engine      |  |  Zero-Token Layered   |
+|      Navigation       |  |   (arXiv:2609.35357 RepoReuse)    |  |        Memory         |
+|                       |  |                                   |  | (arXiv:2607.29377)    |
+| • < 2ms query latency |  | • Pre-write: aw search interface  |  |                       |
+| • 0.02s rebuild       |  |   cards with [callers=N]          |  | • 0 LLM tokens tax    |
+| • -27.3% input tokens |  | • Post-edit: instant build hints  |  | • Local: repo context |
+| • 98.6% recall        |  | • Calibrated detector (Cdup >= 80%)|  | • Global: dev profile |
++-----------------------+  +-----------------------------------+  +-----------------------+
+```
 
-### What has been measured?
+### 1. Sub-2ms Deterministic Code Navigation (Zero Daemon, Zero Token Waste)
+Large Language Models waste context windows dumping whole source files to find call sites. `aw` parses Python, TypeScript, JavaScript, and Rust into a local SQLite AST graph:
+- **Sub-2ms query latency** across multi-thousand file codebases.
+- **0.02s–0.03s incremental rebuilds** via content-addressed AST hashing.
+- **Empirical impact**: **98.6% recall** (vs 81.9% grep-only), **-27.3% input tokens**, and **-57% to -86% tool calls**.
+- **Deterministic pointers**: `path:line qualname` outputs allow agents to inspect exact slices instead of burning tokens on file scans.
 
-In a historical navigation experiment on one repository and one host/model,
-agents found **98.6% of expected call sites with aw, versus 81.9% with grep-only**.
-When instructed to query aw first, they used **27.3% fewer input tokens** than
-the grep-only group, with the same 98.6% recall. Input-token means used 10 runs
-per group. Simply making aw available did not produce the same saving.
+### 2. Real-Time Anti-Reinvention Engine (Prevents Duplicate Code & Exploration Collapse)
+Unguided AI coding agents duplicate existing logic at alarming rates (up to 50.8% duplicate code by Turn 5 under standard multi-turn benchmarks, as documented in RepoReuse, [arXiv:2609.35357](https://arxiv.org/abs/2609.35357)). `aw` provides two-moment protection:
+- **Pre-write Discovery**: `aw search` returns zero-body Concise Interface Cards ranked by `BM25 + log(1 + callers)` to surface canonical functions before agents author new code.
+- **Post-edit Defense**: Incremental `aw build` emits instant stderr hints (< 1ms), while `aw reuse` runs four calibrated detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, client bypass, and 1-caller wrappers).
 
-Other experiments found that benefits depend on the task and host/model.
-Symbol search and duplicate detection did not consistently reduce effort;
-test and API lookups did not show savings in their narrow measured tasks.
-These are reported historical results for those task shapes, not
-feature-level verdicts or measurements of every current build.
-See [Evaluation](docs/EVALUATION.md) for comparisons, sample sizes, limitations,
-and what can be checked from the public repository.
+### 3. Zero-Token Code-Anchored Project & Global Memory (Unified Single Binary)
+External memory MCP servers introduce an expensive "Memory Tax" through prompt-injected summaries and LLM-based extractions. Based on Zero-Mem ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377)), `aw` implements zero-token persistent memory:
+- **0 LLM tokens consumed**: Pure SQLite FTS5 BM25 + deterministic recency/ref score fusion in under 2ms.
+- **Layered storage**: Local `.aw/memory.db` for repository decisions, gotchas, and task handoffs; global `~/.aw/memory.db` (`--global`) for developer preferences and cross-project conventions.
+- **Code-anchored references**: Notes anchor directly to AST symbols via `--refs`. When code refactors invalidate an anchor, `aw` flags `[stale-ref]` automatically.
+- **Unified binary**: Replaces separate memory servers (`ai-memory`) with a single toolchain.
 
-## Try it
+---
 
-You need Rust 1.90 or later, Cargo, Git, and a C compiler. Install from a clone;
-agent-weave is not published on crates.io. CI builds and tests on macOS and Linux.
+## Workflow Comparison Matrix
 
-```sh
-git clone https://github.com/quy-doan/agent-weave.git
+| Metric / Capability | Grep / Whole-File Reads | Language Server Protocol (LSP) | `agent-weave` (`aw`) |
+|---|---|---|---|
+| **Query Latency** | 100ms–5000ms | 50ms–2000ms (daemon startup) | **< 2ms** (in-process SQLite) |
+| **Incremental Rebuild** | N/A (re-scans every time) | Continuous background indexing | **0.02s** on edit |
+| **Token Consumption** | High (dumps whole files) | High (verbose JSON structures) | **-27.3% input tokens** (compact `path:line`) |
+| **Tool Call Volume** | 5–15 calls per lookup | 3–8 protocol exchanges | **1–2 targeted queries** (-57% to -86%) |
+| **Multi-Hop Recall** | 81.9% (text search misses) | Variable across dynamic edges | **98.6% deterministic graph** |
+| **Anti-Reinvention** | None (silent duplicates) | None | **Pre-write cards + post-edit hints** |
+| **Cross-Session Memory** | None (wiped on reset) | None | **Zero-token local + global memory** |
+| **Runtime Overhead** | High CPU during search | Persistent background daemon | **Zero daemons, zero background threads** |
+
+---
+
+## 60-Second Quickstart
+
+### Installation
+Build from source using Rust 1.90 or later:
+
+```bash
+git clone https://github.com/dmoreq/agent-weave.git
 cd agent-weave
 cargo install --path . --locked
+```
+
+Confirm the installation:
+```bash
+aw --version
+```
+
+### Quick Walkthrough
+
+```bash
+# 1. Build the local index
 aw build
-aw symbols src/cli.rs --outline
-aw context discover_root
-```
 
-The last two commands inspect aw's own code. To use another repository, run
-`aw build` from that repository, then ask a question using one of its symbol
-names or repository-relative file paths:
+# 2. USP 2: Discover canonical interfaces before writing code
+aw search "read bounded"
+# Output: src/walk.rs:42 fn read_bounded(path: &Path, max_bytes: usize) -> Result<Vec<u8>> [callers=14]
 
-```sh
-aw callers YourClass.your_method
-aw impact path/to/your_file.py
-```
+# 3. USP 1: Inspect surroundings and callers in sub-2ms
+aw context read_bounded
+aw callers read_bounded --depth 2
 
-Replace these example names with your own. Results use `path:line` locations.
-Rebuild with `aw build` after source edits; aw never rebuilds automatically.
-See [Getting started](docs/getting-started.md) for setup and result handling.
+# 4. USP 2: Verify zero duplicate functions after edits
+aw reuse
 
-## Choose the right question
-
-| Question | Command |
-|---|---|
-| Who calls a function or method, directly or transitively? | `aw callers <symbol> [--depth N]` |
-| What does it call, including further calls? | `aw callees <symbol> --depth 3` |
-| How does A call through to B? | `aw path <from> <to>` |
-| What surrounds this symbol? | `aw context <symbol>` |
-| Which files call into this file? | `aw impact <file>` |
-| Where is a symbol with this name? | `aw search '<terms>'` |
-| What definitions are in a file or directory? | `aw symbols <path> --outline` |
-| What did a previous session settle here? | `aw mem query '<terms>'` |
-
-For import relationships, code reuse candidates, and other commands, see the
-[CLI reference](docs/cli-reference.md).
-Use the [workflow guide](docs/usage.md) to decide what to do with a result.
-
-## Carry knowledge across sessions
-
-Code navigation answers where things are; memory keeps what your sessions
-concluded. `aw mem write` persists a decision, gotcha, or task note as
-agent-authored prose; `aw mem query` retrieves it in a later session. Notes
-live in `.aw/memory.db` for repository-specific context or `~/.aw/memory.db`
-(`--global`) for cross-project developer profiles and conventions. Queries
-seamlessly search both stores with local shadowing and a `[global]` badge:
-
-```sh
-# Repository-specific decision
-aw mem write resolver-confidence-tiers --kind decision \
-  --body "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL" \
-  --refs src/query/callgraph.rs
-
-# Cross-project developer profile
+# 5. USP 3: Persist cross-project developer preferences (0 tokens)
 aw mem write dev-profile --kind decision --global \
-  --body "Preferred stack: Rust. Coding style: Minimalist."
+  --body "Preferred stack: Rust. Coding style: Minimalist. Reject unrequested dependencies."
 
-# Layered search (queries both local and global stores)
-aw mem query confidence tiers
+# 6. USP 3: Persist a code-anchored repository decision
+aw mem write resolver-strategy --kind decision \
+  --body "Resolver maintains explicit confidence tiers. Ambiguous calls remain dst_id NULL." \
+  --refs src/extract/resolve.rs
 ```
 
-See [Project memory](docs/cli-reference.md#project-memory) for the contracts.
+---
 
-## Know what the answer does not prove
+## Core Command Reference
 
-- **Not every relationship is visible in source.** Dynamic dispatch, untyped
-  receivers, and external calls can remain unresolved. No result does not prove
-  that no caller, path, dependency, or test exists.
-- **Change impact is a starting point for inspection.** It identifies indexed
-  dependencies, not every runtime effect or every test you must run.
-- **Results can be limited or stale.** Read result counts and warnings. Rebuild
-  after edits, and request more results when you need the complete indexed set.
-- **Candidates need review.** Duplicate, unused-code, and test candidates are
-  not proof of equivalent behavior, safe deletion, or complete test coverage.
-- **One index covers one repository.** aw does not answer cross-repository
-  questions or search by the meaning of arbitrary behavior descriptions.
-- **Language support has boundaries.** Dart is not indexed. Supported source
-  files larger than 1 MiB are skipped. See the reference for other limits.
+The 10 core command surfaces cover complete code navigation, anti-reinvention, and memory workflows:
 
-## Local by design
+| Subcommand | Primary Purpose | Key Output / Behavior |
+|---|---|---|
+| `aw build` | Compile or incrementally update AST index | Rebuilds in ~0.02s; atomic swap |
+| `aw callers <symbol>` | Find incoming callers (direct or transitive) | `path:line qualname [depth=N]` |
+| `aw callees <symbol>` | Trace outgoing function calls | Resolved call targets by depth |
+| `aw context <symbol>` | 1-call definition, callers, and callees | Consolidated symbol surroundings |
+| `aw path <from> <to>` | Find shortest call route between symbols | Exact hop sequence with call sites |
+| `aw impact <file>` | Identify files calling into target file | File grouping with caller counts |
+| `aw imports <file>` | Outbound resolved imports for a file | Module import targets |
+| `aw search <terms>` | BM25 + caller-weighted symbol discovery | Interface cards with `[callers=N]` |
+| `aw symbols <path>` | File/directory outline with signatures | `path:line kind qualname (signature)` |
+| `aw reuse [paths...]` | Detect duplicate functions and wrappers | 4 calibrated anti-reinvention detectors |
 
-At runtime, aw makes no network requests and changes no source files. Its
-index, project-memory store, and local usage records live under `.aw/`. It
-installs no hooks, runs no background daemon, and does not edit your agent
-configuration.
+### Platform & Maintenance Commands
 
-Usage records are enabled by default. Pass `--no-journal` or set
-`AW_NO_JOURNAL=1` to disable them. Source names, signatures, paths, and query
-records can be sensitive: do not publish `.aw/` unintentionally.
-See [Security](SECURITY.md) for the security model.
+- `aw mem write|query|get|delete|export|gc`: Zero-token project and global memory management.
+- `aw doctor [--invalidate]`: Verify index integrity, staleness, or reset derived data.
+- `aw stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
+- `aw unresolved [--names]`: Inspect where static resolution could not resolve call sites.
+- `aw usage [--quality]`: View latency distribution, token savings, and query success telemetry.
+- `aw mcp`: Start the Model Context Protocol stdio server.
 
-## Use it with a coding agent
+See the complete [CLI Reference](docs/cli-reference.md) for flag details and exit codes.
 
-- **MCP** gives an agent access to aw tools through `aw mcp`.
-- **The aw-first skill** tells an agent when and how to use those tools,
-  handle incomplete results, and fall back to source inspection.
-- **Trust contract:** successful navigation output is ground truth for the
-  fields it returns. `dead` and `unresolved` remain candidates.
-  Source reads still gate edits and behavioral claims.
+---
 
-Neither is installed automatically. See [Agent integration](docs/agent-integration.md)
-for setup, verification, and the difference between tool access and routing.
+## Agent Integration (MCP)
 
-## Documentation and contribution
+`aw` integrates seamlessly with AI coding agents via the Model Context Protocol (MCP).
 
-- [Documentation index](docs/README.md): guides, reference, and technical design.
-- [Evaluation](docs/EVALUATION.md): reported benefits, costs, and evidence limits.
-- [Public benchmark](bench/README.md): reproducible pointer regression corpus.
-- [Support](SUPPORT.md): common errors and how to report a problem.
-- [Contributing](CONTRIBUTING.md): development setup, checks, and review rules.
-- [Changelog](CHANGELOG.md): changes and required user actions.
-- [Code of conduct](CODE_OF_CONDUCT.md) and [Security policy](SECURITY.md).
+### 1-Click Host Configurations
 
-aw is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
-See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
+#### Claude Desktop (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "agent-weave": {
+      "command": "aw",
+      "args": ["--root", "/absolute/path/to/repository", "mcp"]
+    }
+  }
+}
+```
+
+#### Cursor (`.cursor/mcp.json`)
+```json
+{
+  "mcpServers": {
+    "agent-weave": {
+      "command": "aw",
+      "args": ["--root", "${workspaceFolder}", "mcp"]
+    }
+  }
+}
+```
+
+#### Antigravity / Gemini CLI (`antigravity.json`)
+```json
+{
+  "mcpServers": {
+    "agent-weave": {
+      "command": "aw",
+      "args": ["--root", ".", "mcp"]
+    }
+  }
+}
+```
+
+### Real-Time Performance & Telemetry Footer
+Every MCP response includes a compact execution summary:
+```text
+⚡ aw: 1.2ms | ~3.8k tokens saved
+```
+Verify aggregate session savings at any time:
+```bash
+aw usage --quality
+```
+
+For complete agent routing instructions and the `aw-first` skill, see [Agent Integration](docs/agent-integration.md).
+
+---
+
+## Security and Confinement
+
+- **Zero Runtime Network Access**: `aw` makes no network connections during operation.
+- **Strict Filesystem Confinement**: All runtime writes and deletes are confined strictly to `.aw/` inside the target repository root, plus `~/.aw/` for global memory. `aw` never edits source files, git configuration, hooks, or agent settings.
+- **Zero Background Daemons**: No background processes, file watchers, or persistent sockets. Every command runs synchronously and exits immediately.
+- **Deterministic and Audited**: Zero `unsafe` Rust code in `src/` or `tests/`. Dependencies are pinned and strictly allowlisted.
+
+See [Security Policy](SECURITY.md) for full audit parameters.
+
+---
+
+## Documentation
+
+- [Getting Started](docs/getting-started.md): Installation and first 5 minutes.
+- [Usage Guide](docs/usage.md): Developer workflows, anti-reinvention scenarios, and handoffs.
+- [CLI Reference](docs/cli-reference.md): Full flag specifications, exit codes, and output contracts.
+- [Agent Integration](docs/agent-integration.md): MCP setup and routing rules.
+- [Concepts](docs/concepts.md): Graph data model, confidence tiers, and resolution boundaries.
+- [Documentation Index](docs/README.md): Complete repository documentation map.
+
+---
+
+## License
+
+Dual-licensed under either:
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

@@ -1,429 +1,314 @@
-# CLI reference
+# CLI Reference
 
-Use the [usage guide](usage.md) to choose a workflow. This page describes the command interface defined in [`src/cli.rs`](../src/cli.rs), with behavior from the query and maintenance implementations.
+Comprehensive reference for the `agent-weave` (`aw`) command-line interface.
 
-## Find the command for your task
+All commands operate as consultative inspection tools: zero runtime network calls, zero background daemons, zero file watchers, and zero modifications outside `.aw/` (or `~/.aw/` for global memory).
 
-| Task | Commands |
-|---|---|
-| Create or refresh an index | `build` |
-| Inspect a definition and its neighbors | `context`, `callers`, `callees`, `path` |
-| Inspect dependencies | `impact`, `imports` |
-| Find definitions and symbols | `search`, `symbols` |
-| Detect anti-reinvention candidates | `reuse`, `unresolved` |
-| Read repository summaries | `stats` |
-| Persist and retrieve project notes | `mem write`, `mem query`, `mem get`, `mem delete`, `mem export`, `mem gc` |
-| Diagnose or remove local data | `doctor` |
-| Inspect recorded usage | `usage` |
-| Connect an MCP client | `mcp` |
+---
 
-## Trust contract
+## Global Options
 
-A successful query is ground truth for the rows it returns. Re-run or read
-source when output is capped, ambiguous, stale, or empty; those are coverage
-limits, not routine re-verification. Treat `reuse` and `unresolved`
-as candidates.
+Global options can be specified before or after any subcommand:
 
-## Invocation and global options
-
-```text
-aw [GLOBAL_OPTIONS] <COMMAND> [ARGUMENTS] [OPTIONS]
+```bash
+aw [GLOBAL_OPTIONS] <SUBCOMMAND> [OPTIONS]
 ```
 
-| Option | Default | Meaning |
-|---|---|---|
-| `--root <PATH>` | Nearest ancestor of the working directory containing `.git` | Select the repository root; an explicit root must be a directory and need not contain `.git` |
-| `--no-journal` | Off | Disable the usage journal for this invocation |
-| `-h`, `--help` | Off | Print command help and exit successfully |
-| `-V`, `--version` | Off | Print the binary version and exit successfully; top-level option |
+| Option | Description |
+|---|---|
+| `--root <PATH>` | Select repository root (defaults to nearest `.git` ancestor of current directory). |
+| `--no-journal` | Disable invocation logging in `.aw/usage.log` for this execution. |
+| `-h`, `--help` | Print help information and exit. |
+| `-V`, `--version` | Print binary version and exit. |
 
-`--root` and `--no-journal` work before or after a subcommand. `aw help` and `aw help <COMMAND>` also show help. Every subcommand supports `-h` and `--help`.
+---
 
-Names accept an exact bare name or a full printed qualified name. If no exact match exists, a dotted suffix such as `Class.method` resolves when unique; multiple suffix matches stay ambiguous. Pointers and partial segments are not accepted.
+## The 10 Core Commands
 
-File arguments use root-relative paths with `/`, not paths relative to the invoking subdirectory. Where `--path <PATH>` is offered, it selects an exact file or a directory and descendants, not an arbitrary string prefix.
+### 1. `aw build`
+Compile or incrementally update the local SQLite AST index (`.aw/index.db`). Uses content-addressed hashing to skip unchanged files and atomically swaps the database file upon completion.
 
-Omit `--path` for the whole index. Use a nonempty repository-relative scope without `..` components, backslashes, or an absolute prefix.
-
-### Shared limits and switches
-
-- Unless overridden below, `--limit <N>` defaults to **50** and clamps values above **10000** to **10000**. Zero is a usage error.
-- `context --limit` defaults to **10** and clamps at **50**, independently for callers and callees.
-- `--depth <N>` clamps to **1–10**, including clamping zero to one. Defaults differ by command.
-- Boolean switches default to off. Optional filters default to absent.
-- Generated-file tags use recognized suffixes or markers in the first five lines, not a general generated-code classifier. They remain in inventories and summaries but do not have a query switch.
-
-## Build and maintain the index
-
-### `build`
-
-```text
+```bash
 aw build [--force] [--max-parse-error-rate <FRACTION>]
 ```
 
-Build `.aw/index.db` using an atomic replacement. Reuse unchanged extraction data when possible; a fully unchanged build can leave the database untouched.
-
-| Option | Default | Meaning |
+| Option | Default | Description |
 |---|---|---|
-| `--force` | Off | Re-extract all files and bypass the parse-quality abort |
-| `--max-parse-error-rate <FRACTION>` | `0.05` | Abort if the fraction of indexed files with parse errors exceeds this threshold; require a finite value in `[0, 1]` |
+| `--force` | `false` | Re-extract all files from scratch (bypasses fast-path cache and parse abort). |
+| `--max-parse-error-rate` | `0.05` | Maximum allowable fraction of files with parse errors (0.0 to 1.0) before aborting. |
 
-Print a build summary with file, symbol, edge, parse-error, unresolved-call, carried-file, and timing fields. An abort does not publish a partial replacement index; `--force` still validates the threshold argument.
+- **Exit Codes**: `0` on success; `4` if build lock is held; `7` if parse error threshold is exceeded.
 
-### `doctor`
+---
 
-```text
-aw doctor [--invalidate]
+### 2. `aw callers`
+Identify inbound call sites that invoke the specified function, method, or class.
+
+```bash
+aw callers <NAME> [--depth <N>] [--limit <N>]
 ```
 
-Without options, report database integrity, versions, parse errors, changed indexed files, size, and leftover build files. This report needs an index.
+| Option / Argument | Default | Description |
+|---|---|---|
+| `<NAME>` | Required | Symbol name or qualified name (`Class.method` or `module.func`). |
+| `--depth <N>` | `1` | Transitive closure depth (1 to 10). Transitive hops are tagged `[depth=N]`. |
+| `--limit <N>` | `50` | Maximum results displayed (1 to 10000). |
 
-`--invalidate` defaults to off. When set, reset the derived `.aw/` state: the index, journals, locks, and orphan files are removed; no index is required. The project-memory store `.aw/memory.db` is primary data and is **kept** (with its crash-recovery sidecars); export it with `aw mem export` first if you want a copy. When no memory store exists the whole directory is removed, as before. Source files and the executable remain unchanged.
+- **Output Format**: `{path}:{line} {qualname} [depth=N]`
 
-## Inspect definitions and calls
+---
 
-### `context <NAME>`
+### 3. `aw callees`
+List outgoing function and method calls made by the specified symbol.
 
-```text
+```bash
+aw callees <NAME> [--depth <N>] [--limit <N>]
+```
+
+| Option / Argument | Default | Description |
+|---|---|---|
+| `<NAME>` | Required | Symbol name or qualified name. |
+| `--depth <N>` | `1` | Transitive depth for outgoing call closure (1 to 10). |
+| `--limit <N>` | `50` | Maximum results displayed (1 to 10000). |
+
+- **Output Format**: Points to destination definition ranges over resolved edges.
+
+---
+
+### 4. `aw context`
+Single-call consolidated symbol surroundings: definition range, signature, direct callers, and direct callees.
+
+```bash
 aw context <NAME> [--limit <N>]
 ```
 
-Print a definition range, kind, qualified name, signature, direct caller sites, and direct callees. `--limit` defaults to 10 per section, maximum 50.
+| Option / Argument | Default | Description |
+|---|---|---|
+| `<NAME>` | Required | Symbol name or qualified name. |
+| `--limit <N>` | `10` | Maximum callers and callees shown per section (1 to 50). |
 
-Resolved callees point to definitions; ambiguous callee entries can point to the originating site and carry `[ambiguous]`. Missing sections do not fail a query when the target exists. This is static context, not a complete runtime call graph. Does not prove: every runtime caller or callee is present.
+- **Output Format**: Structured sections with definition header, direct callers, and direct callees.
 
-### `callers <NAME>`
+---
 
-```text
-aw callers <NAME> [--limit <N>] [--depth <N>]
-```
+### 5. `aw path`
+Find the shortest directed call route between two symbols over resolved call graph edges.
 
-Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. Each caller symbol appears once at its shortest depth; a symbol reached by a shorter route is not repeated on a longer route, and its inbound edges are expanded once. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target. Does not prove: no other caller exists; dynamic dispatch can hide callers.
-
-### `callees <NAME>`
-
-```text
-aw callees <NAME> [--limit <N>] [--depth <N>]
-```
-
-Print outgoing callees; resolved rows point to definitions and include callee identity. `--depth` defaults to 1 for direct callees; larger depths follow the forward call closure. `--limit` uses the shared default and cap. Does not prove: the symbol has no other outgoing calls; external and dynamic calls can be missing.
-
-### `path <FROM> <TO>`
-
-```text
+```bash
 aw path <FROM> <TO> [--depth <N>]
 ```
 
-Find one shortest forward route over resolved call edges. Print a static-analysis caveat, call-site pointers in hop order, and the symbol chain. `--depth` defaults to 10; there is no `--limit` option.
+| Option / Argument | Default | Description |
+|---|---|---|
+| `<FROM>` | Required | Originating symbol name or qualified name. |
+| `<TO>` | Required | Destination symbol name or qualified name. |
+| `--depth <N>` | `10` | Maximum hops to search (1 to 10). |
 
-Swap arguments for the reverse question. Equal endpoints or no route within the depth limit return exit 1. Ambiguity identifies the failing endpoint; dynamic dispatch can hide routes. Does not prove: no route exists at runtime, or that every hop is exercised.
+- **Output Format**: Sequence of hop call sites with `path:line` pointers and symbol chain. Swap arguments for reverse reachability.
 
-## Inspect dependencies and test candidates
+---
 
-### `impact <FILE>`
+### 6. `aw impact`
+Reverse dependency analysis: identify files that depend on or call into a specified target file.
 
-```text
+```bash
 aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>] [--limit <N>]
 ```
 
-Find files that depend on the indexed target file, not its outbound dependencies. Default rows group by caller file and include `(N sites)`; `--limit` uses the shared default and cap. An empty default (calls-only) result names how many files import or inherit from the target and points at `--edges imports,inherits`.
-
-| Option | Default | Meaning |
+| Option / Argument | Default | Description |
 |---|---|---|
-| `--sites` | Off | Show individual relationship sites instead of grouping by file |
-| `--depth <N>` | `1` | Reverse dependency traversal depth |
-| `--edges <KINDS>` | `calls` | Comma-separated `calls`, `imports`, `inherits`, or `all`; do not combine `all` with explicit kinds |
-| `--limit <N>` | `50` | Maximum displayed matches, cap 10000 |
+| `<FILE>` | Required | Repository-relative path of the indexed file. |
+| `--sites` | `false` | Display individual call-site pointers instead of grouping by file. |
+| `--depth <N>` | `1` | Reverse traversal depth (1 to 10). |
+| `--edges <KINDS>` | `calls` | Comma-separated edge kinds: `calls`, `imports`, `inherits`, or `all`. |
+| `--limit <N>` | `50` | Maximum results displayed (1 to 10000). |
 
-Unresolved imports and bases are omitted from extended dependency traversal. Dynamic calls can hide dependents even when only calls are selected. Does not prove: runtime impact, required tests, or effects outside indexed edges.
+---
 
-### `imports <FILE>`
+### 7. `aw imports`
+List outbound resolved imports declared by a specific file.
 
-```text
+```bash
 aw imports <FILE> [--limit <N>]
 ```
 
-List outbound resolved import targets for an indexed file. External and unresolved imports are omitted. `--limit` uses the shared default and cap. Does not prove: the file has no other dependencies; external and unresolved imports are omitted.
+| Option / Argument | Default | Description |
+|---|---|---|
+| `<FILE>` | Required | Repository-relative path of the indexed file. |
+| `--limit <N>` | `50` | Maximum results displayed (1 to 10000). |
 
-## Find symbols
+---
 
-### `search <TERMS>`
+### 8. `aw search`
+Symbol-level discovery using SQLite FTS5 BM25 search across symbol names, qualified names, file paths, and signatures, weighted by inbound caller popularity.
 
-```text
+```bash
 aw search <TERMS> [--limit <N>]
 ```
 
-Rank symbols using BM25 token search over names, qualified names, file paths, and signatures, weighted by inbound caller count. Quote multiple words as one argument, for example `aw search 'parse tree'`.
-
-| Option | Default | Meaning |
+| Option / Argument | Default | Description |
 |---|---|---|
-| `--limit <N>` | `50` | Maximum displayed matches, cap 10000 |
+| `<TERMS>` | Required | Space-separated search query. camelCase and snake_case are automatically split. |
+| `--limit <N>` | `50` | Maximum results displayed (1 to 10000). |
 
-Outputs concise interface cards: `{path}:{line} {kind} {qualname} {signature} [callers=N]`.
+- **Output Format (Concise Interface Cards)**:
+  `{path}:{line} {kind} {qualname} {signature} [callers=N]`
+- Surfaces canonical functions first to prevent duplicate logic.
 
-camelCase and snake_case split into tokens. Normal search uses prefix terms and keeps at most 32 tokens, with a warning when truncated. It does not search bodies, comments, or docstrings. Does not prove: the symbol does not exist elsewhere; bodies, comments, and docstrings are not searched.
+---
 
-### `symbols <FILE_OR_DIRECTORY>`
+### 9. `aw symbols`
+List indexed definitions in a file or directory ordered by line number.
 
-```text
-aw symbols <FILE_OR_DIRECTORY> [--outline] [--limit <N>]
+```bash
+aw symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 ```
 
-List indexed definitions by path and line. `--outline` adds signatures. `--limit` uses the shared default and cap. Accept `.` or `./` as the repository root.
+| Option / Argument | Default | Description |
+|---|---|---|
+| `<FILE_OR_DIR>` | Required | Repository-relative file or directory path. |
+| `--outline` | `false` | Append one-line signature column (truncated at 160 characters). |
+| `--limit <N>` | `50` | Maximum results displayed (1 to 10000). |
 
-## Detect anti-reinvention candidates and gaps
+---
 
-### `reuse`
+### 10. `aw reuse`
+Real-time anti-reinvention engine. Detects duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
-```text
+```bash
 aw reuse [PATHS]... [--limit <N>]
 ```
 
-Scan the repository for anti-reinvention opportunities and code reuse candidates. Detects:
-- Exact signature and callee footprint duplicates across files.
-- Utility functions with high callee overlap.
-- Candidate shared abstractions.
-
-| Option | Default | Meaning |
+| Option / Argument | Default | Description |
 |---|---|---|
-| `[PATHS]...` | Empty (whole repo) | Restrict search scope to specific file or directory prefixes |
-| `--limit <N>` | `10` | Maximum candidate pairs displayed, cap 100 |
+| `[PATHS]...` | Empty (repo) | Optional file or directory paths to inspect. |
+| `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
 
-Does not prove: functions are identical in runtime behavior. Inspect implementation before consolidating.
+#### Calibrated Detectors
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions.
+- **D2: Interface Token Overlap ($\ge 60\%$)**: Flags functions with heavily overlapping signatures and parameter types.
+- **D3: Raw Client Bypass**: Warns when callers invoke raw primitives rather than existing canonical wrappers.
+- **D4: 1-Caller Wrappers**: Surfaces redundant single-use forwarding functions.
 
-### `unresolved`
+---
 
-```text
-aw unresolved [--names] [--path <PATH>] [--limit <N>]
+## Project & Global Memory (`aw mem`)
+
+Zero-token persistent memory store for architectural decisions, gotchas, session handoffs, and developer preferences.
+
+### `aw mem write`
+Persist an agent-authored note under a stable key identity.
+
+```bash
+aw mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 ```
 
-By default, summarize unresolved callees by file and include common unresolved names. `--names` lists unresolved relationship sites as `path:line kind name` instead; it defaults to off.
-
-`--path` defaults to absent; `--limit` controls displayed files or site rows and uses the shared default and cap. `[internal]` marks unresolved call names also present in the index. External calls contribute to counts too.
-
-Summary counts are build-time data with no freshness check. Site mode checks displayed locations for changes; locations unavailable from extraction are reported separately on stderr.
-
-## Project memory
-
-aw keeps agent-authored project notes — decisions, gotchas, facts, task
-wrap-ups — in `.aw/memory.db`, a separate SQLite store that survives builds,
-`doctor --invalidate`, and index schema skew. Notes are prose written by the
-calling agent or human; aw never originates one. Every mem command opens with
-the caveat `aw: memory — agent-authored notes, candidates only, never proof of
-current behavior` on stdout (for `mem export` it goes to stderr so stdout
-stays pure JSONL).
-
-### `mem write <KEY>`
-
-```text
-aw mem write <KEY> --body <TEXT> --kind <decision|gotcha|fact|task>
-    [--tags <TOKENS>] [--refs <NAMES>] [--scope durable] [--ttl <SECS>]
-    [--supersedes <KEY>] [--global]
-```
-
-Persist one note under a stable identity (`<= 200` chars, no control
-characters). The body is agent-authored prose, hard-capped at 8192 bytes —
-never a verbatim source dump; source evidence stays in the repository.
-
-| Option | Default | Meaning |
+| Option / Argument | Default | Description |
 |---|---|---|
-| `--body <TEXT>` | required | Note body (`<= 8192` bytes, must not be empty) |
-| `--kind <KIND>` | required | One of `decision`, `gotcha`, `fact`, `task` |
-| `--tags <TOKENS>` | absent | Whitespace-separated lowercase tokens, at most 16 x 32 chars (stored as a sorted set) |
-| `--refs <NAMES>` | absent | Whitespace-separated qualnames / repo paths the note is about, at most 16 x 256 chars (stored as a sorted set) |
-| `--scope <SCOPE>` | `durable` | `durable` never expires; `session` expires after the TTL |
-| `--ttl <SECS>` | `604800` with `--scope session` | Session lifetime in seconds; only valid with `--scope session` (OQ2 default: 7 days) |
-| `--supersedes <KEY>` | absent | Mark the named key's current note as replaced by this one; unknown target exits 1, the same key exits 2 |
-| `--global` | absent | Persist to the cross-project global memory store (`~/.aw/memory.db` or `$AW_GLOBAL_DIR/memory.db`) |
+| `<KEY>` | Required | Stable note identifier ($\le 200$ chars, alphanumeric/dashes). |
+| `--body <TEXT>` | Required | Note body prose ($\le 8192$ bytes, never verbatim source dumps). |
+| `--kind <KIND>` | Required | Note category: `decision`, `gotcha`, `fact`, or `task`. |
+| `--tags <TOKENS>` | None | Whitespace-separated tags ($\le 16$ tags, $\le 32$ chars each). |
+| `--refs <NAMES>` | None | Whitespace-separated AST qualnames or paths ($\le 16$ refs, $\le 256$ chars each). |
+| `--scope <SCOPE>` | `durable` | `durable` (never expires) or `session` (expires after TTL). |
+| `--ttl <SECS>` | `604800` (7 days)| Expiration lifetime in seconds (only valid with `--scope session`). |
+| `--supersedes <KEY>`| None | Mark the specified key as superseded by this note in one atomic transaction. |
+| `--global` | `false` | Persist to global store (`~/.aw/memory.db`) instead of repository (`.aw/memory.db`). |
 
-Identical content under the same key (compared by an FNV-1a hash over kind,
-body, tags, refs, and scope after normalization) is a successful no-op naming
-the existing revision — agent retries and framework replays are safe, and a
-replayed `--supersedes` does not re-apply. Different content under the same
-key writes a new revision in one `BEGIN IMMEDIATE` transaction; the previous
-revision is marked superseded and stays out of reads but remains in the store
-until `mem gc` retention (30 days from supersession, not creation). A
-`--supersedes` target is marked superseded in the same transaction — an
-unknown target rolls the whole write back (exit 1). Concurrent writers
-serialize on a 5 s busy timeout or exit 4; a `UNIQUE(key, rev)` failure is
-treated as a defect (one retry, then exit 6).
+---
 
-### `mem query [TERMS]`
+### `aw mem query`
+Retrieve and rank memory notes using SQLite FTS5 BM25, reference token overlap, and recency decay.
 
-```text
-aw mem query <TERMS> [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--global]
-aw mem query --all [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--global]
+```bash
+aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global]
 ```
 
-Rank current notes for the terms: FTS5 BM25 over key/tags/body tokens plus
-ref/token-overlap plus recency decay, min-max fused with fixed weights
-(0.5/0.3/0.2) and deterministic tie-breaks (score, then created_at, then key,
-then revision). The same tokenizer splits camelCase/snake_case on both the
-stored text and the query, so `calleeEmptyReason` in a body matches the query
-`callee empty reason`. At most 256 FTS candidates are fused per query.
-`--all` (mutually exclusive with terms) lists current notes by recency;
-`--all --include-superseded` extends the listing with superseded revisions,
-each header tagged `[superseded]` (not valid with terms).
+| Option | Default | Description |
+|---|---|---|
+| `[TERMS]` | Optional | Search query terms (mutually exclusive with `--all`). |
+| `--all` | `false` | List all active notes ordered by recency. |
+| `--kind <KIND>` | None | Filter by note kind (`decision`, `gotcha`, `fact`, `task`). |
+| `--scope <SCOPE>` | None | Filter by scope (`durable` or `session`). |
+| `--limit <N>` | `10` | Maximum results displayed (1 to 100). |
+| `--include-superseded`| `false` | When combined with `--all`, includes superseded note revisions. |
+| `--global` | `false` | Restrict search exclusively to global store (`~/.aw/memory.db`). |
 
-Without `--global`, queries seamlessly search **both** local (`.aw/memory.db`)
-and global (`~/.aw/memory.db`) stores. Global notes are rendered with a
-`[global]` badge. If a key exists in both stores, the local note shadows the
-global note (local takes precedence). Passing `--global` restricts the query
-exclusively to the global store. `--limit` defaults to 10 and clamps to 1..100.
-Rows print `key rev kind scope created_at [tags]` followed by the indented body;
-a capped result ends with `showing N of M` on stdout and the cap notice on stderr.
-`--kind`/`--scope` are plain equality filters. A query without hits exits 1.
+- **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
 
-### `mem get <KEY>`
+---
 
-```text
-aw mem get <KEY> [--global]
+### Additional Memory Operations
+
+| Subcommand | Syntax | Description |
+|---|---|---|
+| `get` | `aw mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
+| `delete` | `aw mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
+| `export` | `aw mem export [--limit <N>] [--global]` | Export active notes as JSONL to stdout (pure backup stream). |
+| `gc` | `aw mem gc [--global]` | Purge expired session notes and superseded revisions older than 30 days. |
+
+---
+
+## Diagnostics and Maintenance
+
+### `aw doctor`
+Verify index integrity, versions, parse errors, and changed file ratios.
+
+```bash
+aw doctor [--invalidate]
 ```
 
-Print the current note for the exact key — the same row shape as `mem query`
-plus a final `revs: <N>` line with the key's total revision count. Without
-`--global`, checks the local store first and falls back to the global store
-(rendering with `[global]`). With `--global`, checks the global store only.
-Unknown keys exit 1.
+- `--invalidate`: Resets derived `.aw/` data (removes `.aw/index.db`, journals, and orphan locks). Primary memory data (`.aw/memory.db`) is safely preserved.
 
-### `mem delete <KEY>`
+### `aw stats`
+Display build-time counts for files, symbols, edges, parse errors, and database bytes.
 
-```text
-aw mem delete <KEY> [--global]
-```
-
-Hard-delete every revision of the key and their search-index rows in one
-transaction, and print `deleted '<KEY>' revs=<N>`. With `--global`, deletes
-from the global store instead of the local store. Unknown keys exit 1 and
-nothing is created. There is no undo — `mem export` beforehand is the backup.
-
-### `mem export`
-
-```text
-aw mem export [--limit <N>] [--global]
-```
-
-Write current notes as one JSON object per line to stdout — key, rev, kind,
-scope, session, body, tags, refs, source, created_at, expires_at — so a
-restore preserves the TTL shape. With `--global`, exports from the global store.
-stdout carries ONLY the JSONL; the caveat goes to stderr. Without `--limit`
-every current note is exported; with `--limit <N>` the N most recent by
-`created_at` (deterministic). The caller redirects the output to a file outside
-`.aw/` — aw writes only under `.aw/` or `~/.aw/`.
-
-Restore = replay `aw mem write` per line into a fresh store (idempotent by
-content-hash dedup; session rows would re-derive `--ttl` as
-`expires_at - created_at`). Restore is content-exact, not a bit-exact
-replica: `created_at` and rev are re-stamped by the replay.
-
-### `mem gc`
-
-```text
-aw mem gc [--global]
-```
-
-Reclaim disk in one transaction: expired session notes are deleted with their
-search-index rows, and superseded revisions whose supersession is older than
-the 30-day retention constant are purged (the clock is `superseded_at`, so a
-revision superseded yesterday but created 40 days ago survives). With
-`--global`, runs GC on the global store. Prints
-`expired=<N> removed, superseded=<M> removed, durable=<K> rows`. Missing
-store exits 1; nothing is created.
-
-### Memory exit and data contracts
-
-Missing store on a read path exits 1 with
-`aw: no-memory: no .aw/memory.db under <root> — write with aw mem write` (or
-global equivalent). A corrupt store exits 3. A store newer than the binary, or
-one missing required structure, exits 5 with a message naming `aw mem export`
-as the recovery path — memory cannot be rebuilt from source, unlike the index,
-so an older structurally complete store still opens read-write. Every mem command
-journaled carries `body_len`, never the body text. Expired session notes are
-invisible to every read regardless of `gc`; the purge only reclaims disk.
-
-## Read summaries
-
-### `stats`
-
-```text
+```bash
 aw stats [--path <PATH>]
 ```
 
-Print build-time file, generated-file, symbol, edge-kind, parse-error, and unresolved-call counts, plus database size and versions. This is not a freshness check. `--path` defaults to absent and scopes every counter to one repo-relative file or directory prefix; a scoped line inserts `scope=<PATH>` after `aw stats:`. `db_bytes` and the version fields always describe the whole index. A scope with no indexed files exits 1.
+### `aw unresolved`
+Analyze where static resolution could not resolve call targets.
 
-## Journal and environment
+```bash
+aw unresolved [--names] [--path <PATH>] [--limit <N>]
+```
 
-### `usage`
+- `--names`: Lists individual unresolved call sites with file:line pointers instead of aggregated per-file counts. `[internal]` indicates an unresolved call to a symbol that exists in the index.
 
-```text
+### `aw usage`
+Display local performance telemetry, query distribution, latency percentiles, and token savings.
+
+```bash
 aw usage [--quality]
 ```
 
-Summarize invocation counts, errors, latency, empty/stale rates, and ambiguous-pointer counts. No index is needed; an empty journal returns exit 1.
+- `--quality`: Appends breakdown of empty results (`empty_ok` vs `empty_error`), capped queries, and p50/p95 latency percentiles.
 
-`--quality` adds the empty-result split (`empty_ok` for exit 0, `empty_error` for non-zero), the capped-result count (`total > shown`), and the `empty_ok` percentage. It reads only fields already present in `.aw/usage.log`; the journal schema and the default summary do not change.
+---
 
-### Local data and controls
+## Model Context Protocol (`aw mcp`)
 
-| Path or environment variable | Purpose |
-|---|---|
-| `.aw/index.db` | Local SQLite index (derived; `aw build` recreates it) |
-| `.aw/memory.db` | Project-memory store (primary data; agent-authored notes) |
-| `.aw/usage.log` | Invocation metadata: tool, arguments, outcome, latency, and result counts |
-| `AW_NO_JOURNAL=1` | Disable the journal; equivalent to `--no-journal` |
-| `AW_SESSION` | Optional journal attribution, trimmed and capped at 64 characters |
-| `AW_ARM` | Optional comparison-group attribution, trimmed and capped at 64 characters |
+Serve `aw` as an MCP stdio server over newline-delimited JSON-RPC 2.0.
 
-`aw` 0.3 wrote `.aw/usage-results.jsonl`; 0.4 no longer writes or reads it, and the file can be deleted manually.
-
-Journals stay local and rotate after exceeding 5 MiB to a `.1` generation. Writes are best-effort and do not change command results on failure. They can contain repository paths, symbol names, and displayed signatures; treat them as project data.
-
-The CLI does not journal `doctor`, `usage`, or the MCP server invocation itself. MCP tool calls can be journaled separately. Opting out does not delete existing data.
-
-## Serve an MCP client
-
-### `mcp`
-
-```text
+```bash
 aw mcp [--all-tools]
 ```
 
-Serve newline-delimited JSON-RPC 2.0 over stdin/stdout until input closes. A client starts this process; aw does not install host configuration or a background service.
+- **Default (Core Surface)**: Exposes 13 high-ROI tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, `symbols`, `reuse`, `search`, `usage`, `mem_write`, and `mem_query`.
+- `--all-tools`: Exposes all 17 tools, adding the 4 extended memory management tools: `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
 
-By default the tool list is the eight core navigation tools — `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols` — plus the memory write/query loop `mem_write` and `mem_query`. `--all-tools` defaults to off; when set, it exposes the full surface of 23 tools, adding the inventory, analysis, and usage operations plus `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
+---
 
-`doctor` is never exposed as a tool. Global root and journal controls apply. Frames are limited to 8 MiB. Do not send ordinary shell text or log messages into the protocol stream.
+## Exit Codes
 
-See [agent integration](agent-integration.md) for host setup and fallback guidance.
-
-## Interpret output and failures
-
-Locations use repository-relative paths and 1-based line numbers. Definition ranges include both endpoints. Header caveats and summary rows are not source pointers.
-
-- A `[ambiguous]` edge is a possible relationship, not a uniquely resolved call.
-- Capped result lists report `showing N of M` and usually a stderr cap notice. Context reports its counts in each section heading.
-- Many pointer queries warn only about changed files in the displayed, post-cap set. They do not check every indexed file or detect every newly added file.
-- An empty result is not proof of absence. Inspect the reason, rebuild, and fall back to source search.
-- Runtime diagnostics use `aw: <class>: <detail>` on stderr. Argument-parser errors can use clap's own format. Ambiguous target candidates print on stdout, at most 50.
-- `dead` retains its candidate caveat on stdout even for an empty result; other analysis commands can also emit caveats.
-
-### Exit codes
-
-| Code | Meaning | Action |
-|---|---|---|
-| `0` | Success, help/version display, or a closed downstream output pipe | Read result-specific caveats and counters |
-| `1` | No results, no index, no memory store, unknown memory key, empty journal/input, or missing batch names | Inspect the reason; build, write a note, or search source as appropriate |
-| `2` | Invalid usage or ambiguous name | Fix arguments or use a full printed qualified name |
-| `3` | Corrupt index or corrupt `memory.db` | Rebuild the index; restore memory from an `aw mem export` backup |
-| `4` | Build lock held, or a memory write timed out on the busy lock | Wait for the running build or write, then retry |
-| `5` | Schema mismatch — index: rebuild with the installed binary; memory: restore from an `aw mem export` backup | Follow the message for the store that failed |
-| `6` | Internal failure, including I/O/database errors or unexpected panic | Preserve the diagnostic and report it |
-| `7` | Build exceeded the parse-error-rate threshold | Inspect source syntax and coverage; adjust the threshold only knowingly |
-
-Exit codes describe the operation, not certainty of analysis. `context` can succeed with empty relationship sections.
-
-## Static-analysis boundaries
-
-Only Python, TypeScript/TSX, JavaScript/JSX, and Rust extensions listed in [getting started](getting-started.md#know-what-is-indexed) are indexed. Source files over 1 MiB and `.aw/` are excluded; ignore rules and parse errors can reduce coverage further.
-
-Queries operate on one local repository. Unresolved calls, runtime dispatch, external dependencies, inheritance, exports, framework discovery, and macro behavior can be incomplete. Rebuild after edits; use grep, a language server, source reading, and the normal test runner for questions the index cannot establish.
+| Code | Status | Meaning | Recovery Action |
+|---|---|---|---|
+| `0` | Success | Command completed successfully. | Inspect results or continue workflow. |
+| `1` | Empty / Missing | No results found, target missing, or index absent. | Verify name/spelling, run `aw build`, or write note. |
+| `2` | Usage / Ambiguous | Invalid arguments or bare name matched multiple symbols. | Correct arguments or copy qualified name from candidate list. |
+| `3` | Corrupt Database | SQLite database corruption detected. | Run `aw build` (for index) or restore memory from JSONL backup. |
+| `4` | Lock Contention | Build lock held by another process or busy timeout. | Wait for concurrent operation to finish and retry. |
+| `5` | Schema Skew | Index or memory database version mismatch. | Run `aw build` to recreate index; memory provides export path. |
+| `6` | Internal Error | Unexpected I/O error or internal failure. | Inspect stderr diagnostic. |
+| `7` | Parse Abort | File parse failure rate exceeded threshold. | Audit syntax or increase `--max-parse-error-rate`. |

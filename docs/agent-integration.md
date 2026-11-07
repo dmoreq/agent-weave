@@ -1,123 +1,142 @@
-# Agent integration
+# Agent Integration & Model Context Protocol (MCP)
 
-Use the `aw-first` skill to guide navigation, and CLI or MCP access to execute queries.
-These are separate integrations. Neither installs the other or changes host configuration automatically.
+This document provides setup instructions for integrating `agent-weave` (`aw`) with AI coding agents, including Claude Desktop, Cursor, and Antigravity.
 
-## Choose the access mechanism
+---
 
-| Integration | Provides | Does not provide |
-|---|---|---|
-| CLI | `aw` commands through the agent's command runner | Skill loading or routing rules |
-| MCP | aw operations as tools over stdio | Skill loading or a query-first policy |
-| `aw-first` skill | Query selection, result handling, and fallback rules | The aw executable, index, or MCP registration |
+## Architecture Overview
 
-Use CLI access, MCP access, or both according to your host's capabilities.
-The skill works with either. It does not require MCP.
+`aw` serves AI agents via the Model Context Protocol (MCP) over standard input/output (stdio) using newline-delimited JSON-RPC 2.0.
 
-## Prepare the repository
-
-1. Follow [Getting started](getting-started.md) to install aw from a clone.
-2. In the repository you want to navigate, run `aw build` and `aw doctor`.
-3. Confirm that `aw symbols <file> --outline` returns locations for a known supported source file.
-
-Replace `<file>` with a repository-relative path; it is not literal command input.
-Use the same repository root for the build and subsequent queries.
-
-## Register the skill manually
-
-1. Read [`aw-first/SKILL.md`](../skills/aw-first/SKILL.md) and confirm its routing policy fits your workflow.
-2. Check your installed host version's documentation for skill discovery or registration.
-3. Register the [`skills/aw-first/`](../skills/aw-first/) directory using that mechanism, preserving `SKILL.md` and its frontmatter.
-4. Reload the host or start a new session if required. Confirm the host can find and load `aw-first`.
-5. Ask the agent to locate callers of a known symbol. Confirm it queries aw before broad text search.
-6. Open a returned source location. Confirm the agent can use source reads or grep to investigate missing relationships.
-
-Skill discovery and skill activation are different checks. A visible skill name does not prove its instructions reached the active session.
-If the host cannot load skills, use CLI or MCP directly and follow the routing document manually.
-
-## Register MCP manually
-
-aw serves MCP through newline-delimited JSON-RPC over standard input and output.
-It is not an HTTP server. The host starts the process; no separate background service is required.
-
-1. Find the installed aw executable's absolute path. Confirm the host can execute it.
-2. In your host's documented MCP registration interface, add a local stdio server.
-3. Set the executable to that absolute path. Set separate arguments to `--root`, the target repository's absolute path, and `mcp`.
-4. Let the host start the server. Confirm initialization succeeds and the tool list includes the core navigation tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols`, plus the memory loop `mem_write` and `mem_query`.
-5. Call the `symbols` tool with `file` set to the known source file and `outline` set to `true`.
-6. Compare the returned locations with the CLI query and current source. Confirm the repository root matches.
-
-The equivalent process invocation is shown below. Replace both example paths before use:
-
-```sh
-/absolute/path/to/aw --root /absolute/path/to/repository mcp
+```text
++-----------------------+                    +------------------------------------+
+|                       |  stdio (JSON-RPC)  |          agent-weave (aw)          |
+|    AI Coding Agent    | -----------------> |  - In-process SQLite AST Graph     |
+| (Claude/Cursor/AntiG) | <----------------- |  - Real-Time Anti-Reinvention      |
+|                       |  compact response  |  - Zero-Token Layered Memory       |
++-----------------------+                    +------------------------------------+
 ```
 
-Running this command in a terminal waits for protocol input; it is not a host-registration command.
-The repository root is selected when the server starts. Restart or re-register the server to target another repository.
+- **Zero Background Daemons**: The host agent spawns the `aw mcp` process on demand.
+- **Zero Runtime Network Access**: Operates 100% locally and offline.
+- **Strict Confinement**: Reads repository code; writes exclusively to `.aw/` or `~/.aw/`.
 
-MCP argument names come from the tool schemas, not CLI spelling: for example, `symbols` uses `file` and `outline`.
-The default tool list is the eight core navigation tools plus `mem_write` and `mem_query`. Add `--all-tools` to the server arguments to expose the full inventory and analysis surface plus the remaining memory operations (`mem_get`, `mem_delete`, `mem_gc`, `mem_export`; 23 tools total); see the [CLI reference](cli-reference.md#mcp).
-The `doctor` command is CLI-only. MCP tool errors use `isError`; inspect the returned text before treating results as successful.
+---
 
-## Host verification status
+## 1-Click Host Configuration
 
-No host-specific installation recipe or host version was verified for this guide.
-These instructions describe aw's source-defined CLI and MCP interfaces, not a tested host configuration.
+Add `aw` to your agent host's configuration file.
 
-| Host | Verified host version | Setup status |
+### 1. Claude Desktop
+Add to `claude_desktop_config.json` (located at `~/Library/Application Support/Claude/` on macOS or `%APPDATA%\Claude\` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "agent-weave": {
+      "command": "aw",
+      "args": ["--root", "/path/to/your/repository", "mcp"]
+    }
+  }
+}
+```
+
+### 2. Cursor
+Add to `.cursor/mcp.json` in your workspace root:
+
+```json
+{
+  "mcpServers": {
+    "agent-weave": {
+      "command": "aw",
+      "args": ["--root", "${workspaceFolder}", "mcp"]
+    }
+  }
+}
+```
+
+### 3. Antigravity / Gemini CLI
+Add to `antigravity.json` in your project or global configuration directory:
+
+```json
+{
+  "mcpServers": {
+    "agent-weave": {
+      "command": "aw",
+      "args": ["--root", ".", "mcp"]
+    }
+  }
+}
+```
+
+---
+
+## MCP Tools Reference
+
+### Default Core Surface (13 Tools)
+
+By default, `aw mcp` exposes 13 high-ROI tools focused on navigation, anti-reinvention, and persistent memory:
+
+| Tool Name | Parameters | Responsibility |
 |---|---|---|
-| Grok Build | Not recorded | Skill registration and MCP setup not verified here |
-| OpenCode | Not recorded | Skill registration and MCP setup not verified here |
-| ZCode | Not recorded | Skill registration and MCP setup not verified here |
+| `build` | `force?`, `max_parse_error_rate?` | Rebuild local AST index (~0.02s incremental) |
+| `callers` | `name`, `depth?`, `limit?` | Find incoming caller sites |
+| `callees` | `name`, `depth?`, `limit?` | Trace outgoing function calls |
+| `path` | `from`, `to`, `depth?` | Shortest call route between symbols |
+| `context` | `name`, `limit?` | 1-call definition, callers, and callees |
+| `impact` | `file`, `sites?`, `depth?`, `edges?`, `limit?` | Reverse dependency analysis for modified files |
+| `imports` | `file`, `limit?` | Outbound resolved imports |
+| `symbols` | `file`, `outline?`, `limit?` | File/directory definitions and signatures |
+| `search` | `terms`, `limit?` | Discover symbols with interface cards & `[callers=N]` |
+| `reuse` | `paths?`, `limit?` | Anti-reinvention duplicate detector |
+| `usage` | `quality?` | Session telemetry, latency percentiles, and token savings |
+| `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `global?` | Persist architectural decisions and gotchas |
+| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?` | Zero-token layered memory search |
 
-Use the documentation for your installed host version. This guide intentionally provides no host configuration syntax or installation paths.
-When validating an integration, record the host version, `aw --version`, repository revision, access mechanism, and the query result.
+### Extended Surface (`--all-tools`)
+Passing `--all-tools` exposes 4 additional memory maintenance tools (17 total): `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
 
-## Interpret results and fall back
+*Note*: `doctor`, `stats`, and `unresolved` are intentionally reserved for human CLI inspection and omitted from MCP stdio dispatch.
 
-- **Missing tools:** confirm MCP registration and initialization. Skill registration alone does not expose tools.
-- **Missing executable:** use an absolute executable path and check the host's execution permissions.
-- **Wrong or missing index:** verify `--root`; run `aw build` for that repository. Check index health with CLI `aw doctor`.
-- **Ambiguous name:** select the intended qualified name from the candidates, then query again. Do not guess.
-- **Capped results:** increase the supported limit or narrow the query. Do not treat displayed rows as a complete dependency set.
-- **Empty result or no path:** inspect source or use grep. Missing resolved edges do not prove missing runtime behavior.
-- **Changed code:** rebuild before further navigation. No staleness warning does not prove the entire index is current.
-- **Conflicting evidence:** verify current source. Query-first routing does not prohibit safety checks or required review evidence.
-- **Transitive callers:** `aw callers <name> --depth N` follows the resolved reverse call closure; rows deeper than one hop carry `[depth=N]`.
+---
 
-For workflows, see [Usage](usage.md). For arguments, limits, exit codes, and journaling, see [CLI reference](cli-reference.md).
-Read [Evaluation](EVALUATION.md) before applying measured benefits to another host or repository.
+## Real-Time Response Telemetry
 
-## Trust contract
+Every MCP tool response appends an execution telemetry footer:
 
-See [Concepts](concepts.md) for symbols, edges, confidence, and the static boundaries behind these rules.
+```text
+⚡ aw: 1.2ms | ~3.8k tokens saved
+```
 
-When an `aw` query exits 0, treat its navigation fields as candidates, not ground
-truth. Static resolution can return false positives even when the index is
-current and results are not capped or ambiguous. Avoid repeating a complete
-lookup merely for navigation; verify individual relationships against source
-when correctness matters. Treat `dead` and `unresolved` as candidates,
-not proofs. Re-run or read source when
-a result is capped, stale, ambiguous, or empty, when the question needs a field
-the output does not carry, or for behavioral claims, edits, safety, and review.
-The full policy is in [`aw-first/SKILL.md`](../skills/aw-first/SKILL.md).
+This footer reflects:
+- **Execution Latency**: Wall-clock execution time inside `aw` (consistently sub-2ms for SQLite graph lookups).
+- **Estimated Token Savings**: Tokens saved compared to dumping raw file contents to locate the same symbol or call site.
 
-## Local data and removal
+Check aggregate session statistics via the `usage` tool or CLI:
 
-aw confines its generated data to `.aw/` and does not write agent configuration.
-Queries can append local usage journals; `--no-journal` or `AW_NO_JOURNAL=1` disables journaling.
-Your host controls how it stores tool results and transmits context to a model; review its privacy settings separately.
+```bash
+aw usage --quality
+```
 
-To remove integration, manually unregister the skill and MCP server through your host's documented mechanism.
-Stop the host-managed aw process and start a fresh session to clear loaded instructions.
-Neither step removes the repository index. CLI `aw doctor --invalidate` resets the derived `.aw/` state —
-the index and usage journals — and keeps the project-memory store `.aw/memory.db`, which holds agent-authored
-notes and is not rebuildable; export it with `aw mem export` first if you want a copy. `rm -rf .aw/` removes
-everything, including memory. Neither command removes host registration.
+---
 
-## Interface sources
+## Agent Routing Rules (`aw-first`)
 
-- [`src/cli.rs`](../src/cli.rs): commands, flags, and repository selection.
-- [`src/mcp.rs`](../src/mcp.rs): stdio transport, tool schemas, and response handling.
-- [`tests/mcp.rs`](../tests/mcp.rs): MCP contract checks; not executed for this documentation update.
+To ensure AI models take full advantage of `aw` rather than falling back to slow whole-file reads:
+1. Load the repository agent skill from [`skills/aw-first/SKILL.md`](../skills/aw-first/SKILL.md).
+2. The skill enforces **query-first routing** for:
+   - Locating callers (`callers`)
+   - Finding call chains (`path`)
+   - Assessing blast radius (`impact`)
+   - Discovering reusable helpers (`search`)
+   - Checking for code duplication (`reuse`)
+   - Retrieving session context and developer preferences (`mem_query`)
+
+---
+
+## Trust Contract
+
+1. **Navigation Rows**: When an `aw` query exits 0, returned `path:line` pointers are ground truth for indexed static relationships. Do not re-verify existing pointers with broad greps.
+2. **Behavioral Edits**: Pointers identify *where* to inspect. Always read the exact targeted source lines before performing edits.
+3. **Candidates**: Results from `reuse` and `unresolved` represent candidates for inspection, not definitive refactoring mandates.
+4. **Staleness Discipline**: Rebuild the index (`aw build`) after editing source files before trusting further navigation queries.

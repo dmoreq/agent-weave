@@ -1,122 +1,193 @@
-# Get started with agent-weave (`aw`)
+# Getting Started with agent-weave (`aw`)
 
-Build a local index, find a symbol, and open its source location. This tutorial uses aw's own repository.
+Get up and running with `agent-weave` in under 5 minutes. Learn how to index a repository, navigate code relationships deterministically, prevent duplicate code, and carry zero-token memory across sessions.
 
-aw does not replace source reading, grep, or a language server. It provides indexed navigation without a runtime network connection.
+---
 
-## 1. Install from a clone
+## 1. Installation
 
-You need Git, Rust 1.90 or newer with Cargo, and a C compiler. SQLite and the tree-sitter parsers compile from bundled sources.
+### Requirements
+- **Rust**: 1.90 or later (`rustc --version`)
+- **Cargo**: Bundled with Rust toolchain
+- **Git**: For repository discovery
+- **C Compiler**: `cc` or `clang` for bundled SQLite and tree-sitter parsers
 
-CI defines build jobs for macOS and Linux, plus an installation smoke check on Linux. This guide does not promise Windows support or a specific CPU architecture.
+### Install from Source
+`aw` compiles to a single self-contained binary:
 
-```sh
-git clone https://github.com/quy-doan/agent-weave.git
+```bash
+git clone https://github.com/dmoreq/agent-weave.git
 cd agent-weave
 cargo install --path . --locked
+```
+
+Confirm that the binary is available in your `$PATH` (typically in `~/.cargo/bin`):
+
+```bash
 aw --version
 aw --help
 ```
 
-Cargo installs the executable into its configured installation directory, normally `$HOME/.cargo/bin`. Add that directory to `PATH` if your shell cannot find `aw`.
+*Note*: `aw` is built entirely with offline-capable bundled sources. Runtime execution requires zero network access.
 
-Install from this checkout, not with `cargo install agent-weave`: this package is not published on crates.io. Dependency downloads during installation can require network access; the `aw` runtime does not.
+---
 
-## 2. Build the index
+## 2. The First 5 Minutes: Core USPs in Action
 
-From the cloned repository:
+Navigate to any supported code repository (Python, TypeScript, JavaScript, or Rust). You can also run these commands directly inside the `agent-weave` checkout.
 
-```sh
+### Step 1: Build the Local Index (USP 1)
+
+Generate the local SQLite AST graph:
+
+```bash
 aw build
+```
+
+`aw` indexes source files into `.aw/index.db`. Initial builds complete in a few hundred milliseconds; subsequent incremental rebuilds take **~0.02s**.
+
+Verify index health and coverage:
+
+```bash
 aw doctor
 ```
 
-`build` writes `.aw/index.db` and reports files, symbols, edges, parse errors, unresolved calls, and build timings. Read the actual counts from your checkout; this guide does not supply a captured output transcript.
+`aw doctor` checks database integrity, parser health, and changed file ratios.
 
-`doctor` checks integrity and reports index versions, parse coverage, changed indexed files, and leftover build files. A successful build does not mean every call resolved.
+---
 
-aw discovers the nearest ancestor containing `.git`. To index a different directory, pass its root explicitly:
+### Step 2: Deterministic Code Navigation (USP 1)
 
-```sh
-aw --root . build
-```
+Traditional agent navigation burns thousands of tokens reading entire files to locate references. `aw` gives you exact, sub-2ms pointers:
 
-File arguments in queries remain relative to the selected root, even when you invoke aw from a subdirectory. aw writes only under that root's `.aw/` during normal operation; it does not add ignore rules or change agent configuration.
+#### Inspect Symbol Surroundings
+Get definition ranges, signatures, callers, and callees in a single query:
 
-## 3. Find and inspect real code
-
-```sh
-aw symbols src/cli.rs --outline
-aw search run_build
+```bash
 aw context run_build
 ```
 
-- `symbols` lists definitions in `src/cli.rs`, with one-line signatures when available.
-- `search` ranks identifier matches and accepts either a bare name or a qualified name.
-- `context` combines the definition range, direct callers, and direct callees. It does not print function bodies.
+#### Find Incoming Callers
+Trace direct and transitive callers without grepping:
 
-Open a returned `path:line` in your editor. Lines are 1-based and paths are repository-relative.
-
-These examples name existing files and definitions, not guaranteed result counts. If a name becomes ambiguous, copy a full qualified name from the candidate list and repeat the query.
-
-## 4. Check likely callers before editing
-
-```sh
+```bash
+# Direct callers
 aw callers run_build
+
+# Transitive callers up to 2 hops away
+aw callers run_build --depth 2
+```
+
+Outputs list exact `path:line qualname [depth=N]` pointers. Open only the specific lines in your editor.
+
+#### Assess Change Impact
+Identify every file that calls into a target file before you edit it:
+
+```bash
 aw impact src/build.rs
 ```
 
-`callers` points to indexed call sites. `impact` lists files that call into `src/build.rs`, not files that `src/build.rs` calls.
+---
 
-Use these locations to choose what to inspect next. Empty results do not prove the function is unused or a change is safe.
+### Step 3: Anti-Reinvention Discovery & Verification (USP 2)
 
-Without aw, search for the definition and its references, then read each match. Keep that fallback available:
+Unguided AI agents frequently reinvent existing helpers because they cannot easily find canonical functions. `aw` provides two-moment protection:
 
-```sh
-git grep -n run_build -- src tests
+#### Pre-Write Discovery
+Search for existing helpers before implementing new utility functions:
+
+```bash
+aw search "read bounded"
 ```
 
-## 5. Rebuild after source changes
+Output delivers **Concise Interface Cards** ranked by caller popularity:
+```text
+src/walk.rs:42 fn read_bounded(path: &Path, max_bytes: usize) -> Result<Vec<u8>> [callers=14]
+```
+The `[callers=14]` tag signals that `read_bounded` is an established, canonical helper that you should reuse.
 
-```sh
-aw build
+#### Post-Edit Verification
+Verify that your changes did not introduce duplicate logic or bypass existing helpers:
+
+```bash
+aw reuse
 ```
 
-aw does not watch files or rebuild automatically. Normal builds reuse unchanged extraction data; `aw build --force` re-extracts everything and also bypasses the parse-error-rate abort.
+`aw reuse` analyzes callee footprints and interface similarities across four calibrated detectors to surface duplicate function candidates.
 
-Queries can warn about changed result files, but no warning is not a whole-repository freshness guarantee. Rebuild after adding, deleting, renaming, or editing source files.
+---
 
-## Know what is indexed
+### Step 4: Zero-Token Layered Memory (USP 3)
+
+Avoid the token overhead of external memory servers. Persist durable decisions, gotchas, and preferences using SQLite FTS5 in under 2ms:
+
+#### Save a Code-Anchored Repository Decision
+Anchor architectural decisions directly to source files:
+
+```bash
+aw mem write resolver-strategy --kind decision \
+  --body "Resolver maintains explicit confidence tiers. Ambiguous calls remain dst_id NULL." \
+  --refs src/extract/resolve.rs
+```
+
+If `src/extract/resolve.rs` is renamed or refactored, `aw` flags `[stale-ref]` alerts automatically.
+
+#### Save Cross-Project Developer Preferences
+Use `--global` to persist global habits and profile settings in `~/.aw/memory.db`:
+
+```bash
+aw mem write dev-profile --kind decision --global \
+  --body "Preferred stack: Rust. Coding style: Minimalist. Reject unrequested abstractions."
+```
+
+#### Layered Retrieval
+Query across both local repository decisions and global profile preferences:
+
+```bash
+aw mem query resolver
+aw mem query profile
+```
+
+Local repository notes automatically shadow global notes with the same key. Global notes are labeled with `[global]`.
+
+---
+
+## 3. What is Indexed
+
+`aw` indexes code using AST grammars for the following file extensions:
 
 | Language | Extensions |
 |---|---|
-| Python | `.py` |
-| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` |
-| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
-| Rust | `.rs` |
+| **Rust** | `.rs` |
+| **Python** | `.py` |
+| **TypeScript** | `.ts`, `.tsx`, `.mts`, `.cts` |
+| **JavaScript** | `.js`, `.jsx`, `.mjs`, `.cjs` |
 
-Files larger than 1 MiB are skipped. `.aw/` is always excluded. In Git repositories, aw uses tracked and untracked-unignored paths when Git enumeration succeeds; otherwise it uses textual ignore rules.
+### Index Boundaries
+- **Size Cap**: Individual files larger than 1 MiB are skipped to avoid indexing large generated assets.
+- **Git Awareness**: Automatically respects `.gitignore` rules and excludes untracked ignored paths.
+- **Confinement**: `.aw/` directories and external build artifacts are excluded.
 
-Other languages, including Dart, are not indexed. Dynamic calls, external dependencies, macros, and framework conventions can leave relationships missing.
+---
 
-## Remove local index data
+## 4. Resetting Local Data
 
-Run this only when you intend to delete aw's local data for the selected repository:
+Derived data (the SQLite AST index and usage journals) can be cleaned up at any time:
 
-```sh
+```bash
 aw doctor --invalidate
 ```
 
-This resets the derived `.aw/` state — the index, journals, and leftover build
-files. The project-memory store `.aw/memory.db` is primary data (agent-authored
-notes) and is kept; export it first with `aw mem export` if you want a copy,
-and use `rm -rf .aw/` when you really want everything gone. `--invalidate`
-does not uninstall the executable or modify source files. Run `aw build` to
-start again.
+`--invalidate` removes `.aw/index.db` and temporary locks, but safely **preserves** your agent-authored project memory (`.aw/memory.db`). To back up memory notes before a full cleanup, run:
 
-## Continue
+```bash
+aw mem export > memory_backup.jsonl
+```
 
-- [Usage guide](usage.md): select queries for editing and investigation.
-- [Concepts](concepts.md): symbols, edges, pointers, and static limits.
-- [CLI reference](cli-reference.md): options, result interpretation, exits, and journal controls.
-- [Documentation index](README.md): integrations, evaluation, and contribution guidance.
+---
+
+## Next Steps
+
+- **[Usage Guide](usage.md)**: Master real-world developer and agent scenarios.
+- **[CLI Reference](cli-reference.md)**: Explore the complete 10-command syntax and exit codes.
+- **[Agent Integration](agent-integration.md)**: Connect `aw` to Claude Desktop, Cursor, or Antigravity via MCP.

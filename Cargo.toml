@@ -2,14 +2,14 @@
 name = "agent-weave"
 version = "0.5.0"
 edition = "2021"
-description = "Local code knowledge index: who calls this, what does this call, what is impacted by this file."
+description = "Local deterministic code graph, real-time anti-reinvention engine, and zero-token persistent memory for AI coding agents."
 license = "MIT OR Apache-2.0"
 publish = false  # review pending; crates.io name is prepared as `agent-weave`
-repository = "https://github.com/quy-doan/agent-weave"
-homepage = "https://github.com/quy-doan/agent-weave"
+repository = "https://github.com/dmoreq/agent-weave"
+homepage = "https://github.com/dmoreq/agent-weave"
 documentation = "https://docs.rs/agent-weave"
 readme = "README.md"
-keywords = ["code-search", "call-graph", "mcp", "tree-sitter", "sqlite"]
+keywords = ["code-index", "call-graph", "anti-reinvention", "agent-memory", "mcp"]
 categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.90"
 include = [
@@ -48,7 +48,7 @@ tree-sitter-javascript = "0.25"
 tree-sitter-rust = "0.23"
 rusqlite = { version = "0.41", features = ["bundled"] }
 ignore = "0.4"
-# MCP stdio boundary parses UNTRUSTED client JSON (Amendment 8): one audited
+# MCP stdio boundary parses UNTRUSTED client JSON: one audited
 # parser instead of a hand-rolled one on a trust boundary; no async runtime.
 serde_json = "1"
 
