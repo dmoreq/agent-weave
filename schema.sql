@@ -1,13 +1,10 @@
--- aw schema v8 — additive-only evolution policy (v1 -> v2 adds files.unresolved;
--- v2 -> v3 adds files.loc/files.cyclomatic; v3 -> v4 adds symbols.signature,
--- Amendment 12a; v4 -> v5 adds unresolved_calls, Amendment 15; v5 -> v6 adds
--- Amendment 19 metrics/exported/generated/unresolved kind/site; v6 -> v7 adds
--- symbols.file_path, Amendment 20: denormalized path for deterministic
--- complexity ordering; v7 -> v8 adds symbols.is_test: test classification
--- computed once at extraction, consumed by `aw tests`, `aw dead
--- --exclude-tests`, and the build-time test_symbol_count counter).
--- The binary opens a DB only when PRAGMA user_version equals its own compiled
--- schema version; older AND newer both exit 5. The DB is never migrated in place.
+-- aw schema v9 — v8 -> v9 drops the per-symbol micro-metrics (symbols
+-- cyclomatic/branches/nesting), the file-level hotspots metrics (files
+-- loc/cyclomatic), and the clone_groups shingle table: the only retained
+-- per-symbol size metric is symbols.effective_loc, ranked by a single-column
+-- key. The binary opens a DB only when PRAGMA user_version equals its own
+-- compiled schema version; older AND newer both exit 5. The DB is never
+-- migrated in place.
 -- Tables and the FTS table live here; secondary indexes live in
 -- schema_indexes.sql and are created after the bulk insert of a fresh build
 -- (the final schema is unchanged).
@@ -26,10 +23,6 @@ CREATE TABLE files(
     -- Unresolved-callee count for this file (authoritative per-file split of
     -- the meta unresolved_callee_count total; stable across incremental builds).
     unresolved INTEGER NOT NULL DEFAULT 0,
-    -- Hotspots metrics (Amendment 11d), frozen at this file's last fresh
-    -- extraction: line count and language-aware decision-node count.
-    loc INTEGER NOT NULL DEFAULT 0,
-    cyclomatic INTEGER NOT NULL DEFAULT 0,
     -- Generated-file tag (Amendment 19): path/marker detection at build.
     generated INTEGER NOT NULL DEFAULT 0
 );
@@ -48,10 +41,7 @@ CREATE TABLE symbols(
     -- line-wrapped parameters, whitespace collapsed, hard cap 160 chars.
     -- Empty for module symbols. No bodies.
     signature TEXT NOT NULL DEFAULT '',
-    -- Per-symbol metrics (Amendment 19); 0 for non-callables.
-    cyclomatic INTEGER NOT NULL DEFAULT 0,
-    branches INTEGER NOT NULL DEFAULT 0,
-    nesting INTEGER NOT NULL DEFAULT 0,
+    -- Effective non-comment line count (Amendment 19); 0 for non-callables.
     effective_loc INTEGER NOT NULL DEFAULT 0,
     -- Public-surface flag (Amendment 19); language rules in the spec.
     -- Retained for schema compatibility; no current CLI/MCP surface reads it.
@@ -59,8 +49,8 @@ CREATE TABLE symbols(
     -- Test classification (v8): 1 when the symbol came from a test path or
     -- test-shaped name, or sits under Rust #[test]/#[cfg(test)] or a TS
     -- describe/it callback. Classification happens once at extraction; the
-    -- column is authoritative for `aw tests`, `aw dead --exclude-tests`, and
-    -- the test_symbol_count meta counter.
+    -- column is authoritative for `aw dead --exclude-tests` and the
+    -- test_symbol_count meta counter.
     is_test INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE edges(
@@ -84,13 +74,4 @@ CREATE TABLE unresolved_calls(
     dst_name TEXT NOT NULL,
     kind TEXT NOT NULL DEFAULT 'call',
     site_line INTEGER NOT NULL DEFAULT 0
-);
--- Clone candidates (Amendment 12d): normalized 5-line-window FNV-1a shingles
--- computed during the build parse phase for fresh files and carried forward
--- with the fast path; grouping/pairing happens at query time.
-CREATE TABLE clone_groups(
-    shingle_hash INTEGER NOT NULL,
-    file_id INTEGER NOT NULL REFERENCES files(id),
-    line_start INTEGER NOT NULL,
-    line_end INTEGER NOT NULL
 );

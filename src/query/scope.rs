@@ -2,10 +2,6 @@
 
 use super::*;
 
-pub(crate) fn path_in_scope(path: &str, scope: &str) -> bool {
-    path == scope || path.starts_with(&format!("{scope}/"))
-}
-
 pub fn validate_path_scope(path: &str, allow_root: bool) -> Result<()> {
     let p = path.trim().trim_start_matches("./").trim_end_matches('/');
     let bad_component = !p.is_empty()

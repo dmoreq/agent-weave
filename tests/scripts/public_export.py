@@ -82,7 +82,6 @@ PRIVATE_SCRIPTS = {
     "path_recall.py",
     "search_gap_recall.py",
     "search_recall.py",
-    "tests_recall.py",
 }
 
 

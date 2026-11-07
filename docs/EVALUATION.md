@@ -194,7 +194,7 @@ The source-derived expected sets were frozen on 2026-11-02 at aw `342ebc3`, corp
 | Relationship | Expected-row recall | Reported precision | Wilson 95% interval for recall | Public harness |
 |---|---:|---:|---|---|
 | Imports | 40/40 | 183/183 | 0.912–1.000 | [import_recall.py](../tests/scripts/import_recall.py) |
-| Test reachability | 20/20 | 2,679/2,679 | 0.839–1.000 | [tests_recall.py](../tests/scripts/tests_recall.py) |
+| Test reachability (measured for `aw tests`, removed in 0.5.0) | 20/20 | 2,679/2,679 | 0.839–1.000 | harness retired with the command |
 | Inheritance | 17/17 | Not measured | 0.816–1.000 | [inheritance_recall.py](../tests/scripts/inheritance_recall.py) |
 
 Imports comprised 25 corpus-A rows and 15 aw-self rows. Test recall covered 20 corpus-A symbols across 20 files. Inheritance covered 15 Python rows, including five cross-file rows, and two TypeScript rows, including one cross-file row.
@@ -266,6 +266,7 @@ The commands below are **verification recipes, not results from this documentati
 | Untouched no-op index | Same file, `noop_build_leaves_the_index_untouched` | `cargo test --locked --test cli noop_build_leaves_the_index_untouched` |
 | CLI/MCP contracts | [tests/mcp.rs](../tests/mcp.rs) | `cargo test --locked --test mcp` |
 | Public navigation pointers | [bench/](../bench/README.md) | `cargo build --release && python3 -I bench/run.py target/release/aw` |
+| Memory retrieval recall + negative control | [tests/fixtures/memory/oracle-v2.json](../tests/fixtures/memory/oracle-v2.json) | `cargo build --release && python3 -I tests/scripts/mem_recall.py --aw target/release/aw` |
 
 The public pointer benchmark is a committed synthetic corpus with expected
 pointers per command. It is a regression gate for the public corpus; it does
@@ -275,6 +276,18 @@ reduction, or dynamic-dispatch coverage.
 For local synthetic measurements, inspect [make_synth_corpus.py](../tests/scripts/make_synth_corpus.py) and [timing_assert.sh](../tests/scripts/timing_assert.sh). The latter reports best-of-N wall time, accepts semantic exit codes 0/1/2, and does not calculate percentiles.
 
 Record the commit, binary build mode, operating system, CPU/RAM, corpus generator arguments, indexed totals, cache conditions, repetitions, and exclusions. Preserve every timing sample if you need a median or p95. Do not label new fixture results as reproductions of private agent experiments.
+
+## 6a. Project memory: retrieval recall (measured 2026-11-06)
+
+The project-memory resolver (design: [memory retrieval](designs/2026-11-05_agent-weave-memory-retrieval.md)) is measured against a frozen oracle, not agent economics. Method follows the standing experiment-plan principles: the fixture freezes 30 notes and 20 queries with expected keys and the negative-control seed before any run; measurement is deterministic (same DB + query + binary → same ranking); the script is stdlib Python only.
+
+- **Command:** `python3 -I tests/scripts/mem_recall.py --aw target/release/aw --json docs/baselines/2026-11-06_memory-phase3/recall.json`
+- **Fixture:** [tests/fixtures/memory/oracle-v2.json](../tests/fixtures/memory/oracle-v2.json) (30 notes, 20 queries, seed 20261105)
+- **Result (aw, release build, 2026-11-06):** recall@5 = 20/20 = **1.000**, Wilson 95% interval [0.839, 1.000]. Negative control (frozen shuffle of the term→key mapping, scored against the same retrievals): 1/20 = **0.050**, clearly below the 0.8 gate — the ranking is load-bearing, not a pass-everything store. Gate: PASS. Evidence: [docs/baselines/2026-11-06_memory-phase3/recall.json](baselines/2026-11-06_memory-phase3/recall.json).
+- **Weight-tuning rule:** the resolver weights (0.5 lexical / 0.3 ref-overlap / 0.2 recency) change only if a frozen-oracle run drops below 0.8, with before/after numbers recorded here and in the changelog. No retune was needed for this measurement.
+- **Feature retention:** `aw usage --quality` splits `mem_write`/`mem_query` call and empty rates from the journal. A measurement window with zero `mem_write` calls makes the feature a recorded drop candidate rather than a permanent fixture.
+
+**What this does not establish:** one 30-note synthetic fixture, one repository, one binary build; recall over the oracle is not agent utility (no task-completion A/B), not precision under adversarial duplicates, and not transferable to other note distributions. The negative control rules out a pass-everything store, not every trivial-ranking failure mode.
 
 ## 7. Practical limits
 

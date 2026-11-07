@@ -99,13 +99,10 @@ index recorded. It is not a complete model of runtime behavior.
 
 These surfaces are **candidates**, not proof:
 
-- `tests`: statically reachable test candidates; it does not run tests or prove
-  that a test validates the target.
 - `dead`: symbols without indexed inbound references; it does not prove deadness.
 - `unresolved`: locations where the static resolver failed; it does not prove
   that a call is external or dynamic.
-- `clones`: normalized-text similarity; it does not prove semantic duplication.
-- `complexity` and `hotspots`: syntax and repository metrics, not runtime cost.
+- `complexity`: a static effective-line-count ranking, not runtime cost.
 
 Source reads still gate edits and behavioral claims.
 

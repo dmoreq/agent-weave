@@ -1,6 +1,6 @@
 [package]
 name = "agent-weave"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Local code knowledge index: who calls this, what does this call, what is impacted by this file."
 license = "MIT OR Apache-2.0"
@@ -18,6 +18,7 @@ include = [
     "/tests/*.rs",
     "/tests/scripts/timing_assert.sh",
     "/schema.sql",
+    "/schema_memory.sql",
     "/schema_indexes.sql",
     "/build.rs",
     "/Cargo.toml",

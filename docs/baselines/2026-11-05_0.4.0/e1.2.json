@@ -1,0 +1,354 @@
+{
+  "experiment": "E1.2",
+  "aw_version": "aw 0.4.0",
+  "fixture": "/Users/quy.doan/Workspace/kg/tests/fixtures/callees",
+  "resolved": {
+    "rows": [
+      {
+        "symbol": "resolved.hub_a",
+        "exit": 0,
+        "expected": [
+          "resolved.r1",
+          "resolved.r2",
+          "resolved.r3"
+        ],
+        "emitted": [
+          "resolved.r1",
+          "resolved.r2",
+          "resolved.r3"
+        ],
+        "correct": [
+          "resolved.r1",
+          "resolved.r2",
+          "resolved.r3"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.hub_b",
+        "exit": 0,
+        "expected": [
+          "resolved.r4",
+          "resolved.r5"
+        ],
+        "emitted": [
+          "resolved.r4",
+          "resolved.r5"
+        ],
+        "correct": [
+          "resolved.r4",
+          "resolved.r5"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.hub_c",
+        "exit": 0,
+        "expected": [
+          "resolved.r1",
+          "resolved.r4"
+        ],
+        "emitted": [
+          "resolved.r1",
+          "resolved.r4"
+        ],
+        "correct": [
+          "resolved.r1",
+          "resolved.r4"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.hub_d",
+        "exit": 0,
+        "expected": [
+          "resolved.r2",
+          "resolved.r5",
+          "resolved.r6"
+        ],
+        "emitted": [
+          "resolved.r2",
+          "resolved.r5",
+          "resolved.r6"
+        ],
+        "correct": [
+          "resolved.r2",
+          "resolved.r5",
+          "resolved.r6"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.hub_e",
+        "exit": 0,
+        "expected": [
+          "resolved.r1",
+          "resolved.r6"
+        ],
+        "emitted": [
+          "resolved.r1",
+          "resolved.r6"
+        ],
+        "correct": [
+          "resolved.r1",
+          "resolved.r6"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.chain1",
+        "exit": 0,
+        "expected": [
+          "resolved.chain2"
+        ],
+        "emitted": [
+          "resolved.chain2"
+        ],
+        "correct": [
+          "resolved.chain2"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.chain2",
+        "exit": 0,
+        "expected": [
+          "resolved.chain3"
+        ],
+        "emitted": [
+          "resolved.chain3"
+        ],
+        "correct": [
+          "resolved.chain3"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.multi1",
+        "exit": 0,
+        "expected": [
+          "resolved.chain1",
+          "resolved.r1",
+          "resolved.r2"
+        ],
+        "emitted": [
+          "resolved.chain1",
+          "resolved.r1",
+          "resolved.r2"
+        ],
+        "correct": [
+          "resolved.chain1",
+          "resolved.r1",
+          "resolved.r2"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.multi2",
+        "exit": 0,
+        "expected": [
+          "resolved.chain2",
+          "resolved.r3",
+          "resolved.r4"
+        ],
+        "emitted": [
+          "resolved.chain2",
+          "resolved.r3",
+          "resolved.r4"
+        ],
+        "correct": [
+          "resolved.chain2",
+          "resolved.r3",
+          "resolved.r4"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      },
+      {
+        "symbol": "resolved.multi3",
+        "exit": 0,
+        "expected": [
+          "resolved.chain3",
+          "resolved.r5",
+          "resolved.r6"
+        ],
+        "emitted": [
+          "resolved.chain3",
+          "resolved.r5",
+          "resolved.r6"
+        ],
+        "correct": [
+          "resolved.chain3",
+          "resolved.r5",
+          "resolved.r6"
+        ],
+        "false_positives": [],
+        "false_negatives": []
+      }
+    ],
+    "emitted": 23,
+    "expected": 23,
+    "correct": 23,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "precision_wilson95": [
+      1.0,
+      0.8569,
+      1.0
+    ],
+    "recall_wilson95": [
+      1.0,
+      0.8569,
+      1.0
+    ]
+  },
+  "ambiguous": {
+    "rows": [
+      {
+        "symbol": "ambig.call_m1",
+        "exit": 0,
+        "expected": [
+          "ambig.D1.m"
+        ],
+        "ambiguous": [
+          "ambig.D1.m"
+        ],
+        "hits": [
+          "ambig.D1.m"
+        ]
+      },
+      {
+        "symbol": "ambig.call_m2",
+        "exit": 0,
+        "expected": [
+          "ambig.D2.m"
+        ],
+        "ambiguous": [
+          "ambig.D2.m"
+        ],
+        "hits": [
+          "ambig.D2.m"
+        ]
+      },
+      {
+        "symbol": "ambig.call_m3",
+        "exit": 0,
+        "expected": [
+          "ambig.D3.m"
+        ],
+        "ambiguous": [
+          "ambig.D3.m"
+        ],
+        "hits": [
+          "ambig.D3.m"
+        ]
+      },
+      {
+        "symbol": "ambig.call_m4",
+        "exit": 0,
+        "expected": [
+          "ambig.D4.m"
+        ],
+        "ambiguous": [
+          "ambig.D4.m"
+        ],
+        "hits": [
+          "ambig.D4.m"
+        ]
+      },
+      {
+        "symbol": "ambig.call_m5",
+        "exit": 0,
+        "expected": [
+          "ambig.D5.m"
+        ],
+        "ambiguous": [
+          "ambig.D5.m"
+        ],
+        "hits": [
+          "ambig.D5.m"
+        ]
+      }
+    ],
+    "hits": 5,
+    "total": 5
+  },
+  "unresolved": {
+    "rows": [
+      {
+        "symbol": "unresolved.u1",
+        "exit": 1,
+        "expected_unresolved_names": [
+          "missing.run"
+        ],
+        "names_present": [
+          "missing.run"
+        ],
+        "silent_empty": false,
+        "stdout": ""
+      },
+      {
+        "symbol": "unresolved.u2",
+        "exit": 1,
+        "expected_unresolved_names": [
+          "external_fn"
+        ],
+        "names_present": [
+          "external_fn"
+        ],
+        "silent_empty": false,
+        "stdout": ""
+      },
+      {
+        "symbol": "unresolved.u3",
+        "exit": 1,
+        "expected_unresolved_names": [
+          "missing2"
+        ],
+        "names_present": [
+          "missing2"
+        ],
+        "silent_empty": false,
+        "stdout": ""
+      },
+      {
+        "symbol": "unresolved.u4",
+        "exit": 1,
+        "expected_unresolved_names": [
+          "pkg.nope"
+        ],
+        "names_present": [
+          "pkg.nope"
+        ],
+        "silent_empty": false,
+        "stdout": ""
+      },
+      {
+        "symbol": "unresolved.u5",
+        "exit": 1,
+        "expected_unresolved_names": [
+          "absent.method"
+        ],
+        "names_present": [
+          "absent.method"
+        ],
+        "silent_empty": false,
+        "stdout": ""
+      }
+    ],
+    "silent_empty": 0,
+    "names_present": 5,
+    "total": 5
+  },
+  "gate": true
+}

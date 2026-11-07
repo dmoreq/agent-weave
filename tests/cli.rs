@@ -277,7 +277,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v8 — run aw build"),
+        stderr.contains("schema v99, binary expects v9 — run aw build"),
         "{stderr}"
     );
 }
@@ -446,6 +446,7 @@ fn cleanup_removed_features_are_unrecognized() {
         vec!["search", "x", "--exact"],
         vec!["dead", "--exclude-generated"],
         vec!["complexity", "--exclude-generated"],
+        vec!["tests", "f"],
         vec!["clones", "--exclude-generated"],
         vec!["hotspots", "--exclude-generated"],
         vec!["report", "--exclude-generated"],
@@ -869,6 +870,39 @@ fn callees_depth_two_is_transitive() {
         !stdout.contains("a.py:1"),
         "depth 2 must NOT include the distance-3 callee base: {stdout}"
     );
+}
+
+#[test]
+fn callees_empty_names_unresolved_sites() {
+    let repo = temp_repo("callees-empty-unresolved");
+    write(&repo, "a.py", "def entry():\n    return missing.run()\n");
+    assert_eq!(build(&repo).0, 0);
+    let out = aw(&repo).args(["callees", "entry"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(combined.contains("unresolved call site"), "{combined}");
+    assert!(combined.contains("missing.run"), "{combined}");
+    assert!(combined.contains("aw unresolved --names"), "{combined}");
+}
+
+#[test]
+fn callees_empty_without_unresolved_stays_plain() {
+    let repo = temp_repo("callees-empty-plain");
+    write(&repo, "a.py", "def empty():\n    return 1\n");
+    assert_eq!(build(&repo).0, 0);
+    let out = aw(&repo).args(["callees", "empty"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(combined.contains("0 callees found"), "{combined}");
+    assert!(!combined.contains("unresolved call site"), "{combined}");
 }
 
 #[test]
@@ -1392,7 +1426,7 @@ fn p8c_complexity_excludes_zero_metric_trait_signatures() {
     build(&repo);
 
     let out = aw(&repo)
-        .args(["complexity", "--min-cyc", "0"])
+        .args(["complexity", "--min-loc", "0"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1612,53 +1646,6 @@ fn import_deleted_destination_heals_unresolved_and_restore() {
 }
 
 #[test]
-fn tests_impact_seed_covers_direct_indirect_depth_and_file_seed() {
-    let repo = temp_repo("tests-cmd");
-    write(&repo, "src/core.py", "def f():\n    pass\n");
-    write(
-        &repo,
-        "src/mid.py",
-        "from src.core import f\n\ndef g():\n    return f()\n",
-    );
-    write(
-        &repo,
-        "tests/test_core.py",
-        "from src.core import f\n\ndef test_direct():\n    f()\n",
-    );
-    write(
-        &repo,
-        "tests/test_mid.py",
-        "from src.mid import g\n\ndef test_indirect():\n    g()\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo).args(["tests", "f"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.starts_with("aw: test candidates —"), "{stdout}");
-    assert!(stdout.contains("tests/test_core.py:3"), "{stdout}");
-
-    // Depth 1 finds only the direct test; depth 2 adds the indirect route.
-    let out = aw(&repo)
-        .args(["tests", "f", "--depth", "1"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("test_indirect"), "depth 1: {stdout}");
-    let out = aw(&repo)
-        .args(["tests", "f", "--depth", "2"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("test_indirect"), "depth 2: {stdout}");
-
-    // A file seed uses every symbol in that file.
-    let out = aw(&repo).args(["tests", "src/mid.py"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("test_indirect"), "file seed: {stdout}");
-}
-
-#[test]
 fn p8c_unresolved_names_lists_sites_with_kind() {
     let repo = temp_repo("unresolved-names");
     write(&repo, "app.py", "def f():\n    missing_thing()\n");
@@ -1687,17 +1674,16 @@ fn p8c_complexity_ranks_symbols_and_symbols_metrics_append() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("cyc=3"), "{stdout}");
-    assert!(stdout.contains("branches=2"), "{stdout}");
+    assert!(stdout.contains("loc=6"), "{stdout}");
 
     let out = aw(&repo)
-        .args(["complexity", "--min-cyc", "2"])
+        .args(["complexity", "--min-loc", "4"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.starts_with("aw: complexity —"), "{stdout}");
-    assert!(stdout.contains("app.py:1 cyc=3"), "{stdout}");
+    assert!(stdout.contains("app.py:1 loc=6 app.f"), "{stdout}");
 }
 
 #[test]
@@ -1952,26 +1938,6 @@ fn inheritance_ignores_generic_arguments_and_external_paths() {
 }
 
 #[test]
-fn tests_ignores_module_symbols_named_like_tests() {
-    let repo = temp_repo("tests-kind");
-    write(&repo, "src/core.py", "def f():\n    pass\n");
-    write(
-        &repo,
-        "pkg/test_service.py",
-        "from src.core import f\nf()\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo).args(["tests", "f"]).output().unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-}
-
-#[test]
 fn unresolved_reports_counts_and_zero_is_exit1() {
     let repo = temp_repo("unresolved");
     write(&repo, "m.py", "def go():\n    return ghost()\n");
@@ -2152,20 +2118,6 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
         "signature tokens reach symbols: {stdout}"
     );
 
-    // Morphology fallback (R7): plural asks match the singular stem.
-    let out = aw(&repo).args(["search", "normalizes"]).output().unwrap();
-    assert_eq!(
-        out.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("utils.py:1"),
-        "{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-
     // No match: exit 1 with the documented reason line.
     let out = aw(&repo).args(["search", "zzzqqqxyz"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -2175,116 +2127,6 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     // Empty terms: usage error, exit 2.
     let out = aw(&repo).args(["search", "   "]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
-}
-
-#[test]
-fn clones_seed_gate() {
-    // G16 (Amendment 12d): 10 seeded clone pairs + distractors. Pass:
-    // >= 8/10 pairs detected, <= 20% spurious pair lines, caveat first,
-    // min-lines filter, carry-forward survival.
-    let repo = fixture("clones-g16");
-    // Per-pair unique identifiers: no line may be shared across pairs, or the
-    // 5-line text-equality windows cross-match (true per the semantics, but a
-    // fixture artifact).
-    let body = |name: &str, n: usize| {
-        let mut s = format!("def process_{name}(items):\n");
-        s.push_str(&format!("    acc_{name} = 0\n"));
-        for k in 0..n.saturating_sub(3) {
-            s.push_str(&format!("    acc_{name} += scale_{name}(items[{k}])\n"));
-        }
-        s.push_str(&format!("    return finish_{name}(acc_{name})\n"));
-        s
-    };
-    let mut expected_pairs: Vec<(String, String)> = Vec::new();
-    for i in 0..10 {
-        let n = 6 + i * 3; // varied spans, all >= window
-        let a = format!("pair{:02}_a.py", i);
-        let b = format!("pair{:02}_b.py", i);
-        write(&repo, &a, &body(&format!("a{i}"), n));
-        // Same content with the same identifiers: text-equality clone.
-        write(&repo, &b, &body(&format!("a{i}"), n));
-        expected_pairs.push((a, b));
-    }
-    // Distractors: unique files (no duplication) and a near-duplicate whose
-    // identifiers differ (normalized-text inequality -> no window matches).
-    for u in 0..8 {
-        write(
-            &repo,
-            &format!("unique{u}.py"),
-            &body(&format!("u{u}"), 6 + u),
-        );
-    }
-    write(&repo, "near.py", &body("near_variant", 9));
-    build(&repo);
-
-    let out = aw(&repo)
-        .args(["clones", "--limit", "10000"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    let first = stdout.lines().next().unwrap().to_string();
-    assert_eq!(
-        first, "aw: clone candidates — normalized-text equality, not proof of semantic duplication",
-        "{stdout}"
-    );
-
-    let pair_lines: Vec<&str> = stdout
-        .lines()
-        .filter(|l| l.contains(":") && !l.starts_with("aw:") && !l.starts_with("showing "))
-        .collect();
-    let mut detected = 0usize;
-    for (a, b) in &expected_pairs {
-        if pair_lines
-            .iter()
-            .any(|l| l.contains(a.as_str()) && l.contains(b.as_str()))
-        {
-            detected += 1;
-        }
-    }
-    assert!(
-        detected >= 8,
-        "seeded pairs detected {detected}/10 (bar >= 8): {stdout}"
-    );
-    let spurious = pair_lines.len() - detected;
-    assert!(
-        spurious * 5 <= pair_lines.len(),
-        "spurious {spurious}/{} exceeds 20%: {stdout}",
-        pair_lines.len()
-    );
-
-    // min-lines above every seeded span: gate to zero, exit 1.
-    let out = aw(&repo)
-        .args(["clones", "--min-lines", "100"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-
-    // Carry-forward: no-change rebuild keeps the candidates (re-count from
-    // the second run's own stdout — detection must hold independently).
-    build(&repo);
-    let out = aw(&repo)
-        .args(["clones", "--limit", "10000"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    let stdout2 = String::from_utf8_lossy(&out.stdout);
-    let pair_lines2: Vec<&str> = stdout2
-        .lines()
-        .filter(|l| l.contains(":") && !l.starts_with("aw:") && !l.starts_with("showing "))
-        .collect();
-    let detected2 = expected_pairs
-        .iter()
-        .filter(|(a, b)| {
-            pair_lines2
-                .iter()
-                .any(|l| l.contains(a.as_str()) && l.contains(b.as_str()))
-        })
-        .count();
-    assert!(
-        detected2 >= 8,
-        "post-rebuild detection {detected2}/10: {stdout2}"
-    );
 }
 
 #[test]
@@ -2599,7 +2441,7 @@ fn g5_process_inspection_detects_seeded_child() {
 }
 
 #[test]
-fn p15_stats_hotspots_report() {
+fn p15_stats_line() {
     let repo = fixture("p15");
     build(&repo);
     let out = aw(&repo).args(["stats"]).output().unwrap();
@@ -2609,36 +2451,6 @@ fn p15_stats_hotspots_report() {
         stdout.contains("files=3") && stdout.contains("symbols=") && stdout.contains("edges="),
         "{stdout}"
     );
-
-    let out = aw(&repo).args(["hotspots"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        stdout.contains("loc=") && stdout.contains("cyc="),
-        "{stdout}"
-    );
-
-    // R7 L4: report is a build snapshot; an edit must surface a first-line
-    // freshness caveat before the sections.
-    write(
-        &repo,
-        "utils.py",
-        &format!("{UTILS}\n\ndef extra():\n    return 1\n"),
-    );
-    let out = aw(&repo).args(["report"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.starts_with("aw: 1 of 3 sampled files changed since build"),
-        "freshness header: {stdout}"
-    );
-    for section in [
-        "## 1. index overview",
-        "## 2. architecture map",
-        "## 3. hotspots",
-        "## 4. most-called symbols",
-    ] {
-        assert!(stdout.contains(section), "missing {section}: {stdout}");
-    }
 }
 
 #[test]
@@ -2763,8 +2575,8 @@ fn partial_complexity_index_rebuilds_fresh() {
 
 #[test]
 fn partial_v7_file_path_column_rebuilds_fresh() {
-    // Amendment 20: a v7-stamped index missing symbols.file_path must disable
-    // the fast path. Recreate the v6 table shape behind a v7 stamp.
+    // Amendment 20: a v9-stamped index missing symbols.file_path must disable
+    // the fast path. Recreate the v8 table shape behind a v9 stamp.
     let repo = fixture("partial-file-path");
     build(&repo);
     let idx = repo.join(".aw/index.db");
@@ -2775,7 +2587,7 @@ fn partial_v7_file_path_column_rebuilds_fresh() {
              DROP INDEX symbols_file_path;
              ALTER TABLE symbols DROP COLUMN file_path;
              CREATE INDEX symbols_complexity_idx
-               ON symbols(cyclomatic DESC, effective_loc DESC, qualname, file_id, line_start);",
+               ON symbols(effective_loc DESC, qualname, file_id, line_start);",
         ])
         .output()
         .unwrap();
@@ -2792,12 +2604,12 @@ fn partial_v7_file_path_column_rebuilds_fresh() {
     assert_eq!(out.status.code(), Some(0));
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("app.py"),
-        "fresh index lost symbols after v7 rebuild"
+        "fresh index lost symbols after v9 rebuild"
     );
 }
 
 #[test]
-fn v6_database_rebuilds_to_v8() {
+fn old_version_database_rebuilds_to_v9() {
     // A v6 user_version disables the fast path; build rewrites the index at
     // the current schema version instead of carrying v6 rows.
     let repo = fixture("v6-to-v8");
@@ -2812,7 +2624,7 @@ fn v6_database_rebuilds_to_v8() {
     assert_eq!(out.status.code(), Some(5), "v6 query open must exit 5");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v6, binary expects v8 — run aw build"),
+        stderr.contains("schema v6, binary expects v9 — run aw build"),
         "{stderr}"
     );
     let (code, stdout, stderr) = build(&repo);
@@ -2823,8 +2635,8 @@ fn v6_database_rebuilds_to_v8() {
         .unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
-        "8",
-        "build did not stamp v8"
+        "9",
+        "build did not stamp v9"
     );
 }
 
@@ -2870,16 +2682,17 @@ fn p8c_complexity_path_tiebreak_is_stable_fresh_and_carried() {
 }
 
 #[test]
-fn partial_v4_index_rebuilds_fresh() {
-    // Amendment 12 regression: a v4-stamped index from the first landing
-    // wave (symbols_fts present, clone_groups absent) must disable the fast
-    // path and rebuild fully, not fail carry-forward on the missing table.
+fn partial_v9_index_rebuilds_fresh() {
+    // A v9-stamped index missing a required column must disable the fast
+    // path and rebuild fully, not fail carry-forward on the partial table.
     let repo = fixture("partial-v4");
     build(&repo);
-    // Demote the index to a first-wave v4: drop clone_groups in place.
     let idx = repo.join(".aw/index.db");
     let status = std::process::Command::new("sqlite3")
-        .args([idx.to_string_lossy().as_ref(), "DROP TABLE clone_groups;"])
+        .args([
+            idx.to_string_lossy().as_ref(),
+            "ALTER TABLE symbols DROP COLUMN exported;",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -2889,9 +2702,9 @@ fn partial_v4_index_rebuilds_fresh() {
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(
         code, 0,
-        "rebuild over partial v4 index failed: {stdout}{stderr}"
+        "rebuild over partial v9 index failed: {stdout}{stderr}"
     );
-    assert!(!stderr.contains("clone_groups"), "{stdout}{stderr}");
+    assert!(!stderr.contains("exported"), "{stdout}{stderr}");
 }
 
 // ---------------------------------------------------------------------------
@@ -3166,30 +2979,6 @@ fn deep_nesting_does_not_abort_build() {
 }
 
 #[test]
-fn clones_pair_generation_is_bounded() {
-    // R6d Blocker 2: a shared header puts every file in one shingle group;
-    // the full pair set is quadratic. The caps must engage and report a
-    // lower bound instead of materializing millions of pairs.
-    let repo = temp_repo("clones-cap");
-    let header = "# shared license header line one\n# shared license header line two\n# shared license header line three\n# shared license header line four\n# shared license header line five\n";
-    for i in 0..120 {
-        write(
-            &repo,
-            &format!("f{i:03}.py"),
-            &format!("{header}def solo_{i}(x):\n    return x + {i}\n"),
-        );
-    }
-    build(&repo);
-    let out = aw(&repo).args(["clones", "--limit", "5"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("lower bound"),
-        "cap note expected on stdout when regions exceed MAX_REGIONS_PER_GROUP: {stdout}"
-    );
-}
-
-#[test]
 fn incremental_build_heals_resolution_gaps() {
     // R6d A4 / Amendment 15: a carried caller whose unresolved call names a
     // symbol added later must be re-extracted by the fast path.
@@ -3386,8 +3175,8 @@ fn parallel_builds_produce_identical_tables() {
             .arg(format!(
                 "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\n\
                  rows=[tuple(str(x) for x in r) for q in [\
-                 'SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic,generated FROM files ORDER BY path',\
-                 'SELECT qualname,kind,line_start,line_end,signature,cyclomatic,branches,nesting,effective_loc,exported,file_path FROM symbols ORDER BY qualname,file_path,line_start',\
+                 'SELECT path,size,parse_status,error_nodes,unresolved,generated FROM files ORDER BY path',\
+                 'SELECT qualname,kind,line_start,line_end,signature,effective_loc,exported,file_path FROM symbols ORDER BY qualname,file_path,line_start',\
                  'SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line',\
                  'SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']\
                  for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
@@ -3494,8 +3283,8 @@ a.py:1 a.target\n";
 }
 
 #[test]
-fn empty_dead_and_clones_carry_their_caveat_on_stdout() {
-    // Amendment 5/12d + R6 round-2: the caveat is the first stdout line even
+fn empty_dead_carries_its_caveat_on_stdout() {
+    // Amendment 5 + R6 round-2: the caveat is the first stdout line even
     // for an empty result (exit 1 reason stays on stderr).
     let repo = temp_repo("empty-caveat");
     // No indexable symbols => dead has zero candidates (module-only file).
@@ -3507,11 +3296,6 @@ fn empty_dead_and_clones_carry_their_caveat_on_stdout() {
     assert!(stdout.starts_with("aw: dead-code candidates —"), "{stdout}");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("0 dead-code candidates"), "{stderr}");
-
-    let out = aw(&repo).args(["clones"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("aw: clone candidates —"), "{stdout}");
 }
 
 #[test]
@@ -3574,52 +3358,6 @@ fn unresolved_names_flag_internal_misses() {
 }
 
 #[test]
-fn clones_show_the_enclosing_symbol() {
-    // R7 L4: spans alone force a file read; the enclosing symbol names the
-    // duplicated unit.
-    let repo = temp_repo("clones-identity");
-    let body = "def process(items):\n    a = 1\n    b = 2\n    c = 3\n    d = 4\n    e = 5\n    return a + b + c + d + e\n";
-    write(
-        &repo,
-        "x.py",
-        &format!("def x_header():\n    return 0\n\n{body}"),
-    );
-    write(
-        &repo,
-        "y.py",
-        &format!("def y_header():\n    return 0\n\n{body}"),
-    );
-    build(&repo);
-    let out = aw(&repo).args(["clones"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(
-        stdout
-            .lines()
-            .any(|l| l.contains("x.py:") && l.contains("(x.process)")),
-        "enclosing symbol missing: {stdout}"
-    );
-    // --min-lines filters AFTER merging: the merged span (10 lines) survives
-    // 8 and disappears at 12 (R7 review: only 5 and 100 were tested).
-    let out = aw(&repo)
-        .args(["clones", "--min-lines", "8"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    let out = aw(&repo)
-        .args(["clones", "--min-lines", "12"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("0 clone candidates"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-#[test]
 fn p8a_impact_defaults_to_files_with_site_counts() {
     let repo = temp_repo("impact-sites");
     write(&repo, "a.py", "def target():\n    return 1\n");
@@ -3676,17 +3414,6 @@ fn dead_exclude_tests_drops_test_paths_and_names() {
     assert!(filtered.contains("src.py"), "{filtered}");
     assert!(!filtered.contains("test_x.py"), "{filtered}");
     assert!(!filtered.contains("test_helper"), "{filtered}");
-}
-
-#[test]
-fn search_stem_fallback_handles_ion_nouns() {
-    let repo = temp_repo("search-ion");
-    write(&repo, "a.py", "def rotate():\n    return 1\n");
-    build(&repo);
-    let out = aw(&repo).args(["search", "rotation"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("a.rotate"), "{stdout}");
 }
 
 /// Split a documented command line into shell-like words, honoring single and
@@ -3942,31 +3669,24 @@ fn complexity_path_scope_filters_files() {
 }
 
 #[test]
-fn stats_hotspots_and_report_are_not_journaled_as_empty() {
+fn stats_is_not_journaled_as_empty() {
     let repo = temp_repo("journal-results");
     write(&repo, "a.py", "def a():\n    return 1\n");
     build(&repo);
-    for cmd in ["stats", "hotspots", "report"] {
-        let out = aw(&repo)
-            .arg(cmd)
-            .env_remove("AW_NO_JOURNAL")
-            .output()
-            .unwrap();
-        assert_eq!(out.status.code(), Some(0), "{cmd}");
-    }
+    let out = aw(&repo)
+        .arg("stats")
+        .env_remove("AW_NO_JOURNAL")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "stats");
     let usage = aw(&repo).args(["usage"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&usage.stdout);
     assert_eq!(usage.status.code(), Some(0), "{stdout}");
-    for tool in ["stats", "hotspots", "report"] {
-        let line = stdout
-            .lines()
-            .find(|l| l.trim_start().starts_with(&format!("{tool}:")))
-            .unwrap_or_else(|| panic!("{tool} missing from journal: {stdout}"));
-        assert!(
-            !line.contains("empty=1"),
-            "{tool} misreported empty: {line}"
-        );
-    }
+    let line = stdout
+        .lines()
+        .find(|l| l.trim_start().starts_with("stats:"))
+        .unwrap_or_else(|| panic!("stats missing from journal: {stdout}"));
+    assert!(!line.contains("empty=1"), "stats misreported empty: {line}");
 }
 
 #[test]
@@ -3993,15 +3713,12 @@ fn complexity_path_scope_uses_the_file_path_index() {
     // Mirrors the scoped `aw complexity` predicate: the path range must drive
     // the plan through symbols_file_path, not the complexity ranking index.
     let sql = "EXPLAIN QUERY PLAN
-        SELECT s.file_path, s.line_start, s.cyclomatic, s.branches, s.nesting,
-               s.effective_loc, s.qualname
+        SELECT s.file_path, s.line_start, s.effective_loc, s.qualname
         FROM symbols s
         WHERE s.kind IN ('function','method')
-          AND s.cyclomatic > 0 AND s.cyclomatic >= 1 AND s.effective_loc >= 0
-          AND s.branches >= 0 AND s.nesting >= 0
+          AND s.effective_loc > 0 AND s.effective_loc >= 0
           AND (s.file_path = 'src' OR (s.file_path >= 'src' || '/' AND s.file_path < 'src' || '0'))
-        ORDER BY s.cyclomatic DESC, s.effective_loc DESC, s.qualname,
-                 s.file_path, s.line_start LIMIT 50";
+        ORDER BY s.effective_loc DESC, s.qualname, s.file_path, s.line_start LIMIT 50";
     let plan: Vec<String> = conn
         .prepare(sql)
         .unwrap()
@@ -4101,32 +3818,13 @@ fn symlinked_build_lock_and_gitignore_are_rejected() {
 
 #[cfg(unix)]
 #[test]
-fn symlinked_journal_is_not_followed() {
-    use std::os::unix::fs::symlink;
-    let repo = temp_repo("symlink-journal");
-    write(&repo, "sample.py", "def task():\n    pass\n");
-    let built = aw(&repo).args(["--no-journal", "build"]).output().unwrap();
-    assert_eq!(built.status.code(), Some(0));
-    let ext = external_symlink_dir("journal");
-    let sentinel = ext.join("sentinel.txt");
-    fs::write(&sentinel, "keep").unwrap();
-    symlink(&sentinel, repo.join(".aw/usage.log")).unwrap();
-
-    let out = aw(&repo).args(["stats"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
-    let _ = fs::remove_dir_all(&ext);
-}
-
-#[cfg(unix)]
-#[test]
-fn invalidate_refuses_while_root_lock_is_held() {
+fn invalidate_refuses_while_build_lock_is_held() {
     let repo = temp_repo("invalidate-lock");
     write(&repo, "sample.py", "def task():\n    pass\n");
     let _ = build(&repo);
     let sentinel = repo.join(".aw/sentinel");
     fs::write(&sentinel, "keep").unwrap();
-    let lock = agent_weave::db::RootLock::acquire(&repo).unwrap();
+    let lock = agent_weave::db::BuildLock::acquire(&repo).unwrap();
 
     let blocked = aw(&repo).args(["doctor", "--invalidate"]).output().unwrap();
     assert_eq!(blocked.status.code(), Some(4), "{blocked:?}");
@@ -4696,7 +4394,12 @@ fn build_force_bypasses_parse_gate_and_help_says_so() {
     assert!(text.contains("parse-error"), "{text}");
     let doctor = aw(&repo).args(["doctor", "--help"]).output().unwrap();
     let text = String::from_utf8_lossy(&doctor.stdout);
-    assert!(text.contains("entire .aw"), "{text}");
+    // Contract bump (memory retrieval design): --invalidate resets the
+    // derived state and keeps the primary memory.db store.
+    assert!(
+        text.contains("primary data") && text.contains("memory.db"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -4901,39 +4604,6 @@ fn hardlinked_build_lock_does_not_touch_external_file() {
 
 #[cfg(unix)]
 #[test]
-fn hardlinked_journal_does_not_touch_external_file() {
-    let repo = temp_repo("hardlink-journal");
-    write(&repo, "a.py", "def f(): pass\n");
-    build(&repo);
-    let sentinel = std::env::temp_dir().join(format!("aw-sentinel-journal-{}", std::process::id()));
-    fs::write(&sentinel, b"keep\n").unwrap();
-    fs::remove_file(repo.join(".aw/usage.log")).ok();
-    fs::hard_link(&sentinel, repo.join(".aw/usage.log")).unwrap();
-    let out = aw(&repo).args(["symbols", "a.py"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-    assert_eq!(fs::read(&sentinel).unwrap(), b"keep\n");
-    let _ = fs::remove_file(&sentinel);
-}
-
-#[cfg(unix)]
-#[test]
-fn fifo_journal_does_not_hang_build() {
-    let repo = temp_repo("fifo-writer");
-    write(&repo, "a.py", "def f(): pass\n");
-    fs::create_dir_all(repo.join(".aw")).unwrap();
-    let status = std::process::Command::new("mkfifo")
-        .arg(repo.join(".aw/usage.log"))
-        .status()
-        .unwrap();
-    assert!(status.success());
-    let mut cmd = aw(&repo);
-    cmd.args(["build"]);
-    let out = output_with_timeout(cmd, 5).expect("build hung on a FIFO journal");
-    assert_eq!(out.status.code(), Some(0), "{out:?}");
-}
-
-#[cfg(unix)]
-#[test]
 fn fifo_journal_reader_does_not_hang() {
     let repo = temp_repo("fifo-reader");
     write(&repo, "a.py", "def f(): pass\n");
@@ -5112,4 +4782,917 @@ fn unrelated_addition_does_not_invalidate_resolved_edges() {
     let text = String::from_utf8_lossy(&callees.stdout);
     assert!(text.contains("pkg.foo"), "{text}");
     assert!(!text.contains("[ambiguous]"), "{text}");
+}
+
+// ---------------------------------------------------------------------------
+// Project memory (companion design: 2026-11-05_agent-weave-memory-retrieval).
+// Phase 1 acceptance: byte-exact shapes, exit contracts, idempotent replay,
+// revision supersession, version/corruption gates, doctor disposition,
+// concurrent writers, export round-trip, journal privacy, recall smoke.
+// ---------------------------------------------------------------------------
+
+fn mem_write(repo: &Path, key: &str, body: &str, kind: &str) -> (i32, String, String) {
+    let out = aw(repo)
+        .args(["mem", "write", key, "--body", body, "--kind", kind])
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+fn mem_out(repo: &Path, args: &[&str]) -> (i32, String, String) {
+    let out = aw(repo).args(["mem"]).args(args).output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn mem_write_query_get_shapes_and_idempotent_replay() {
+    let repo = temp_repo("mem-shapes");
+    let (code, stdout, stderr) = mem_write(
+        &repo,
+        "resolver-tiers",
+        "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL",
+        "decision",
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.starts_with(
+            "aw: memory — agent-authored notes, candidates only, never proof of current behavior\n"
+        ),
+        "caveat must be the stdout first line: {stdout:?}"
+    );
+    assert_eq!(
+        stdout.lines().nth(1),
+        Some("ok: 'resolver-tiers' rev 1 written"),
+        "{stdout:?}"
+    );
+    // Idempotent replay: identical content is a successful no-op naming the rev.
+    let (code, stdout, _stderr) = mem_write(
+        &repo,
+        "resolver-tiers",
+        "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL",
+        "decision",
+    );
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout.lines().nth(1),
+        Some("ok: 'resolver-tiers' unchanged at rev 1 (identical content)"),
+        "{stdout:?}"
+    );
+    // Ranked query hit.
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "confidence", "tiers"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(
+        lines[0],
+        "aw: memory — agent-authored notes, candidates only, never proof of current behavior"
+    );
+    assert!(
+        lines[1].starts_with("resolver-tiers r1 decision durable "),
+        "row header is `key rev kind scope created_at`: {:?}",
+        lines[1]
+    );
+    assert_eq!(
+        lines[2],
+        "  the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL"
+    );
+    // Exact-key get with revision count.
+    let (code, stdout, _stderr) = mem_out(&repo, &["get", "resolver-tiers"]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("resolver-tiers r1 decision durable "),
+        "{stdout}"
+    );
+    assert!(stdout.ends_with("revs: 1\n"), "{stdout:?}");
+    // Unknown key: exit 1, caveat on stdout, diagnostic on stderr.
+    let (code, stdout, stderr) = mem_out(&repo, &["get", "missing-key"]);
+    assert_eq!(code, 1);
+    assert!(stdout.starts_with("aw: memory — "), "{stdout:?}");
+    assert_eq!(
+        stderr.trim(),
+        "aw: no-results: unknown memory key 'missing-key'",
+        "{stderr}"
+    );
+}
+
+#[test]
+fn mem_query_cap_showing_line_and_stderr_notice() {
+    let repo = temp_repo("mem-cap");
+    for i in 0..15 {
+        let (code, stdout, stderr) = mem_write(
+            &repo,
+            &format!("cap-note-{i:02}"),
+            &format!("cap filler note number {i} shares the token filler"),
+            "fact",
+        );
+        assert_eq!(code, 0, "{stdout}{stderr}");
+    }
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "filler"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    // Caveat + 10 rows + `showing 10 of 15`.
+    assert_eq!(
+        lines[0],
+        "aw: memory — agent-authored notes, candidates only, never proof of current behavior"
+    );
+    assert_eq!(lines.last(), Some(&"showing 10 of 15"), "{stdout:?}");
+    assert_eq!(
+        stderr.trim(),
+        "[aw] capped at 10 results (15 total)",
+        "{stderr}"
+    );
+    // --limit raises the cap deterministically.
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "filler", "--limit", "12"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.ends_with("showing 12 of 15\n"), "{stdout:?}");
+    assert_eq!(
+        stderr.trim(),
+        "[aw] capped at 12 results (15 total)",
+        "{stderr}"
+    );
+    // --all lists by recency with the same cap contract.
+    let (code, stdout, _stderr) = mem_out(&repo, &["query", "--all"]);
+    assert_eq!(code, 0);
+    assert!(stdout.ends_with("showing 10 of 15\n"), "{stdout:?}");
+}
+
+#[test]
+fn mem_empty_and_missing_store_are_exit1() {
+    let repo = temp_repo("mem-empty");
+    // No .aw/memory.db at all: the read contract exits 1 with the no-memory class.
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "anything"]);
+    assert_eq!(code, 1);
+    // House convention for a missing store: stdout stays empty, the
+    // diagnostic carries the no-memory class on stderr.
+    assert!(stdout.is_empty(), "{stdout:?}");
+    assert_eq!(
+        stderr.trim(),
+        format!(
+            "aw: no-memory: no .aw/memory.db under {} — write with aw mem write",
+            repo.display()
+        ),
+        "{stderr}"
+    );
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("no-memory"), "{stderr}");
+    // With a store present, a non-matching query is a plain empty result.
+    let _ = mem_write(
+        &repo,
+        "solo",
+        "the only note here talks about orbit values",
+        "fact",
+    );
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "zzz-unmatchable"]);
+    assert_eq!(code, 1);
+    assert!(stdout.starts_with("aw: memory — "), "{stdout:?}");
+    assert_eq!(
+        stderr.trim(),
+        "aw: no-results: no memory matches 'zzz-unmatchable'",
+        "{stderr}"
+    );
+    // Usage errors: --all with terms, no input at all.
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all", "terms"]);
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("mutually exclusive"), "{stderr}");
+    let (code, _stdout, stderr) = mem_out(&repo, &["query"]);
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("provide terms or --all"), "{stderr}");
+}
+
+#[test]
+fn mem_revision_supersession_and_delete() {
+    let repo = temp_repo("mem-revs");
+    let _ = mem_write(&repo, "k", "body one", "decision");
+    let (code, stdout, _stderr) = mem_write(&repo, "k", "body two", "decision");
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout.lines().nth(1),
+        Some("ok: 'k' rev 2 written (supersedes rev 1)"),
+        "{stdout:?}"
+    );
+    let (code, stdout, _stderr) = mem_out(&repo, &["get", "k"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("k r2 decision durable "), "{stdout}");
+    assert!(stdout.contains("  body two"), "{stdout}");
+    assert!(stdout.ends_with("revs: 2\n"), "{stdout:?}");
+    // Delete removes every revision; the FTS rows go with it (query misses).
+    let (code, stdout, _stderr) = mem_out(&repo, &["delete", "k"]);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout.lines().nth(1),
+        Some("deleted 'k' revs=2"),
+        "{stdout:?}"
+    );
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "body"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("no memory matches"), "{stderr}");
+    let (code, _stdout, stderr) = mem_out(&repo, &["delete", "k"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("unknown memory key 'k'"), "{stderr}");
+    // Deleting with no store at all must not conjure one.
+    let empty = temp_repo("mem-delete-empty");
+    let (code, _stdout, stderr) = mem_out(&empty, &["delete", "k"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("no-memory"), "{stderr}");
+    assert!(!empty.join(".aw/memory.db").exists());
+}
+
+#[test]
+fn mem_write_usage_rejections_are_exit2() {
+    let repo = temp_repo("mem-usage");
+    // Unknown kind (closed taxonomy).
+    let (code, _stdout, stderr) = mem_write(&repo, "k", "body", "mood");
+    assert_eq!(code, 2);
+    assert!(
+        stderr.contains("kind must be one of decision|gotcha|fact|task"),
+        "{stderr}"
+    );
+    // Phase 2: session scope is now accepted; unknown scope still exits 2.
+    let out = aw(&repo)
+        .args([
+            "mem", "write", "k", "--body", "b", "--kind", "fact", "--scope", "orbit",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("scope must be 'durable' or 'session'"));
+    // TTL without the session lane.
+    let out = aw(&repo)
+        .args([
+            "mem", "write", "k", "--body", "b", "--kind", "fact", "--ttl", "60",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--ttl is only valid with --scope session"),
+    );
+    // Body cap.
+    let big = "x".repeat(8193);
+    let (code, _stdout, stderr) = mem_write(&repo, "k", &big, "fact");
+    assert_eq!(code, 2);
+    assert!(stderr.contains("body exceeds 8192 bytes"), "{stderr}");
+    // Key cap and control characters.
+    let (code, _stdout, stderr) = mem_write(&repo, &"k".repeat(201), "b", "fact");
+    assert_eq!(code, 2);
+    assert!(stderr.contains("key exceeds 200 bytes"), "{stderr}");
+    let (code, _stdout, stderr) = mem_write(&repo, "bad\nkey", "b", "fact");
+    assert_eq!(code, 2);
+    assert!(stderr.contains("control characters"), "{stderr}");
+    // Empty body.
+    let (code, _stdout, stderr) = mem_write(&repo, "k", "   ", "fact");
+    assert_eq!(code, 2);
+    assert!(stderr.contains("body must not be empty"), "{stderr}");
+    // Nothing was written by the rejected calls.
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("no .aw/memory.db"), "{stderr}");
+}
+
+#[test]
+fn mem_schema_gates_newer_incomplete_and_corrupt() {
+    use rusqlite::Connection;
+    // Newer than the binary -> exit 5, export-backup message.
+    let repo = temp_repo("mem-newer");
+    let _ = mem_write(&repo, "k", "b", "fact");
+    let conn = Connection::open(repo.join(".aw/memory.db")).unwrap();
+    conn.execute_batch("PRAGMA user_version = 99").unwrap();
+    drop(conn);
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all"]);
+    assert_eq!(code, 5);
+    assert!(
+        stderr.contains("memory.db schema v99 is newer than the binary expects (v1)"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("restore from an aw mem export backup"),
+        "{stderr}"
+    );
+
+    // Older but failing the compiled manifest -> the other exit-5 message.
+    let repo = temp_repo("mem-incomplete");
+    let _ = mem_write(&repo, "k", "b", "fact");
+    let conn = Connection::open(repo.join(".aw/memory.db")).unwrap();
+    conn.execute_batch("PRAGMA user_version = 0; DROP TABLE memories_fts;")
+        .unwrap();
+    drop(conn);
+    let (code, _stdout, stderr) = mem_out(&repo, &["get", "k"]);
+    assert_eq!(code, 5);
+    assert!(
+        stderr.contains("is missing required structure for this binary"),
+        "{stderr}"
+    );
+
+    // Truncated / non-SQLite file -> exit 3.
+    let repo = temp_repo("mem-corrupt");
+    std::fs::create_dir_all(repo.join(".aw")).unwrap();
+    std::fs::write(repo.join(".aw/memory.db"), b"this is not sqlite at all").unwrap();
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all"]);
+    assert_eq!(code, 3);
+    assert!(stderr.contains("corrupt-memory"), "{stderr}");
+}
+
+#[test]
+fn mem_works_without_index_db_and_survives_rebuilds() {
+    let repo = temp_repo("mem-no-index");
+    // No build ever ran: mem write + query work alone.
+    let (code, stdout, stderr) =
+        mem_write(&repo, "standalone", "memory outlives the index", "fact");
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    let (code, stdout, _stderr) = mem_out(&repo, &["query", "memory outlives"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(stdout.contains("standalone r1"), "{stdout}");
+    assert!(
+        !repo.join(".aw/index.db").exists(),
+        "no index.db was created"
+    );
+    // And it still answers after a full build + invalidate cycle.
+    let (code, _stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stderr}");
+    let (code, _stdout, stderr) = mem_out(&repo, &["get", "standalone"]);
+    assert_eq!(code, 0, "{stderr}");
+}
+
+#[test]
+fn mem_doctor_invalidate_preserves_memory() {
+    let repo = temp_repo("mem-invalidate");
+    let _ = mem_write(&repo, "keeper", "memory survives the reset", "decision");
+    let (code, _stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stderr}");
+    let out = aw(&repo).args(["doctor", "--invalidate"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("kept primary memory.db"), "{text}");
+    assert!(
+        repo.join(".aw/memory.db").exists(),
+        "memory.db must survive --invalidate"
+    );
+    assert!(
+        !repo.join(".aw/index.db").exists(),
+        "the derived index is reset"
+    );
+    // --help documents the new reset scope (contract bump).
+    let help = aw(&repo).args(["doctor", "--help"]).output().unwrap();
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help_text.contains("memory.db") && help_text.contains("primary data"),
+        "--help must document the kept store: {help_text}"
+    );
+    // Memory still answers; journal/report rows are gone with the index.
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "memory survives"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("keeper"), "{stdout}");
+    // Doctor report carries the memory line (the index was reset above, so
+    // rebuild first — the report opens the index).
+    let (code, _stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stderr}");
+    let out = aw(&repo).args(["doctor"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("memory: integrity ok, 1 notes"), "{text}");
+}
+
+#[test]
+fn mem_concurrent_writers_serialize_or_exit4_never_unique() {
+    // (a) Same key, different bodies: the loser either lands as the next rev
+    // (busy_timeout serialization) or exits 4 — never a UNIQUE(key, rev) hit.
+    let repo = temp_repo("mem-race-same");
+    let _ = mem_write(&repo, "shared", "the original body", "fact");
+    let ra_repo = repo.clone();
+    let a = std::thread::spawn(move || mem_write(&ra_repo, "shared", "writer A body", "fact"));
+    let rb_repo = repo.clone();
+    let b = std::thread::spawn(move || mem_write(&rb_repo, "shared", "writer B body", "fact"));
+    let (ra, rb) = (a.join().unwrap(), b.join().unwrap());
+    for (code, _stdout, stderr) in [&ra, &rb] {
+        assert!(
+            *code == 0 || *code == 4,
+            "loser must serialize (0) or exit 4, got {code}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("UNIQUE"),
+            "constraint leaks are defects: {stderr}"
+        );
+    }
+    let (code, stdout, _stderr) = mem_out(&repo, &["get", "shared"]);
+    assert_eq!(code, 0);
+    let revs: usize = stdout
+        .lines()
+        .last()
+        .and_then(|l| l.strip_prefix("revs: "))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    let expected = 1 + [&ra, &rb].iter().filter(|r| r.0 == 0).count();
+    assert_eq!(
+        revs, expected,
+        "every successful write is one rev: {stdout}"
+    );
+
+    // (b) Different keys: both succeed.
+    let repo = temp_repo("mem-race-distinct");
+    let ra = {
+        let repo = repo.clone();
+        std::thread::spawn(move || mem_write(&repo, "left", "left body", "fact"))
+    };
+    let rb = {
+        let repo = repo.clone();
+        std::thread::spawn(move || mem_write(&repo, "right", "right body", "fact"))
+    };
+    let (ra, rb) = (ra.join().unwrap(), rb.join().unwrap());
+    assert_eq!(ra.0, 0, "{}{}", ra.1, ra.2);
+    assert_eq!(rb.0, 0, "{}{}", rb.1, rb.2);
+    for key in ["left", "right"] {
+        let (code, _stdout, stderr) = mem_out(&repo, &["get", key]);
+        assert_eq!(code, 0, "{stderr}");
+    }
+}
+
+#[test]
+fn mem_export_round_trip_restores_the_note_set() {
+    let repo = temp_repo("mem-export-src");
+    let notes = [
+        (
+            "alpha-decision",
+            "decision",
+            "settled: alpha path",
+            "tags alpha",
+            "src/one.rs",
+        ),
+        (
+            "beta-gotcha",
+            "gotcha",
+            "never do beta; it exits 5",
+            "",
+            "src/two.rs src/three.rs",
+        ),
+        (
+            "gamma-fact",
+            "fact",
+            "gamma notes with a much longer body about retrieval behavior",
+            "tags gamma",
+            "",
+        ),
+    ];
+    for (key, kind, body, tags, refs) in notes {
+        let mut args = vec!["write", key, "--body", body, "--kind", kind];
+        if !tags.is_empty() {
+            args.push("--tags");
+            args.push(tags);
+        }
+        if !refs.is_empty() {
+            args.push("--refs");
+            args.push(refs);
+        }
+        let (code, _stdout, stderr) = mem_out(&repo, &args);
+        assert_eq!(code, 0, "{stderr}");
+    }
+    // Supersede one note so the export carries only current revs.
+    let _ = mem_write(
+        &repo,
+        "alpha-decision",
+        "settled: alpha path v2",
+        "decision",
+    );
+
+    let (code, stdout, stderr) = mem_out(&repo, &["export"]);
+    assert_eq!(code, 0, "{stderr}");
+    // stdout is PURE JSONL: the caveat travels on stderr.
+    assert!(
+        !stdout.contains("aw: memory"),
+        "export stdout must not carry the caveat: {stdout:?}"
+    );
+    assert!(stderr.starts_with("aw: memory — "), "{stderr:?}");
+    let lines: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("pure JSONL"))
+        .collect();
+    assert_eq!(lines.len(), 3, "{stdout}");
+    let fingerprint = |rows: &[serde_json::Value]| -> Vec<String> {
+        let mut v: Vec<String> = rows
+            .iter()
+            .map(|r| {
+                format!(
+                    "{}|{}|{}|{}|{}|{}",
+                    r["key"].as_str().unwrap(),
+                    r["kind"].as_str().unwrap(),
+                    r["scope"].as_str().unwrap(),
+                    r["body"].as_str().unwrap(),
+                    r["tags"].as_str().unwrap(),
+                    r["refs"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let original = fingerprint(&lines);
+
+    // Restore into a fresh store by replaying mem write per line.
+    let fresh = temp_repo("mem-export-fresh");
+    for r in &lines {
+        let mut args = vec![
+            "write",
+            r["key"].as_str().unwrap(),
+            "--body",
+            r["body"].as_str().unwrap(),
+            "--kind",
+            r["kind"].as_str().unwrap(),
+        ];
+        let tags = r["tags"].as_str().unwrap();
+        let refs = r["refs"].as_str().unwrap();
+        if !tags.is_empty() {
+            args.push("--tags");
+            args.push(tags);
+        }
+        if !refs.is_empty() {
+            args.push("--refs");
+            args.push(refs);
+        }
+        let (code, _stdout, stderr) = mem_out(&fresh, &args);
+        assert_eq!(code, 0, "{stderr}");
+    }
+    let (code, stdout2, stderr) = mem_out(&fresh, &["export"]);
+    assert_eq!(code, 0, "{stderr}");
+    let restored: Vec<serde_json::Value> = stdout2
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(original, fingerprint(&restored), "restore is content-exact");
+    // --limit takes the N most recent, deterministically.
+    let (code, stdout3, _stderr) = mem_out(&repo, &["export", "--limit", "1"]);
+    assert_eq!(code, 0);
+    let limited: Vec<serde_json::Value> = stdout3
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(limited.len(), 1);
+    // Empty store: exit 1, nothing on stdout.
+    let bare = temp_repo("mem-export-empty");
+    let _ = mem_write(&bare, "temp", "note", "fact");
+    let _ = mem_out(&bare, &["delete", "temp"]);
+    let (code, stdout4, stderr) = mem_out(&bare, &["export"]);
+    assert_eq!(code, 1);
+    assert!(stdout4.is_empty(), "{stdout4:?}");
+    assert!(stderr.contains("no current notes to export"), "{stderr}");
+}
+
+#[test]
+fn mem_journal_records_len_never_body() {
+    let repo = temp_repo("mem-journal");
+    let secret_body = "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL";
+    let (code, _stdout, stderr) = mem_write(&repo, "secret-check", secret_body, "decision");
+    assert_eq!(code, 0, "{stderr}");
+    let _ = mem_out(&repo, &["query", "confidence"]);
+    let log = std::fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    assert!(log.contains("\"tool\":\"mem_write\""), "{log}");
+    assert!(log.contains("\"tool\":\"mem_query\""), "{log}");
+    assert!(
+        log.contains("body_len"),
+        "journal args carry body_len: {log}"
+    );
+    assert!(
+        !log.contains("confidence tiers"),
+        "journal must never carry the body: {log}"
+    );
+    // usage --quality shows the mem tools and the query empty rate.
+    let out = aw(&repo).args(["usage", "--quality"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("mem_write:"), "{text}");
+    assert!(text.contains("mem_query:"), "{text}");
+}
+
+#[test]
+fn mem_recall_smoke_oracle_reaches_threshold() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/memory/oracle.json")).unwrap();
+    let repo = temp_repo("mem-oracle");
+    for note in fixture["notes"].as_array().unwrap() {
+        let (code, _stdout, stderr) = mem_out(
+            &repo,
+            &[
+                "write",
+                note["key"].as_str().unwrap(),
+                "--body",
+                note["body"].as_str().unwrap(),
+                "--kind",
+                note["kind"].as_str().unwrap(),
+                "--tags",
+                note["tags"].as_str().unwrap(),
+                "--refs",
+                note["refs"].as_str().unwrap(),
+            ],
+        );
+        assert_eq!(code, 0, "{stderr}");
+    }
+    let queries = fixture["queries"].as_array().unwrap();
+    let mut hits = 0usize;
+    for q in queries {
+        let (code, stdout, stderr) = mem_out(
+            &repo,
+            &["query", q["terms"].as_str().unwrap(), "--limit", "3"],
+        );
+        assert_eq!(code, 0, "{} {stderr}", q["terms"].as_str().unwrap());
+        let expected = q["expect"].as_str().unwrap();
+        if stdout.contains(expected) {
+            hits += 1;
+        }
+    }
+    let recall = hits as f64 / queries.len() as f64;
+    assert!(
+        recall >= 0.8,
+        "recall@3 = {recall} ({hits}/{}), below the 0.8 smoke threshold",
+        queries.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — lifecycle: session lane + TTL, gc purge, --supersedes,
+// --include-superseded, determinism under replay.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn mem_session_ttl_default_and_durable_ttl_rejection() {
+    let repo = temp_repo("mem-session-ttl");
+    // Session without --ttl: expires_at = created_at + 604800 (OQ2 default).
+    let (code, _stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "session-note",
+            "--body",
+            "transient scratch work",
+            "--kind",
+            "fact",
+            "--scope",
+            "session",
+        ],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    let (code, stdout, _stderr) = mem_out(&repo, &["export"]);
+    assert_eq!(code, 0);
+    let row: serde_json::Value = serde_json::from_str(stdout.lines().next().unwrap()).unwrap();
+    assert_eq!(row["scope"], "session");
+    let ttl = row["expires_at"].as_i64().unwrap() - row["created_at"].as_i64().unwrap();
+    assert_eq!(ttl, 604800, "OQ2 default session TTL is 7 days: {row}");
+    // Explicit --ttl wins.
+    let _ = mem_out(
+        &repo,
+        &[
+            "write",
+            "session-short",
+            "--body",
+            "short lived",
+            "--kind",
+            "fact",
+            "--scope",
+            "session",
+            "--ttl",
+            "60",
+        ],
+    );
+    let (code, stdout, _stderr) = mem_out(&repo, &["export"]);
+    assert_eq!(code, 0);
+    let rows: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let short = rows.iter().find(|r| r["key"] == "session-short").unwrap();
+    assert_eq!(
+        short["expires_at"].as_i64().unwrap() - short["created_at"].as_i64().unwrap(),
+        60
+    );
+    // Durable + --ttl is a usage error; durable rows carry expires_at = 0.
+    let (code, _stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "durable-ttl",
+            "--body",
+            "b",
+            "--kind",
+            "fact",
+            "--ttl",
+            "60",
+        ],
+    );
+    assert_eq!(code, 2);
+    assert!(
+        stderr.contains("--ttl is only valid with --scope session"),
+        "{stderr}"
+    );
+    let durable = rows.iter().find(|r| r["key"] == "session-note").unwrap();
+    assert!(durable["scope"] == "session");
+}
+
+#[test]
+fn mem_gc_cli_purges_seeded_expired_and_reports_counts() {
+    use rusqlite::Connection;
+    let repo = temp_repo("mem-gc-cli");
+    let _ = mem_write(&repo, "keeper", "durable note", "fact");
+    let _ = mem_out(
+        &repo,
+        &[
+            "write",
+            "session-note",
+            "--body",
+            "expired scratch",
+            "--kind",
+            "fact",
+            "--scope",
+            "session",
+            "--ttl",
+            "60",
+        ],
+    );
+    // Inject an expired deadline for the session note (injected clock).
+    let conn = Connection::open(repo.join(".aw/memory.db")).unwrap();
+    conn.execute(
+        "UPDATE memories SET expires_at = 1 WHERE key = 'session-note'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+    let (code, stdout, stderr) = mem_out(&repo, &["gc"]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout.lines().nth(1),
+        Some("expired=1 removed, superseded=0 removed, durable=1 rows"),
+        "{stdout:?}"
+    );
+    // The expired row and its FTS entry are gone: the query misses it.
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "expired scratch"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("no memory matches"), "{stderr}");
+    // gc with no store at all must not conjure one.
+    let bare = temp_repo("mem-gc-missing");
+    let (code, _stdout, stderr) = mem_out(&bare, &["gc"]);
+    assert_eq!(code, 1);
+    assert!(stderr.contains("no-memory"), "{stderr}");
+    assert!(!bare.join(".aw/memory.db").exists());
+}
+
+#[test]
+fn mem_supersedes_chain_cli_contract() {
+    let repo = temp_repo("mem-supersedes-cli");
+    let _ = mem_write(
+        &repo,
+        "old-conclusion",
+        "the old way of doing things",
+        "decision",
+    );
+    let (code, stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "new-conclusion",
+            "--body",
+            "the new way, measured",
+            "--kind",
+            "decision",
+            "--supersedes",
+            "old-conclusion",
+        ],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert_eq!(
+        stdout.lines().nth(1),
+        Some("ok: 'new-conclusion' rev 1 written"),
+        "{stdout:?}"
+    );
+    // Default listing hides the superseded note; --include-superseded shows it tagged.
+    let (code, stdout, _stderr) = mem_out(&repo, &["query", "--all"]);
+    assert_eq!(code, 0);
+    assert!(
+        stdout.contains("new-conclusion") && !stdout.contains("old-conclusion"),
+        "{stdout}"
+    );
+    let (code, stdout, _stderr) = mem_out(&repo, &["query", "--all", "--include-superseded"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("old-conclusion"), "{stdout}");
+    let superseded_line = stdout
+        .lines()
+        .find(|l| l.starts_with("old-conclusion"))
+        .unwrap();
+    assert!(
+        superseded_line.ends_with(" [superseded]"),
+        "{superseded_line}"
+    );
+    // --include-superseded without --all is a usage error.
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "measured", "--include-superseded"]);
+    assert_eq!(code, 2);
+    assert!(
+        stderr.contains("--include-superseded requires --all"),
+        "{stderr}"
+    );
+    // Unknown target: exit 1 and no new note.
+    let (code, _stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "never-lands",
+            "--body",
+            "x",
+            "--kind",
+            "fact",
+            "--supersedes",
+            "missing",
+        ],
+    );
+    assert_eq!(code, 1);
+    assert!(stderr.contains("unknown memory key 'missing'"), "{stderr}");
+    let (code, _stdout, _stderr) = mem_out(&repo, &["get", "never-lands"]);
+    assert_eq!(code, 1, "the failed supersedes write must leave no row");
+    // Same key as the new note: exit 2 (same-key updates go through revs).
+    let (code, _stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "self",
+            "--body",
+            "x",
+            "--kind",
+            "fact",
+            "--supersedes",
+            "self",
+        ],
+    );
+    assert_eq!(code, 2);
+    assert!(stderr.contains("different key"), "{stderr}");
+}
+
+#[test]
+fn mem_query_output_is_deterministic_under_replay() {
+    let repo = temp_repo("mem-determinism");
+    let writes: [(&str, &str, &str, &str); 3] = [
+        (
+            "alpha",
+            "alpha body about caching rows",
+            "fact",
+            "cache rows",
+        ),
+        (
+            "beta",
+            "beta body about resolver passes",
+            "gotcha",
+            "resolver passes",
+        ),
+        (
+            "gamma",
+            "gamma body about build timing",
+            "decision",
+            "build timing",
+        ),
+    ];
+    let run_queries = || {
+        let mut outs = Vec::new();
+        for (terms, kind) in [
+            ("caching rows", "--kind fact"),
+            ("resolver passes", "--kind gotcha"),
+            ("build timing", "--kind decision"),
+        ] {
+            let kind_flag = if kind == "--kind fact" {
+                vec!["--kind", "fact"]
+            } else if kind == "--kind gotcha" {
+                vec!["--kind", "gotcha"]
+            } else {
+                vec!["--kind", "decision"]
+            };
+            let (code, stdout, stderr) =
+                mem_out(&repo, &[&["query", terms][..], &kind_flag[..]].concat());
+            assert_eq!(code, 0, "{stdout}{stderr}");
+            outs.push(stdout);
+        }
+        outs
+    };
+    for (key, body, kind, tags) in writes {
+        let (code, _stdout, stderr) = mem_out(
+            &repo,
+            &["write", key, "--body", body, "--kind", kind, "--tags", tags],
+        );
+        assert_eq!(code, 0, "{stderr}");
+    }
+    let first = run_queries();
+    // Replay the exact write sequence: every write is an idempotent no-op,
+    // and the query output is byte-identical.
+    for (key, body, kind, tags) in writes {
+        let (code, stdout, _stderr) = mem_out(
+            &repo,
+            &["write", key, "--body", body, "--kind", kind, "--tags", tags],
+        );
+        assert_eq!(code, 0);
+        assert!(
+            stdout.contains("unchanged at rev 1"),
+            "replay must be a no-op: {stdout}"
+        );
+    }
+    let second = run_queries();
+    assert_eq!(first, second, "same DB + same queries -> same bytes");
 }

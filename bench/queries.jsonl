@@ -6,7 +6,6 @@
 {"id":"py-impact-models","corpus":"python","command":"impact","args":["shop/models.py"],"expect":[{"path":"shop/service.py"},{"path":"tests/test_service.py"}],"exit":0}
 {"id":"py-imports-service","corpus":"python","command":"imports","args":["shop/service.py"],"expect":[{"path":"shop/service.py","detail_contains":"shop.models.Order"}],"exit":0}
 {"id":"py-implementers-order","corpus":"python","command":"implementers","args":["shop.models.Order"],"expect":[{"path":"shop/models.py","detail_contains":"shop.models.DiscountedOrder"}],"exit":0}
-{"id":"py-tests-create-order","corpus":"python","command":"tests","args":["shop.service.create_order"],"expect":[{"path":"tests/test_service.py","detail_contains":"tests.test_service.test_create_order"}],"exit":0}
 {"id":"py-search-apply-discount","corpus":"python","command":"search","args":["apply discount"],"expect":[{"path":"shop/service.py","detail_contains":"shop.service.apply_discount"}],"exit":0}
 {"id":"py-callers-leaf","corpus":"python","command":"callers","args":["shop.models.DiscountedOrder.discount"],"expect":[],"exit":1}
 {"id":"ts-callers-cart-total","corpus":"typescript","command":"callers","args":["web.cart.Cart.total"],"expect":[{"path":"web/cart.ts","detail_contains":"web.cart.Cart.add"}],"exit":0}

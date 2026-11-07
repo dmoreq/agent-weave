@@ -2,10 +2,10 @@
 //! result-set-scoped staleness, caps, tier tags, and empty-result reason lines
 //! (response contract; CUJ2/CUJ3/CUJ4/CUJ7).
 
-use std::collections::{BTreeSet, BinaryHeap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 use crate::db;
 use crate::error::{AwError, Result};
@@ -20,10 +20,6 @@ pub const MAX_LIMIT: usize = 10_000;
 /// Permanent honesty caveat for `aw dead` (Amendment 5): candidates, not proof.
 const DEAD_CAVEAT: &str =
     "aw: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, type references, attribute references, and external callers are not proven absent";
-
-/// Permanent honesty caveat for `aw clones` (Amendment 12d): candidates, not proof.
-const CLONES_CAVEAT: &str =
-    "aw: clone candidates — normalized-text equality, not proof of semantic duplication";
 
 /// Permanent honesty caveat for `aw path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
@@ -56,12 +52,6 @@ const IMPACT_SITE_KEY: &str =
 const IMPORTS_CAVEAT: &str =
     "aw: imports — resolved static imports only; external and unresolved imports are omitted";
 
-/// `aw tests` caveat (Amendment 19): static candidates only.
-const TESTS_CAVEAT: &str = "aw: test candidates — static resolved call edges only; test classification covers test paths, test-shaped names, Rust #[test]/#[cfg(test)], and TS describe/it scope, but fixtures, generated tests, and indirect tests may still be missed";
-/// Forward search from every test is cheaper than a reverse graph walk when
-/// the test set is bounded; larger sets keep the reverse BFS.
-const FORWARD_TEST_LIMIT: usize = 20000;
-
 /// One resolved candidate: (path, line, qualname).
 mod scope;
 
@@ -73,63 +63,18 @@ mod callgraph;
 mod impact;
 
 pub use analysis::{
-    clones, complexity, dead, files, resolve_names, search, symbols, unresolved, unresolved_names,
+    complexity, dead, files, resolve_names, search, symbols, unresolved, unresolved_names,
 };
-pub use callgraph::{callees, callers, context, implementers, imports, path, test_impact};
+pub use callgraph::{callees, callers, context, implementers, imports, path};
 pub use impact::impact;
-
-fn total_callables(conn: &Connection) -> Result<usize> {
-    if let Some(value) = db::meta_get(conn, "callable_symbol_count") {
-        if let Ok(n) = value.parse::<usize>() {
-            return Ok(n);
-        }
-    }
-    Ok(conn.query_row(
-        "SELECT COUNT(*) FROM symbols WHERE kind IN ('function', 'method')",
-        [],
-        |r| r.get::<_, i64>(0),
-    )? as usize)
-}
-
-fn has_test_candidates(conn: &Connection) -> Result<bool> {
-    Ok(conn
-        .query_row(
-            "SELECT 1 FROM symbols
-         WHERE kind IN ('function', 'method')
-           AND is_test = 1
-         LIMIT 1",
-            [],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some())
-}
-
-fn total_test_symbols(conn: &Connection) -> Result<usize> {
-    if let Some(value) = db::meta_get(conn, "test_symbol_count") {
-        if let Ok(n) = value.parse::<usize>() {
-            return Ok(n);
-        }
-    }
-    Ok(
-        conn.query_row("SELECT COUNT(*) FROM symbols WHERE is_test = 1", [], |r| {
-            r.get::<_, i64>(0)
-        })? as usize,
-    )
-}
-
-fn is_callable_kind(kind: &str) -> bool {
-    matches!(kind, "function" | "method")
-}
 
 /// Dead-code candidates (Amendment 5): no resolved inbound calls edge and no
 /// AMBIGUOUS edge naming the symbol (qualname or bare name). Pointer contract;
 /// the caveat header is unconditional.
 pub type Candidate = (String, i64, String);
 
-/// One symbol row with metrics: (kind, qualname, line, signature,
-/// cyclomatic, branches, nesting, effective_loc). Amendment 19.
-type SymbolRow = (String, String, i64, String, i64, i64, i64, i64);
+/// One symbol row: (kind, qualname, line, signature, effective_loc).
+type SymbolRow = (String, String, i64, String, i64);
 
 /// One BFS level's out-edges grouped per source: `(dst qualname, dst path,
 /// site_line, dst id)` sorted by the pinned neighbor key (`path` is the
@@ -281,26 +226,6 @@ fn search_lines(out: QueryOutput) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-/// Bounded English morphology variants for a zero-hit token (R7).
-fn derived_forms(tok: &str, out: &mut Vec<String>) {
-    if tok.len() <= 4 {
-        return;
-    }
-    if let Some(stem) = tok.strip_suffix("ies") {
-        out.push(format!("{stem}y"));
-        return;
-    }
-    for suffix in ["es", "s", "ed", "ing", "ion"] {
-        if let Some(stem) = tok.strip_suffix(suffix) {
-            if stem.len() >= 3 {
-                out.push(stem.to_string());
-                out.push(format!("{stem}e"));
-            }
-            return;
-        }
-    }
-}
-
 fn collect_output(
     conn: &Connection,
     root: &Path,
@@ -363,13 +288,6 @@ pub fn render_output(out: &QueryOutput) -> String {
         text.push_str(&format!("showing {} of {}\n", out.shown, out.total));
     }
     text
-}
-
-pub fn print_output(out: &QueryOutput) {
-    print!("{}", render_output(out));
-    if out.total > out.shown {
-        eprintln!("[aw] capped at {} results ({} total)", out.shown, out.total);
-    }
 }
 
 /// Staleness: (mtime, size) stat short-circuit; FNV-1a re-hash on mismatch.

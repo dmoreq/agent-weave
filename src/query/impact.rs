@@ -2,6 +2,8 @@
 
 use super::*;
 
+use std::collections::BinaryHeap;
+
 fn parse_edge_kinds(spec: &str) -> Result<Vec<&'static str>> {
     let mut out: Vec<&'static str> = Vec::new();
     let mut saw_all = false;

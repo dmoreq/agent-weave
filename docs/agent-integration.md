@@ -43,7 +43,7 @@ It is not an HTTP server. The host starts the process; no separate background se
 1. Find the installed aw executable's absolute path. Confirm the host can execute it.
 2. In your host's documented MCP registration interface, add a local stdio server.
 3. Set the executable to that absolute path. Set separate arguments to `--root`, the target repository's absolute path, and `mcp`.
-4. Let the host start the server. Confirm initialization succeeds and the tool list includes the core navigation tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols`.
+4. Let the host start the server. Confirm initialization succeeds and the tool list includes the core navigation tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols`, plus the memory loop `mem_write` and `mem_query`.
 5. Call the `symbols` tool with `file` set to the known source file and `outline` set to `true`.
 6. Compare the returned locations with the CLI query and current source. Confirm the repository root matches.
 
@@ -57,7 +57,7 @@ Running this command in a terminal waits for protocol input; it is not a host-re
 The repository root is selected when the server starts. Restart or re-register the server to target another repository.
 
 MCP argument names come from the tool schemas, not CLI spelling: for example, `symbols` uses `file` and `outline`.
-The default tool list is the eight core navigation tools. Add `--all-tools` to the server arguments to expose the full inventory and analysis surface (21 tools); see the [CLI reference](cli-reference.md#mcp).
+The default tool list is the eight core navigation tools plus `mem_write` and `mem_query`. Add `--all-tools` to the server arguments to expose the full inventory and analysis surface plus the remaining memory operations (`mem_get`, `mem_delete`, `mem_gc`, `mem_export`; 23 tools total); see the [CLI reference](cli-reference.md#mcp).
 The `doctor` command is CLI-only. MCP tool errors use `isError`; inspect the returned text before treating results as successful.
 
 ## Host verification status
@@ -97,7 +97,7 @@ When an `aw` query exits 0, treat its navigation fields as candidates, not groun
 truth. Static resolution can return false positives even when the index is
 current and results are not capped or ambiguous. Avoid repeating a complete
 lookup merely for navigation; verify individual relationships against source
-when correctness matters. Treat `tests`, `dead`, and `unresolved` as candidates,
+when correctness matters. Treat `dead` and `unresolved` as candidates,
 not proofs. Re-run or read source when
 a result is capped, stale, ambiguous, or empty, when the question needs a field
 the output does not carry, or for behavioral claims, edits, safety, and review.
@@ -111,8 +111,10 @@ Your host controls how it stores tool results and transmits context to a model; 
 
 To remove integration, manually unregister the skill and MCP server through your host's documented mechanism.
 Stop the host-managed aw process and start a fresh session to clear loaded instructions.
-Neither step removes the repository index. CLI `aw doctor --invalidate` deletes the entire `.aw/` directory,
-including its index and usage journals. Use it only when you intend to discard that local data; it does not remove host registration.
+Neither step removes the repository index. CLI `aw doctor --invalidate` resets the derived `.aw/` state —
+the index and usage journals — and keeps the project-memory store `.aw/memory.db`, which holds agent-authored
+notes and is not rebuildable; export it with `aw mem export` first if you want a copy. `rm -rf .aw/` removes
+everything, including memory. Neither command removes host registration.
 
 ## Interface sources
 

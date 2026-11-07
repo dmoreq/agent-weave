@@ -156,13 +156,8 @@ pub fn run_build(
     // index into `fresh`, consumed by insert_files/insert_symbols) is
     // unchanged.
     let t0 = Instant::now();
-    let (
-        mut fresh_rows,
-        mut extractions,
-        mut fresh_shingles,
-        mut fresh_error_files,
-        mut extract_secs_sum,
-    ) = extract_units(&fresh, 0)?;
+    let (mut fresh_rows, mut extractions, mut fresh_error_files, mut extract_secs_sum) =
+        extract_units(&fresh, 0)?;
 
     // Amendment 15 (R6d A4): the fast path must heal resolution gaps. When
     // the fresh extraction introduces symbol names that did not exist in the
@@ -257,11 +252,10 @@ pub fn run_build(
             if !second.is_empty() {
                 let base = fresh.len();
                 let mut healed: Vec<String> = second.iter().map(|f| f.rel.clone()).collect();
-                let (mut r2, mut e2, mut s2, err2, sec2) = extract_units(&second, base)?;
+                let (mut r2, mut e2, err2, sec2) = extract_units(&second, base)?;
                 fresh.extend(second);
                 fresh_rows.append(&mut r2);
                 extractions.append(&mut e2);
-                fresh_shingles.append(&mut s2);
                 fresh_error_files += err2;
                 extract_secs_sum += sec2;
 
@@ -289,12 +283,11 @@ pub fn run_build(
                         break;
                     }
                     let base = fresh.len();
-                    let (mut r3, mut e3, mut s3, err3, sec3) = extract_units(&third, base)?;
+                    let (mut r3, mut e3, err3, sec3) = extract_units(&third, base)?;
                     healed = third.iter().map(|f| f.rel.clone()).collect();
                     fresh.extend(third);
                     fresh_rows.append(&mut r3);
                     extractions.append(&mut e3);
-                    fresh_shingles.append(&mut s3);
                     fresh_error_files += err3;
                     extract_secs_sum += sec3;
                 }
@@ -451,16 +444,6 @@ pub fn run_build(
     } else {
         crate::db::populate_symbols_fts(&conn)?;
     }
-    // Clone-candidate shingles (Amendment 12d): fresh-file windows keyed by
-    // the just-inserted file ids; carried files' rows were copied above.
-    if !fresh_shingles.is_empty() {
-        let pairs: Vec<crate::clones::FileShingles> = fresh_file_ids
-            .iter()
-            .zip(&fresh_shingles)
-            .map(|(id, sh)| (*id, sh.clone()))
-            .collect();
-        crate::db::insert_clone_groups(&conn, &pairs)?;
-    }
     // Deferred indexes (A1): sort each secondary index once, after every row is
     // in place. The final schema is unchanged; queries only see the published DB.
     crate::db::create_secondary_indexes(&conn)?;
@@ -485,7 +468,7 @@ pub fn run_build(
     let (sym_total, callable_symbols, callable_total) = conn.query_row(
         "SELECT COUNT(*),
                 COALESCE(SUM(kind IN ('function','method')), 0),
-                COALESCE(SUM(kind IN ('function','method') AND cyclomatic > 0), 0)
+                COALESCE(SUM(kind IN ('function','method') AND effective_loc > 0), 0)
          FROM symbols",
         [],
         |r| {
@@ -635,13 +618,11 @@ fn extract_units(
 ) -> Result<(
     Vec<crate::db::FilesRow>,
     Vec<crate::extract::FileExtraction>,
-    Vec<Vec<crate::clones::Shingle>>,
     usize,
     f64,
 )> {
     let mut rows: Vec<crate::db::FilesRow> = Vec::with_capacity(files.len());
     let mut extractions: Vec<crate::extract::FileExtraction> = Vec::with_capacity(files.len());
-    let mut shingles_out: Vec<Vec<crate::clones::Shingle>> = Vec::with_capacity(files.len());
     let mut error_files = 0usize;
     let mut extract_secs_sum = 0f64;
     let workers = std::env::var("AW_WORKERS")
@@ -659,10 +640,9 @@ fn extract_units(
         for (chunk_no, chunk) in files.chunks(chunk_len).enumerate() {
             let chunk = chunk.to_vec();
             let handle = std::thread::Builder::new()
-                .stack_size(64 * 1024 * 1024)
                 .spawn_scoped(
                     scope,
-                    move || -> Result<(Vec<crate::clones::ParseUnit>, f64)> {
+                    move || -> Result<(Vec<(crate::db::FilesRow, crate::extract::FileExtraction)>, f64)> {
                         let mut units = Vec::with_capacity(chunk.len());
                         let mut secs = 0f64;
                         let mut parser = crate::parse::ParserSlot::new();
@@ -674,10 +654,8 @@ fn extract_units(
                             let crate::parse::SyntaxStats {
                                 error_nodes,
                                 status,
-                                decisions,
-                                loc,
                                 code_lines,
-                            } = crate::parse::syntax_stats(tree.root_node(), &bytes, lang);
+                            } = crate::parse::syntax_stats(tree.root_node(), &bytes);
                             let e0 = Instant::now();
                             let fx = crate::extract::extract_file_with_code_lines(
                                 idx,
@@ -687,7 +665,6 @@ fn extract_units(
                                 code_lines,
                             );
                             secs += e0.elapsed().as_secs_f64();
-                            let shingles = crate::clones::shingles(&bytes);
                             let generated = i64::from(crate::walk::is_generated(&f.rel, &bytes));
                             units.push((
                                 crate::db::FilesRow {
@@ -698,12 +675,9 @@ fn extract_units(
                                     parse_status: status,
                                     error_nodes,
                                     unresolved: 0,
-                                    loc,
-                                    cyclomatic: decisions as i64,
                                     generated,
                                 },
                                 fx,
-                                shingles,
                             ));
                         }
                         Ok((units, secs))
@@ -716,22 +690,15 @@ fn extract_units(
                 .join()
                 .map_err(|_| AwError::Internal("parse worker panicked".to_string()))??;
             extract_secs_sum += secs;
-            for (row, fx, shingles) in units {
+            for (row, fx) in units {
                 if row.error_nodes > 0 {
                     error_files += 1;
                 }
                 rows.push(row);
                 extractions.push(fx);
-                shingles_out.push(shingles);
             }
         }
         Ok(())
     })?;
-    Ok((
-        rows,
-        extractions,
-        shingles_out,
-        error_files,
-        extract_secs_sum,
-    ))
+    Ok((rows, extractions, error_files, extract_secs_sum))
 }

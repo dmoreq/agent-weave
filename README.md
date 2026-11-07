@@ -80,10 +80,29 @@ See [Getting started](docs/getting-started.md) for setup and result handling.
 | Which files call into this file? | `aw impact <file>` |
 | Where is a symbol with this name? | `aw search '<terms>'` |
 | What definitions are in a file or directory? | `aw symbols <path> --outline` |
+| What did a previous session settle here? | `aw mem query '<terms>'` |
 
-For test candidates, import relationships, inheritance, duplication, complexity,
-and other commands, see the [CLI reference](docs/cli-reference.md).
+For import relationships, inheritance, complexity, and other commands, see the
+[CLI reference](docs/cli-reference.md).
 Use the [workflow guide](docs/usage.md) to decide what to do with a result.
+
+## Carry knowledge across sessions
+
+Code navigation answers where things are; project memory keeps what your
+sessions concluded. `aw mem write` persists a decision, gotcha, or task note
+as agent-authored prose; `aw mem query` retrieves it by content in a later
+session. Notes live in `.aw/memory.db`, survive rebuilds, and open every
+result with the caveat that they are candidates, never proof of current
+behavior:
+
+```sh
+aw mem write resolver-confidence-tiers --kind decision \
+  --body "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL" \
+  --refs src/query/callgraph.rs
+aw mem query confidence tiers
+```
+
+See [Project memory](docs/cli-reference.md#project-memory) for the contracts.
 
 ## Know what the answer does not prove
 
@@ -103,9 +122,10 @@ Use the [workflow guide](docs/usage.md) to decide what to do with a result.
 
 ## Local by design
 
-At runtime, aw makes no network requests and changes no source files. Its index
-and local usage records live under `.aw/`. It installs no hooks, runs no
-background daemon, and does not edit your agent configuration.
+At runtime, aw makes no network requests and changes no source files. Its
+index, project-memory store, and local usage records live under `.aw/`. It
+installs no hooks, runs no background daemon, and does not edit your agent
+configuration.
 
 Usage records are enabled by default. Pass `--no-journal` or set
 `AW_NO_JOURNAL=1` to disable them. Source names, signatures, paths, and query
@@ -118,7 +138,7 @@ See [Security](SECURITY.md) for the security model.
 - **The aw-first skill** tells an agent when and how to use those tools,
   handle incomplete results, and fall back to source inspection.
 - **Trust contract:** successful navigation output is ground truth for the
-  fields it returns. `tests`, `dead`, and `unresolved` remain candidates.
+  fields it returns. `dead` and `unresolved` remain candidates.
   Source reads still gate edits and behavioral claims.
 
 Neither is installed automatically. See [Agent integration](docs/agent-integration.md)

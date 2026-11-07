@@ -48,7 +48,7 @@ relationships against source when the answer requires confidence in them.
 
 Verify with source or grep when:
 
-- the output is explicitly marked as "candidates only" (`aw tests`, `aw dead`, `aw unresolved`),
+- the output is explicitly marked as "candidates only" (`aw dead`, `aw unresolved`),
 - the result is capped (`showing N of M`), stale, ambiguous, or empty,
 - the question asks for a field the output does not carry,
 - you need behavioral, safety, or review evidence, or
@@ -58,7 +58,7 @@ Commands returning resolved navigation rows:
 `callers`, `callees`, `context`, `implementers`, `imports`, `impact`, `path`, `symbols`
 
 Commands whose output is candidates:
-`tests`, `dead`, `unresolved`
+`dead`, `unresolved`
 
 This contract covers navigation answers only. Source reads remain required for
 behavioral claims, edits, safety, and review.
@@ -74,14 +74,35 @@ verify their output before acting on it.
 | what is in this file / its signatures | `aw symbols <file> [--outline]` — deterministic inventory of one indexed file |
 | find a symbol by (partial) name or signature vocabulary | `aw search <terms>` — token search over names, paths, and signatures; exact names rank first |
 | who inherits/implements a type | `aw implementers <name>` — resolved `inherits` edges only; cross-file impls omitted |
-| which tests reach this symbol/file | `aw tests <name|file>` — static call-edge candidates only, never a test plan |
 | what is in this directory | `aw symbols <dir> --outline`; `aw files --path <dir>` for the file inventory |
 | resolve many names at once | `aw resolve --stdin < names.txt` — one `found`/`ambiguous`/`missing` line per name |
-| is this logic duplicated elsewhere | `aw clones [--min-lines N]` — candidates only, never proof |
-| which functions exceed complexity/length | `aw complexity --min-cyc 11` — syntax proxies, not cognitive complexity |
-| what is risky / unresolved | `aw hotspots`, `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
-| repository totals and structure | `aw stats [--path <dir>]`, `aw report` — build-time summaries, not freshness checks |
+| which functions are the longest | `aw complexity --min-loc 40` — effective line count, not cognitive complexity |
+| where did resolution fail | `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
+| repository totals | `aw stats [--path <dir>]` — build-time summary, not a freshness check |
 | dead-code candidates | `aw dead` — candidate list only, never proof of deadness |
+
+## Project memory (optional, not navigation routing)
+
+aw keeps agent-authored project notes in `.aw/memory.db` — decisions, gotchas,
+facts, and task wrap-ups that survive rebuilds. Memory is NOT part of the
+binding routing table above; use it deliberately:
+
+- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...]`)
+  when a decision was settled after real investigation, a gotcha cost genuine
+  debugging time, or a task ends with conclusions that are not yet in committed
+  docs. Keys are stable identities (e.g. `resolver-confidence-tiers`); `--refs`
+  takes the qualnames/paths the note is about.
+- **Query** (`aw mem query <terms>`; `--all` lists by recency) at session start
+  and before re-investigating an area you suspect was already worked through.
+- **Maintain**: rewrite under the same key to supersede; `--supersedes <key>`
+  records a cross-key replacement; `--scope session` (default TTL 7 days,
+  `--ttl` overrides) keeps transient scratch out of durable memory; `aw mem
+  get <key>`, `aw mem delete <key>`, `aw mem export` (JSONL backup),
+  `aw mem gc` (purge expired session notes + >30-day superseded revisions).
+
+Trust note: notes are agent-authored claims, same standing as this contract's
+candidates — verify against source before any behavioral claim. The output
+caveat line says so on every mem command.
 
 ## Handling the contract behaviors
 
@@ -108,9 +129,8 @@ verify their output before acting on it.
    instead of repeating an unchanged `path` query.
 4. **Static-surface caveats**: every aw result covers the indexed, resolved
    subset only. Successful cases do not establish complete repository coverage;
-   a negative is not proof. Secondary tools inherit the same limit: `tests`
-   misses Rust `#[test]` names outside `test_*`, TS `describe`/`it` callbacks,
-   and function-local imports; `dead` and `clones` are candidate lists.
+   a negative is not proof. Secondary tools inherit the same limit: `dead`
+   is a candidate list.
 
 ## Staleness discipline
 

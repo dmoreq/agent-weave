@@ -1,6 +1,8 @@
 # Graft-learning decisions
 
-Status: proposal, not approved. No implementation is authorized by this page.
+Status: B1 superseded by the project-memory design (see its section);
+B2 and B3 remain proposals, not approved. No implementation is authorized by
+this page for them.
 
 Research of a public external memory tool (Graft) identified three options that
 `aw` does not implement today. They are recorded here so the owner can approve
@@ -26,7 +28,12 @@ wrong definition; a rebuild loses notes; an agent treats a note as proof of
 current behavior. Any of these makes the feature unsafe without an explicit
 orphan/audit design.
 
-**Status:** proposed — not approved.
+**Status:** replaced (owner decision OQ6, 2026-11-05) by
+`docs/designs/2026-11-05_agent-weave-memory-retrieval.md` — the `aw mem`
+note store supersedes `aw note add`; its `key` + `refs` model expresses the
+symbol anchoring B1 wanted (refs hold qualnames), and the store's revision
+chain, `aw mem export` backup, and `doctor --invalidate` disposition answer
+the trade-offs recorded above. One note store lands per repo.
 
 ## Decision B2: hybrid symbol search
 

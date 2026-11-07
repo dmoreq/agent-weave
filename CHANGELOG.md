@@ -18,6 +18,88 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
+- **Project memory: `aw mem write/query/get/delete/export/gc`.** aw now keeps
+  agent-authored project notes (decision/gotcha/fact/task) in
+  `.aw/memory.db`, a separate SQLite store with its own FTS5 index, revision
+  chains, content-hash idempotent replay, and a deterministic resolver
+  (BM25 + ref/token overlap + recency fusion). Notes are candidates, never
+  proof: every mem command opens with the caveat line. Bodies cap at 8 KiB;
+  the journal carries `body_len`, never body text. Design:
+  `docs/designs/2026-11-05_agent-weave-memory-retrieval.md`.
+- **`aw mem export` JSONL backup.** stdout is pure JSONL (the caveat goes to
+  stderr); restore = `mem write` replay, idempotent by content hash. This is
+  the recovery path for the primary memory store.
+- **MCP `mem_write` + `mem_query` join the default tool set** (owner decision
+  OQ1); `mem_get`, `mem_delete`, `mem_gc`, and `mem_export` sit behind
+  `--all-tools` (23 tools total, ten by default). The `aw-first` skill gains
+  a non-mandatory "Project memory" section.
+- **Memory lifecycle (Phase 2, OQ2 default TTL 7 days).** `--scope session`
+  expires after a TTL (`--ttl <SECS>`, default 604800 = 7 days) and drops out
+  of every read once expired; `aw mem gc` now purges expired session notes
+  (with their search-index rows) and superseded revisions older than 30 days
+  clocked by `superseded_at`, printing
+  `expired=N removed, superseded=M removed, durable=K rows`.
+  `mem write --supersedes <key>` records a cross-key replacement in the same
+  transaction (unknown target exits 1, same key exits 2);
+  `mem query --all --include-superseded` lists replaced revisions tagged
+  `[superseded]`.
+- **Memory measurement (Phase 3).** `tests/scripts/mem_recall.py` (stdlib
+  Python) measures `aw mem query` recall against the frozen 30-note/20-query
+  oracle `tests/fixtures/memory/oracle-v2.json` with a Wilson 95% interval
+  and a seeded negative control (gate: recall >= 0.8, shuffled mapping below
+  the gate). First run: recall@5 = 1.000 [0.839, 1.000], negative control
+  0.050 — see [Evaluation](docs/EVALUATION.md). Weight tuning stays gated on
+  a sub-threshold oracle run.
+
+### Changed (breaking)
+
+- **`aw doctor --invalidate` keeps `.aw/memory.db`.** The reset removes the
+  derived state (index, journals, locks, orphans) and preserves the primary
+  memory store and its crash-recovery sidecars; `rm -rf .aw/` remains the
+  one-command exit that discards memory too. `--help` documents the new scope.
+  Graft-learning Decision B1 (`aw note add`) is superseded by this store
+  (owner decision OQ6).
+
+## [0.5.0] - 2026-11-05
+
+### Changed (breaking)
+
+- **Schema v9; rebuild required.** An older index exits `5` on every query;
+  `aw build` replaces it atomically. Removed: the `clone_groups` table and its
+  five-line shingling pass, `symbols.cyclomatic/branches/nesting`,
+  `files.loc/cyclomatic`, and the five-column `symbols_complexity_idx`
+  (replaced by an `effective_loc` ranking key). A fresh build is smaller and
+  skips the shingle pass.
+- **`aw complexity` ranks by effective LOC only.** `--min-cyc`,
+  `--min-branches`, and `--min-nest` are gone; rows print `path:line loc=N
+  qualname`. `aw symbols --metrics` appends only `loc=`.
+- **`aw clones`, `aw hotspots`, `aw report`, and `aw tests` are removed**, along
+  with their MCP tools. Clone detection, git-log churn scraping (including the
+  hardcoded fix-keyword list), the four-section report, and static test-reach
+  candidates are outside the call-graph navigation core. `dead
+  --exclude-tests` keeps the `is_test` classification.
+- **Search no longer applies a morphology fallback.** A zero-hit query is not
+  retried with derived stems (`rotation` -> `rotate`); prefix matching over
+  identifier tokens is the documented behavior.
+- **One dispatch layer for CLI and MCP.** `src/service.rs` owns root
+  resolution, index opening, journaling, output rendering, and exit-code
+  mapping. The MCP tool schemas and required-argument checks render from one
+  declarative tool table, so the two surfaces cannot drift.
+- **The usage journal line is serialized with serde_json.** The JSONL file
+  keeps the same keys and format. The journal no longer refuses a symlinked,
+  hardlinked, or FIFO `usage.log`: an append follows the path as given, so a
+  repository that ships such a link can redirect the journal or block the
+  writer. Treat repository-controlled `.aw/` entries as untrusted.
+- **AST traversal uses an explicit work stack.** Nesting depth is bounded by
+  the 1 MiB file cap, not the thread stack, so parse workers run on the default
+  thread stack (the former 64 MB stack forcing is gone). Depth is no longer
+  truncated at a nesting ceiling.
+- **One build lock.** `RootLock` (a flock on the repository directory) is
+  removed; `BuildLock` on `.aw/build.lock` is the single lock identity for
+  builds and `doctor --invalidate`.
+
+### Added
+
 - `--explain` for `aw callers`, `aw callees`, and `aw context` appends the
   stored edge metadata: kind, confidence, site line, destination, grouped
   edge count, and a typed-receiver hint when a `type_ref` edge exists. It

@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile};
 
-pub const SCHEMA_VERSION: i32 = 8;
+pub const SCHEMA_VERSION: i32 = 9;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -231,17 +231,15 @@ pub struct NewSymbol {
     /// line-wrapped parameters, whitespace collapsed, hard cap 160 chars.
     /// Empty for module/synthetic symbols. No body text.
     pub signature: String,
-    /// Per-symbol metrics (Amendment 19); 0 for non-callables.
-    pub cyclomatic: usize,
-    pub branches: usize,
-    pub nesting: usize,
+    /// Effective non-comment line count (Amendment 19); 0 for non-callables.
+    /// The only per-symbol size metric the index stores.
     pub effective_loc: usize,
     /// Public-surface flag (Amendment 19); language rules in the spec.
     pub exported: bool,
     /// Test-symbol flag (schema v8), classified once at extraction from path,
     /// name shape, Rust `#[test]`/`#[cfg(test)]` context, and TS describe/it
-    /// scope. Consumers: `aw tests`, `aw dead --exclude-tests`, and the
-    /// build-time `test_symbol_count` meta counter.
+    /// scope. Consumers: `aw dead --exclude-tests` and the build-time
+    /// `test_symbol_count` meta counter.
     pub is_test: bool,
 }
 
@@ -526,7 +524,7 @@ fn rust_crate_root(rel: &str) -> Option<String> {
 #[allow(dead_code)]
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {
     let root = parsed.tree.root_node();
-    let stats = crate::parse::syntax_stats(root, src, Lang::from_rel(rel));
+    let stats = crate::parse::syntax_stats(root, src);
     extract_file_with_code_lines(file_idx, rel, src, root, stats.code_lines)
 }
 

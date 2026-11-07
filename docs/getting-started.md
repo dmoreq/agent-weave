@@ -107,7 +107,12 @@ Run this only when you intend to delete aw's local data for the selected reposit
 aw doctor --invalidate
 ```
 
-This removes the entire `.aw/` directory, including the index, journals, and any other files stored there. It does not uninstall the executable or modify source files. Run `aw build` to start again.
+This resets the derived `.aw/` state — the index, journals, and leftover build
+files. The project-memory store `.aw/memory.db` is primary data (agent-authored
+notes) and is kept; export it first with `aw mem export` if you want a copy,
+and use `rm -rf .aw/` when you really want everything gone. `--invalidate`
+does not uninstall the executable or modify source files. Run `aw build` to
+start again.
 
 ## Continue
 

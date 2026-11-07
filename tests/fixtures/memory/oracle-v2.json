@@ -1,0 +1,239 @@
+{
+  "seed": 20261105,
+  "limit": 5,
+  "threshold": 0.8,
+  "notes": [
+    {
+      "key": "resolver-confidence-tiers",
+      "kind": "decision",
+      "tags": "resolver confidence",
+      "refs": "src/query/callgraph.rs",
+      "body": "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL"
+    },
+    {
+      "key": "schema-skew-exit5",
+      "kind": "gotcha",
+      "tags": "schema migration",
+      "refs": "src/db.rs",
+      "body": "never migrate in place; schema skew exits 5 in both directions and aw build replaces the database"
+    },
+    {
+      "key": "incremental-fast-path",
+      "kind": "fact",
+      "tags": "build incremental",
+      "refs": "src/build.rs",
+      "body": "unchanged files carry forward through the fast path when grammar and signature versions match"
+    },
+    {
+      "key": "callee-empty-reason",
+      "kind": "gotcha",
+      "tags": "resolver diagnostics",
+      "refs": "src/extract/resolve.rs",
+      "body": "callee empty reason fires when extraction produced no call candidates for a resolved site"
+    },
+    {
+      "key": "atomic-replacement",
+      "kind": "decision",
+      "tags": "build durability",
+      "refs": "src/db.rs",
+      "body": "aw build writes index.db.new then fsyncs and renames so a concurrent reader sees old or new"
+    },
+    {
+      "key": "write-confinement",
+      "kind": "decision",
+      "tags": "invariants writes",
+      "refs": "src/db.rs",
+      "body": "runtime writes live only in db doctor journal so the allowlist check stays green"
+    },
+    {
+      "key": "mcp-stdio-frame",
+      "kind": "fact",
+      "tags": "mcp protocol",
+      "refs": "src/mcp.rs",
+      "body": "the mcp server reads newline delimited json rpc frames with an eight megabyte cap"
+    },
+    {
+      "key": "fnv-content-hash",
+      "kind": "fact",
+      "tags": "hash staleness",
+      "refs": "src/hash.rs",
+      "body": "fnv1a64 hashes raw file bytes with no normalization for the staleness fast path"
+    },
+    {
+      "key": "journal-privacy",
+      "kind": "decision",
+      "tags": "journal privacy",
+      "refs": "src/journal.rs",
+      "body": "the usage journal records names paths and scalars never file contents or note bodies"
+    },
+    {
+      "key": "fts-purity-invariant",
+      "kind": "gotcha",
+      "tags": "fts derived",
+      "refs": "src/query.rs",
+      "body": "the fts table is derived data and must equal a rebuild from the authoritative rows"
+    },
+    {
+      "key": "busy-timeout-writers",
+      "kind": "gotcha",
+      "tags": "concurrency memory",
+      "refs": "src/db.rs",
+      "body": "concurrent memory writers serialize on a five second busy timeout and the loser either lands as the next revision or exits 4"
+    },
+    {
+      "key": "session-ttl-lane",
+      "kind": "decision",
+      "tags": "session ttl lifecycle",
+      "refs": "src/memory.rs",
+      "body": "session notes expire after seven days by default and the explicit ttl seconds override the oq2 constant"
+    },
+    {
+      "key": "supersedes-cross-key",
+      "kind": "fact",
+      "tags": "supersession links",
+      "refs": "src/db.rs",
+      "body": "the supersedes flag marks another key current note as replaced inside the same write transaction and an unknown target causes a full rollback"
+    },
+    {
+      "key": "gc-retention-clock",
+      "kind": "gotcha",
+      "tags": "gc retention",
+      "refs": "src/db.rs",
+      "body": "gc purges superseded revisions whose supersession is older than thirty days and the clock is the superseded at column not created at"
+    },
+    {
+      "key": "token-shared-normalizer",
+      "kind": "fact",
+      "tags": "tokenizer camelcase",
+      "refs": "src/memory.rs",
+      "body": "one tokenizer splits camelcase and snake case boundaries for the stored fts text and the query side so matching never disagrees"
+    },
+    {
+      "key": "minmax-fusion-weights",
+      "kind": "decision",
+      "tags": "fusion weights ranking",
+      "refs": "src/memory.rs",
+      "body": "the resolver fuses lexical ref overlap and recency with fixed weights point five point three point two and deterministic tie breaks"
+    },
+    {
+      "key": "export-jsonl-restore",
+      "kind": "fact",
+      "tags": "export backup",
+      "refs": "src/service.rs",
+      "body": "mem export writes pure jsonl on stdout with the caveat on stderr and restore replays mem write idempotently"
+    },
+    {
+      "key": "doctor-invalidate-keeps-memory",
+      "kind": "decision",
+      "tags": "doctor invalidate",
+      "refs": "src/doctor.rs",
+      "body": "doctor invalidate resets the derived index and journals but keeps the primary memory database because notes are not rebuildable"
+    },
+    {
+      "key": "caveat-trust-contract",
+      "kind": "decision",
+      "tags": "caveat trust",
+      "refs": "src/service.rs",
+      "body": "every memory command opens with the caveat that agent authored notes are candidates only and never proof of current behavior"
+    },
+    {
+      "key": "user-version-manifest",
+      "kind": "gotcha",
+      "tags": "schema manifest",
+      "refs": "src/db.rs",
+      "body": "the memory store gates on a compiled required structure manifest and an older structurally complete store still opens read write"
+    },
+    {
+      "key": "distractor-resolver-notes",
+      "kind": "fact",
+      "tags": "resolver notes",
+      "refs": "src/memory.rs",
+      "body": "notes about resolver ranking recency decay weights in memory"
+    },
+    {
+      "key": "distractor-build-abort",
+      "kind": "gotcha",
+      "tags": "build quality",
+      "refs": "src/build.rs",
+      "body": "build aborts when the parse error rate crosses the configured threshold"
+    },
+    {
+      "key": "distractor-stale-report",
+      "kind": "fact",
+      "tags": "doctor staleness",
+      "refs": "src/doctor.rs",
+      "body": "doctor reports the stale ratio of indexed files changed on disk"
+    },
+    {
+      "key": "distractor-gc-counts",
+      "kind": "fact",
+      "tags": "memory counts",
+      "refs": "src/service.rs",
+      "body": "gc prints expired removed superseded removed and durable rows counts after every purge"
+    },
+    {
+      "key": "distractor-journal-rotation",
+      "kind": "fact",
+      "tags": "journal rotation",
+      "refs": "src/journal.rs",
+      "body": "the usage journal rotates past five megabytes into a dot one generation"
+    },
+    {
+      "key": "distractor-fts-unicode61",
+      "kind": "fact",
+      "tags": "fts tokenizer",
+      "refs": "schema_memory.sql",
+      "body": "the fts virtual table uses the unicode61 tokenizer because stored text is pre tokenized"
+    },
+    {
+      "key": "distractor-schema-v9-index",
+      "kind": "fact",
+      "tags": "index schema",
+      "refs": "src/extract.rs",
+      "body": "the index schema version nine drops micro metrics and the binary exits five on any mismatch"
+    },
+    {
+      "key": "distractor-walk-ignore",
+      "kind": "fact",
+      "tags": "walk ignore",
+      "refs": "src/walk.rs",
+      "body": "file enumeration honors git visibility and ignore rules with a one megabyte cap per file"
+    },
+    {
+      "key": "distractor-exit-codes",
+      "kind": "fact",
+      "tags": "exit codes",
+      "refs": "src/error.rs",
+      "body": "stable stderr prefixes map to exit codes zero through seven across every subcommand"
+    },
+    {
+      "key": "distractor-bench-latency",
+      "kind": "fact",
+      "tags": "benchmark latency",
+      "refs": "tests/scripts/mem_recall.py",
+      "body": "the query benchmark measures spawn to exit wall clock over a thousand note fixture"
+    }
+  ],
+  "queries": [
+    { "terms": "confidence tiers resolver", "expect": ["resolver-confidence-tiers"] },
+    { "terms": "schema skew migrate", "expect": ["schema-skew-exit5"] },
+    { "terms": "carry forward fast path", "expect": ["incremental-fast-path"] },
+    { "terms": "callee empty reason", "expect": ["callee-empty-reason"] },
+    { "terms": "fsyncs renames concurrent", "expect": ["atomic-replacement"] },
+    { "terms": "writes allowlist doctor journal", "expect": ["write-confinement"] },
+    { "terms": "frames megabyte cap", "expect": ["mcp-stdio-frame"] },
+    { "terms": "fnv1a64 normalization bytes", "expect": ["fnv-content-hash"] },
+    { "terms": "usage journal scalars bodies", "expect": ["journal-privacy"] },
+    { "terms": "derived rebuild authoritative", "expect": ["fts-purity-invariant"] },
+    { "terms": "busy timeout serialize writers", "expect": ["busy-timeout-writers"] },
+    { "terms": "session expire ttl default", "expect": ["session-ttl-lane"] },
+    { "terms": "supersedes target rollback transaction", "expect": ["supersedes-cross-key"] },
+    { "terms": "retention superseded thirty days clock", "expect": ["gc-retention-clock"] },
+    { "terms": "tokenizer camelcase snake boundaries", "expect": ["token-shared-normalizer"] },
+    { "terms": "fusion weights recency lexical", "expect": ["minmax-fusion-weights"] },
+    { "terms": "export jsonl stdout restore", "expect": ["export-jsonl-restore"] },
+    { "terms": "invalidate keeps primary memory", "expect": ["doctor-invalidate-keeps-memory"] },
+    { "terms": "caveat candidates proof trust", "expect": ["caveat-trust-contract"] },
+    { "terms": "manifest required structure opens", "expect": ["user-version-manifest"] }
+  ]
+}

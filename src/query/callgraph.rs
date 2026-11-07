@@ -1,314 +1,6 @@
-//! Call-graph queries: test impact, imports, callers, callees, path, context.
+//! Call-graph queries: imports, callers, callees, path, context.
 
 use super::*;
-
-/// Bounded top-test collector: `seen` counts every distinct reachable test
-/// symbol, while `heap` keeps only the first `limit` rows in output order.
-struct TestTop {
-    limit: usize,
-    seen: HashSet<i64>,
-    heap: BinaryHeap<(String, i64, String)>,
-}
-
-impl TestTop {
-    fn new(limit: usize) -> Self {
-        Self {
-            limit,
-            seen: HashSet::new(),
-            heap: BinaryHeap::new(),
-        }
-    }
-
-    fn insert(&mut self, id: i64, path: String, line: i64, qualname: String) {
-        if !self.seen.insert(id) {
-            return;
-        }
-        let record = (path, line, qualname);
-        if self.heap.len() < self.limit {
-            self.heap.push(record);
-        } else if self.heap.peek().is_some_and(|max| record < *max) {
-            self.heap.pop();
-            self.heap.push(record);
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.seen.is_empty()
-    }
-
-    fn len(&self) -> usize {
-        self.seen.len()
-    }
-
-    fn finish(mut self) -> (usize, Vec<(String, i64, String)>) {
-        let total = self.seen.len();
-        let mut records = std::mem::take(&mut self.heap).into_vec();
-        records.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
-        (total, records)
-    }
-}
-
-fn forward_test_top(
-    conn: &Connection,
-    targets: &HashSet<i64>,
-    depth: usize,
-    limit: usize,
-) -> Result<TestTop> {
-    let mut tests = TestTop::new(limit);
-    let mut stmt = conn.prepare(
-        "SELECT id, name, kind, file_path, line_start, qualname FROM symbols
-         WHERE kind IN ('function', 'method')
-           AND is_test = 1
-         ORDER BY file_path, line_start, qualname",
-    )?;
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, i64>(4)?,
-            r.get::<_, String>(5)?,
-        ))
-    })?;
-    for row in rows {
-        let (id, _name, _kind, path, line, qualname) = row?;
-        if targets.contains(&id) {
-            continue;
-        }
-        if reaches_target(conn, id, targets, depth)? {
-            tests.insert(id, path, line, qualname);
-        }
-    }
-    Ok(tests)
-}
-
-fn reaches_target(
-    conn: &Connection,
-    start: i64,
-    targets: &HashSet<i64>,
-    depth: usize,
-) -> Result<bool> {
-    let mut visited = HashSet::from([start]);
-    let mut frontier = vec![start];
-    for _ in 0..depth {
-        let mut next = Vec::new();
-        for chunk in frontier.chunks(500) {
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
-                "SELECT DISTINCT dst_id FROM edges
-                 WHERE src_id IN ({placeholders}) AND kind = 'calls' AND dst_id IS NOT NULL"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<rusqlite::types::Value> = chunk
-                .iter()
-                .map(|i| rusqlite::types::Value::from(*i))
-                .collect();
-            for dst in stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-                r.get::<_, i64>(0)
-            })? {
-                let dst = dst?;
-                if targets.contains(&dst) {
-                    return Ok(true);
-                }
-                if visited.insert(dst) {
-                    next.push(dst);
-                }
-            }
-        }
-        if next.is_empty() {
-            break;
-        }
-        frontier = next;
-    }
-    Ok(false)
-}
-
-pub fn test_impact(
-    conn: &Connection,
-    root: &Path,
-    target: &str,
-    depth: usize,
-    limit: usize,
-) -> Result<QueryOutput> {
-    let limit = clamp_limit(limit)?;
-    let depth = depth.clamp(1, 10);
-    let target = target.trim_start_matches("./").trim_end_matches('/');
-    let (seed_ids, seed_callables) = test_seed(conn, target)?;
-    let (tests, truncated) = collect_tests(conn, seed_ids, seed_callables, depth, limit)?;
-    if tests.is_empty() {
-        return Err(if truncated {
-            AwError::NoResultsCaveated {
-                caveat: TESTS_CAVEAT,
-                detail: format!(
-                    "no test candidate within depth {depth}; a longer route may exist (static call edges only)"
-                ),
-            }
-        } else {
-            AwError::NoResultsCaveated {
-                caveat: TESTS_CAVEAT,
-                detail: "0 test candidates found (static call edges only)".to_string(),
-            }
-        });
-    }
-    let (total, rows) = tests.finish();
-    let pointers: Vec<Pointer> = rows
-        .into_iter()
-        .map(|(file, line, qualname)| Pointer {
-            file,
-            line,
-            tag: "",
-            detail: qualname,
-        })
-        .collect();
-    let mut out = collect_output(
-        conn,
-        root,
-        pointers.into_iter().map(Ok),
-        limit,
-        "0 test candidates found (static call edges only)",
-        Some(total),
-    )?;
-    let mut header = TESTS_CAVEAT.to_string();
-    if let Some(stale) = out.header.take() {
-        header.push('\n');
-        header.push_str(&stale);
-    }
-    if truncated {
-        header.push_str(&format!(
-            "\naw: depth cap {depth} reached; deeper tests may exist"
-        ));
-    }
-    out.header = Some(header);
-    Ok(out)
-}
-
-/// Resolve a file path or symbol name to seed ids and the callable-seed count
-/// used by the bounded forward test collector.
-fn test_seed(conn: &Connection, target: &str) -> Result<(Vec<i64>, usize)> {
-    let file_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM files WHERE path = ?1",
-            [target],
-            |r| r.get(0),
-        )
-        .map(|c: i64| c > 0)?;
-    if file_exists {
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.kind FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.path = ?1",
-        )?;
-        let rows = stmt.query_map([target], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?;
-        let mut ids = Vec::new();
-        let mut callables = 0;
-        for row in rows {
-            let (id, kind) = row?;
-            ids.push(id);
-            callables += usize::from(is_callable_kind(&kind));
-        }
-        return Ok((ids, callables));
-    }
-    let (ids, cands) = target_ids(conn, target)?;
-    if ids.is_empty() {
-        return Err(AwError::NoResults(format!(
-            "symbol '{target}' not in index"
-        )));
-    }
-    if cands.len() > 1 {
-        return Err(AwError::Ambiguous {
-            name: target.to_string(),
-            total: ids.len(),
-            candidates: cands,
-            role: None,
-        });
-    }
-    let callables = ids.iter().try_fold(0, |acc, id| {
-        let kind: String =
-            conn.query_row("SELECT kind FROM symbols WHERE id = ?1", [id], |r| r.get(0))?;
-        Ok::<_, AwError>(acc + usize::from(is_callable_kind(&kind)))
-    })?;
-    Ok((ids, callables))
-}
-
-/// Bounded test closure: the direct forward pass when the test universe fits,
-/// otherwise a per-level reverse walk capped by depth and the test/limit count.
-fn collect_tests(
-    conn: &Connection,
-    seed_ids: Vec<i64>,
-    seed_callables: usize,
-    depth: usize,
-    limit: usize,
-) -> Result<(TestTop, bool)> {
-    let seed_set: HashSet<i64> = seed_ids.iter().copied().collect();
-    if !has_test_candidates(conn)? {
-        return Err(AwError::NoResultsCaveated {
-            caveat: TESTS_CAVEAT,
-            detail: "0 test candidates found (static call edges only)".to_string(),
-        });
-    }
-    let total_callables = total_callables(conn)?;
-    let total_tests = total_test_symbols(conn)?;
-    let mut truncated = false;
-    if total_tests <= FORWARD_TEST_LIMIT {
-        return Ok((forward_test_top(conn, &seed_set, depth, limit)?, false));
-    }
-    let mut tests = TestTop::new(limit);
-    let mut visited: HashSet<i64> = seed_set.clone();
-    let mut visited_callables = seed_callables;
-    let mut current = seed_ids;
-    for d in 1..=depth {
-        if current.is_empty() || visited_callables >= total_callables || tests.len() >= total_tests
-        {
-            break;
-        }
-        let mut next = Vec::new();
-        for chunk in current.chunks(500) {
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
-                "SELECT e.src_id, s.name, s.kind, s.file_path, s.line_start, s.qualname, s.is_test
-                 FROM edges e JOIN symbols s ON s.id = e.src_id
-                 WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'"
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let params: Vec<rusqlite::types::Value> = chunk
-                .iter()
-                .map(|i| rusqlite::types::Value::from(*i))
-                .collect();
-            let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, i64>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, i64>(6)?,
-                ))
-            })?;
-            for row in rows {
-                let (id, _name, kind, path, line, qualname, is_test) = row?;
-                if !seed_set.contains(&id)
-                    && matches!(kind.as_str(), "function" | "method")
-                    && is_test != 0
-                {
-                    tests.insert(id, path, line, qualname);
-                }
-                if visited.insert(id) {
-                    if is_callable_kind(&kind) {
-                        visited_callables += 1;
-                    }
-                    next.push(id);
-                }
-            }
-        }
-        if d == depth && !next.is_empty() {
-            truncated = true;
-        }
-        current = next;
-    }
-    Ok((tests, truncated))
-}
 
 pub fn imports(conn: &Connection, root: &Path, file: &str, limit: usize) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
@@ -758,6 +450,61 @@ pub fn implementers(
     Ok(out)
 }
 
+/// Explain an empty `callees` result instead of reporting a resolver gap as
+/// absence. Unresolved call sites are attributed to the queried symbol by
+/// its file and line range; names are capped so the detail stays one line.
+fn callee_empty_reason(conn: &Connection, ids: &[i64]) -> Result<String> {
+    const SHOWN: usize = 5;
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut file: Option<String> = None;
+    for id in ids {
+        if file.is_none() {
+            file = conn
+                .query_row(
+                    "SELECT f.path FROM symbols s JOIN files f ON f.id = s.file_id WHERE s.id = ?1",
+                    [*id],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok();
+        }
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT u.dst_name
+               FROM unresolved_calls u
+               JOIN symbols s ON s.file_id = u.file_id
+              WHERE s.id = ?1 AND u.kind = 'call'
+                AND u.site_line >= s.line_start
+                AND u.site_line <= s.line_end
+              ORDER BY u.dst_name",
+        )?;
+        let rows = stmt.query_map([*id], |r| r.get::<_, String>(0))?;
+        for row in rows {
+            names.insert(row?);
+        }
+    }
+    if names.is_empty() {
+        return Ok("0 callees found".to_string());
+    }
+    let shown = names
+        .iter()
+        .take(SHOWN)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = if names.len() > SHOWN {
+        format!(" (+{} more)", names.len() - SHOWN)
+    } else {
+        String::new()
+    };
+    let hint = match file {
+        Some(path) => format!(" — run aw unresolved --names --path {path}"),
+        None => " — run aw unresolved --names".to_string(),
+    };
+    Ok(format!(
+        "0 callees found (resolved static call edges only); {} unresolved call site(s) inside the queried symbol: {shown}{more}{hint}",
+        names.len()
+    ))
+}
+
 pub fn callees(
     conn: &Connection,
     root: &Path,
@@ -806,7 +553,12 @@ pub fn callees(
                 detail,
             })
         });
-        let out = collect_output(conn, root, rows, limit, "0 callees found", Some(total))?;
+        let empty_reason = if total == 0 {
+            callee_empty_reason(conn, &ids)?
+        } else {
+            "0 callees found".to_string()
+        };
+        let out = collect_output(conn, root, rows, limit, &empty_reason, Some(total))?;
         return Ok(with_explain_header(out, explain));
     }
     // depth > 1: recursive closure over call edges from the reached set.
@@ -869,7 +621,12 @@ pub fn callees(
             detail,
         })
     })?;
-    let out = collect_output(conn, root, rows, limit, "0 callees found", Some(total))?;
+    let empty_reason = if total == 0 {
+        callee_empty_reason(conn, &ids)?
+    } else {
+        "0 callees found".to_string()
+    };
+    let out = collect_output(conn, root, rows, limit, &empty_reason, Some(total))?;
     Ok(with_explain_header(out, explain))
 }
 

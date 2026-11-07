@@ -92,17 +92,6 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Which tests reach this symbol or file (static call-edge candidates)
-    Tests {
-        /// Symbol name/qualname or repo-relative file path
-        name: String,
-        /// Transitive depth (default 10; max 10)
-        #[arg(long, default_value_t = 10)]
-        depth: usize,
-        /// Maximum results shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
-        limit: usize,
-    },
     /// Shortest call path between two symbols via resolved call edges.
     /// Resolved static edges only — dynamic dispatch may hide paths.
     /// A reverse question is the same query with swapped arguments.
@@ -177,16 +166,10 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Per-symbol complexity ranking (cyclomatic, branches, nesting, effective LOC)
+    /// Per-symbol complexity ranking (effective LOC)
     Complexity {
-        #[arg(long, default_value_t = 1)]
-        min_cyc: usize,
         #[arg(long, default_value_t = 0)]
         min_loc: usize,
-        #[arg(long, default_value_t = 0)]
-        min_branches: usize,
-        #[arg(long, default_value_t = 0)]
-        min_nest: usize,
         /// Restrict to a repo-relative file or directory prefix
         #[arg(long)]
         path: Option<String>,
@@ -217,43 +200,17 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Duplicate-block candidates: normalized 5-line-window shingle matches
-    Clones {
-        /// Minimum duplicated-block lines per side (floor: the 5-line build window)
-        #[arg(long, default_value_t = 5)]
-        min_lines: usize,
-        /// Restrict to pairs where both regions are under this prefix
-        #[arg(long)]
-        path: Option<String>,
-        /// Maximum pair lines shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
-        limit: usize,
-    },
     /// Index totals: files, symbols, edges, parse errors, sizes
     Stats {
         /// Restrict counts to a repo-relative file or directory prefix
         #[arg(long)]
         path: Option<String>,
     },
-    /// Pain-ranking of files: cyclomatic + LOC + churn-90d + fix-density
-    Hotspots {
-        /// How many files to show (default 10, max 100)
-        #[arg(long, default_value_t = 10)]
-        limit: usize,
-        /// Restrict to a repo-relative file or directory prefix
-        #[arg(long)]
-        path: Option<String>,
-    },
-    /// Four-section architecture report (overview, map, hotspots, fan-in)
-    Report {
-        /// Restrict sections 2-4 to a repo-relative file or directory prefix
-        #[arg(long)]
-        path: Option<String>,
-    },
     /// Inspect index health (integrity, versions, staleness, orphans)
     Doctor {
-        /// Delete the entire .aw directory and all its contents (index,
-        /// journals, and any other files stored there)
+        /// Reset the derived .aw state: index, journals, locks, and orphan
+        /// files. The project-memory store (.aw/memory.db) is primary data
+        /// and is kept — export it with aw mem export if you want a copy.
         #[arg(long)]
         invalidate: bool,
     },
@@ -264,10 +221,90 @@ pub enum Cmd {
         #[arg(long)]
         quality: bool,
     },
+    /// Project memory: agent-authored notes persisted in .aw/memory.db
+    /// (write/query/get/delete/export/gc). Notes are candidates, never proof.
+    Mem {
+        #[command(subcommand)]
+        action: MemAction,
+    },
     /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0)
     Mcp {
         /// Expose every tool instead of the core navigation set
         #[arg(long)]
         all_tools: bool,
     },
+}
+
+#[derive(Subcommand)]
+pub enum MemAction {
+    /// Persist a note (agent-authored prose; identical content under the same
+    /// key is a no-op, different content opens a new revision)
+    Write {
+        /// Stable identity for the note (<= 200 chars, no control characters)
+        key: String,
+        /// Note body, agent-authored prose (<= 8192 bytes)
+        #[arg(long)]
+        body: String,
+        /// One of: decision, gotcha, fact, task
+        #[arg(long)]
+        kind: String,
+        /// Whitespace-separated lowercase tags (<= 16 x 32 chars)
+        #[arg(long)]
+        tags: Option<String>,
+        /// Whitespace-separated qualnames / repo paths the note is about (<= 16 x 256 chars)
+        #[arg(long)]
+        refs: Option<String>,
+        /// Note scope: durable (default, never expires) or session (expires
+        /// after the TTL)
+        #[arg(long, default_value = "durable")]
+        scope: String,
+        /// Session lifetime in seconds (only with --scope session; default
+        /// 604800 = 7 days)
+        #[arg(long)]
+        ttl: Option<u64>,
+        /// Key whose current note this one replaces (cross-key supersession;
+        /// unknown target exits 1, same key exits 2)
+        #[arg(long)]
+        supersedes: Option<String>,
+    },
+    /// Rank current notes for the terms (bm25 + ref-token overlap + recency)
+    Query {
+        /// Space-separated terms (mutually exclusive with --all)
+        terms: Vec<String>,
+        /// List current notes by recency instead of ranking
+        #[arg(long)]
+        all: bool,
+        /// Restrict to one kind: decision, gotcha, fact, task
+        #[arg(long)]
+        kind: Option<String>,
+        /// Restrict to one scope: durable or session
+        #[arg(long)]
+        scope: Option<String>,
+        /// Maximum results shown (default 10, max 100)
+        #[arg(long, default_value_t = crate::memory::DEFAULT_MEM_LIMIT)]
+        limit: usize,
+        /// With --all, also list superseded revisions (tagged [superseded])
+        #[arg(long)]
+        include_superseded: bool,
+    },
+    /// Show the current note for one exact key plus its revision count
+    Get {
+        /// The note's stable identity
+        key: String,
+    },
+    /// Hard-delete every revision of one key (its FTS rows go with it)
+    Delete {
+        /// The note's stable identity
+        key: String,
+    },
+    /// Write current notes as JSONL to stdout (restore = mem write replay);
+    /// the caveat goes to stderr so restore pipelines parse stdout directly
+    Export {
+        /// Take the N most recent notes instead of all of them
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Reclaim disk: purge expired session notes and superseded revisions
+    /// older than the 30-day retention clock, then report counts
+    Gc,
 }

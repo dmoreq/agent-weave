@@ -30,7 +30,8 @@ The [public pointer benchmark](../bench/README.md) is a small regression corpus 
 | [Agent skills](../skills/README.md) | Repository-provided skill and installation scope |
 | [Contributing](../CONTRIBUTING.md) | Development setup, contribution rules, and review requirements |
 | [Technical specification](designs/2026-10-31_agent-weave-rust-code-index.md) | Technical contract and dated amendments; use amendments when earlier descriptions conflict |
-| [Graft-learning decisions](designs/2026-11-05_graft-learning-decisions.md) | Proposed annotation, hybrid-search, and packaging options; not approved |
+| [Memory retrieval design](designs/2026-11-05_agent-weave-memory-retrieval.md) | Project-memory store (`aw mem`): design, schema, resolver, rollout phases |
+| [Graft-learning decisions](designs/2026-11-05_graft-learning-decisions.md) | External-tool options: B1 superseded by the memory design; B2/B3 remain proposals |
 | [Changelog](../CHANGELOG.md) | Version history and user-visible changes |
 | [Security](../SECURITY.md) | Safety boundaries and vulnerability reporting |
 | [Code of conduct](../CODE_OF_CONDUCT.md) | Participation and review standards |

@@ -33,12 +33,12 @@ claim that a particular run passed.
 
 | Area | Files |
 |---|---|
-| Commands and output errors | `src/cli.rs`, `src/main.rs`, `src/error.rs` |
+| Commands and output errors | `src/cli.rs`, `src/service.rs`, `src/main.rs`, `src/error.rs` |
 | File discovery, parsing, and extraction | `src/walk.rs`, `src/parse.rs`, `src/extract.rs`, `src/extract/` |
 | Index construction and storage | `src/build.rs`, `src/db.rs` |
-| Queries and analysis | `src/query.rs`, `src/query/`, `src/insights.rs`, `src/clones.rs` |
+| Queries and analysis | `src/query.rs`, `src/query/`, `src/insights.rs` |
 | Diagnostics and usage journal | `src/doctor.rs`, `src/journal.rs` |
-| MCP integration | `src/mcp.rs` |
+| MCP integration | `src/mcp.rs` (schemas from `src/service.rs`) |
 | Behavior fixtures and safety checks | `tests/fixtures.rs`, `tests/scripts/` |
 
 ## Make and verify a change

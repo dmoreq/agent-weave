@@ -1,14 +1,16 @@
 //! Usage journal: one JSONL line per journaled invocation appended to
 //! `.aw/usage.log`. Best-effort by contract: a failed journal write is
 //! silently ignored and can never alter a command's output or exit code.
-//! Zero dependencies — the JSON line is hand-serialized; the summary reader
-//! extracts only the fixed keys we write.
+//! The line is serialized by serde_json (the MCP boundary dependency); the
+//! summary reader extracts only the fixed keys we write.
 
 use std::cell::RefCell;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
 
 /// Rotate `usage.log` to `usage.log.1` past this size (one prior generation).
 pub(crate) const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
@@ -24,12 +26,19 @@ fn env_tag(key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Session attribution for memory rows (`memories.session`): the same
+/// sanitized AW_SESSION tag the journal line carries. Public because the
+/// memory write path stamps it at write time.
+pub fn session_tag() -> String {
+    env_tag("AW_SESSION")
+}
+
 /// Journal opt-out contract: env `AW_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
 struct Pending {
     surface: &'static str,
     tool: String,
-    args: String, // pre-serialized JSON object body
+    args: serde_json::Map<String, serde_json::Value>,
     result_count: usize,
     shown: usize,
     total: usize,
@@ -56,16 +65,15 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
     if DISABLED.with(|d| d.get()) || std::env::var("AW_NO_JOURNAL").as_deref() == Ok("1") {
         return;
     }
-    let body = args
+    let args: serde_json::Map<String, serde_json::Value> = args
         .iter()
-        .map(|(k, v)| format!("\"{}\":\"{}\"", k, json_escape(v)))
-        .collect::<Vec<_>>()
-        .join(",");
+        .map(|(k, v)| ((*k).to_string(), serde_json::Value::String(v.clone())))
+        .collect();
     PENDING.with(|p| {
         *p.borrow_mut() = Some(Pending {
             surface,
             tool: tool.to_string(),
-            args: format!("{{{body}}}"),
+            args,
             result_count: 0,
             shown: 0,
             total: 0,
@@ -74,21 +82,6 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
             session: env_tag("AW_SESSION"),
             arm: env_tag("AW_ARM"),
         });
-    });
-}
-
-/// Replace the armed argument object when the argument set depends on
-/// parsed input (resolve count). No-op when the journal is not armed.
-pub fn set_args(args: &[(&'static str, String)]) {
-    let body = args
-        .iter()
-        .map(|(k, v)| format!("\"{}\":\"{}\"", k, json_escape(v)))
-        .collect::<Vec<_>>()
-        .join(",");
-    PENDING.with(|p| {
-        if let Some(pending) = p.borrow_mut().as_mut() {
-            pending.args = format!("{{{body}}}");
-        }
     });
 }
 
@@ -127,34 +120,26 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let line = format!(
-        "{{\"ts\":{ts},\"surface\":\"{}\",\"tool\":\"{}\",\"args\":{},\"result_count\":{},\"shown\":{},\"total\":{},\"ambiguous\":{},\"exit_code\":{exit_code},\"latency_us\":{latency_us},\"stale\":{},\"aw_version\":\"{}\",\"session\":\"{}\",\"arm\":\"{}\"}}\n",
-        pending.surface,
-        pending.tool,
-        pending.args,
-        pending.result_count,
-        pending.shown,
-        pending.total,
-        pending.ambiguous,
-        pending.stale,
-        env!("CARGO_PKG_VERSION"),
-        json_escape(&pending.session),
-        json_escape(&pending.arm),
-    );
-    append_line(&usage_log_path(root), &line);
+    let line = serde_json::json!({
+        "ts": ts,
+        "surface": pending.surface,
+        "tool": pending.tool,
+        "args": Value::Object(pending.args),
+        "result_count": pending.result_count,
+        "shown": pending.shown,
+        "total": pending.total,
+        "ambiguous": pending.ambiguous,
+        "exit_code": exit_code,
+        "latency_us": latency_us,
+        "stale": pending.stale,
+        "aw_version": env!("CARGO_PKG_VERSION"),
+        "session": pending.session,
+        "arm": pending.arm,
+    });
+    append_line(&usage_log_path(root), &format!("{line}\n"));
 }
 
 fn append_line(path: &Path, line: &str) {
-    if is_symlink(path) || path.parent().is_some_and(is_symlink) {
-        return;
-    }
-    // Reject FIFOs/devices and hardlinks before any open: append must never
-    // block or modify an external inode through a link.
-    if let Ok(meta) = fs::symlink_metadata(path) {
-        if !meta.is_file() || has_multiple_links(&meta) {
-            return;
-        }
-    }
     rotate_if_needed(path, ROTATE_BYTES);
     // Whether `.aw` exists before this append: the journal seeds the gitignore
     // marker only when IT creates the directory. A pre-existing `.aw` is owned
@@ -165,17 +150,9 @@ fn append_line(path: &Path, line: &str) {
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    let mut file = match fs::symlink_metadata(path) {
-        Ok(meta) if !meta.is_file() || has_multiple_links(&meta) => return,
-        Ok(_) => match OpenOptions::new().append(true).open(path) {
-            Ok(file) => file,
-            Err(_) => return,
-        },
+    let mut file = match OpenOptions::new().append(true).open(path) {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // The journal self-created `.aw` (create_dir_all above): seed the
-            // tool-owned gitignore marker so the directory never leaks into
-            // `git status`. Best-effort — a non-git repo or unreadable marker
-            // must not fail the journal write.
             if aw_created_here {
                 if let Some(aw) = path.parent() {
                     if let Some(root) = aw.parent() {
@@ -190,34 +167,7 @@ fn append_line(path: &Path, line: &str) {
         }
         Err(_) => return,
     };
-    // Re-check after open: a path swapped to a symlink, FIFO, or hardlink
-    // must not receive the append through the opened target.
-    if let Ok(meta) = file.metadata() {
-        if !meta.is_file() || has_multiple_links(&meta) {
-            return;
-        }
-    }
-    if is_symlink(path) {
-        return;
-    }
     let _ = file.write_all(line.as_bytes());
-}
-
-fn is_symlink(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .map(|meta| meta.file_type().is_symlink())
-        .unwrap_or(false)
-}
-
-#[cfg(unix)]
-fn has_multiple_links(meta: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    meta.nlink() > 1
-}
-
-#[cfg(not(unix))]
-fn has_multiple_links(_: &fs::Metadata) -> bool {
-    false
 }
 
 /// Bounded reader for one journal generation: reject non-regular files and
@@ -237,9 +187,6 @@ fn read_log_bounded(path: &Path) -> Option<String> {
 }
 
 fn rotate_if_needed(path: &Path, max: u64) {
-    if is_symlink(path) || path.parent().is_some_and(is_symlink) {
-        return;
-    }
     let oversized = fs::metadata(path).map(|m| m.len() > max).unwrap_or(false);
     if !oversized {
         return;
@@ -247,23 +194,6 @@ fn rotate_if_needed(path: &Path, max: u64) {
     let mut rotated = path.as_os_str().to_owned();
     rotated.push(".1");
     let _ = fs::rename(path, PathBuf::from(rotated));
-}
-
-/// Minimal JSON string escaping for hand-serialized values (symbols, paths).
-fn json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -420,15 +350,6 @@ pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn json_escapes_quotes_backslashes_and_controls() {
-        assert_eq!(json_escape("a\"b"), "a\\\"b");
-        assert_eq!(json_escape("a\\b"), "a\\\\b");
-        assert_eq!(json_escape("a\nb"), "a\\nb");
-        assert_eq!(json_escape("a\u{1}b"), "a\\u0001b");
-        assert_eq!(json_escape("normal.text"), "normal.text");
-    }
 
     #[test]
     fn rotate_moves_log_aside_past_threshold() {

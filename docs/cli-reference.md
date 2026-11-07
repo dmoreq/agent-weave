@@ -8,10 +8,11 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 |---|---|
 | Create or refresh an index | `build` |
 | Inspect a definition and its neighbors | `context`, `callers`, `callees`, `path` |
-| Inspect dependencies | `impact`, `imports`, `implementers`, `tests` |
+| Inspect dependencies | `impact`, `imports`, `implementers` |
 | Find definitions and files | `search`, `symbols`, `resolve`, `files` |
-| Investigate cleanup candidates | `dead`, `clones`, `complexity` |
-| Read repository summaries | `stats`, `hotspots`, `report` |
+| Investigate cleanup candidates | `dead`, `complexity` |
+| Read repository summaries | `stats` |
+| Persist and retrieve project notes | `mem write`, `mem query`, `mem get`, `mem delete`, `mem export`, `mem gc` |
 | Diagnose or remove local data | `doctor` |
 | Inspect recorded usage | `usage` |
 | Connect an MCP client | `mcp` |
@@ -20,7 +21,7 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 
 A successful query is ground truth for the rows it returns. Re-run or read
 source when output is capped, ambiguous, stale, or empty; those are coverage
-limits, not routine re-verification. Treat `tests`, `dead`, and `unresolved`
+limits, not routine re-verification. Treat `dead` and `unresolved`
 as candidates.
 
 ## Invocation and global options
@@ -48,7 +49,6 @@ Omit `--path` for the whole index. Use a nonempty repository-relative scope with
 
 - Unless overridden below, `--limit <N>` defaults to **50** and clamps values above **10000** to **10000**. Zero is a usage error.
 - `context --limit` defaults to **10** and clamps at **50**, independently for callers and callees.
-- `hotspots --limit` defaults to **10** and clamps at **100**. Zero is a usage error.
 - `--depth <N>` clamps to **1–10**, including clamping zero to one. Defaults differ by command.
 - Boolean switches default to off. Optional filters default to absent.
 - Generated-file tags use recognized suffixes or markers in the first five lines, not a general generated-code classifier. They remain in inventories and summaries but do not have a query switch.
@@ -78,7 +78,7 @@ aw doctor [--invalidate]
 
 Without options, report database integrity, versions, parse errors, changed indexed files, size, and leftover build files. This report needs an index.
 
-`--invalidate` defaults to off. When set, remove the **entire `.aw/` directory**, including journals and any other files there; no index is required. Source files and the executable remain unchanged.
+`--invalidate` defaults to off. When set, reset the derived `.aw/` state: the index, journals, locks, and orphan files are removed; no index is required. The project-memory store `.aw/memory.db` is primary data and is **kept** (with its crash-recovery sidecars); export it with `aw mem export` first if you want a copy. When no memory store exists the whole directory is removed, as before. Source files and the executable remain unchanged.
 
 ## Inspect definitions and calls
 
@@ -155,16 +155,6 @@ aw implementers <NAME> [--limit <N>]
 
 Find direct resolved inbound inheritance or implementation relationships. Dynamic inheritance and cross-file Rust implementation blocks can be missing. `--limit` uses the shared default and cap. Does not prove: no other implementation exists; dynamic inheritance and cross-file Rust blocks can be missing.
 
-### `tests <NAME_OR_FILE>`
-
-```text
-aw tests <NAME_OR_FILE> [--depth <N>] [--limit <N>]
-```
-
-Find statically reachable test candidates for a symbol or exact indexed file. `--depth` defaults to 10; `--limit` uses the shared default and cap.
-
-Candidates carry the index's test classification: test paths (`tests/`, `test/`, `__tests__/`), test-shaped names (`test_*`, `test` + uppercase), test-shaped files (`test_*.py`, `*_test.py`, `*_test.go`, `*_test.dart`, `*.test.*`, `*.spec.*`), Rust `#[test]`/`#[cfg(test)]` items, and TS `describe`/`it` scopes. Fixtures, generated tests, and indirect tests can be missed. This command does not run tests. Does not prove: a listed test validates the target, or that no other test reaches it.
-
 ## Find symbols and files
 
 ### `search <TERMS>`
@@ -187,7 +177,7 @@ camelCase and snake_case split into tokens. Normal search uses prefix terms and 
 aw symbols <FILE_OR_DIRECTORY> [--outline] [--metrics] [--limit <N>]
 ```
 
-List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds per-symbol syntax metrics. Both default to off and can be combined. `--limit` uses the shared default and cap. Accept `.` or `./` as the repository root.
+List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds the per-symbol effective line count. Both default to off and can be combined. `--limit` uses the shared default and cap. Accept `.` or `./` as the repository root.
 
 ### `resolve --stdin`
 
@@ -238,34 +228,132 @@ Summary counts are build-time data with no freshness check. Site mode checks dis
 ### `complexity`
 
 ```text
-aw complexity [--min-cyc <N>] [--min-loc <N>] [--min-branches <N>]
-    [--min-nest <N>] [--path <PATH>] [--limit <N>]
+aw complexity [--min-loc <N>] [--path <PATH>] [--limit <N>]
 ```
 
-Rank functions and methods by descending cyclomatic proxy, then effective lines of code. All thresholds must hold.
+Rank functions and methods by descending effective lines of code.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--min-cyc <N>` | `1` | Minimum callable cyclomatic proxy |
 | `--min-loc <N>` | `0` | Minimum effective lines of code |
-| `--min-branches <N>` | `0` | Minimum branch-node count |
-| `--min-nest <N>` | `0` | Minimum nesting metric |
 | `--path <PATH>` | None | Restrict file or directory scope |
 | `--limit <N>` | `50` | Maximum displayed callables, cap 10000 |
 
-Rows label metrics `cyc`, `branches`, `nest`, and `loc`. These syntax-tree proxies are not cognitive complexity and are not comparable to the file-level metric used by hotspots. Effective LOC excludes blank lines, comment-only lines, and Python docstrings.
+Rows label the `loc` metric. It is a static line count, not cognitive complexity. Effective LOC excludes blank lines, comment-only lines, and Python docstrings.
 
-### `clones`
+## Project memory
+
+aw keeps agent-authored project notes — decisions, gotchas, facts, task
+wrap-ups — in `.aw/memory.db`, a separate SQLite store that survives builds,
+`doctor --invalidate`, and index schema skew. Notes are prose written by the
+calling agent or human; aw never originates one. Every mem command opens with
+the caveat `aw: memory — agent-authored notes, candidates only, never proof of
+current behavior` on stdout (for `mem export` it goes to stderr so stdout
+stays pure JSONL).
+
+### `mem write <KEY>`
 
 ```text
-aw clones [--min-lines <N>] [--path <PATH>] [--limit <N>]
+aw mem write <KEY> --body <TEXT> --kind <decision|gotcha|fact|task>
+    [--tags <TOKENS>] [--refs <NAMES>] [--scope durable] [--ttl <SECS>]
 ```
 
-Find duplicate-block candidates using normalized five-line windows. Normalization removes trailing whitespace and blank lines; it does not establish semantic equivalence.
+Persist one note under a stable identity (`<= 200` chars, no control
+characters). The body is agent-authored prose, hard-capped at 8192 bytes —
+never a verbatim source dump; source evidence stays in the repository.
 
-`--min-lines` defaults to 5 and clamps smaller values to 5. `--path` requires both regions under the selected scope and defaults to absent. `--limit` uses the shared default and cap and counts displayed pairs.
+| Option | Default | Meaning |
+|---|---|---|
+| `--body <TEXT>` | required | Note body (`<= 8192` bytes, must not be empty) |
+| `--kind <KIND>` | required | One of `decision`, `gotcha`, `fact`, `task` |
+| `--tags <TOKENS>` | absent | Whitespace-separated lowercase tokens, at most 16 x 32 chars (stored as a sorted set) |
+| `--refs <NAMES>` | absent | Whitespace-separated qualnames / repo paths the note is about, at most 16 x 256 chars (stored as a sorted set) |
+| `--scope <SCOPE>` | `durable` | `durable` never expires; `session` expires after the TTL |
+| `--ttl <SECS>` | `604800` with `--scope session` | Session lifetime in seconds; only valid with `--scope session` (OQ2 default: 7 days) |
+| `--supersedes <KEY>` | absent | Mark the named key's current note as replaced by this one; unknown target exits 1, the same key exits 2 |
 
-Rows identify both inclusive source ranges and enclosing symbols when available. Pair generation retains at most 64 merged regions per window-hash group and 20000 candidate pairs; a warning indicates a lower-bound result when capped.
+Identical content under the same key (compared by an FNV-1a hash over kind,
+body, tags, refs, and scope after normalization) is a successful no-op naming
+the existing revision — agent retries and framework replays are safe, and a
+replayed `--supersedes` does not re-apply. Different content under the same
+key writes a new revision in one `BEGIN IMMEDIATE` transaction; the previous
+revision is marked superseded and stays out of reads but remains in the store
+until `mem gc` retention (30 days from supersession, not creation). A
+`--supersedes` target is marked superseded in the same transaction — an
+unknown target rolls the whole write back (exit 1). Concurrent writers
+serialize on a 5 s busy timeout or exit 4; a `UNIQUE(key, rev)` failure is
+treated as a defect (one retry, then exit 6).
+
+### `mem query [TERMS]`
+
+```text
+aw mem query <TERMS> [--kind <KIND>] [--scope <SCOPE>] [--limit <N>]
+aw mem query --all [--kind <KIND>] [--scope <SCOPE>] [--limit <N>]
+```
+
+Rank current notes for the terms: FTS5 BM25 over key/tags/body tokens plus
+ref/token-overlap plus recency decay, min-max fused with fixed weights
+(0.5/0.3/0.2) and deterministic tie-breaks (score, then created_at, then key,
+then revision). The same tokenizer splits camelCase/snake_case on both the
+stored text and the query, so `calleeEmptyReason` in a body matches the query
+`callee empty reason`. At most 256 FTS candidates are fused per query.
+`--all` (mutually exclusive with terms) lists current notes by recency;
+`--all --include-superseded` extends the listing with superseded revisions,
+each header tagged `[superseded]` (not valid with terms). `--limit` defaults
+to 10 and clamps to 1..100. Rows print
+`key rev kind scope created_at` followed by the indented body; a capped
+result ends with `showing N of M` on stdout and the cap notice on stderr.
+`--kind`/`--scope` are plain equality filters. A query without hits exits 1.
+
+### `mem get <KEY>`
+
+Print the current note for the exact key — the same row shape as `mem query`
+plus a final `revs: <N>` line with the key's total revision count. Unknown
+keys exit 1.
+
+### `mem delete <KEY>`
+
+Hard-delete every revision of the key and their search-index rows in one
+transaction, and print `deleted '<KEY>' revs=<N>`. Unknown keys exit 1 and
+nothing is created. There is no undo — `mem export` beforehand is the backup.
+
+### `mem export`
+
+```text
+aw mem export [--limit <N>]
+```
+
+Write current notes as one JSON object per line to stdout — key, rev, kind,
+scope, session, body, tags, refs, source, created_at, expires_at — so a
+restore preserves the TTL shape. stdout carries ONLY the JSONL; the caveat
+goes to stderr. Without `--limit` every current note is exported; with
+`--limit <N>` the N most recent by `created_at` (deterministic). The caller
+redirects the output to a file outside `.aw/` — aw writes only under `.aw/`.
+
+Restore = replay `aw mem write` per line into a fresh store (idempotent by
+content-hash dedup; session rows would re-derive `--ttl` as
+`expires_at - created_at`). Restore is content-exact, not a bit-exact
+replica: `created_at` and rev are re-stamped by the replay.
+
+### `mem gc`
+
+Reclaim disk in one transaction: expired session notes are deleted with their
+search-index rows, and superseded revisions whose supersession is older than
+the 30-day retention constant are purged (the clock is `superseded_at`, so a
+revision superseded yesterday but created 40 days ago survives). Prints
+`expired=<N> removed, superseded=<M> removed, durable=<K> rows`. Missing
+store exits 1; nothing is created.
+
+### Memory exit and data contracts
+
+Missing `.aw/memory.db` on a read path exits 1 with
+`aw: no-memory: no .aw/memory.db under <root> — write with aw mem write`. A
+corrupt store exits 3. A store newer than the binary, or one missing required
+structure, exits 5 with a message naming `aw mem export` as the recovery path
+— memory cannot be rebuilt from source, unlike the index, so an older
+structurally complete store still opens read-write. Every mem command
+journaled carries `body_len`, never the body text. Expired session notes are
+invisible to every read regardless of `gc`; the purge only reclaims disk.
 
 ## Read summaries
 
@@ -276,26 +364,6 @@ aw stats [--path <PATH>]
 ```
 
 Print build-time file, generated-file, symbol, edge-kind, parse-error, and unresolved-call counts, plus database size and versions. This is not a freshness check. `--path` defaults to absent and scopes every counter to one repo-relative file or directory prefix; a scoped line inserts `scope=<PATH>` after `aw stats:`. `db_bytes` and the version fields always describe the whole index. A scope with no indexed files exits 1.
-
-### `hotspots`
-
-```text
-aw hotspots [--limit <N>] [--path <PATH>]
-```
-
-Rank indexed files by the sum of normalized file-level decision counts, LOC, 90-day change counts, and 180-day fix-related commit counts. Each metric normalizes within the selected file set; scores from different scopes are not directly comparable.
-
-`--limit` defaults to 10, cap 100; `--path` defaults to absent. Git failures or absent history yield zero change and fix signals. Rows contain score, path, `loc`, `cyc`, `churn90`, and `fix180`; these are prioritization heuristics, not measured defect risk.
-
-### `report`
-
-```text
-aw report [--path <PATH>]
-```
-
-Print four sections: index overview, top packages by symbol count, five hotspots, and eight most-called symbols. There is no `--limit` option.
-
-`--path` defaults to absent and scopes the map, hotspots, and fan-in sections; the overview retains global totals and adds scoped counts. Freshness checking samples at most 5000 scoped indexed files.
 
 ## Journal and environment
 
@@ -313,7 +381,8 @@ Summarize invocation counts, errors, latency, empty/stale rates, and ambiguous-p
 
 | Path or environment variable | Purpose |
 |---|---|
-| `.aw/index.db` | Local SQLite index |
+| `.aw/index.db` | Local SQLite index (derived; `aw build` recreates it) |
+| `.aw/memory.db` | Project-memory store (primary data; agent-authored notes) |
 | `.aw/usage.log` | Invocation metadata: tool, arguments, outcome, latency, and result counts |
 | `AW_NO_JOURNAL=1` | Disable the journal; equivalent to `--no-journal` |
 | `AW_SESSION` | Optional journal attribution, trimmed and capped at 64 characters |
@@ -335,7 +404,7 @@ aw mcp [--all-tools]
 
 Serve newline-delimited JSON-RPC 2.0 over stdin/stdout until input closes. A client starts this process; aw does not install host configuration or a background service.
 
-By default the tool list is the eight core navigation tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols`. `--all-tools` defaults to off; when set, it exposes the full surface of 21 tools, including inventory, analysis, and usage operations.
+By default the tool list is the eight core navigation tools — `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, and `symbols` — plus the memory write/query loop `mem_write` and `mem_query`. `--all-tools` defaults to off; when set, it exposes the full surface of 23 tools, adding the inventory, analysis, and usage operations plus `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
 
 `doctor` is never exposed as a tool. Global root and journal controls apply. Frames are limited to 8 MiB. Do not send ordinary shell text or log messages into the protocol stream.
 
@@ -343,25 +412,25 @@ See [agent integration](agent-integration.md) for host setup and fallback guidan
 
 ## Interpret output and failures
 
-Locations use repository-relative paths and 1-based line numbers. Definition ranges and clone spans include both endpoints. Header caveats and summary rows are not source pointers.
+Locations use repository-relative paths and 1-based line numbers. Definition ranges include both endpoints. Header caveats and summary rows are not source pointers.
 
 - A `[ambiguous]` edge is a possible relationship, not a uniquely resolved call.
 - Capped result lists report `showing N of M` and usually a stderr cap notice. Context reports its counts in each section heading.
 - Many pointer queries warn only about changed files in the displayed, post-cap set. They do not check every indexed file or detect every newly added file.
 - An empty result is not proof of absence. Inspect the reason, rebuild, and fall back to source search.
 - Runtime diagnostics use `aw: <class>: <detail>` on stderr. Argument-parser errors can use clap's own format. Ambiguous target candidates print on stdout, at most 50.
-- `dead` and `clones` retain their candidate caveat on stdout even for empty results; other analysis commands can also emit caveats.
+- `dead` retains its candidate caveat on stdout even for an empty result; other analysis commands can also emit caveats.
 
 ### Exit codes
 
 | Code | Meaning | Action |
 |---|---|---|
 | `0` | Success, help/version display, or a closed downstream output pipe | Read result-specific caveats and counters |
-| `1` | No results, no index, empty journal/input, or missing batch names | Inspect the reason; build or search source as appropriate |
+| `1` | No results, no index, no memory store, unknown memory key, empty journal/input, or missing batch names | Inspect the reason; build, write a note, or search source as appropriate |
 | `2` | Invalid usage or ambiguous name | Fix arguments or use a full printed qualified name |
-| `3` | Corrupt index | Rebuild the index |
-| `4` | Build lock held | Wait for the running build, then retry |
-| `5` | Index schema mismatch | Rebuild with the installed binary |
+| `3` | Corrupt index or corrupt `memory.db` | Rebuild the index; restore memory from an `aw mem export` backup |
+| `4` | Build lock held, or a memory write timed out on the busy lock | Wait for the running build or write, then retry |
+| `5` | Schema mismatch — index: rebuild with the installed binary; memory: restore from an `aw mem export` backup | Follow the message for the store that failed |
 | `6` | Internal failure, including I/O/database errors or unexpected panic | Preserve the diagnostic and report it |
 | `7` | Build exceeded the parse-error-rate threshold | Inspect source syntax and coverage; adjust the threshold only knowingly |
 

@@ -1,0 +1,114 @@
+{
+  "notes": [
+    {
+      "key": "resolver-confidence-tiers",
+      "kind": "decision",
+      "tags": "resolver confidence",
+      "refs": "src/query/callgraph.rs",
+      "body": "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL"
+    },
+    {
+      "key": "schema-skew-exit5",
+      "kind": "gotcha",
+      "tags": "schema migration",
+      "refs": "src/db.rs",
+      "body": "never migrate in place; schema skew exits 5 in both directions and aw build replaces the database"
+    },
+    {
+      "key": "incremental-fast-path",
+      "kind": "fact",
+      "tags": "build incremental",
+      "refs": "src/build.rs",
+      "body": "unchanged files carry forward through the fast path when grammar and signature versions match"
+    },
+    {
+      "key": "callee-empty-reason",
+      "kind": "gotcha",
+      "tags": "resolver diagnostics",
+      "refs": "src/extract/resolve.rs",
+      "body": "callee empty reason fires when extraction produced no call candidates for a resolved site"
+    },
+    {
+      "key": "atomic-replacement",
+      "kind": "decision",
+      "tags": "build durability",
+      "refs": "src/db.rs",
+      "body": "aw build writes index.db.new then fsyncs and renames so a concurrent reader sees old or new"
+    },
+    {
+      "key": "write-confinement",
+      "kind": "decision",
+      "tags": "invariants writes",
+      "refs": "src/db.rs",
+      "body": "runtime writes live only in db doctor journal so the allowlist check stays green"
+    },
+    {
+      "key": "mcp-stdio-frame",
+      "kind": "fact",
+      "tags": "mcp protocol",
+      "refs": "src/mcp.rs",
+      "body": "the mcp server reads newline delimited json rpc frames with an eight megabyte cap"
+    },
+    {
+      "key": "fnv-content-hash",
+      "kind": "fact",
+      "tags": "hash staleness",
+      "refs": "src/hash.rs",
+      "body": "fnv1a64 hashes raw file bytes with no normalization for the staleness fast path"
+    },
+    {
+      "key": "journal-privacy",
+      "kind": "decision",
+      "tags": "journal privacy",
+      "refs": "src/journal.rs",
+      "body": "the usage journal records names paths and scalars never file contents or note bodies"
+    },
+    {
+      "key": "fts-purity-invariant",
+      "kind": "gotcha",
+      "tags": "fts derived",
+      "refs": "src/query.rs",
+      "body": "the fts table is derived data and must equal a rebuild from the authoritative rows"
+    },
+    {
+      "key": "distractor-resolver-notes",
+      "kind": "fact",
+      "tags": "resolver notes",
+      "refs": "src/memory.rs",
+      "body": "notes about resolver ranking recency decay weights in memory"
+    },
+    {
+      "key": "distractor-build-abort",
+      "kind": "gotcha",
+      "tags": "build quality",
+      "refs": "src/build.rs",
+      "body": "build aborts when the parse error rate crosses the configured threshold"
+    },
+    {
+      "key": "distractor-stale-report",
+      "kind": "fact",
+      "tags": "doctor staleness",
+      "refs": "src/doctor.rs",
+      "body": "doctor reports the stale ratio of indexed files changed on disk"
+    },
+    {
+      "key": "distractor-memory-caveat",
+      "kind": "decision",
+      "tags": "memory notes",
+      "refs": "src/service.rs",
+      "body": "memory output opens with the caveat that notes are candidates only"
+    }
+  ],
+  "queries": [
+    { "terms": "confidence tiers resolver", "expect": "resolver-confidence-tiers" },
+    { "terms": "schema skew migrate", "expect": "schema-skew-exit5" },
+    { "terms": "carry forward fast path", "expect": "incremental-fast-path" },
+    { "terms": "callee empty reason", "expect": "callee-empty-reason" },
+    { "terms": "fsyncs renames concurrent", "expect": "atomic-replacement" },
+    { "terms": "writes allowlist doctor journal", "expect": "write-confinement" },
+    { "terms": "json rpc frame cap", "expect": "mcp-stdio-frame" },
+    { "terms": "fnv1a64 normalization bytes", "expect": "fnv-content-hash" },
+    { "terms": "usage journal scalars bodies", "expect": "journal-privacy" },
+    { "terms": "derived rebuild authoritative", "expect": "fts-purity-invariant" }
+  ]
+}

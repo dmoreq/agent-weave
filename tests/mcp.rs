@@ -170,7 +170,6 @@ fn g10_initialize_tools_list_and_parity() {
             "context",
             "implementers",
             "imports",
-            "tests",
             "impact",
             "dead",
             "unresolved",
@@ -179,11 +178,14 @@ fn g10_initialize_tools_list_and_parity() {
             "files",
             "resolve",
             "search",
-            "clones",
             "stats",
-            "hotspots",
-            "report",
-            "usage"
+            "usage",
+            "mem_write",
+            "mem_query",
+            "mem_get",
+            "mem_delete",
+            "mem_gc",
+            "mem_export"
         ]
     );
     assert!(
@@ -237,57 +239,7 @@ fn g10_initialize_tools_list_and_parity() {
         String::from_utf8_lossy(&cli_search.stdout).into_owned()
     );
 
-    // G10 parity extends to clones (Amendment 12d): the fixture's tail block
-    // is duplicated across both files, so the pair line must be byte-equal.
-    let cli_clones = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["clones"])
-        .output()
-        .unwrap();
-    assert_eq!(cli_clones.status.code(), Some(0));
-    let clones = rpc(
-        &mut srv,
-        10,
-        "tools/call",
-        json!({"name": "clones", "arguments": {}}),
-    );
-    assert_eq!(
-        result_text(&clones),
-        String::from_utf8_lossy(&cli_clones.stdout).into_owned()
-    );
-    assert!(
-        result_text(&clones).contains("app.py:5-9")
-            && result_text(&clones).contains("utils.py:6-10"),
-        "seeded clone pair line present: {}",
-        result_text(&clones)
-    );
-
-    // min_lines above every span: both surfaces fail with the same stderr
-    // text and isError semantics (Amendment 8 error contract).
-    let cli_clones_hi = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["clones", "--min-lines", "100"])
-        .output()
-        .unwrap();
-    assert_eq!(cli_clones_hi.status.code(), Some(1));
-    let clones_hi = rpc(
-        &mut srv,
-        11,
-        "tools/call",
-        json!({"name": "clones", "arguments": {"min_lines": 100}}),
-    );
-    assert_eq!(clones_hi["result"]["isError"], true);
-    // R6 round-2: the empty path carries the mandatory caveat on stdout, so
-    // the MCP text is caveat + the stderr reason line.
-    let expected = format!(
-        "aw: clone candidates — normalized-text equality, not proof of semantic duplication\n{}",
-        String::from_utf8_lossy(&cli_clones_hi.stderr).trim_end()
-    );
-    assert_eq!(result_text(&clones_hi).trim_end(), expected);
-
-    // R6e: parity covers every pointer/report tool that does not depend on
+    // R6e: parity covers every pointer tool that does not depend on
     // wall-clock timings or journal state.
     for (tool, args, cli_args) in [
         (
@@ -310,18 +262,11 @@ fn g10_initialize_tools_list_and_parity() {
             json!({"file": "app.py"}),
             vec!["imports", "app.py"],
         ),
-        ("tests", json!({"name": "run"}), vec!["tests", "run"]),
         (
             "complexity",
-            json!({"min_cyc": 1}),
-            vec!["complexity", "--min-cyc", "1"],
+            json!({"min_loc": 1}),
+            vec!["complexity", "--min-loc", "1"],
         ),
-        (
-            "hotspots",
-            json!({"limit": 5}),
-            vec!["hotspots", "--limit", "5"],
-        ),
-        ("report", json!({}), vec!["report"]),
     ] {
         let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
             .arg("--root")
@@ -473,10 +418,9 @@ fn g10_initialize_tools_list_and_parity() {
     );
 
     // Every dispatched tool call journaled with the mcp surface: callers,
-    // callers (depth 2), symbols (plain), symbols (outline), search, clones,
-    // clones (min_lines failure), dead, stats, path, plus the R6e parity
-    // additions (callees, impact, hotspots, report, unresolved, imports,
-    // complexity; imports no-result). The unknown tool is rejected
+    // callers (depth 2), symbols (plain), symbols (outline), search, dead,
+    // stats, path, plus the R6e parity additions (callees, impact, unresolved,
+    // imports, complexity; imports no-result). The unknown tool is rejected
     // before dispatch and journals nothing; CLI reference commands above add
     // their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
@@ -484,7 +428,7 @@ fn g10_initialize_tools_list_and_parity() {
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 20, "{log}");
+    assert_eq!(mcp_lines, 15, "{log}");
 
     let _ = fs::remove_dir_all(&repo);
 }
@@ -766,8 +710,9 @@ fn missing_required_argument_returns_invalid_params() {
     let _ = fs::remove_dir_all(&repo);
 }
 
-/// Default MCP profile: only the eight core navigation tools. The full
-/// inventory/analysis surface stays available behind `--all-tools`.
+/// Default MCP profile: the eight core navigation tools plus the memory
+/// write/query loop (OQ1). The full inventory/analysis surface stays
+/// available behind `--all-tools`.
 #[test]
 fn default_mcp_exposes_core_navigation_tools() {
     let repo = fixture("core");
@@ -790,7 +735,18 @@ fn default_mcp_exposes_core_navigation_tools() {
         .collect();
     assert_eq!(
         names,
-        vec!["build", "callers", "callees", "path", "context", "imports", "impact", "symbols",]
+        vec![
+            "build",
+            "callers",
+            "callees",
+            "path",
+            "context",
+            "imports",
+            "impact",
+            "symbols",
+            "mem_write",
+            "mem_query",
+        ]
     );
 
     let denied = rpc(
@@ -965,4 +921,326 @@ fn mcp_stats_path_matches_cli() {
     );
     assert_eq!(stats["result"]["isError"], false, "{stats}");
     assert_eq!(result_text(&stats), expected);
+}
+
+// ---------------------------------------------------------------------------
+// Project memory over MCP (companion design, Phase 1): OQ1 puts mem_write +
+// mem_query in the default CORE_TOOLS; the other four stay behind
+// --all-tools. Every call dispatches through service::execute, so the result
+// text is the CLI's stdout byte for byte.
+// ---------------------------------------------------------------------------
+
+fn mem_fixture(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("aw-mcp-mem-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn cli_mem(repo: &Path, args: &[&str]) -> (i32, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(repo)
+        .args(["mem"])
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn mem_core_tools_default_surface_and_byte_parity() {
+    let repo = mem_fixture("core");
+    // CLI reference output first (the server would journal its own calls).
+    let (code, cli_write, cli_stderr) = cli_mem(
+        &repo,
+        &[
+            "write",
+            "parity-note",
+            "--body",
+            "the resolver keeps confidence tiers over resolved edges",
+            "--kind",
+            "decision",
+            "--tags",
+            "resolver confidence",
+            "--refs",
+            "src/query/callgraph.rs",
+        ],
+    );
+    assert_eq!(code, 0, "{cli_write}{cli_stderr}");
+
+    // spawn() defaults to --all-tools; the default surface needs spawn_with(false).
+    let mut srv = spawn_with(&repo, false);
+    let init = rpc(
+        &mut srv,
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18"}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    notification(&mut srv, "notifications/initialized");
+    let list = rpc(&mut srv, 2, "tools/list", json!({}));
+    let names: Vec<String> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.contains(&"mem_write".to_string()), "{names:?}");
+    assert!(names.contains(&"mem_query".to_string()), "{names:?}");
+    for tool in ["mem_get", "mem_delete", "mem_gc", "mem_export"] {
+        assert!(
+            !names.contains(&tool.to_string()),
+            "{tool} stays behind --all-tools: {names:?}"
+        );
+    }
+
+    // A second note via MCP (duplicate content under a new key shape).
+    let call = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({
+            "name": "mem_write",
+            "arguments": {
+                "key": "parity-note-2",
+                "body": "memory notes are candidates, never proof",
+                "kind": "fact"
+            }
+        }),
+    );
+    assert_eq!(call["result"]["isError"], false, "{}", result_text(&call));
+
+    // mem_query over MCP is byte-identical to the CLI stdout.
+    let (code, cli_query, _stderr) = cli_mem(&repo, &["query", "confidence", "tiers"]);
+    assert_eq!(code, 0);
+    let query_call = rpc(
+        &mut srv,
+        4,
+        "tools/call",
+        json!({"name": "mem_query", "arguments": {"terms": "confidence tiers"}}),
+    );
+    assert_eq!(query_call["result"]["isError"], false);
+    assert_eq!(result_text(&query_call), cli_query, "mem_query byte parity");
+
+    // Journal: MCP surface tag lands on mem tool rows.
+    drop(srv);
+    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    assert!(
+        log.lines()
+            .any(|l| l.contains("\"tool\":\"mem_write\"") && l.contains("\"surface\":\"mcp\"")),
+        "{log}"
+    );
+}
+
+#[test]
+fn mem_all_tools_exposes_full_family_with_parity() {
+    let repo = mem_fixture("all");
+    let (code, _stdout, stderr) = cli_mem(
+        &repo,
+        &[
+            "write",
+            "export-me",
+            "--body",
+            "export parity body",
+            "--kind",
+            "fact",
+        ],
+    );
+    assert_eq!(code, 0, "{stderr}");
+
+    let mut srv = spawn_with(&repo, true);
+    notification(&mut srv, "notifications/initialized");
+    let list = rpc(&mut srv, 1, "tools/list", json!({}));
+    let names: Vec<String> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    for tool in [
+        "mem_write",
+        "mem_query",
+        "mem_get",
+        "mem_delete",
+        "mem_gc",
+        "mem_export",
+    ] {
+        assert!(
+            names.contains(&tool.to_string()),
+            "{tool} missing: {names:?}"
+        );
+    }
+
+    // mem_get parity.
+    let (code, cli_get, _stderr) = cli_mem(&repo, &["get", "export-me"]);
+    assert_eq!(code, 0);
+    let get = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "mem_get", "arguments": {"key": "export-me"}}),
+    );
+    assert_eq!(result_text(&get), cli_get, "mem_get byte parity");
+
+    // mem_gc parity (Phase 1 report-only).
+    let (code, cli_gc, _stderr) = cli_mem(&repo, &["gc"]);
+    assert_eq!(code, 0);
+    let gc = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({"name": "mem_gc", "arguments": {}}),
+    );
+    assert_eq!(result_text(&gc), cli_gc, "mem_gc byte parity");
+
+    // mem_export parity: pure JSONL text, caveat absent from the text.
+    let (code, cli_export, _stderr) = cli_mem(&repo, &["export"]);
+    assert_eq!(code, 0);
+    let export = rpc(
+        &mut srv,
+        4,
+        "tools/call",
+        json!({"name": "mem_export", "arguments": {}}),
+    );
+    assert_eq!(result_text(&export), cli_export, "mem_export byte parity");
+    assert!(
+        !result_text(&export).contains("aw: memory"),
+        "{:?}",
+        result_text(&export)
+    );
+
+    // Phase 2 lifecycle over MCP: session scope + ttl + cross-key supersedes.
+    let session = rpc(
+        &mut srv,
+        6,
+        "tools/call",
+        json!({"name": "mem_write", "arguments": {
+            "key": "mcp-session-note", "body": "transient mcp scratch", "kind": "fact",
+            "scope": "session", "ttl": 3600
+        }}),
+    );
+    assert_eq!(
+        session["result"]["isError"],
+        false,
+        "{}",
+        result_text(&session)
+    );
+    let supersedes = rpc(
+        &mut srv,
+        7,
+        "tools/call",
+        json!({"name": "mem_write", "arguments": {
+            "key": "mcp-replacement", "body": "replaces the export note", "kind": "fact",
+            "supersedes": "export-me"
+        }}),
+    );
+    assert_eq!(
+        supersedes["result"]["isError"],
+        false,
+        "{}",
+        result_text(&supersedes)
+    );
+    let (code, cli_all, _stderr) = cli_mem(&repo, &["query", "--all"]);
+    assert_eq!(code, 0);
+    assert!(
+        cli_all.contains("mcp-session-note") && !cli_all.contains("export-me"),
+        "{cli_all}"
+    );
+    let all = rpc(
+        &mut srv,
+        8,
+        "tools/call",
+        json!({"name": "mem_query", "arguments": {"all": true}}),
+    );
+    assert_eq!(result_text(&all), cli_all, "mem_query --all byte parity");
+    let with_superseded = rpc(
+        &mut srv,
+        9,
+        "tools/call",
+        json!({"name": "mem_query", "arguments": {"all": true, "include_superseded": true}}),
+    );
+    let (code, cli_sup, _stderr) = cli_mem(&repo, &["query", "--all", "--include-superseded"]);
+    assert_eq!(code, 0);
+    assert!(
+        result_text(&with_superseded).contains("[superseded]"),
+        "{}",
+        result_text(&with_superseded)
+    );
+    assert_eq!(
+        result_text(&with_superseded),
+        cli_sup,
+        "include-superseded byte parity"
+    );
+
+    // mem_gc parity: expire the session note via the store, then compare.
+    {
+        let conn = rusqlite::Connection::open(repo.join(".aw/memory.db")).unwrap();
+        conn.execute(
+            "UPDATE memories SET expires_at = 1 WHERE key = 'mcp-session-note'",
+            [],
+        )
+        .unwrap();
+    }
+    let (code, cli_gc_after, _stderr) = cli_mem(&repo, &["gc"]);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(cli_gc_after.contains("expired=1 removed"), "{cli_gc_after}");
+
+    // mem_delete parity: MCP delete text equals the CLI delete text for the
+    // same input (recreated between the two calls — delete is destructive).
+    let write = rpc(
+        &mut srv,
+        10,
+        "tools/call",
+        json!({"name": "mem_write", "arguments": {"key": "doomed", "body": "delete parity body", "kind": "fact"}}),
+    );
+    assert_eq!(write["result"]["isError"], false);
+    let delete = rpc(
+        &mut srv,
+        11,
+        "tools/call",
+        json!({"name": "mem_delete", "arguments": {"key": "doomed"}}),
+    );
+    assert_eq!(delete["result"]["isError"], false);
+    // Recreate via CLI so the CLI delete sees the same input shape.
+    let (code, _stdout, stderr) = cli_mem(
+        &repo,
+        &[
+            "write",
+            "doomed",
+            "--body",
+            "delete parity body",
+            "--kind",
+            "fact",
+        ],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    let (code, cli_delete, _stderr) = cli_mem(&repo, &["delete", "doomed"]);
+    assert_eq!(code, 0);
+    assert_eq!(result_text(&delete), cli_delete, "mem_delete byte parity");
+
+    // Error path: unknown key reaches the caller with the CLI's stderr text.
+    let (code, _stdout, cli_err) = cli_mem(&repo, &["get", "missing"]);
+    assert_eq!(code, 1);
+    let missing = rpc(
+        &mut srv,
+        5,
+        "tools/call",
+        json!({"name": "mem_get", "arguments": {"key": "missing"}}),
+    );
+    assert_eq!(missing["result"]["isError"], true);
+    assert!(
+        result_text(&missing).contains("unknown memory key 'missing'"),
+        "{}",
+        result_text(&missing)
+    );
+    assert!(
+        result_text(&missing).contains(cli_err.trim()),
+        "{}",
+        result_text(&missing)
+    );
 }

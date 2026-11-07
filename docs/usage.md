@@ -16,14 +16,13 @@ The examples below use aw's repository after `aw build`. They show commands, not
 | Follow outgoing calls | `aw callees run_build --depth 2` | Follow each call manually |
 | Trace a route between functions | `aw path run_build fnv1a64` | Read and follow candidate call chains |
 | Inspect dependent files | `aw impact src/hash.rs` | Search references and imports across files |
-| Find possible tests | `aw tests src/hash.rs` | Read test files and the test runner's discovery rules |
 | Inspect imports | `aw imports src/build.rs` | Read import declarations and resolve targets |
 | Find implementations of a type | `aw implementers <name>` | Read the type hierarchy and implementation blocks |
 
 Trust the rows a successful query returns for the navigation question you
 asked; do not repeat the same lookup with grep. Use source reads for behavioral
 claims, edits, and for capped, ambiguous, stale, or empty results. Treat
-`tests`, `dead`, and `unresolved` as candidates.
+`dead` and `unresolved` as candidates.
 
 See the [CLI reference](cli-reference.md) for all options and maintenance commands.
 
@@ -82,27 +81,15 @@ Quote multiword search terms: the CLI accepts one positional search string. Sear
 
 For inheritance questions, query a class, trait, or interface name discovered in your own index with `aw implementers`. It follows resolved inheritance relationships, not arbitrary runtime implementations.
 
-## Select test candidates, not a complete test suite
-
-```sh
-aw tests src/hash.rs --depth 10
-```
-
-This query selects statically reachable functions named `test_*` or `test` followed by an uppercase letter. It does not execute tests or use the test runner's discovery mechanism.
-
-Rust `#[test]` functions with other names, TypeScript `describe`/`it` callbacks, fixtures, and dynamic relationships can be missed. Read candidate tests, inspect nearby tests, and use the project's test runner before declaring coverage sufficient.
-
 ## Investigate cleanup candidates
 
 ```sh
 aw dead --path src --exclude-tests
-aw clones --path src --min-lines 10
-aw complexity --path src --min-cyc 11
+aw complexity --path src --min-loc 40
 ```
 
 - `dead` reports definitions without indexed inbound calls, imports, or inheritance references after its policy filters. Entry points and external consumers can still use them.
-- `clones` reports normalized-text matches, not semantic duplicates. Inspect both regions before extracting shared code.
-- `complexity` ranks callable syntax metrics. It is not cognitive complexity or a proof that a function needs refactoring.
+- `complexity` ranks callables by effective non-comment line count. It is not cognitive complexity or a proof that a function needs refactoring.
 
 Do not delete or refactor code solely because it appears here. Confirm runtime entry points, visibility, framework discovery, and existing tests first.
 
@@ -111,13 +98,49 @@ Do not delete or refactor code solely because it appears here. Confirm runtime e
 ```sh
 aw stats
 aw stats --path src
-aw hotspots --path src --limit 10
-aw report --path src
 ```
 
-`stats` describes the index, not current runtime behavior; `--path` scopes every counter to one prefix but leaves `db_bytes` and the version fields global. `report` combines totals, a package map, hotspots, and most-called symbols.
+`stats` describes the index, not current runtime behavior; `--path` scopes every counter to one prefix but leaves `db_bytes` and the version fields global.
 
-`hotspots` combines file size, a file-level decision-count proxy, recent change counts, and fix-related commit counts. Without usable Git history, change and fix signals become zero; scores are not defect probabilities.
+## Remember what a session settled
+
+aw carries a project-memory store, `.aw/memory.db`, for the knowledge a coding
+session produces: settled decisions, gotchas that cost real debugging time,
+and task wrap-ups that are not yet in committed docs. Notes are agent-authored
+prose — aw never originates one, and every mem command opens with the caveat
+that notes are candidates, never proof of current behavior.
+
+```sh
+# A decision settled after real investigation — write it once:
+aw mem write resolver-confidence-tiers --kind decision \
+  --body "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL" \
+  --tags "resolver confidence" --refs src/query/callgraph.rs
+
+# A later session retrieves it by content instead of re-deriving it:
+aw mem query confidence tiers
+
+# Rework the decision: same key, new content -> a new revision, nothing overwritten:
+aw mem write resolver-confidence-tiers --kind decision --body "confidence tiers v2: ..."
+```
+
+Write when a decision was settled, a gotcha cost genuine time, or a task ends
+with unmerged conclusions. Query at session start and before re-investigating
+an area. `mem get <key>` shows one note with its revision count; `mem delete`
+removes a key; `mem export` writes a JSONL backup (restore = `mem write`
+replay); `mem gc` purges expired session notes and superseded revisions
+older than 30 days, then reports counts.
+
+Transient scratch ("tried X, it failed here") belongs to the session lane:
+`aw mem write scratch --kind fact --scope session --body ...` expires after
+7 days by default (`--ttl <SECS>` overrides) and disappears from every read
+once expired, so durable memory stays clean. `--supersedes <key>` records
+that a new note replaces an old one across keys; `--include-superseded`
+surfaces replaced revisions when you need the audit trail.
+Unlike the index, this store is primary data: it survives `aw build` and
+`aw doctor --invalidate`, and the only backup is `aw mem export`.
+
+See [CLI reference](cli-reference.md#project-memory) for the full contracts,
+caps, and exit codes.
 
 ## Recover from uncertain results
 
@@ -127,7 +150,7 @@ See [Concepts](concepts.md) for the index model behind pointers, confidence, and
 |---|---|---|
 | Name is ambiguous; exit 2 | Multiple indexed definitions match | Copy a full printed qualified name; do not merge candidates silently |
 | Symbol or path is missing; exit 1 | The index lacks that target | Check spelling, root, supported extensions, ignore rules, and rebuild |
-| No callers, tests, or route; exit 1 | No matching indexed relationship | Search source and inspect dynamic or external relationships |
+| No callers or route; exit 1 | No matching indexed relationship | Search source and inspect dynamic or external relationships |
 | `showing N of M` | Output is capped | Narrow the scope or raise `--limit`; do not treat N as the total |
 | Changed-result warning | Displayed source differs from the index | Run `aw build`, then repeat the query |
 | No freshness warning | Checked files did not trigger a warning | Rebuild after edits anyway; omitted or new files may not be checked |

@@ -49,6 +49,20 @@ pub enum AwError {
         role: Option<&'static str>,
     },
     CorruptIndex(String),
+    /// Missing `.aw/memory.db` on a read path (companion design exit contract:
+    /// 1 = no results / unknown key / no memory store).
+    NoMemory(String),
+    /// `memory.db` reported corruption (SQLITE_NOTADB / SQLITE_CORRUPT): exit 3,
+    /// same class of failure as a corrupt index but memory is not rebuildable.
+    CorruptMemory(String),
+    /// `SQLITE_BUSY` after the memory `busy_timeout` expired: exit 4.
+    MemoryLocked,
+    /// Memory schema skew: newer than the binary, or older but failing the
+    /// compiled required-structure manifest. `detail` carries the message body
+    /// after the `aw: memory-schema-mismatch:` class prefix.
+    MemorySchema {
+        detail: String,
+    },
     Locked(u32),
     SchemaMismatch {
         have: i32,
@@ -75,6 +89,10 @@ impl AwError {
             AwError::Usage(_) => 2,
             AwError::Ambiguous { .. } => 2,
             AwError::CorruptIndex(_) => 3,
+            AwError::NoMemory(_) => 1,
+            AwError::CorruptMemory(_) => 3,
+            AwError::MemoryLocked => 4,
+            AwError::MemorySchema { .. } => 5,
             AwError::Locked(_) => 4,
             AwError::SchemaMismatch { .. } => 5,
             AwError::Internal(_) => 6,
@@ -89,6 +107,10 @@ impl AwError {
             AwError::Usage(_) => "usage",
             AwError::Ambiguous { .. } => "usage",
             AwError::CorruptIndex(_) => "corrupt-index",
+            AwError::NoMemory(_) => "no-memory",
+            AwError::CorruptMemory(_) => "corrupt-memory",
+            AwError::MemoryLocked => "locked",
+            AwError::MemorySchema { .. } => "memory-schema-mismatch",
             AwError::Locked(_) => "locked",
             AwError::SchemaMismatch { .. } => "schema-mismatch",
             AwError::ParseQuality { .. } => "parse-quality",
@@ -116,6 +138,13 @@ impl fmt::Display for AwError {
                 }
             ),
             AwError::CorruptIndex(detail) => write!(f, "aw: {}: {}", self.class(), detail),
+            AwError::NoMemory(detail) => write!(f, "aw: {}: {}", self.class(), detail),
+            AwError::CorruptMemory(detail) => write!(f, "aw: {}: {}", self.class(), detail),
+            AwError::MemoryLocked => write!(
+                f,
+                "aw: locked: memory write in progress — retry"
+            ),
+            AwError::MemorySchema { detail } => write!(f, "aw: {}: {}", self.class(), detail),
             AwError::Locked(pid) => {
                 write!(f, "aw: locked: build in progress (pid {pid}) — retry after it exits")
             }

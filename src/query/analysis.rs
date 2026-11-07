@@ -109,15 +109,11 @@ pub fn dead(
     Ok(out)
 }
 
-/// `aw complexity` (Amendment 19): per-symbol metric ranking.
-#[allow(clippy::too_many_arguments)] // CLI surface; a params struct adds no value here.
+/// `aw complexity` (Amendment 19, v9 shape): per-symbol effective-LOC ranking.
 pub fn complexity(
     conn: &Connection,
     root: &Path,
-    min_cyc: usize,
     min_loc: usize,
-    min_branches: usize,
-    min_nest: usize,
     path: Option<&str>,
     limit: usize,
 ) -> Result<Vec<String>> {
@@ -125,18 +121,13 @@ pub fn complexity(
     if let Some(p) = path {
         validate_path_scope(p, false)?;
     }
-    let (gen_filter, scope_value) = file_path_scope_sql("s", path, 5);
-    let mut params: Vec<rusqlite::types::Value> = vec![
-        rusqlite::types::Value::from(min_cyc as i64),
-        rusqlite::types::Value::from(min_loc as i64),
-        rusqlite::types::Value::from(min_branches as i64),
-        rusqlite::types::Value::from(min_nest as i64),
-    ];
+    let (gen_filter, scope_value) = file_path_scope_sql("s", path, 2);
+    let mut params: Vec<rusqlite::types::Value> =
+        vec![rusqlite::types::Value::from(min_loc as i64)];
     if let Some(scope) = scope_value {
         params.push(rusqlite::types::Value::from(scope));
     }
-    let default_filters =
-        min_cyc <= 1 && min_loc == 0 && min_branches == 0 && min_nest == 0 && path.is_none();
+    let default_filters = min_loc == 0 && path.is_none();
     let total: i64 = if default_filters {
         db::meta_get(conn, "callable_count")
             .and_then(|v| v.parse().ok())
@@ -146,9 +137,7 @@ pub fn complexity(
             &format!(
                 "SELECT COUNT(*) FROM symbols s
                  WHERE s.kind IN ('function','method')
-                   AND s.cyclomatic > 0 AND s.cyclomatic >= ?1
-                   AND s.effective_loc >= ?2 AND s.branches >= ?3
-                   AND s.nesting >= ?4 {gen_filter}"
+                   AND s.effective_loc > 0 AND s.effective_loc >= ?1 {gen_filter}"
             ),
             rusqlite::params_from_iter(params.iter()),
             |r| r.get(0),
@@ -156,7 +145,7 @@ pub fn complexity(
     };
     if total == 0 {
         return Err(AwError::NoResultsCaveated {
-            caveat: "aw: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic",
+            caveat: "aw: complexity — static line-count ranking; not comparable to hotspots",
             detail: "0 symbols match the thresholds".to_string(),
         });
     }
@@ -168,28 +157,23 @@ pub fn complexity(
         " INDEXED BY symbols_complexity_idx"
     };
     let mut stmt = conn.prepare(&format!(
-        "SELECT s.file_path, s.line_start, s.cyclomatic, s.branches, s.nesting,
-                s.effective_loc, s.qualname
+        "SELECT s.file_path, s.line_start, s.effective_loc, s.qualname
          FROM symbols s{index_hint}
          WHERE s.kind IN ('function','method')
-           AND s.cyclomatic > 0 AND s.cyclomatic >= ?1 AND s.effective_loc >= ?2
-           AND s.branches >= ?3 AND s.nesting >= ?4 {gen_filter}
-         ORDER BY s.cyclomatic DESC, s.effective_loc DESC, s.qualname,
-                  s.file_path, s.line_start LIMIT {limit}"
+           AND s.effective_loc > 0 AND s.effective_loc >= ?1 {gen_filter}
+         ORDER BY s.effective_loc DESC, s.qualname, s.file_path, s.line_start
+         LIMIT {limit}"
     ))?;
     let rows: Vec<(String, String)> = stmt
         .query_map(rusqlite::params_from_iter(params.iter()), |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 format!(
-                    "{}:{} cyc={} branches={} nest={} loc={} {}",
+                    "{}:{} loc={} {}",
                     r.get::<_, String>(0)?,
                     r.get::<_, i64>(1)?,
                     r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, i64>(4)?,
-                    r.get::<_, i64>(5)?,
-                    r.get::<_, String>(6)?
+                    r.get::<_, String>(3)?
                 ),
             ))
         })?
@@ -206,9 +190,8 @@ pub fn complexity(
         .take(shown)
         .map(|(_, line)| line.clone())
         .collect();
-    let mut out = vec![
-        "aw: complexity — static AST proxy, not cognitive complexity; not comparable to hotspots/file cyclomatic".to_string(),
-    ];
+    let mut out =
+        vec!["aw: complexity — static line-count ranking; not comparable to hotspots".to_string()];
     if stale {
         out.push(format!(
             "aw: {changed} of {} result files changed since build — run aw build",
@@ -540,14 +523,12 @@ pub fn symbols(
         return symbols_directory(conn, root, &rel, outline, metrics, limit);
     }
     let sql = if outline {
-        "SELECT s.kind, s.qualname, s.line_start, s.signature,
-                s.cyclomatic, s.branches, s.nesting, s.effective_loc
+        "SELECT s.kind, s.qualname, s.line_start, s.signature, s.effective_loc
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE f.path = ?1
          ORDER BY s.line_start, s.qualname"
     } else {
-        "SELECT s.kind, s.qualname, s.line_start, '',
-                s.cyclomatic, s.branches, s.nesting, s.effective_loc
+        "SELECT s.kind, s.qualname, s.line_start, '', s.effective_loc
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE f.path = ?1
          ORDER BY s.line_start, s.qualname"
@@ -561,9 +542,6 @@ pub fn symbols(
                 r.get::<_, i64>(2)?,
                 r.get::<_, String>(3)?,
                 r.get::<_, i64>(4)?,
-                r.get::<_, i64>(5)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, i64>(7)?,
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -576,14 +554,14 @@ pub fn symbols(
     let data_lines: Vec<String> = rows
         .into_iter()
         .take(shown)
-        .map(|(kind, qualname, line, signature, cyc, br, nest, loc)| {
+        .map(|(kind, qualname, line, signature, loc)| {
             let mut text = format!("{rel}:{line} {kind} {qualname}");
             if !signature.is_empty() {
                 text.push(' ');
                 text.push_str(&signature);
             }
             if metrics {
-                text.push_str(&format!(" cyc={cyc} branches={br} nest={nest} loc={loc}"));
+                text.push_str(&format!(" loc={loc}"));
             }
             text
         })
@@ -644,8 +622,7 @@ fn symbols_directory(
         |r| r.get(0),
     )?;
     let sql = format!(
-        "SELECT f.path, s.kind, s.qualname, s.line_start, s.signature,
-                s.cyclomatic, s.branches, s.nesting, s.effective_loc
+        "SELECT f.path, s.kind, s.qualname, s.line_start, s.signature, s.effective_loc
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE substr(f.path, 1, length(?1)) = ?1
          ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
@@ -665,9 +642,6 @@ fn symbols_directory(
                         String::new()
                     },
                     r.get::<_, i64>(5)?,
-                    r.get::<_, i64>(6)?,
-                    r.get::<_, i64>(7)?,
-                    r.get::<_, i64>(8)?,
                 ),
             ))
         })?
@@ -689,7 +663,7 @@ fn symbols_directory(
         "aw: dir {display} — {n_files} files, {total} symbols"
     ));
     let mut last_path = "";
-    for (path, (kind, qualname, line, signature, cyc, br, nest, loc)) in &rows {
+    for (path, (kind, qualname, line, signature, loc)) in &rows {
         if path != last_path {
             out.push(path.clone());
             last_path = path;
@@ -700,7 +674,7 @@ fn symbols_directory(
             text.push_str(signature);
         }
         if metrics {
-            text.push_str(&format!(" cyc={cyc} branches={br} nest={nest} loc={loc}"));
+            text.push_str(&format!(" loc={loc}"));
         }
         out.push(text);
     }
@@ -787,48 +761,19 @@ fn search_pointer(r: &rusqlite::Row<'_>) -> rusqlite::Result<Pointer> {
     })
 }
 
-/// FTS page, total, and the expression actually used (morphology fallback).
+/// FTS page, total, and the expression actually used.
 fn search_fts_page(
     conn: &Connection,
-    toks: &[String],
-    mut expr: String,
+    expr: String,
     limit: usize,
 ) -> Result<(Vec<Pointer>, usize, String)> {
-    let mut total: usize = conn.query_row(
+    let total: usize = conn.query_row(
         "SELECT COUNT(*) FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid JOIN files f ON f.id = s.file_id
          WHERE symbols_fts MATCH ?1",
         [&expr],
         |r| r.get::<_, i64>(0),
     )? as usize;
-    // Morphology fallback (R7): agents ask "handlers" or "rotation" while the
-    // index stores the stem. Retry once with bounded derived forms, only on
-    // zero hits, so recall improves without changing ranked results.
-    if total == 0 {
-        let mut variants: Vec<String> = Vec::new();
-        for tok in toks {
-            derived_forms(tok, &mut variants);
-        }
-        variants.retain(|v| !v.is_empty() && v.len() >= 3);
-        variants.dedup();
-        variants.truncate(SEARCH_MAX_TERMS);
-        if !variants.is_empty() {
-            let alt = variants
-                .iter()
-                .map(|tok| format!("\"{}\"*", tok.replace('"', "")))
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            let alt_total: usize = conn.query_row(
-                "SELECT COUNT(*) FROM symbols_fts WHERE symbols_fts MATCH ?1",
-                [&alt],
-                |r| r.get::<_, i64>(0),
-            )? as usize;
-            if alt_total > 0 {
-                expr = alt;
-                total = alt_total;
-            }
-        }
-    }
     let mut stmt = conn.prepare(&format!(
         "SELECT f.path, s.line_start, s.qualname, s.signature
          FROM symbols_fts ft
@@ -895,7 +840,7 @@ fn merge_search_pointers(exact: Vec<Pointer>, fts: Vec<Pointer>) -> Vec<Pointer>
 pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Result<Vec<String>> {
     let limit = clamp_limit(limit)?;
     let (toks, expr) = search_expr(conn, terms)?;
-    let (fts_ptrs, total, expr) = search_fts_page(conn, &toks, expr, limit)?;
+    let (fts_ptrs, total, expr) = search_fts_page(conn, expr, limit)?;
     if toks.len() == 1 {
         let exact_name = toks.join(" ");
         let (exact_ptrs, exact_total) = search_exact_page(conn, &exact_name, limit)?;
@@ -924,235 +869,4 @@ pub fn search(conn: &Connection, root: &Path, terms: &str, limit: usize) -> Resu
         Some(total),
     )?;
     search_lines(out)
-}
-
-/// Clone candidates (Amendment 12d): merge adjacent matching shingle windows
-/// per file, pair the merged regions, filter by `min_lines`, emit
-/// `pathA:startA-endA pathB:startB-endB` under the standard cap contract.
-/// Caveat line always first — candidates, never proof.
-type CloneGroup = Vec<(String, i64, i64)>;
-type ClonePair = (String, i64, i64, String, i64, i64);
-
-pub fn clones(
-    conn: &Connection,
-    root: &Path,
-    min_lines: usize,
-    path: Option<&str>,
-    limit: usize,
-) -> Result<Vec<String>> {
-    let limit = clamp_limit(limit)?;
-    if let Some(p) = path {
-        validate_path_scope(p, false)?;
-    }
-    let min_lines = min_lines.max(crate::clones::WINDOW);
-    let groups = clone_groups(conn)?;
-    let (pairs, capped) = clone_pairs(groups);
-    let pairs = merge_clone_pairs(pairs, min_lines, path);
-    render_clones(conn, root, &pairs, capped, limit)
-}
-
-/// Load clone shingle groups that occur at least twice.
-fn clone_groups(conn: &Connection) -> Result<std::collections::BTreeMap<i64, CloneGroup>> {
-    let mut stmt = conn.prepare(
-        "SELECT cg.shingle_hash, f.path, cg.line_start, cg.line_end
-         FROM clone_groups cg JOIN files f ON f.id = cg.file_id
-         WHERE cg.shingle_hash IN (
-             SELECT shingle_hash FROM clone_groups
-             GROUP BY shingle_hash HAVING COUNT(*) >= 2)
-         ORDER BY cg.shingle_hash, f.path, cg.line_start",
-    )?;
-    let mut groups: std::collections::BTreeMap<i64, Vec<(String, i64, i64)>> = Default::default();
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, i64>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, i64>(2)?,
-            r.get::<_, i64>(3)?,
-        ))
-    })?;
-    for r in rows {
-        let (h, path, s, e) = r?;
-        groups.entry(h).or_default().push((path, s, e));
-    }
-    Ok(groups)
-}
-
-/// Bounded pair generation. A shared header can put thousands of regions in
-/// one shingle group and the full pair set is quadratic, so caps report a
-/// lower bound instead of unbounded work.
-fn clone_pairs(groups: std::collections::BTreeMap<i64, CloneGroup>) -> (Vec<ClonePair>, bool) {
-    const MAX_REGIONS_PER_GROUP: usize = 64;
-    const MAX_PAIRS: usize = 20_000;
-    let mut capped = false;
-    let mut seen = std::collections::BTreeSet::new();
-    let mut pairs: Vec<ClonePair> = Vec::new();
-    'groups: for regions in groups.values() {
-        // Merge overlapping / near-adjacent windows (gap < window) per file:
-        // one long clone produces many overlapping windows, one region.
-        let mut merged: Vec<(String, i64, i64)> = Vec::new();
-        for (path, s, e) in regions {
-            if let Some(last) = merged.last_mut() {
-                if last.0 == *path && *s <= last.2 + 4 {
-                    last.2 = (*e).max(last.2);
-                    continue;
-                }
-            }
-            merged.push((path.clone(), *s, *e));
-        }
-        if merged.len() < 2 {
-            continue;
-        }
-        if merged.len() > MAX_REGIONS_PER_GROUP {
-            merged.truncate(MAX_REGIONS_PER_GROUP);
-            capped = true;
-        }
-        for i in 0..merged.len() {
-            for j in (i + 1)..merged.len() {
-                if pairs.len() >= MAX_PAIRS {
-                    capped = true;
-                    break 'groups;
-                }
-                let (pa, sa, ea) = &merged[i];
-                let (pb, sb, eb) = &merged[j];
-                let (fa, sta, ena, fb, stb, enb) =
-                    if (pa.as_str(), *sa, *ea) <= (pb.as_str(), *sb, *eb) {
-                        (pa, *sa, *ea, pb, *sb, *eb)
-                    } else {
-                        (pb, *sb, *eb, pa, *sa, *ea)
-                    };
-                let key = (fa.clone(), sta, ena, fb.clone(), stb, enb);
-                if seen.insert(key) {
-                    pairs.push((fa.clone(), sta, ena, fb.clone(), stb, enb));
-                }
-            }
-        }
-    }
-    (pairs, capped)
-}
-
-/// Merge per-window pairs into maximal spans, then apply min-lines and path
-/// filters. Merge-before-filter is required: filtering 5-line windows first
-/// made every min-lines > 5 a false negative.
-fn merge_clone_pairs(
-    pairs: Vec<ClonePair>,
-    min_lines: usize,
-    path: Option<&str>,
-) -> Vec<ClonePair> {
-    // Group by file pair first: sorting globally interleaves different pairs,
-    // so merging only against the previous row leaves overlaps unmerged.
-    type SpanPair = (i64, i64, i64, i64);
-    let mut by_pair: std::collections::BTreeMap<(String, String), Vec<SpanPair>> =
-        Default::default();
-    for (fa, sa, ea, fb, sb, eb) in pairs {
-        by_pair.entry((fa, fb)).or_default().push((sa, ea, sb, eb));
-    }
-    let mut merged_pairs: Vec<(String, i64, i64, String, i64, i64)> = Vec::new();
-    for ((fa, fb), mut spans) in by_pair {
-        spans.sort_unstable();
-        let mut cur: Option<(i64, i64, i64, i64)> = None;
-        for (sa, ea, sb, eb) in spans {
-            match cur {
-                Some((csa, cea, csb, ceb)) if sa <= cea && sb <= ceb => {
-                    cur = Some((csa, cea.max(ea), csb, ceb.max(eb)));
-                }
-                Some(done) => {
-                    merged_pairs.push((fa.clone(), done.0, done.1, fb.clone(), done.2, done.3));
-                    cur = Some((sa, ea, sb, eb));
-                }
-                None => cur = Some((sa, ea, sb, eb)),
-            }
-        }
-        if let Some((sa, ea, sb, eb)) = cur {
-            merged_pairs.push((fa, sa, ea, fb, sb, eb));
-        }
-    }
-    merged_pairs.retain(|(_, sa, ea, _, sb, eb)| {
-        (*ea - *sa + 1) >= min_lines as i64 && (*eb - *sb + 1) >= min_lines as i64
-    });
-    if let Some(scope) = path {
-        let scope = scope.trim_start_matches("./").trim_end_matches('/');
-        merged_pairs
-            .retain(|(fa, _, _, fb, _, _)| path_in_scope(fa, scope) && path_in_scope(fb, scope));
-    }
-    // Longest merged spans first, deterministic tie-break by paths/spans.
-    merged_pairs.sort_by(|a, b| {
-        let la = (a.2 - a.1).max(a.5 - a.4);
-        let lb = (b.2 - b.1).max(b.5 - b.4);
-        lb.cmp(&la).then_with(|| {
-            (a.0.as_str(), a.1, a.3.as_str(), a.4).cmp(&(b.0.as_str(), b.1, b.3.as_str(), b.4))
-        })
-    });
-    merged_pairs
-}
-
-/// Render merged pairs with staleness/journal accounting and enclosing-symbol
-/// identity. Journaling stays at this public-surface phase.
-fn render_clones(
-    conn: &Connection,
-    root: &Path,
-    pairs: &[ClonePair],
-    capped: bool,
-    limit: usize,
-) -> Result<Vec<String>> {
-    if pairs.is_empty() {
-        return Err(AwError::NoResultsCaveated {
-            caveat: CLONES_CAVEAT,
-            detail: "0 clone candidates found".to_string(),
-        });
-    }
-    let shown = pairs.len().min(limit);
-    let displayed = &pairs[..shown];
-    let files: std::collections::BTreeSet<&String> = displayed
-        .iter()
-        .flat_map(|(a, _, _, b, _, _)| [a, b])
-        .collect();
-    let n_files = files.len();
-    let mut changed = 0usize;
-    for f in &files {
-        if file_changed(conn, root, f) {
-            changed += 1;
-        }
-    }
-    let stale = changed > 0;
-    crate::journal::record_result(shown, shown, pairs.len(), stale, 0);
-    let mut out = vec![CLONES_CAVEAT.to_string()];
-    if capped {
-        out.push("[aw] clone pair generation capped — result is a lower bound".to_string());
-    }
-    if stale {
-        out.push(format!(
-            "aw: {changed} of {n_files} result files changed since build — run aw build"
-        ));
-    }
-    // Identity (R7 L4): a bare span forces a file read to learn what the
-    // duplicated block is. Name the enclosing symbol per side, when any.
-    let enclosing = |path: &str, start: i64, end: i64| -> Option<String> {
-        // Largest overlap wins: a merged span can begin in the previous
-        // function's last line, and the shallowest containing symbol is
-        // rarely the duplicated unit.
-        conn.query_row(
-            "SELECT s.qualname FROM symbols s JOIN files f ON f.id = s.file_id
-             WHERE f.path = ?1 AND s.line_start <= ?3 AND s.line_end >= ?2
-             ORDER BY (MIN(s.line_end, ?3) - MAX(s.line_start, ?2)) DESC,
-                      s.line_start DESC
-             LIMIT 1",
-            rusqlite::params![path, start, end],
-            |r| r.get::<_, String>(0),
-        )
-        .ok()
-    };
-    for (pa, sa, ea, pb, sb, eb) in displayed {
-        let ta = enclosing(pa, *sa, *ea)
-            .map(|q| format!(" ({q})"))
-            .unwrap_or_default();
-        let tb = enclosing(pb, *sb, *eb)
-            .map(|q| format!(" ({q})"))
-            .unwrap_or_default();
-        out.push(format!("{pa}:{sa}-{ea}{ta} {pb}:{sb}-{eb}{tb}"));
-    }
-    if pairs.len() > shown {
-        out.push(format!("showing {} of {}", shown, pairs.len()));
-        eprintln!("[aw] capped at {} results ({} total)", shown, pairs.len());
-    }
-    Ok(out)
 }
