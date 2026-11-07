@@ -8,9 +8,9 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 |---|---|
 | Create or refresh an index | `build` |
 | Inspect a definition and its neighbors | `context`, `callers`, `callees`, `path` |
-| Inspect dependencies | `impact`, `imports`, `implementers` |
-| Find definitions and files | `search`, `symbols`, `resolve`, `files` |
-| Investigate cleanup candidates | `dead`, `complexity` |
+| Inspect dependencies | `impact`, `imports` |
+| Find definitions and symbols | `search`, `symbols` |
+| Detect anti-reinvention candidates | `reuse`, `unresolved` |
 | Read repository summaries | `stats` |
 | Persist and retrieve project notes | `mem write`, `mem query`, `mem get`, `mem delete`, `mem export`, `mem gc` |
 | Diagnose or remove local data | `doctor` |
@@ -21,7 +21,7 @@ Use the [usage guide](usage.md) to choose a workflow. This page describes the co
 
 A successful query is ground truth for the rows it returns. Re-run or read
 source when output is capped, ambiguous, stale, or empty; those are coverage
-limits, not routine re-verification. Treat `dead` and `unresolved`
+limits, not routine re-verification. Treat `reuse` and `unresolved`
 as candidates.
 
 ## Invocation and global options
@@ -85,28 +85,28 @@ Without options, report database integrity, versions, parse errors, changed inde
 ### `context <NAME>`
 
 ```text
-aw context <NAME> [--limit <N>] [--explain]
+aw context <NAME> [--limit <N>]
 ```
 
-Print a definition range, kind, qualified name, signature, direct caller sites, and direct callees. `--limit` defaults to 10 per section, maximum 50. `--explain` appends the stored edge kind, confidence, site line, destination, and a typed-receiver hint when a `type_ref` edge exists; it does not reconstruct the resolver branch.
+Print a definition range, kind, qualified name, signature, direct caller sites, and direct callees. `--limit` defaults to 10 per section, maximum 50.
 
 Resolved callees point to definitions; ambiguous callee entries can point to the originating site and carry `[ambiguous]`. Missing sections do not fail a query when the target exists. This is static context, not a complete runtime call graph. Does not prove: every runtime caller or callee is present.
 
 ### `callers <NAME>`
 
 ```text
-aw callers <NAME> [--limit <N>] [--depth <N>] [--explain]
+aw callers <NAME> [--limit <N>] [--depth <N>]
 ```
 
-Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. Each caller symbol appears once at its shortest depth; a symbol reached by a shorter route is not repeated on a longer route, and its inbound edges are expanded once. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target. `--explain` appends stored edge metadata; it does not reconstruct the resolver branch. Does not prove: no other caller exists; dynamic dispatch can hide callers.
+Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. Each caller symbol appears once at its shortest depth; a symbol reached by a shorter route is not repeated on a longer route, and its inbound edges are expanded once. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target. Does not prove: no other caller exists; dynamic dispatch can hide callers.
 
 ### `callees <NAME>`
 
 ```text
-aw callees <NAME> [--limit <N>] [--depth <N>] [--explain]
+aw callees <NAME> [--limit <N>] [--depth <N>]
 ```
 
-Print outgoing callees; resolved rows point to definitions and include callee identity. `--depth` defaults to 1 for direct callees; larger depths follow the forward call closure. `--limit` uses the shared default and cap. `--explain` appends stored edge metadata and grouped site counts; it does not reconstruct the resolver branch. Does not prove: the symbol has no other outgoing calls; external and dynamic calls can be missing.
+Print outgoing callees; resolved rows point to definitions and include callee identity. `--depth` defaults to 1 for direct callees; larger depths follow the forward call closure. `--limit` uses the shared default and cap. Does not prove: the symbol has no other outgoing calls; external and dynamic calls can be missing.
 
 ### `path <FROM> <TO>`
 
@@ -123,8 +123,7 @@ Swap arguments for the reverse question. Equal endpoints or no route within the 
 ### `impact <FILE>`
 
 ```text
-aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>]
-    [--context] [--explain] [--limit <N>]
+aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>] [--limit <N>]
 ```
 
 Find files that depend on the indexed target file, not its outbound dependencies. Default rows group by caller file and include `(N sites)`; `--limit` uses the shared default and cap. An empty default (calls-only) result names how many files import or inherit from the target and points at `--edges imports,inherits`.
@@ -134,8 +133,7 @@ Find files that depend on the indexed target file, not its outbound dependencies
 | `--sites` | Off | Show individual relationship sites instead of grouping by file |
 | `--depth <N>` | `1` | Reverse dependency traversal depth |
 | `--edges <KINDS>` | `calls` | Comma-separated `calls`, `imports`, `inherits`, or `all`; do not combine `all` with explicit kinds |
-| `--context` | Off | Append the enclosing callable when available |
-| `--explain` | Off | Append relationship kind and depth |
+| `--limit <N>` | `50` | Maximum displayed matches, cap 10000 |
 
 Unresolved imports and bases are omitted from extended dependency traversal. Dynamic calls can hide dependents even when only calls are selected. Does not prove: runtime impact, required tests, or effects outside indexed edges.
 
@@ -147,15 +145,7 @@ aw imports <FILE> [--limit <N>]
 
 List outbound resolved import targets for an indexed file. External and unresolved imports are omitted. `--limit` uses the shared default and cap. Does not prove: the file has no other dependencies; external and unresolved imports are omitted.
 
-### `implementers <NAME>`
-
-```text
-aw implementers <NAME> [--limit <N>]
-```
-
-Find direct resolved inbound inheritance or implementation relationships. Dynamic inheritance and cross-file Rust implementation blocks can be missing. `--limit` uses the shared default and cap. Does not prove: no other implementation exists; dynamic inheritance and cross-file Rust blocks can be missing.
-
-## Find symbols and files
+## Find symbols
 
 ### `search <TERMS>`
 
@@ -163,55 +153,43 @@ Find direct resolved inbound inheritance or implementation relationships. Dynami
 aw search <TERMS> [--limit <N>]
 ```
 
-Rank symbols using BM25 token search over names, qualified names, file paths, and signatures. Quote multiple words as one argument, for example `aw search 'parse tree'`.
+Rank symbols using BM25 token search over names, qualified names, file paths, and signatures, weighted by inbound caller count. Quote multiple words as one argument, for example `aw search 'parse tree'`.
 
 | Option | Default | Meaning |
 |---|---|---|
 | `--limit <N>` | `50` | Maximum displayed matches, cap 10000 |
 
-camelCase and snake_case split into tokens. Normal search uses prefix terms and keeps at most 32 tokens, with a warning when truncated. It does not search bodies, comments, or docstrings. Rows carry a location, qualified name, and available signature. Does not prove: the symbol does not exist elsewhere; bodies, comments, and docstrings are not searched.
+Outputs concise interface cards: `{path}:{line} {kind} {qualname} {signature} [callers=N]`.
+
+camelCase and snake_case split into tokens. Normal search uses prefix terms and keeps at most 32 tokens, with a warning when truncated. It does not search bodies, comments, or docstrings. Does not prove: the symbol does not exist elsewhere; bodies, comments, and docstrings are not searched.
 
 ### `symbols <FILE_OR_DIRECTORY>`
 
 ```text
-aw symbols <FILE_OR_DIRECTORY> [--outline] [--metrics] [--limit <N>]
+aw symbols <FILE_OR_DIRECTORY> [--outline] [--limit <N>]
 ```
 
-List indexed definitions by path and line. `--outline` adds signatures; `--metrics` adds the per-symbol effective line count. Both default to off and can be combined. `--limit` uses the shared default and cap. Accept `.` or `./` as the repository root.
+List indexed definitions by path and line. `--outline` adds signatures. `--limit` uses the shared default and cap. Accept `.` or `./` as the repository root.
 
-### `resolve --stdin`
+## Detect anti-reinvention candidates and gaps
+
+### `reuse`
 
 ```text
-aw resolve --stdin
+aw reuse [PATHS]... [--limit <N>]
 ```
 
-Read one name per line from standard input. `--stdin` defaults to off but is required; there are no other command-specific options.
+Scan the repository for anti-reinvention opportunities and code reuse candidates. Detects:
+- Exact signature and callee footprint duplicates across files.
+- Utility functions with high callee overlap.
+- Candidate shared abstractions.
 
-Ignore blank lines and trimmed lines starting with `#`. Accept at most 1 MiB input, 4096 bytes per original line, and 1000 retained names. Print `found`, `ambiguous`, or `missing` rows; ambiguity renders at most 50 candidates per name.
+| Option | Default | Meaning |
+|---|---|---|
+| `[PATHS]...` | Empty (whole repo) | Restrict search scope to specific file or directory prefixes |
+| `--limit <N>` | `10` | Maximum candidate pairs displayed, cap 100 |
 
-Exit 0 when all names resolve uniquely, 1 for missing names with no ambiguity or for empty input, and 2 if any name is ambiguous. Ordinary index and input errors retain their standard exit codes.
-
-### `files`
-
-```text
-aw files [--path <PATH>] [--limit <N>]
-```
-
-List indexed paths with build-time symbol counts, byte sizes, and generated tagging. `--path` defaults to absent; `--limit` uses the shared default and cap. This inventory does not check current source freshness.
-
-## Investigate candidates and gaps
-
-### `dead`
-
-```text
-aw dead [--exclude-tests] [--path <PATH>] [--limit <N>]
-```
-
-List candidate functions, methods, classes, traits, and interfaces without indexed inbound calls, imports, inheritance, or typed-receiver (`type_ref`) references. Rows render `path:line qualname`. Relevant ambiguous references also suppress candidates; members under traits and interfaces are excluded by policy.
-
-`--exclude-tests` drops rows carrying the index's test classification (test paths, test-shaped names and files, Rust `#[test]`/`#[cfg(test)]` items, TS `describe`/`it` scopes), not test-runner discovery. All switches default to off, `--path` defaults to absent, and `--limit` uses the shared default and cap.
-
-Always treat the output as candidates. Entry points, external consumers, dynamic dispatch, star imports, module-level imports, type references, and attribute references are not proven absent. Does not prove: the symbol is dead.
+Does not prove: functions are identical in runtime behavior. Inspect implementation before consolidating.
 
 ### `unresolved`
 
@@ -224,22 +202,6 @@ By default, summarize unresolved callees by file and include common unresolved n
 `--path` defaults to absent; `--limit` controls displayed files or site rows and uses the shared default and cap. `[internal]` marks unresolved call names also present in the index. External calls contribute to counts too.
 
 Summary counts are build-time data with no freshness check. Site mode checks displayed locations for changes; locations unavailable from extraction are reported separately on stderr.
-
-### `complexity`
-
-```text
-aw complexity [--min-loc <N>] [--path <PATH>] [--limit <N>]
-```
-
-Rank functions and methods by descending effective lines of code.
-
-| Option | Default | Meaning |
-|---|---|---|
-| `--min-loc <N>` | `0` | Minimum effective lines of code |
-| `--path <PATH>` | None | Restrict file or directory scope |
-| `--limit <N>` | `50` | Maximum displayed callables, cap 10000 |
-
-Rows label the `loc` metric. It is a static line count, not cognitive complexity. Effective LOC excludes blank lines, comment-only lines, and Python docstrings.
 
 ## Project memory
 

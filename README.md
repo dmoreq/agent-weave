@@ -82,7 +82,7 @@ See [Getting started](docs/getting-started.md) for setup and result handling.
 | What definitions are in a file or directory? | `aw symbols <path> --outline` |
 | What did a previous session settle here? | `aw mem query '<terms>'` |
 
-For import relationships, inheritance, complexity, and other commands, see the
+For import relationships, code reuse candidates, and other commands, see the
 [CLI reference](docs/cli-reference.md).
 Use the [workflow guide](docs/usage.md) to decide what to do with a result.
 

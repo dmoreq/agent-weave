@@ -32,8 +32,6 @@ pub(super) fn define_class<'a>(w: &mut Walker<'a, '_, '_>, kind: SymbolKind) {
         line_start: start,
         line_end: w.node.end_position().row + 1,
         is_test: is_test_item(w.fx, w.ctx, &name),
-        exported: is_exported(w.fx, w.node),
-        ..Default::default()
     });
     // Heritage: extends X / implements Y / trait bounds.
     collect_type_heritage(w.node, w.src, w.fx, sym_idx);
@@ -184,11 +182,6 @@ pub(super) fn ts_default_export_ancestor(node: Node<'_>) -> bool {
     })
 }
 
-/// True when a TS declaration is wrapped by an `export` statement.
-pub(super) fn ts_exported_ancestor(node: Node<'_>) -> bool {
-    ts_ancestor(node, |_| true)
-}
-
 /// Module-level `const X = () => {...}` / `= function() {...}` -> function
 /// symbol (React components and hooks live here).
 pub(super) fn record_ts_arrow_function<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
@@ -210,20 +203,15 @@ pub(super) fn record_ts_arrow_function<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
     let name = text(name_node, w.src);
     let qualname = format!("{}.{}", w.fx.module, name);
     let start = value.start_position().row + 1;
-    let loc = w.callable_effective_loc(value);
     w.fx.push_symbol(NewSymbol {
         kind: SymbolKind::Function,
         name: name.clone(),
         qualname: qualname.clone(),
         file_idx: w.fx.file_idx,
         signature: signature_of(w.node, w.src),
-        // Metrics and line range use the same arrow/function-expression node;
-        // a multiline `const f =` header must not make loc and lines disagree.
         line_start: start,
         line_end: value.end_position().row + 1,
-        effective_loc: loc,
         is_test: is_test_item(w.fx, w.ctx, &name),
-        exported: ts_exported_ancestor(w.node),
     });
     w.ctx.func_stack.push(qualname.clone());
     collect_arrow_params(value, w.src, w.fx, &qualname, None);

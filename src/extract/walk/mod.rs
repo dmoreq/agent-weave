@@ -16,23 +16,15 @@ pub(super) struct WalkCtx {
     /// Test ancestry (schema v8): inside a Rust `#[test]`/`#[cfg(test)]` item
     /// or a TS `describe(...)`/`it(...)` callback. Save/restore per scope.
     test_scope: bool,
-    /// Per-line byte bounds for the Python docstring adjustment, computed once
-    /// per file instead of per callable.
-    line_bounds: Vec<(usize, usize)>,
 }
 
 impl WalkCtx {
-    pub(super) fn for_file(lang: Lang, src: &[u8]) -> WalkCtx {
+    pub(super) fn for_file(_lang: Lang, _src: &[u8]) -> WalkCtx {
         WalkCtx {
             class_stack: Vec::new(),
             mod_stack: Vec::new(),
             func_stack: Vec::new(),
             test_scope: false,
-            line_bounds: if lang == Lang::Python {
-                crate::parse::line_byte_bounds(src)
-            } else {
-                Vec::new()
-            },
         }
     }
 
@@ -441,7 +433,6 @@ fn push_scope_symbol(
         line_start: node.start_position().row + 1,
         line_end: node.end_position().row + 1,
         is_test,
-        ..Default::default()
     });
 }
 
@@ -661,7 +652,6 @@ fn visit_python_class<'a>(w: &mut Walker<'a, '_, '_>) {
         line_end: w.node.end_position().row + 1,
 
         is_test: is_test_item(w.fx, w.ctx, &name),
-        ..Default::default()
     });
     if let Some(bases) = w.node.child_by_field_name("superclasses") {
         let mut cursor = bases.walk();
@@ -723,9 +713,7 @@ pub(super) struct CallableSpec<'a> {
     pub name: &'a str,
     pub qualname: &'a str,
     pub start: usize,
-    pub effective_loc: usize,
     pub is_test: bool,
-    pub exported: bool,
     /// Python pushes the scope before the body check and pops it when there
     /// is no body; Rust/TS push it only when a body exists.
     pub always_push_scope: bool,
@@ -751,9 +739,7 @@ impl<'a, 's> Walker<'a, 's, '_> {
             signature: signature_of(self.node, self.src),
             line_start: spec.start,
             line_end: self.node.end_position().row + 1,
-            effective_loc: spec.effective_loc,
             is_test: spec.is_test,
-            exported: spec.exported,
         });
     }
 
@@ -1180,57 +1166,8 @@ fn try_ts_module_import(node: Node<'_>, f: Node<'_>, src: &[u8], fx: &mut FileEx
 }
 
 impl Walker<'_, '_, '_> {
-    /// Effective LOC from the file-wide comment mask plus the Python
-    /// docstring. A line counts when it has a non-whitespace byte outside
-    /// every comment node; docstring bytes are excluded only when the whole
-    /// line is inside the string.
-    fn callable_effective_loc(&self, node: Node<'_>) -> usize {
-        let code_lines = &self.fx.code_lines;
-        let base_row = node.start_position().row;
-        let end_row = node.end_position().row;
-        let mut effective = (base_row..=end_row)
-            .filter(|row| code_lines.get(*row).copied().unwrap_or(true))
-            .count();
-        if self.fx.lang != Lang::Python {
-            return effective;
-        }
-        let Some(body) = node.child_by_field_name("body") else {
-            return effective;
-        };
-        let mut c = body.walk();
-        let first = body.named_children(&mut c).next();
-        let Some(stmt) = first.filter(|s| s.kind() == "expression_statement") else {
-            return effective;
-        };
-        let mut c2 = stmt.walk();
-        let inner = stmt.named_children(&mut c2).next();
-        let Some(doc) = inner.filter(|s| s.kind() == "string") else {
-            return effective;
-        };
-        let doc_start = doc.start_byte();
-        let doc_end = doc.end_byte();
-        for row in doc.start_position().row..=doc.end_position().row {
-            let Some(&(start, end)) = self.ctx.line_bounds.get(row) else {
-                continue;
-            };
-            let has_code_outside_doc = self.src[start..end].iter().enumerate().any(|(i, byte)| {
-                if byte.is_ascii_whitespace() {
-                    return false;
-                }
-                let pos = start + i;
-                !(doc_start <= pos && pos < doc_end)
-            });
-            if !has_code_outside_doc && code_lines.get(row).copied().unwrap_or(true) {
-                effective = effective.saturating_sub(1);
-            }
-        }
-        effective
-    }
-
-    /// Shared CallableSpec constructor: start line, effective LOC, and the
-    /// base is-test flag all come from the walked node. Callers override the
-    /// export/scope policy (and, for `define_function`, the bodyless LOC and
-    /// Rust test attribute) on the returned spec.
+    /// Shared CallableSpec constructor: start line and the
+    /// base is-test flag all come from the walked node.
     fn callable_spec<'a>(
         &self,
         kind: SymbolKind,
@@ -1242,9 +1179,7 @@ impl Walker<'_, '_, '_> {
             name,
             qualname,
             start: self.node.start_position().row + 1,
-            effective_loc: self.callable_effective_loc(self.node),
             is_test: is_test_item(self.fx, self.ctx, name),
-            exported: false,
             always_push_scope: false,
         }
     }
@@ -1257,11 +1192,6 @@ fn define_function<'a>(w: &mut Walker<'a, '_, '_>, kind: SymbolKind) {
     let name = text(name_node, w.src);
     let qualname = parent_qualname(w.ctx, w.fx, &name);
     let mut spec = w.callable_spec(kind, &name, &qualname);
-    spec.exported = is_exported(w.fx, w.node);
-    // Bodyless declarations (Rust trait fns) carry no LOC.
-    if w.node.child_by_field_name("body").is_none() {
-        spec.effective_loc = 0;
-    }
     if w.fx.lang == Lang::Rust && rust::has_test_attr(w.node, w.src) {
         spec.is_test = true;
     }
@@ -1279,13 +1209,6 @@ fn parent_qualname(ctx: &WalkCtx, fx: &FileExtraction, name: &str) -> String {
         .cloned()
         .unwrap_or_else(|| fx.module.clone());
     format!("{parent}.{name}")
-}
-
-fn is_exported(fx: &FileExtraction, node: Node<'_>) -> bool {
-    matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
-        && node
-            .parent()
-            .is_some_and(|p| p.kind() == "export_statement")
 }
 
 /// `export default function work()` has no `worker.default` symbol; bind

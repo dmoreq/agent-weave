@@ -62,6 +62,10 @@ where
 }
 
 /// Row mappers for the fixed-width integer tuples used by counter queries.
+pub(crate) fn ints2(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64)> {
+    Ok((r.get(0)?, r.get(1)?))
+}
+
 pub(crate) fn ints3(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64, i64)> {
     Ok((r.get(0)?, r.get(1)?, r.get(2)?))
 }
@@ -419,15 +423,11 @@ fn schema_compatible(old: &Connection) -> bool {
     if version != SCHEMA_VERSION {
         return false;
     }
-    // Amendment 19: a partial index (the v4 lesson) can lag its version
-    // stamp. Require every v6 column and the complexity index before enabling
-    // the fast path; otherwise fall back to a full fresh build.
+    // Require every v10 column before enabling the fast path;
+    // otherwise fall back to a full fresh build.
     let required_columns = [
-        ("symbols", "effective_loc"),
-        ("symbols", "exported"),
         ("symbols", "file_path"),
         ("symbols", "is_test"),
-        ("files", "generated"),
         ("unresolved_calls", "site_line"),
         ("unresolved_calls", "kind"),
     ];
@@ -435,9 +435,6 @@ fn schema_compatible(old: &Connection) -> bool {
         if !column_present(old, table, column).unwrap_or(false) {
             return false;
         }
-    }
-    if !object_exists(old, "index", "symbols_complexity_idx") {
-        return false;
     }
     if !object_exists(old, "table", "symbols_fts") {
         return false;
@@ -448,12 +445,7 @@ fn schema_compatible(old: &Connection) -> bool {
     if meta_get(old, meta_keys::SIGNATURE_VERSION).as_deref() != Some(SIGNATURE_VERSION) {
         return false;
     }
-    if meta_get(old, meta_keys::METRICS_VERSION).as_deref() != Some(METRICS_VERSION) {
-        return false;
-    }
-    // Amendment 21 added the complexity manifest after v7 shipped. An index
-    // without it must rebuild; the read-only no-op path cannot backfill.
-    meta_get(old, "callable_count").is_some()
+    true
 }
 
 /// True when `sqlite_master` holds an object of `kind` named `name`.
@@ -875,8 +867,8 @@ pub fn carry_forward_unchanged(
     new.execute_batch(&format!("ATTACH DATABASE '{quoted}' AS olddb"))?;
     {
         let mut stmt = new.prepare(
-            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, generated)
-             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved, generated
+            "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
+             SELECT id, path, size, mtime, content_hash, parse_status, error_nodes, unresolved
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
         let mut refresh_mtime = new.prepare("UPDATE files SET mtime = ?1 WHERE path = ?2")?;
@@ -888,8 +880,8 @@ pub fn carry_forward_unchanged(
         }
     }
     new.execute_batch(
-        "INSERT INTO symbols(id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, effective_loc, exported, is_test)
-         SELECT id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, effective_loc, exported, is_test
+        "INSERT INTO symbols(id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, is_test)
+         SELECT id, kind, name, qualname, file_id, file_path, line_start, line_end, signature, is_test
          FROM olddb.symbols WHERE file_id IN (SELECT id FROM files);
          INSERT INTO edges(id, src_id, dst_id, dst_name, kind, confidence, site_line)
          SELECT id, src_id, dst_id, dst_name, kind, confidence, site_line
@@ -913,8 +905,6 @@ pub struct FilesRow {
     pub error_nodes: usize,
     /// Per-file unresolved-callee count (filled after resolve()).
     pub unresolved: usize,
-    /// Generated-file tag (Amendment 19).
-    pub generated: i64,
 }
 
 /// Amendment 11b: caller holds the build transaction; 500-row prepared
@@ -922,8 +912,8 @@ pub struct FilesRow {
 pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(rows.len());
     let mut stmt = conn.prepare(
-        "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved, generated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO files(path, size, mtime, content_hash, parse_status, error_nodes, unresolved)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )?;
     for r in rows {
         stmt.execute(rusqlite::params![
@@ -933,8 +923,7 @@ pub fn insert_files(conn: &Connection, rows: &[FilesRow]) -> Result<Vec<i64>> {
             r.content_hash,
             r.parse_status,
             r.error_nodes as i64,
-            r.unresolved as i64,
-            r.generated
+            r.unresolved as i64
         ])?;
         ids.push(conn.last_insert_rowid());
     }
@@ -949,8 +938,8 @@ pub fn insert_symbols(
 ) -> Result<Vec<i64>> {
     let mut ids = Vec::with_capacity(symbols.len());
     let mut stmt = conn.prepare(
-        "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, effective_loc, exported, is_test)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO symbols(kind, name, qualname, file_id, file_path, line_start, line_end, signature, is_test)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
     for s in symbols {
         stmt.execute(rusqlite::params![
@@ -962,8 +951,6 @@ pub fn insert_symbols(
             s.line_start as i64,
             s.line_end as i64,
             s.signature,
-            s.effective_loc as i64,
-            i64::from(s.exported),
             i64::from(s.is_test)
         ])?;
         ids.push(conn.last_insert_rowid());
@@ -1088,7 +1075,6 @@ pub(crate) mod meta_keys {
     pub const BUILT_AT: &str = "built_at";
     pub const SOURCE_REV: &str = "source_rev";
     pub const CALLABLE_COUNT: &str = "callable_count";
-    pub const CALLABLE_SYMBOL_COUNT: &str = "callable_symbol_count";
     pub const FILE_COUNT: &str = "file_count";
     pub const SYMBOL_COUNT: &str = "symbol_count";
     pub const EDGE_COUNT: &str = "edge_count";

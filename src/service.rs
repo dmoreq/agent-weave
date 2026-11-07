@@ -4,7 +4,6 @@
 //! both convert their input into a `CommandRequest` and print the returned
 //! `ExecutionResult`, so the two surfaces stay byte-identical by construction.
 
-use std::io::Read;
 use std::path::Path;
 use std::time::Instant;
 
@@ -37,20 +36,13 @@ pub enum CommandRequest {
         name: String,
         limit: usize,
         depth: usize,
-        explain: bool,
     },
     Callees {
         name: String,
         limit: usize,
         depth: usize,
-        explain: bool,
     },
     Context {
-        name: String,
-        limit: usize,
-        explain: bool,
-    },
-    Implementers {
         name: String,
         limit: usize,
     },
@@ -70,13 +62,6 @@ pub enum CommandRequest {
         /// Validated `--edges` kinds (parsed at the surface boundary, so a bad
         /// spec is a usage error before dispatch).
         edges: Vec<crate::extract::EdgeKind>,
-        context: bool,
-        explain: bool,
-        limit: usize,
-    },
-    Dead {
-        exclude_tests: bool,
-        path: Option<String>,
         limit: usize,
     },
     Unresolved {
@@ -87,19 +72,10 @@ pub enum CommandRequest {
     Symbols {
         file: String,
         outline: bool,
-        metrics: bool,
         limit: usize,
     },
-    Complexity {
-        min_loc: usize,
-        path: Option<String>,
-        limit: usize,
-    },
-    Resolve {
-        names: Vec<String>,
-    },
-    Files {
-        path: Option<String>,
+    Reuse {
+        paths: Vec<String>,
         limit: usize,
     },
     Search {
@@ -170,16 +146,12 @@ fn cli_family(cmd: &crate::cli::Cmd) -> Family {
         crate::cli::Cmd::Callers { .. }
         | crate::cli::Cmd::Callees { .. }
         | crate::cli::Cmd::Context { .. }
-        | crate::cli::Cmd::Implementers { .. }
         | crate::cli::Cmd::Imports { .. }
         | crate::cli::Cmd::Path { .. }
         | crate::cli::Cmd::Impact { .. } => Family::Graph,
-        crate::cli::Cmd::Dead { .. }
-        | crate::cli::Cmd::Unresolved { .. }
+        crate::cli::Cmd::Unresolved { .. }
         | crate::cli::Cmd::Symbols { .. }
-        | crate::cli::Cmd::Complexity { .. }
-        | crate::cli::Cmd::Resolve { .. }
-        | crate::cli::Cmd::Files { .. }
+        | crate::cli::Cmd::Reuse { .. }
         | crate::cli::Cmd::Search { .. }
         | crate::cli::Cmd::Stats { .. } => Family::Analysis,
         crate::cli::Cmd::Mem { .. } => Family::Memory,
@@ -198,24 +170,14 @@ fn edge_kinds_csv(kinds: &[crate::extract::EdgeKind]) -> String {
 /// Shared journal fields for the graph queries; `depth` joins only for the
 /// two call-graph directions (callers/callees). Built in explicit branches so
 /// field order never depends on a positional `insert`.
-fn graph_args(
-    name: &str,
-    depth: Option<usize>,
-    limit: usize,
-    explain: bool,
-) -> Vec<(&'static str, String)> {
+fn graph_args(name: &str, depth: Option<usize>, limit: usize) -> Vec<(&'static str, String)> {
     match depth {
         Some(depth) => vec![
             ("name", name.to_string()),
             ("depth", depth.to_string()),
             ("limit", limit.to_string()),
-            ("explain", explain.to_string()),
         ],
-        None => vec![
-            ("name", name.to_string()),
-            ("limit", limit.to_string()),
-            ("explain", explain.to_string()),
-        ],
+        None => vec![("name", name.to_string()), ("limit", limit.to_string())],
     }
 }
 
@@ -266,40 +228,13 @@ impl CommandRequest {
     /// Graph traversal and call-site commands.
     fn from_cli_graph(cmd: crate::cli::Cmd) -> Result<CommandRequest> {
         Ok(match cmd {
-            crate::cli::Cmd::Callers {
-                name,
-                limit,
-                depth,
-                explain,
-            } => CommandRequest::Callers {
-                name,
-                limit,
-                depth,
-                explain,
-            },
-            crate::cli::Cmd::Callees {
-                name,
-                limit,
-                depth,
-                explain,
-            } => CommandRequest::Callees {
-                name,
-                limit,
-                depth,
-                explain,
-            },
-            crate::cli::Cmd::Context {
-                name,
-                limit,
-                explain,
-            } => CommandRequest::Context {
-                name,
-                limit,
-                explain,
-            },
-            crate::cli::Cmd::Implementers { name, limit } => {
-                CommandRequest::Implementers { name, limit }
+            crate::cli::Cmd::Callers { name, limit, depth } => {
+                CommandRequest::Callers { name, limit, depth }
             }
+            crate::cli::Cmd::Callees { name, limit, depth } => {
+                CommandRequest::Callees { name, limit, depth }
+            }
+            crate::cli::Cmd::Context { name, limit } => CommandRequest::Context { name, limit },
             crate::cli::Cmd::Imports { file, limit } => CommandRequest::Imports { file, limit },
             crate::cli::Cmd::Path { from, to, depth } => CommandRequest::Path { from, to, depth },
             crate::cli::Cmd::Impact { .. } => Self::impact_request(cmd)?,
@@ -316,8 +251,6 @@ impl CommandRequest {
             sites,
             depth,
             edges,
-            context,
-            explain,
             limit,
         } = cmd
         else {
@@ -328,57 +261,25 @@ impl CommandRequest {
             sites,
             depth,
             edges: crate::query::parse_edge_kinds(&edges)?,
-            context,
-            explain,
             limit,
         })
     }
-    /// Analysis, inventory, and batch resolution.
+    /// Analysis, inventory, and anti-reinvention.
     fn from_cli_analysis(cmd: crate::cli::Cmd) -> Result<CommandRequest> {
         Ok(match cmd {
-            crate::cli::Cmd::Dead {
-                exclude_tests,
-                path,
-                limit,
-            } => CommandRequest::Dead {
-                exclude_tests,
-                path,
-                limit,
-            },
             crate::cli::Cmd::Unresolved { names, path, limit } => {
                 CommandRequest::Unresolved { names, path, limit }
             }
             crate::cli::Cmd::Symbols {
                 file,
                 outline,
-                metrics,
                 limit,
             } => CommandRequest::Symbols {
                 file,
                 outline,
-                metrics,
                 limit,
             },
-            crate::cli::Cmd::Complexity {
-                min_loc,
-                path,
-                limit,
-            } => CommandRequest::Complexity {
-                min_loc,
-                path,
-                limit,
-            },
-            crate::cli::Cmd::Resolve { stdin } => {
-                if !stdin {
-                    return Err(AwError::Usage(
-                        "resolve reads names from stdin; pass --stdin".to_string(),
-                    ));
-                }
-                CommandRequest::Resolve {
-                    names: read_resolve_stdin()?,
-                }
-            }
-            crate::cli::Cmd::Files { path, limit } => CommandRequest::Files { path, limit },
+            crate::cli::Cmd::Reuse { paths, limit } => CommandRequest::Reuse { paths, limit },
             crate::cli::Cmd::Search { terms, limit } => CommandRequest::Search { terms, limit },
             crate::cli::Cmd::Stats { path } => CommandRequest::Stats { path },
             _ => unreachable!("from_cli_analysis called with a non-matching command"),
@@ -441,16 +342,12 @@ impl CommandRequest {
             CommandRequest::Callers { .. }
             | CommandRequest::Callees { .. }
             | CommandRequest::Context { .. }
-            | CommandRequest::Implementers { .. }
             | CommandRequest::Imports { .. }
             | CommandRequest::Path { .. }
             | CommandRequest::Impact { .. } => Family::Graph,
-            CommandRequest::Dead { .. }
-            | CommandRequest::Unresolved { .. }
+            CommandRequest::Unresolved { .. }
             | CommandRequest::Symbols { .. }
-            | CommandRequest::Complexity { .. }
-            | CommandRequest::Resolve { .. }
-            | CommandRequest::Files { .. }
+            | CommandRequest::Reuse { .. }
             | CommandRequest::Search { .. }
             | CommandRequest::Stats { .. } => Family::Analysis,
             CommandRequest::MemWrite { .. }
@@ -469,16 +366,12 @@ impl CommandRequest {
             CommandRequest::Callers { .. } => "callers",
             CommandRequest::Callees { .. } => "callees",
             CommandRequest::Context { .. } => "context",
-            CommandRequest::Implementers { .. } => "implementers",
             CommandRequest::Imports { .. } => "imports",
             CommandRequest::Path { .. } => "path",
             CommandRequest::Impact { .. } => "impact",
-            CommandRequest::Dead { .. } => "dead",
             CommandRequest::Unresolved { .. } => "unresolved",
             CommandRequest::Symbols { .. } => "symbols",
-            CommandRequest::Complexity { .. } => "complexity",
-            CommandRequest::Resolve { .. } => "resolve",
-            CommandRequest::Files { .. } => "files",
+            CommandRequest::Reuse { .. } => "reuse",
             CommandRequest::Search { .. } => "search",
             CommandRequest::Stats { .. } => "stats",
             CommandRequest::Doctor { .. } => "doctor",
@@ -523,26 +416,11 @@ impl CommandRequest {
     /// Journal fields for the graph queries.
     fn journal_args_graph(&self) -> Vec<(&'static str, String)> {
         match self {
-            CommandRequest::Callers {
-                name,
-                limit,
-                depth,
-                explain,
+            CommandRequest::Callers { name, limit, depth }
+            | CommandRequest::Callees { name, limit, depth } => {
+                graph_args(name, Some(*depth), *limit)
             }
-            | CommandRequest::Callees {
-                name,
-                limit,
-                depth,
-                explain,
-            } => graph_args(name, Some(*depth), *limit, *explain),
-            CommandRequest::Context {
-                name,
-                limit,
-                explain,
-            } => graph_args(name, None, *limit, *explain),
-            CommandRequest::Implementers { name, limit } => {
-                vec![("name", name.clone()), ("limit", limit.to_string())]
-            }
+            CommandRequest::Context { name, limit } => graph_args(name, None, *limit),
             CommandRequest::Imports { file, limit } => {
                 vec![("file", file.clone()), ("limit", limit.to_string())]
             }
@@ -556,16 +434,12 @@ impl CommandRequest {
                 sites,
                 depth,
                 edges,
-                context,
-                explain,
                 limit,
             } => vec![
                 ("file", file.clone()),
                 ("sites", sites.to_string()),
                 ("depth", depth.to_string()),
                 ("edges", edge_kinds_csv(edges)),
-                ("context", context.to_string()),
-                ("explain", explain.to_string()),
                 ("limit", limit.to_string()),
             ],
             _ => unreachable!("journal_args_graph called with a non-matching request"),
@@ -574,42 +448,21 @@ impl CommandRequest {
     /// Journal fields for analysis and inventory.
     fn journal_args_analysis(&self) -> Vec<(&'static str, String)> {
         match self {
-            CommandRequest::Dead {
-                exclude_tests,
-                path,
-                limit,
-            } => path_limit_args(
-                &[("exclude_tests", exclude_tests.to_string())],
-                path.as_ref(),
-                *limit,
-            ),
             CommandRequest::Unresolved { names, path, limit } => {
                 path_limit_args(&[("names", names.to_string())], path.as_ref(), *limit)
             }
             CommandRequest::Symbols {
                 file,
                 outline,
-                metrics,
                 limit,
             } => vec![
                 ("file", file.clone()),
                 ("outline", outline.to_string()),
-                ("metrics", metrics.to_string()),
                 ("limit", limit.to_string()),
             ],
-            CommandRequest::Complexity {
-                min_loc,
-                path,
-                limit,
-            } => path_limit_args(&[("min_loc", min_loc.to_string())], path.as_ref(), *limit),
-            CommandRequest::Resolve { names } => vec![
-                ("count", names.len().to_string()),
-                (
-                    "candidate_limit",
-                    crate::query::MAX_AMBIGUOUS_CANDIDATES.to_string(),
-                ),
-            ],
-            CommandRequest::Files { path, limit } => path_limit_args(&[], path.as_ref(), *limit),
+            CommandRequest::Reuse { paths, limit } => {
+                vec![("paths", paths.join(",")), ("limit", limit.to_string())]
+            }
             CommandRequest::Search { terms, limit } => {
                 vec![("terms", terms.clone()), ("limit", limit.to_string())]
             }
@@ -715,14 +568,6 @@ pub fn execute(
             }
             (stdout, stderr, 0)
         }
-        Err(AwError::BatchOutput { text, code }) => {
-            // Batch output still journals: `resolve --stdin` exits 1/2 through
-            // this arm, and `record_result` only stages the pending line.
-            if journal {
-                crate::journal::finalize(root.as_deref(), code, latency_us);
-            }
-            (text, String::new(), code)
-        }
         Err(e) => {
             let mut stdout = String::new();
             if let AwError::NoResultsCaveated { caveat, .. } = &e {
@@ -767,8 +612,8 @@ fn run_diag(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
             force,
             max_parse_error_rate,
         } => {
-            let line = crate::build::run_build(root_arg, *force, *max_parse_error_rate)?;
-            Ok((format!("{line}\n"), String::new()))
+            let (line, stderr) = crate::build::run_build(root_arg, *force, *max_parse_error_rate)?;
+            Ok((format!("{line}\n"), stderr))
         }
         CommandRequest::Doctor { invalidate } => run_doctor(root_arg, *invalidate),
         CommandRequest::Usage { quality } => run_usage(root_arg, *quality),
@@ -794,16 +639,9 @@ fn run_graph_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmO
     };
     match req {
         CommandRequest::Callers { .. } | CommandRequest::Callees { .. } => run_traversal(req, &ctx),
-        CommandRequest::Context {
-            name,
-            limit,
-            explain,
-        } => {
-            let lines = crate::query::context(&ctx, name, *limit, *explain)?;
+        CommandRequest::Context { name, limit } => {
+            let lines = crate::query::context(&ctx, name, *limit)?;
             Ok((join_lines(lines), String::new()))
-        }
-        CommandRequest::Implementers { name, limit } => {
-            emit(crate::query::implementers(&ctx, name, *limit)?)
         }
         CommandRequest::Imports { file, limit } => emit(crate::query::imports(&ctx, file, *limit)?),
         CommandRequest::Path { from, to, depth } => {
@@ -815,40 +653,26 @@ fn run_graph_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmO
     }
 }
 
-/// `callers`/`callees`: one name plus the shared limit/depth/explain bundle.
+/// `callers`/`callees`: one name plus the shared limit/depth bundle.
 fn run_traversal(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Result<ArmOut> {
     match req {
-        CommandRequest::Callers {
-            name,
-            limit,
-            depth,
-            explain,
-        } => emit(crate::query::callers(
+        CommandRequest::Callers { name, limit, depth } => emit(crate::query::callers(
             ctx,
             name,
-            graph_opts(*limit, *depth, *explain),
+            graph_opts(*limit, *depth),
         )?),
-        CommandRequest::Callees {
-            name,
-            limit,
-            depth,
-            explain,
-        } => emit(crate::query::callees(
+        CommandRequest::Callees { name, limit, depth } => emit(crate::query::callees(
             ctx,
             name,
-            graph_opts(*limit, *depth, *explain),
+            graph_opts(*limit, *depth),
         )?),
         _ => unreachable!("run_traversal called with a non-traversal request"),
     }
 }
 
 /// Shared graph-traversal knobs for `callers`/`callees` (ImpactOpts-style).
-fn graph_opts(limit: usize, depth: usize, explain: bool) -> crate::query::GraphQueryOpts {
-    crate::query::GraphQueryOpts {
-        limit,
-        depth,
-        explain,
-    }
+fn graph_opts(limit: usize, depth: usize) -> crate::query::GraphQueryOpts {
+    crate::query::GraphQueryOpts { limit, depth }
 }
 
 /// `impact`: one file plus the extended ImpactOpts bundle.
@@ -858,8 +682,6 @@ fn run_impact(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Result<
         sites,
         depth,
         edges,
-        context,
-        explain,
         limit,
     } = req
     else {
@@ -873,14 +695,12 @@ fn run_impact(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Result<
             sites: *sites,
             depth: *depth,
             kinds: edges.clone(),
-            context: *context,
-            explain: *explain,
         },
     )?;
     emit(out)
 }
 
-/// Inventory, analysis, and batch-resolution queries.
+/// Inventory, analysis, and reuse queries.
 fn run_analysis_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
     let (root, conn) = open_query(root_arg)?;
     let ctx = crate::query::QueryCtx {
@@ -888,20 +708,10 @@ fn run_analysis_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<A
         root: &root,
     };
     match req {
-        CommandRequest::Dead {
-            exclude_tests,
-            path,
-            limit,
-        } => {
-            let out = crate::query::dead(&ctx, *limit, *exclude_tests, path.as_deref())?;
-            emit(out)
-        }
         CommandRequest::Unresolved { .. }
         | CommandRequest::Symbols { .. }
-        | CommandRequest::Complexity { .. }
-        | CommandRequest::Files { .. }
+        | CommandRequest::Reuse { .. }
         | CommandRequest::Search { .. } => run_line_query(req, &ctx),
-        CommandRequest::Resolve { names } => run_resolve_batch(&conn, names),
         CommandRequest::Stats { path } => {
             let line = crate::insights::stats(&ctx, path.as_deref())?;
             crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
@@ -926,47 +736,18 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
         CommandRequest::Symbols {
             file,
             outline,
-            metrics,
             limit,
         } => crate::query::symbols(
             ctx,
             file,
             *limit,
-            crate::query::SymbolsOpts {
-                outline: *outline,
-                metrics: *metrics,
-            },
+            crate::query::SymbolsOpts { outline: *outline },
         )?,
-        CommandRequest::Complexity {
-            min_loc,
-            path,
-            limit,
-        } => crate::query::complexity(ctx, *min_loc, path.as_deref(), *limit)?,
-        CommandRequest::Files { path, limit } => {
-            crate::query::files(ctx.conn, path.as_deref(), *limit)?
-        }
+        CommandRequest::Reuse { paths, limit } => crate::query::run_reuse(ctx, paths, *limit)?,
         CommandRequest::Search { terms, limit } => crate::query::search(ctx, terms, *limit)?,
         _ => unreachable!("run_line_query called with a non-line request"),
     };
     Ok((join_lines(lines), stderr))
-}
-
-/// Batch `resolve`: journal the staged result, then exit 1/2 through the
-/// BatchOutput arm when a name is ambiguous or missing.
-fn run_resolve_batch(conn: &rusqlite::Connection, names: &[String]) -> Result<ArmOut> {
-    let (lines, exit) = crate::query::resolve_names(conn, names)?;
-    crate::journal::record_result(
-        crate::journal::OutcomeCounts::uniform(lines.len()),
-        false,
-        0,
-    );
-    if exit != 0 {
-        return Err(AwError::BatchOutput {
-            text: join_lines(lines),
-            code: exit,
-        });
-    }
-    Ok((join_lines(lines), String::new()))
 }
 
 /// Memory-store dispatcher. Each command owns its request shape in a small
@@ -1409,71 +1190,12 @@ fn open_memory(
     Ok((root, conn))
 }
 
-/// Shared bounds for one `resolve` name list (CLI stdin and MCP names array):
-/// at most 1000 names, 4096 bytes per name, 1 MiB total. One copy keeps the
-/// two surfaces from drifting; `empty` is the surface-specific error for a
-/// list with no usable names (blank entries and `#` comments never count).
-fn validate_resolve_names(names: &[String], empty: &str) -> Result<()> {
-    if names.len() > RESOLVE_MAX_NAMES {
-        return Err(AwError::Usage(format!(
-            "resolve accepts at most {RESOLVE_MAX_NAMES} names"
-        )));
-    }
-    if names.iter().any(|n| n.len() > RESOLVE_MAX_NAME_BYTES) {
-        return Err(AwError::Usage(format!(
-            "resolve name exceeds {RESOLVE_MAX_NAME_BYTES} bytes"
-        )));
-    }
-    if names.iter().map(|n| n.len()).sum::<usize>() > RESOLVE_MAX_TOTAL_BYTES {
-        return Err(AwError::Usage(format!(
-            "resolve names exceed {} MiB total",
-            RESOLVE_MAX_TOTAL_BYTES / (1024 * 1024)
-        )));
-    }
-    if names
-        .iter()
-        .all(|n| n.trim().is_empty() || n.trim().starts_with('#'))
-    {
-        return Err(AwError::NoResults(empty.to_string()));
-    }
-    Ok(())
-}
-
-/// Read and validate `resolve --stdin` input (CLI-only input shape; the MCP
-/// surface passes names as a JSON array). Bounds mirror the MCP dispatch via
-/// `validate_resolve_names`: 1 MiB total input, 4096 bytes per line, 1000
-/// retained names, `#` comments.
-pub fn read_resolve_stdin() -> Result<Vec<String>> {
-    let mut input = String::new();
-    std::io::stdin()
-        .take(RESOLVE_MAX_TOTAL_BYTES as u64 + 1)
-        .read_to_string(&mut input)?;
-    if input.len() > RESOLVE_MAX_TOTAL_BYTES {
-        return Err(AwError::Usage(format!(
-            "resolve input exceeds {} MiB",
-            RESOLVE_MAX_TOTAL_BYTES / (1024 * 1024)
-        )));
-    }
-    let mut names = Vec::new();
-    for line in input.lines() {
-        if line.len() > RESOLVE_MAX_NAME_BYTES {
-            return Err(AwError::Usage(format!(
-                "resolve line exceeds {RESOLVE_MAX_NAME_BYTES} bytes"
-            )));
-        }
-        let trimmed = line.trim();
-        if !trimmed.is_empty() && !trimmed.starts_with('#') {
-            names.push(trimmed.to_string());
-        }
-    }
-    validate_resolve_names(&names, "no names on stdin")?;
-    Ok(names)
-}
-
 // ---------------------------------------------------------------------------
 // MCP tool registry: the single declarative table both the JSON Schema
 // renderer and the required-argument validator read.
 // ---------------------------------------------------------------------------
+
+pub const MAX_STR_ARRAY_ITEMS: usize = 1000;
 
 /// JSON type of one MCP tool argument.
 pub enum ParamKind {
@@ -1487,7 +1209,7 @@ pub enum ParamKind {
         max: f64,
     },
     Bool,
-    /// Array of strings, at most 1000 entries (the `resolve` names input).
+    /// Array of strings, at most 1000 entries.
     StrArray,
 }
 
@@ -1527,20 +1249,6 @@ const DEPTH_PARAM: ParamSpec = ParamSpec {
     },
     required: false,
     description: "Transitive depth (default 1)",
-};
-
-const EXPLAIN_PARAM: ParamSpec = ParamSpec {
-    name: "explain",
-    kind: ParamKind::Bool,
-    required: false,
-    description: "Append edge kind, confidence, site, and destination metadata",
-};
-
-const PATH_PARAM: ParamSpec = ParamSpec {
-    name: "path",
-    kind: ParamKind::Str,
-    required: false,
-    description: "Restrict to a repo-relative file or directory prefix",
 };
 
 const NAME_PARAM: ParamSpec = ParamSpec {
@@ -1594,7 +1302,6 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
             NAME_PARAM,
             DEPTH_PARAM,
             LIMIT_PARAM,
-            EXPLAIN_PARAM,
         ],
         core: true,
     },
@@ -1605,7 +1312,6 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
             NAME_PARAM,
             DEPTH_PARAM,
             LIMIT_PARAM,
-            EXPLAIN_PARAM,
         ],
         core: true,
     },
@@ -1625,18 +1331,8 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         params: &[
             NAME_PARAM,
             ParamSpec { name: "limit", kind: ParamKind::Int { min: 1, max: Some(50) }, required: false, description: "Callers/callees shown per section (default 10)" },
-            EXPLAIN_PARAM,
         ],
         core: true,
-    },
-    ToolSpec {
-        name: "implementers",
-        description: "Who inherits from or implements this symbol — resolved inherits edges only; cross-file impls omitted",
-        params: &[
-            NAME_PARAM,
-            LIMIT_PARAM,
-        ],
-        core: false,
     },
     ToolSpec {
         name: "imports",
@@ -1655,95 +1351,47 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
             ParamSpec { name: "sites", kind: ParamKind::Bool, required: false, description: "List every call site instead of one row per file" },
             DEPTH_PARAM,
             ParamSpec { name: "edges", kind: ParamKind::Str, required: false, description: "Edge kinds: calls,imports,inherits,all (default calls)" },
-            ParamSpec { name: "context", kind: ParamKind::Bool, required: false, description: "Append the enclosing symbol to each pointer" },
-            EXPLAIN_PARAM,
             LIMIT_PARAM,
         ],
         core: true,
-    },
-    ToolSpec {
-        name: "dead",
-        description: "Dead-code candidates (no resolved inbound calls/imports/inherits) — candidates, never proof; exclude_tests and path scope filters",
-        params: &[
-            ParamSpec { name: "exclude_tests", kind: ParamKind::Bool, required: false, description: "Exclude tests/ paths and test_* symbols" },
-            PATH_PARAM,
-            LIMIT_PARAM,
-        ],
-        core: false,
-    },
-    ToolSpec {
-        name: "unresolved",
-        description: "Per-file unresolved-callee counts, or names=true for path:line kind name sites",
-        params: &[
-            ParamSpec { name: "names", kind: ParamKind::Bool, required: false, description: "List unresolved sites as path:line kind name" },
-            PATH_PARAM,
-            LIMIT_PARAM,
-        ],
-        core: false,
     },
     ToolSpec {
         name: "symbols",
-        description: "Symbols of one indexed file or directory, ordered by line; outline adds signatures, metrics adds the effective line count",
+        description: "Symbols of one indexed file or directory, ordered by line; outline adds signatures",
         params: &[
             ParamSpec { name: "file", kind: ParamKind::Str, required: true, description: "Repo-relative path of the indexed file or directory" },
             ParamSpec { name: "outline", kind: ParamKind::Bool, required: false, description: "Append the one-line signature column" },
-            ParamSpec { name: "metrics", kind: ParamKind::Bool, required: false, description: "Append the per-symbol effective line count" },
             LIMIT_PARAM,
         ],
         core: true,
     },
     ToolSpec {
-        name: "complexity",
-        description: "Per-symbol complexity ranking: effective LOC",
+        name: "reuse",
+        description: "Calibrated anti-reinvention candidates: detect duplicate helpers and suggest canonical reuse",
         params: &[
-            ParamSpec { name: "min_loc", kind: ParamKind::Int { min: 0, max: None }, required: false, description: "Minimum effective lines of code (default 0)" },
-            PATH_PARAM,
-            LIMIT_PARAM,
+            ParamSpec {
+                name: "paths",
+                kind: ParamKind::StrArray,
+                required: false,
+                description: "File paths or symbols to inspect (default: entire index)",
+            },
+            ParamSpec {
+                name: "limit",
+                kind: ParamKind::Int { min: 1, max: Some(100) },
+                required: false,
+                description: "Maximum candidates shown (default 10)",
+            },
         ],
-        core: false,
-    },
-    ToolSpec {
-        name: "files",
-        description: "Indexed file inventory with symbol/byte counts and generated tag",
-        params: &[PATH_PARAM, LIMIT_PARAM],
-        core: false,
-    },
-    ToolSpec {
-        name: "resolve",
-        description: "Batch-resolve names: found/ambiguous/missing per name",
-        params: &[ParamSpec {
-            name: "names",
-            kind: ParamKind::StrArray,
-            required: true,
-            description: "Names to resolve, at most 1000",
-        }],
-        core: false,
+        core: true,
     },
     ToolSpec {
         name: "search",
-        description: "Symbol-level search: bm25-ranked FTS5 over split identifier terms",
+        description: "Symbol-level search: bm25 and caller-ranked concise interface cards",
         params: &[
             ParamSpec { name: "terms", kind: ParamKind::Str, required: true, description: "Space-separated terms; camelCase/snake_case are split and matched" },
             LIMIT_PARAM,
         ],
-        core: false,
-    },
-    ToolSpec {
-        name: "stats",
-        description: "Index totals: files, symbols, edges, parse errors, sizes",
-        params: &[PATH_PARAM],
-        core: false,
-    },
-    ToolSpec {
-        name: "usage",
-        description: "Usage-journal summary: calls, errors, latency, empty/stale rates",
-        params: &[ParamSpec {
-            name: "quality",
-            kind: ParamKind::Bool,
-            required: false,
-            description: "Add the empty-result split, cap count, and percentages",
-        }],
-        core: false,
+        core: true,
     },
     ToolSpec {
         name: "mem_write",
@@ -1919,10 +1567,6 @@ impl ArgReader<'_> {
             .ok_or_else(|| AwError::Usage(format!("missing required argument '{key}'")))
     }
 
-    fn raw(&self) -> &serde_json::Value {
-        self.0
-    }
-
     /// Read an Int argument per its TOOL_SPECS declaration (absent or null
     /// falls back to `default`). A non-integer is a usage error (the module's
     /// untrusted-JSON type contract), and a value above the declared max is
@@ -1982,6 +1626,23 @@ impl ArgReader<'_> {
             })?;
         Ok(x)
     }
+
+    fn str_array(&self, name: &str) -> Result<Vec<String>> {
+        let Some(v) = self.0.get(name).filter(|v| !v.is_null()) else {
+            return Ok(Vec::new());
+        };
+        let arr = v.as_array().ok_or_else(|| {
+            AwError::Usage(format!("argument '{name}' must be an array of strings"))
+        })?;
+        let mut out = Vec::with_capacity(arr.len());
+        for item in arr {
+            let s = item.as_str().ok_or_else(|| {
+                AwError::Usage(format!("argument '{name}' elements must be strings"))
+            })?;
+            out.push(s.to_string());
+        }
+        Ok(out)
+    }
 }
 
 /// Usage error for a tool name the `from_tool_args*` family does not route;
@@ -1993,12 +1654,11 @@ fn unknown_tool(tool: &str) -> AwError {
 pub fn from_tool_args(tool: &str, args: &serde_json::Value) -> Result<CommandRequest> {
     let a = ArgReader(args);
     match tool {
-        "build" | "usage" => from_tool_args_diag(&a, tool),
-        "callers" | "callees" | "context" | "implementers" | "imports" | "path" | "impact" => {
+        "build" => from_tool_args_diag(&a, tool),
+        "callers" | "callees" | "context" | "imports" | "path" | "impact" => {
             from_tool_args_graph(&a, tool)
         }
-        "dead" | "unresolved" | "symbols" | "complexity" | "files" | "resolve" | "search"
-        | "stats" => from_tool_args_analysis(&a, tool),
+        "symbols" | "reuse" | "search" => from_tool_args_analysis(&a, tool),
         "mem_write" | "mem_query" | "mem_get" | "mem_delete" | "mem_gc" | "mem_export" => {
             from_tool_args_memory(&a, tool)
         }
@@ -2012,9 +1672,6 @@ fn from_tool_args_diag(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> 
             force: a.b("force"),
             max_parse_error_rate: a.f_spec(tool, "max_parse_error_rate", 0.05)?,
         },
-        "usage" => CommandRequest::Usage {
-            quality: a.b("quality"),
-        },
         _ => return Err(unknown_tool(tool)),
     })
 }
@@ -2024,22 +1681,15 @@ fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest>
             name: a.req("name")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
             depth: a.n_spec(tool, "depth", 1)?,
-            explain: a.b("explain"),
         },
         "callees" => CommandRequest::Callees {
             name: a.req("name")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
             depth: a.n_spec(tool, "depth", 1)?,
-            explain: a.b("explain"),
         },
         "context" => CommandRequest::Context {
             name: a.req("name")?,
             limit: a.n_spec(tool, "limit", 10)?,
-            explain: a.b("explain"),
-        },
-        "implementers" => CommandRequest::Implementers {
-            name: a.req("name")?,
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
         },
         "imports" => CommandRequest::Imports {
             file: a.req("file")?,
@@ -2057,8 +1707,6 @@ fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest>
             edges: crate::query::parse_edge_kinds(
                 &a.s("edges").unwrap_or_else(|| "calls".to_string()),
             )?,
-            context: a.b("context"),
-            explain: a.b("explain"),
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
         },
         _ => return Err(unknown_tool(tool)),
@@ -2066,39 +1714,19 @@ fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest>
 }
 fn from_tool_args_analysis(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> {
     Ok(match tool {
-        "dead" => CommandRequest::Dead {
-            exclude_tests: a.b("exclude_tests"),
-            path: a.s("path"),
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-        },
-        "unresolved" => CommandRequest::Unresolved {
-            names: a.b("names"),
-            path: a.s("path"),
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-        },
         "symbols" => CommandRequest::Symbols {
             file: a.req("file")?,
             outline: a.b("outline"),
-            metrics: a.b("metrics"),
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
         },
-        "complexity" => CommandRequest::Complexity {
-            min_loc: a.n_spec(tool, "min_loc", 0)?,
-            path: a.s("path"),
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-        },
-        "files" => CommandRequest::Files {
-            path: a.s("path"),
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-        },
-        "resolve" => CommandRequest::Resolve {
-            names: resolve_names_from_args(a.raw())?,
+        "reuse" => CommandRequest::Reuse {
+            paths: a.str_array("paths")?,
+            limit: a.n_spec(tool, "limit", 10)?,
         },
         "search" => CommandRequest::Search {
             terms: a.req("terms")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
         },
-        "stats" => CommandRequest::Stats { path: a.s("path") },
         _ => return Err(unknown_tool(tool)),
     })
 }
@@ -2135,28 +1763,6 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
     })
 }
 
-/// Validate and collect the `resolve` names array (untrusted input bounds).
-pub(crate) const RESOLVE_MAX_NAMES: usize = 1000;
-const RESOLVE_MAX_NAME_BYTES: usize = 4096;
-const RESOLVE_MAX_TOTAL_BYTES: usize = 1024 * 1024;
-
-fn resolve_names_from_args(args: &serde_json::Value) -> Result<Vec<String>> {
-    let arr = args
-        .get("names")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| AwError::Usage("resolve requires a names array".to_string()))?;
-    let mut names: Vec<String> = Vec::new();
-    for value in arr {
-        let name = value
-            .as_str()
-            .ok_or_else(|| AwError::Usage("resolve names must be strings".to_string()))?;
-        names.push(name.to_string());
-    }
-    // MCP has no stdin: the empty-list error names the argument, not stdin.
-    validate_resolve_names(&names, "no names provided")?;
-    Ok(names)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2172,22 +1778,15 @@ mod tests {
                 name: "x".into(),
                 limit: 50,
                 depth: 1,
-                explain: false,
             },
             CommandRequest::Callees {
                 name: "x".into(),
                 limit: 50,
                 depth: 1,
-                explain: false,
             },
             CommandRequest::Context {
                 name: "x".into(),
                 limit: 10,
-                explain: false,
-            },
-            CommandRequest::Implementers {
-                name: "x".into(),
-                limit: 50,
             },
             CommandRequest::Imports {
                 file: "f".into(),
@@ -2203,13 +1802,6 @@ mod tests {
                 sites: false,
                 depth: 1,
                 edges: vec![crate::extract::EdgeKind::Calls],
-                context: false,
-                explain: false,
-                limit: 50,
-            },
-            CommandRequest::Dead {
-                exclude_tests: false,
-                path: None,
                 limit: 50,
             },
             CommandRequest::Unresolved {
@@ -2220,18 +1812,11 @@ mod tests {
             CommandRequest::Symbols {
                 file: "f".into(),
                 outline: false,
-                metrics: false,
                 limit: 50,
             },
-            CommandRequest::Complexity {
-                min_loc: 0,
-                path: None,
-                limit: 50,
-            },
-            CommandRequest::Resolve { names: vec![] },
-            CommandRequest::Files {
-                path: None,
-                limit: 50,
+            CommandRequest::Reuse {
+                paths: vec!["f".into()],
+                limit: 10,
             },
             CommandRequest::Search {
                 terms: "x".into(),
@@ -2268,6 +1853,14 @@ mod tests {
     fn tool_specs_cover_every_request_shape() {
         let dispatchable: Vec<&str> = all_requests()
             .iter()
+            .filter(|r| {
+                !matches!(
+                    r,
+                    CommandRequest::Unresolved { .. }
+                        | CommandRequest::Stats { .. }
+                        | CommandRequest::Usage { .. }
+                )
+            })
             .map(CommandRequest::tool_name)
             .collect();
         for name in dispatchable {

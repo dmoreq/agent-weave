@@ -232,6 +232,13 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
         )));
     }
     validate_body(body)?;
+    if contains_suspected_secret(tags.unwrap_or(""))
+        || contains_suspected_secret(refs.unwrap_or(""))
+    {
+        return Err(AwError::Usage(
+            "mem write: content contains suspected secret token".into(),
+        ));
+    }
     Ok(NormalizedNote {
         key: key.to_string(),
         kind: kind.to_string(),
@@ -241,6 +248,13 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
         body: body.to_string(),
         ttl_secs: normalize_ttl(scope, ttl)?,
     })
+}
+
+fn contains_suspected_secret(text: &str) -> bool {
+    const SUSPECTED_SECRETS: [&str; 5] = ["sk-", "ghp_", "AKIA", "eyJ", "-----BEGIN "];
+    SUSPECTED_SECRETS
+        .iter()
+        .any(|&prefix| text.contains(prefix))
 }
 
 fn validate_key(key: &str) -> Result<&str> {
@@ -258,6 +272,11 @@ fn validate_key(key: &str) -> Result<&str> {
             "mem write: key must not contain control characters".into(),
         ));
     }
+    if contains_suspected_secret(key) {
+        return Err(AwError::Usage(
+            "mem write: content contains suspected secret token".into(),
+        ));
+    }
     Ok(key)
 }
 
@@ -270,6 +289,11 @@ fn validate_body(body: &str) -> Result<()> {
         return Err(AwError::Usage(format!(
             "mem write: body exceeds {MAX_BODY_BYTES} bytes (got {body_len})"
         )));
+    }
+    if contains_suspected_secret(body) {
+        return Err(AwError::Usage(
+            "mem write: content contains suspected secret token".into(),
+        ));
     }
     Ok(())
 }
@@ -631,5 +655,34 @@ mod tests {
             mem_content_hash(&c.kind, &c.body, &c.tags, &c.refs, &c.scope),
             "body bytes are part of the identity"
         );
+    }
+
+    #[test]
+    fn secret_rejection_covers_key_body_tags_refs() {
+        assert!(normalize_note(NoteInput {
+            key: "sk-12345",
+            ..note("k", "fact", "b", "durable")
+        })
+        .is_err());
+        assert!(normalize_note(NoteInput {
+            body: "contains ghp_abcdef token",
+            ..note("k", "fact", "b", "durable")
+        })
+        .is_err());
+        assert!(normalize_note(NoteInput {
+            tags: Some("tag AKIAIOSFODNN7EXAMPLE"),
+            ..note("k", "fact", "b", "durable")
+        })
+        .is_err());
+        assert!(normalize_note(NoteInput {
+            refs: Some("src/main.rs eyJhbGciOi"),
+            ..note("k", "fact", "b", "durable")
+        })
+        .is_err());
+        assert!(normalize_note(NoteInput {
+            body: "-----BEGIN RSA PRIVATE KEY-----",
+            ..note("k", "fact", "b", "durable")
+        })
+        .is_err());
     }
 }

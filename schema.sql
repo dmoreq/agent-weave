@@ -1,8 +1,5 @@
--- aw schema v9 — v8 -> v9 drops the per-symbol micro-metrics (symbols
--- cyclomatic/branches/nesting), the file-level hotspots metrics (files
--- loc/cyclomatic), and the clone_groups shingle table: the only retained
--- per-symbol size metric is symbols.effective_loc, ranked by a single-column
--- key. The binary opens a DB only when PRAGMA user_version equals its own
+-- aw schema v10 — v9 -> v10 drops symbols.exported, symbols.effective_loc,
+-- and files.generated. The binary opens a DB only when PRAGMA user_version equals its own
 -- compiled schema version; older AND newer both exit 5. The DB is never
 -- migrated in place.
 -- Tables and the FTS table live here; secondary indexes live in
@@ -22,9 +19,7 @@ CREATE TABLE files(
     error_nodes INTEGER NOT NULL,
     -- Unresolved-callee count for this file (authoritative per-file split of
     -- the meta unresolved_callee_count total; stable across incremental builds).
-    unresolved INTEGER NOT NULL DEFAULT 0,
-    -- Generated-file tag (Amendment 19): path/marker detection at build.
-    generated INTEGER NOT NULL DEFAULT 0
+    unresolved INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE symbols(
     id INTEGER PRIMARY KEY,
@@ -32,8 +27,6 @@ CREATE TABLE symbols(
     name TEXT NOT NULL,
     qualname TEXT NOT NULL,
     file_id INTEGER NOT NULL REFERENCES files(id),
-    -- Denormalized files.path (Amendment 20); keeps complexity ORDER BY
-    -- (qualname, path, line_start) fully index-backed.
     file_path TEXT NOT NULL DEFAULT '',
     line_start INTEGER NOT NULL,
     line_end INTEGER NOT NULL,
@@ -41,16 +34,10 @@ CREATE TABLE symbols(
     -- line-wrapped parameters, whitespace collapsed, hard cap 160 chars.
     -- Empty for module symbols. No bodies.
     signature TEXT NOT NULL DEFAULT '',
-    -- Effective non-comment line count (Amendment 19); 0 for non-callables.
-    effective_loc INTEGER NOT NULL DEFAULT 0,
-    -- Public-surface flag (Amendment 19); language rules in the spec.
-    -- Retained for schema compatibility; no current CLI/MCP surface reads it.
-    exported INTEGER NOT NULL DEFAULT 0,
     -- Test classification (v8): 1 when the symbol came from a test path or
     -- test-shaped name, or sits under Rust #[test]/#[cfg(test)] or a TS
     -- describe/it callback. Classification happens once at extraction; the
-    -- column is authoritative for `aw dead --exclude-tests` and the
-    -- test_symbol_count meta counter.
+    -- column is authoritative for anti-reinvention test filtering.
     is_test INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE edges(

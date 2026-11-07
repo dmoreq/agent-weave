@@ -46,9 +46,6 @@ pub enum Cmd {
         /// Transitive depth for the caller closure (default 1 = direct callers)
         #[arg(long, default_value_t = 1)]
         depth: usize,
-        /// Explain edge metadata (kind, confidence, site, destination)
-        #[arg(long)]
-        explain: bool,
     },
     /// What does this symbol call
     Callees {
@@ -60,9 +57,6 @@ pub enum Cmd {
         /// Transitive depth for the call closure (default 1 = direct callees)
         #[arg(long, default_value_t = 1)]
         depth: usize,
-        /// Explain edge metadata (kind, confidence, site, destination)
-        #[arg(long)]
-        explain: bool,
     },
     /// One-call symbol context: definition + signature, direct callers, and
     /// direct callees. Resolved static edges plus tagged ambiguous candidates.
@@ -71,17 +65,6 @@ pub enum Cmd {
         name: String,
         /// Maximum callers and callees shown per section (default 10, max 50)
         #[arg(long, default_value_t = 10)]
-        limit: usize,
-        /// Explain edge metadata (kind, confidence, site, destination)
-        #[arg(long)]
-        explain: bool,
-    },
-    /// Who inherits from or implements this symbol (resolved inherits edges)
-    Implementers {
-        /// Symbol name or dotted qualname
-        name: String,
-        /// Maximum results shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
     /// What does this file import (outbound resolved imports)
@@ -117,25 +100,6 @@ pub enum Cmd {
         /// Edge kinds: calls,imports,inherits,all (default calls)
         #[arg(long, default_value = "calls")]
         edges: String,
-        /// Append the enclosing symbol to each pointer
-        #[arg(long)]
-        context: bool,
-        /// Append edge kind/depth to each pointer
-        #[arg(long)]
-        explain: bool,
-        /// Maximum results shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
-        limit: usize,
-    },
-    /// Dead-code candidates: indexed symbols with no resolved inbound calls, imports, or inherits.
-    /// Candidates only — dynamic dispatch and entry points are not proven absent.
-    Dead {
-        /// Exclude tests/ paths and test_* symbols (policy filter)
-        #[arg(long)]
-        exclude_tests: bool,
-        /// Restrict to a repo-relative file or directory prefix
-        #[arg(long)]
-        path: Option<String>,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
@@ -159,40 +123,20 @@ pub enum Cmd {
         /// Append the one-line signature column
         #[arg(long)]
         outline: bool,
-        /// Append per-symbol metrics
-        #[arg(long)]
-        metrics: bool,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Per-symbol complexity ranking (effective LOC)
-    Complexity {
-        #[arg(long, default_value_t = 0)]
-        min_loc: usize,
-        /// Restrict to a repo-relative file or directory prefix
-        #[arg(long)]
-        path: Option<String>,
-        /// Maximum results shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
+    /// Anti-reinvention candidates: detect duplicate helpers and suggest canonical reuse
+    Reuse {
+        /// Target file paths or symbol names to inspect for reuse candidates
+        #[arg(required = false)]
+        paths: Vec<String>,
+        /// Maximum candidates shown (default 10, max 100)
+        #[arg(long, default_value_t = 10)]
         limit: usize,
     },
-    /// Batch-resolve names from stdin (found/ambiguous/missing)
-    Resolve {
-        /// Read one name per line from stdin
-        #[arg(long)]
-        stdin: bool,
-    },
-    /// Indexed file inventory with symbol/byte counts
-    Files {
-        /// Restrict to a repo-relative file or directory prefix
-        #[arg(long)]
-        path: Option<String>,
-        /// Maximum results shown (default 50, max 10000)
-        #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
-        limit: usize,
-    },
-    /// Symbol-level search: bm25-ranked FTS5 over identifier tokens
+    /// Symbol-level search: bm25-ranked FTS5 over identifier tokens with interface cards
     Search {
         /// Space-separated terms; camelCase/snake_case are split and matched
         terms: String,

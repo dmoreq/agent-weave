@@ -13,7 +13,7 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::service::{
-    from_tool_args, CommandRequest, ParamKind, Surface, RESOLVE_MAX_NAMES, TOOL_SPECS,
+    from_tool_args, CommandRequest, ParamKind, Surface, MAX_STR_ARRAY_ITEMS, TOOL_SPECS,
 };
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -45,7 +45,7 @@ fn tools(all: bool) -> Value {
                         json!({
                             "type": "array",
                             "items": {"type": "string"},
-                            "maxItems": RESOLVE_MAX_NAMES
+                            "maxItems": MAX_STR_ARRAY_ITEMS
                         })
                     }
                 };

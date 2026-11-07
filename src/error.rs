@@ -74,12 +74,6 @@ pub enum AwError {
         threshold: f64,
     },
     Internal(String),
-    /// Batch surface whose stdout text is already complete; MCP must return
-    /// it with `isError` instead of routing through the error renderer.
-    BatchOutput {
-        text: String,
-        code: i32,
-    },
 }
 
 impl AwError {
@@ -96,7 +90,6 @@ impl AwError {
             AwError::Locked(_) => (4, "locked"),
             AwError::SchemaMismatch { .. } => (5, "schema-mismatch"),
             AwError::Internal(_) => (6, "internal"),
-            AwError::BatchOutput { code, .. } => (*code, "batch"),
             AwError::ParseQuality { .. } => (7, "parse-quality"),
         }
     }
@@ -155,7 +148,6 @@ impl fmt::Display for AwError {
                 rate * 100.0,
                 threshold * 100.0
             ),
-            AwError::BatchOutput { text, .. } => write!(f, "{text}"),
         }
     }
 }

@@ -18,7 +18,7 @@ use tree_sitter::Node;
 
 use crate::parse::{Lang, ParsedFile, SOURCE_EXTENSIONS};
 
-pub const SCHEMA_VERSION: i32 = 9;
+pub const SCHEMA_VERSION: i32 = 10;
 
 /// Python builtins: calls drop with the builtin counter (spec step 4).
 const BUILTINS: &[&str] = &[
@@ -367,15 +367,9 @@ pub struct NewSymbol {
     /// line-wrapped parameters, whitespace collapsed, hard cap 160 chars.
     /// Empty for module/synthetic symbols. No body text.
     pub signature: String,
-    /// Effective non-comment line count (Amendment 19); 0 for non-callables.
-    /// The only per-symbol size metric the index stores.
-    pub effective_loc: usize,
-    /// Public-surface flag (Amendment 19); language rules in the spec.
-    pub exported: bool,
     /// Test-symbol flag (schema v8), classified once at extraction from path,
     /// name shape, Rust `#[test]`/`#[cfg(test)]` context, and TS describe/it
-    /// scope. Consumers: `aw dead --exclude-tests` and the build-time
-    /// `test_symbol_count` meta counter.
+    /// scope.
     pub is_test: bool,
 }
 
@@ -610,8 +604,6 @@ pub struct FileExtraction {
     /// Methods declared inside a trait impl; trait impl methods are public
     /// even without `pub`, while inherent methods follow `pub`.
     trait_impl_methods: Vec<String>,
-    /// Per-line code flag (comment nodes excluded), computed once per file.
-    pub code_lines: Vec<bool>,
     calls: Vec<CallSite>,
     import_edges: Vec<ImportEdgeCandidate>,
 }
@@ -620,7 +612,7 @@ impl FileExtraction {
     /// Empty extraction for one file: module path, language, crate root, and
     /// the module symbol. The caller walks the tree; the language comes from
     /// the caller, which resolved it explicitly against the walk allowlist.
-    fn for_file(file_idx: usize, rel: &str, lang: Lang, code_lines: Vec<bool>) -> Self {
+    fn for_file(file_idx: usize, rel: &str, lang: Lang) -> Self {
         let (module, is_package) = module_path_for(rel);
         let crate_root = if lang == Lang::Rust {
             rust_crate_root(rel)
@@ -651,7 +643,6 @@ impl FileExtraction {
                 signature: String::new(),
 
                 is_test: is_test_file,
-                ..Default::default()
             }],
             symbol_index: HashMap::from([(module, 0usize)]),
             inherits: Vec::new(),
@@ -667,7 +658,6 @@ impl FileExtraction {
             from_import_parents: HashSet::new(),
             unresolved_inherits: Vec::new(),
             trait_impl_methods: Vec::new(),
-            code_lines,
             calls: Vec::new(),
             import_edges: Vec::new(),
         }
@@ -767,14 +757,12 @@ pub struct FileInput<'a> {
 
 /// Lib API used by tests and fixtures; the bin uses
 /// `extract_file_with_code_lines` with the caller's syntax-stats mask.
+/// Lib API used by tests and fixtures.
 #[allow(dead_code)]
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {
     let root = parsed.tree.root_node();
-    let stats = crate::parse::syntax_stats(root, src);
-    // Fixture path: an unsupported extension is a fixture bug and fails
-    // loudly instead of defaulting to a language.
     let lang = Lang::from_rel(rel).unwrap_or_else(|| panic!("unsupported source extension: {rel}"));
-    extract_file_with_code_lines(
+    extract_file_nodes(
         FileInput {
             file_idx,
             rel,
@@ -782,207 +770,16 @@ pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile)
             src,
         },
         root,
-        stats.code_lines,
     )
 }
 
-/// Extraction with the file comment mask computed by the caller's single
-/// `syntax_stats` walk (B1). Keeps the public `extract_file` wrapper for tests.
-pub fn extract_file_with_code_lines(
-    input: FileInput<'_>,
-    root: Node<'_>,
-    code_lines: Vec<bool>,
-) -> FileExtraction {
-    let mut fx = FileExtraction::for_file(input.file_idx, input.rel, input.lang, code_lines);
+/// Extraction from a parsed Tree-sitter root node.
+pub fn extract_file_nodes(input: FileInput<'_>, root: Node<'_>) -> FileExtraction {
+    let mut fx = FileExtraction::for_file(input.file_idx, input.rel, input.lang);
     let mut ctx = WalkCtx::for_file(fx.lang, input.src);
     walk_children(root, input.src, &mut fx, &mut ctx);
     finalize_rust_impls(&mut fx);
-    finalize_exports(&mut fx, input.src, root);
     fx
-}
-
-fn python_all_names(root: Node<'_>, src: &[u8]) -> Option<std::collections::HashSet<String>> {
-    let mut cursor = root.walk();
-    for stmt in root.named_children(&mut cursor) {
-        if stmt.kind() != "expression_statement" {
-            continue;
-        }
-        let mut c = stmt.walk();
-        let Some(assign) = stmt
-            .named_children(&mut c)
-            .find(|n| n.kind() == "assignment")
-        else {
-            continue;
-        };
-        let Some(left) = assign.child_by_field_name("left") else {
-            continue;
-        };
-        if text(left, src) != "__all__" {
-            continue;
-        }
-        let right = assign.child_by_field_name("right")?;
-        if !matches!(right.kind(), "list" | "tuple") {
-            return None;
-        }
-        let mut out = std::collections::HashSet::new();
-        let mut rc = right.walk();
-        for item in right.named_children(&mut rc) {
-            if item.kind() == "string" {
-                let raw = text(item, src);
-                let name = raw.trim_matches(|c| c == '"' || c == '\'').to_string();
-                if !name.is_empty() {
-                    out.insert(name);
-                }
-            } else {
-                return None;
-            }
-        }
-        return Some(out);
-    }
-    None
-}
-
-/// Populate the exported/public flag from language rules (Amendment 19).
-/// Two passes: non-method symbols first, then methods, so an `impl Type` that
-/// appears before `pub struct Type` still exports its public methods.
-fn finalize_exports(fx: &mut FileExtraction, src: &[u8], root: Node<'_>) {
-    let lines: Vec<&[u8]> = src.split(|b| *b == b'\n').collect();
-    let all_names = if fx.lang == Lang::Python {
-        python_all_names(root, src)
-    } else {
-        None
-    };
-    let ts_local = if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
-        ts_local_export_names(root, src)
-    } else {
-        HashSet::new()
-    };
-    for i in 0..fx.symbols.len() {
-        if fx.symbols[i].kind != SymbolKind::Method {
-            fx.symbols[i].exported = export_base(fx, i, all_names.as_ref(), &ts_local);
-        }
-    }
-    for i in 0..fx.symbols.len() {
-        if fx.symbols[i].kind == SymbolKind::Method {
-            fx.symbols[i].exported = export_method(fx, i, &lines);
-        }
-    }
-}
-
-/// True when `qualname` is exactly `module.name` (no extra nesting). Avoids a
-/// per-symbol `format!` allocation in the export walk.
-fn is_direct_child(module: &str, name: &str, qualname: &str) -> bool {
-    qualname.len() == module.len() + 1 + name.len()
-        && qualname.starts_with(module)
-        && qualname.as_bytes().get(module.len()) == Some(&b'.')
-        && qualname.ends_with(name)
-}
-
-fn export_base(
-    fx: &FileExtraction,
-    i: usize,
-    all_names: Option<&HashSet<String>>,
-    ts_local: &HashSet<String>,
-) -> bool {
-    let sym = &fx.symbols[i];
-    if sym.kind == SymbolKind::Module {
-        return false;
-    }
-    let top_level = is_direct_child(&fx.module, &sym.name, &sym.qualname);
-    match fx.lang {
-        Lang::Python => match all_names {
-            Some(all) => all.contains(&sym.name),
-            None => top_level && !sym.name.starts_with('_'),
-        },
-        Lang::Rust => rust_is_pub(&sym.signature),
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
-            if !matches!(
-                sym.kind,
-                SymbolKind::Class
-                    | SymbolKind::Function
-                    | SymbolKind::Interface
-                    | SymbolKind::Trait
-            ) {
-                return false;
-            }
-            sym.exported || (top_level && ts_local.contains(&sym.name))
-        }
-    }
-}
-
-fn export_method(fx: &FileExtraction, i: usize, lines: &[&[u8]]) -> bool {
-    let sym = &fx.symbols[i];
-    let parent_qn = sym.qualname.rsplit_once('.').map(|(p, _)| p.to_string());
-    let parent = parent_qn
-        .as_ref()
-        .and_then(|p| fx.symbol_index.get(p).map(|&i| &fx.symbols[i]));
-    let parent_exported = parent.map(|s| s.exported).unwrap_or(false);
-    let parent_is_module = parent
-        .map(|s| s.kind == SymbolKind::Module)
-        .unwrap_or(false);
-    let parent_is_trait = parent
-        .map(|s| matches!(s.kind, SymbolKind::Trait | SymbolKind::Interface))
-        .unwrap_or(false);
-    let trait_impl_method = fx.trait_impl_methods.contains(&sym.qualname);
-    match fx.lang {
-        Lang::Python => parent_exported && !sym.name.starts_with('_'),
-        Lang::Rust => {
-            ((rust_is_pub(&sym.signature) || parent_is_trait || trait_impl_method)
-                && parent_exported)
-                || (parent_is_module && rust_is_pub(&sym.signature))
-        }
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
-            let source_line = lines
-                .get(sym.line_start.saturating_sub(1))
-                .map(|l| String::from_utf8_lossy(l).to_string())
-                .unwrap_or_default();
-            parent_exported
-                && !sym.name.starts_with('#')
-                && !source_line.contains("private ")
-                && !source_line.contains("protected ")
-        }
-    }
-}
-
-/// `pub fn` is public; `pub(crate)`/`pub(super)`/`pub(in ...)` are not.
-/// Signatures may be just `pub` when the rest of the header wraps.
-fn rust_is_pub(signature: &str) -> bool {
-    let sig = signature.trim();
-    if sig == "pub" {
-        return true;
-    }
-    sig.strip_prefix("pub")
-        .map(|rest| {
-            let rest = rest.trim_start();
-            !rest.is_empty() && !rest.starts_with('(')
-        })
-        .unwrap_or(false)
-}
-
-/// Names listed by a local `export { X }` (no source specifier). This is a
-/// module binding list, so only top-level symbols consume it.
-fn ts_local_export_names(root: Node<'_>, src: &[u8]) -> HashSet<String> {
-    let mut out = HashSet::new();
-    let mut cursor = root.walk();
-    for stmt in root.named_children(&mut cursor) {
-        if stmt.kind() != "export_statement" || stmt.child_by_field_name("source").is_some() {
-            continue;
-        }
-        let mut stack = vec![stmt];
-        while let Some(n) = stack.pop() {
-            if n.kind() == "export_specifier" {
-                if let Some(name) = n.child_by_field_name("name") {
-                    out.insert(text(name, src));
-                }
-                continue;
-            }
-            let mut c = n.walk();
-            for child in n.children(&mut c) {
-                stack.push(child);
-            }
-        }
-    }
-    out
 }
 
 /// Resolve Rust `impl Trait for Type` pairs against same-file type symbols.
@@ -998,11 +795,20 @@ fn finalize_rust_impls(fx: &mut FileExtraction) {
     }
 }
 
+/// True when `qualname` is exactly `module.name` (no extra nesting). Avoids a
+/// per-symbol `format!` allocation in the export walk.
+pub(crate) fn is_direct_child(module: &str, name: &str, qualname: &str) -> bool {
+    qualname.len() == module.len() + 1 + name.len()
+        && qualname.starts_with(module)
+        && qualname.as_bytes().get(module.len()) == Some(&b'.')
+        && qualname.ends_with(name)
+}
+
 /// Per-language metric tables computed once per file instead of once per
 /// callable (B2): the filtered decision kinds and the branch kinds.
 mod walk;
 pub use walk::split_ident;
-use walk::{text, walk_children, WalkCtx};
+use walk::{walk_children, WalkCtx};
 
 mod resolve;
 pub use resolve::resolve;

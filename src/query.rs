@@ -18,10 +18,6 @@ pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
 
-/// Permanent honesty caveat for `aw dead` (Amendment 5): candidates, not proof.
-const DEAD_CAVEAT: &str =
-    "aw: dead-code candidates — dynamic dispatch, entry points, star imports, module-level imports, type references, attribute references, and external callers are not proven absent";
-
 /// Permanent honesty caveat for `aw path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
 const PATH_CAVEAT: &str = "aw: path — resolved static edges only; dynamic dispatch may hide paths";
@@ -29,17 +25,6 @@ const PATH_CAVEAT: &str = "aw: path — resolved static edges only; dynamic disp
 /// Permanent honesty caveat for `aw context` (Amendment 17).
 const CONTEXT_CAVEAT: &str =
     "aw: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees";
-
-/// `--explain` caveat: the index stores edge metadata, not the resolution path.
-pub const EXPLAIN_CAVEAT: &str =
-    "aw: explain — edge metadata from the index; resolution reason is not stored";
-
-/// Permanent honesty caveat for `aw implementers` (Amendment 19).
-const IMPLEMENTERS_CAVEAT: &str = "aw: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
-
-/// Permanent honesty caveat for `aw complexity` (Amendment 19).
-const COMPLEXITY_CAVEAT: &str =
-    "aw: complexity — static line-count ranking; not comparable to hotspots";
 
 /// `impact` caveats (Amendment 19): the default calls-only shape stays
 /// byte-identical; the extended shapes state their static-edge limit.
@@ -72,16 +57,15 @@ use scope::*;
 mod analysis;
 mod callgraph;
 mod impact;
+pub mod reuse;
 
-pub use analysis::{
-    complexity, dead, files, resolve_names, search, symbols, unresolved, unresolved_names,
-    SymbolsOpts,
-};
-pub use callgraph::{callees, callers, context, implementers, imports, path, GraphQueryOpts};
+pub use analysis::{search, symbols, unresolved, unresolved_names, SymbolsOpts};
+pub use callgraph::{callees, callers, context, imports, path, GraphQueryOpts};
 /// Re-exported for the service boundary: `--edges` is validated where the
 /// request is built, not at query time.
 pub(crate) use impact::parse_edge_kinds;
 pub use impact::{impact, ImpactOpts};
+pub use reuse::run_reuse;
 
 /// One resolved name candidate: (path, line, qualname). Distinct from
 /// `memory::Candidate` (a fused search-signal row), so one name keeps one
@@ -94,7 +78,6 @@ struct SymbolRow {
     qualname: String,
     line: i64,
     signature: String,
-    loc: i64,
 }
 
 /// One BFS level's out-edges grouped per source: `(dst qualname, dst path,
@@ -184,15 +167,6 @@ pub fn prepend_header(out: &mut QueryOutput, caveat: &str) {
         Some(existing) => format!("{caveat}\n{existing}"),
         None => caveat.to_string(),
     });
-}
-
-/// Prepend the `--explain` caveat to any existing header without changing the
-/// default (non-explain) output.
-pub fn with_explain_header(mut out: QueryOutput, explain: bool) -> QueryOutput {
-    if explain {
-        prepend_header(&mut out, EXPLAIN_CAVEAT);
-    }
-    out
 }
 
 pub fn clamp_limit(limit: usize) -> Result<usize> {

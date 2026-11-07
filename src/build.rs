@@ -119,7 +119,7 @@ pub fn run_build(
     root_arg: Option<&Path>,
     force: bool,
     max_parse_error_rate: f64,
-) -> Result<String> {
+) -> Result<(String, String)> {
     if !max_parse_error_rate.is_finite() || !(0.0..=1.0).contains(&max_parse_error_rate) {
         return Err(AwError::Usage(format!(
             "--max-parse-error-rate must be a finite value in [0, 1], got {max_parse_error_rate}"
@@ -130,7 +130,7 @@ pub fn run_build(
     let _lock = crate::db::BuildLock::acquire(&root)?;
     let mut prep = prepare_build(&root, force, max_parse_error_rate, started)?;
     if let Some(line) = no_op_line(&prep)? {
-        return Ok(line);
+        return Ok((line, String::new()));
     }
     let t0 = Instant::now();
     let mut fe = extract_units(&prep.cls.fresh, 0)?;
@@ -148,6 +148,7 @@ pub fn run_build(
         row.unresolved = *unresolved;
     }
 
+    let is_incremental = prep.old.is_some() && !prep.opts.force;
     let (totals, db_secs) = write_index(&prep, &rows, &resolution)?;
     let total_files = prep.stats.files.len();
     crate::journal::record_result(
@@ -155,7 +156,7 @@ pub fn run_build(
         false,
         0,
     );
-    Ok(built_index_line(
+    let stdout_line = built_index_line(
         &prep,
         &totals,
         PhaseSecs {
@@ -163,7 +164,40 @@ pub fn run_build(
             extract: extract_secs,
             db: db_secs,
         },
-    ))
+    );
+    let stderr_hints = incremental_reuse_hints(&prep, &resolution, is_incremental);
+    Ok((stdout_line, stderr_hints))
+}
+
+fn incremental_reuse_hints(
+    prep: &BuildPrep,
+    resolution: &crate::extract::Resolution,
+    is_incremental: bool,
+) -> String {
+    if !is_incremental {
+        return String::new();
+    }
+    let mut new_names = std::collections::HashSet::new();
+    for s in &resolution.symbols {
+        if !s.is_test {
+            new_names.insert(s.name.clone());
+            new_names.insert(s.qualname.clone());
+        }
+    }
+    if new_names.is_empty() {
+        return String::new();
+    }
+    let Ok(conn) = crate::db::open_for_query(&prep.root) else {
+        return String::new();
+    };
+    let Ok(hints) = crate::query::reuse::detect_hints(&conn, &new_names) else {
+        return String::new();
+    };
+    if hints.is_empty() {
+        String::new()
+    } else {
+        hints.join("\n") + "\n"
+    }
 }
 
 /// Walk, probe the previous index, and compute the carried/fresh split.
@@ -742,7 +776,6 @@ fn write_fts_indexes(
 /// Authoritative SQL totals for the meta manifest, one scan per table (A3).
 struct MetaCounts {
     sym_total: i64,
-    callable_symbols: i64,
     callable_total: i64,
     edge_total: i64,
     calls_total: i64,
@@ -762,7 +795,6 @@ fn write_meta_counts(conn: &rusqlite::Connection, root: &Path) -> Result<MetaTot
     let c = meta_counts(conn)?;
     for (key, n) in [
         (meta_keys::CALLABLE_COUNT, c.callable_total),
-        (meta_keys::CALLABLE_SYMBOL_COUNT, c.callable_symbols),
         (meta_keys::FILE_COUNT, c.file_total),
         (meta_keys::SYMBOL_COUNT, c.sym_total),
         (meta_keys::EDGE_COUNT, c.edge_total),
@@ -820,15 +852,14 @@ fn write_meta_identity(conn: &rusqlite::Connection, root: &Path) -> Result<()> {
 fn meta_counts(conn: &rusqlite::Connection) -> Result<MetaCounts> {
     let callable = crate::extract::SymbolKind::Function.as_str();
     let method = crate::extract::SymbolKind::Method.as_str();
-    let (sym_total, callable_symbols, callable_total) = conn.query_row(
+    let (sym_total, callable_total) = conn.query_row(
         &format!(
             "SELECT COUNT(*),
-            COALESCE(SUM(kind IN ('{callable}','{method}')), 0),
-            COALESCE(SUM(kind IN ('{callable}','{method}') AND effective_loc > 0), 0)
+            COALESCE(SUM(kind IN ('{callable}','{method}')), 0)
      FROM symbols"
         ),
         [],
-        crate::db::ints3,
+        crate::db::ints2,
     )?;
     let (edge_total, calls_total, imports_total, inherits_total) = conn.query_row(
         &format!(
@@ -854,7 +885,6 @@ fn meta_counts(conn: &rusqlite::Connection) -> Result<MetaCounts> {
     )?;
     Ok(MetaCounts {
         sym_total,
-        callable_symbols,
         callable_total,
         edge_total,
         calls_total,
@@ -898,11 +928,6 @@ fn write_meta_universe(conn: &rusqlite::Connection) -> Result<()> {
     ] {
         crate::db::set_meta(conn, key, &n.to_string())?;
     }
-    let test_symbols: i64 =
-        conn.query_row("SELECT COUNT(*) FROM symbols WHERE is_test = 1", [], |r| {
-            r.get(0)
-        })?;
-    crate::db::set_meta(conn, "test_symbol_count", &test_symbols.to_string())?;
     Ok(())
 }
 
@@ -1037,10 +1062,9 @@ fn extract_one(
     let crate::parse::SyntaxStats {
         error_nodes,
         status,
-        code_lines,
-    } = crate::parse::syntax_stats(tree.root_node(), &bytes);
+    } = crate::parse::syntax_stats(tree.root_node());
     let e0 = Instant::now();
-    let fx = crate::extract::extract_file_with_code_lines(
+    let fx = crate::extract::extract_file_nodes(
         crate::extract::FileInput {
             file_idx: idx,
             rel: &file.rel,
@@ -1048,10 +1072,8 @@ fn extract_one(
             src: &bytes,
         },
         tree.root_node(),
-        code_lines,
     );
     let secs = e0.elapsed().as_secs_f64();
-    let generated = i64::from(crate::walk::is_generated(&file.rel, &bytes));
     Ok((
         crate::db::FilesRow {
             rel: file.rel,
@@ -1061,7 +1083,6 @@ fn extract_one(
             parse_status: status,
             error_nodes,
             unresolved: 0,
-            generated,
         },
         fx,
         secs,

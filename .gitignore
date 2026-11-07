@@ -6,3 +6,4 @@ dist/
 *.new
 .zcode/
 __pycache__/
+.tmp/

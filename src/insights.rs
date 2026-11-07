@@ -10,7 +10,6 @@ use crate::query::QueryCtx;
 /// Counter set shared by the global and scoped `stats` renderings.
 struct StatsTotals {
     files: i64,
-    generated: i64,
     symbols: i64,
     edges: i64,
     calls: i64,
@@ -48,7 +47,6 @@ pub fn stats(ctx: &QueryCtx<'_>, path: Option<&str>) -> Result<String> {
 }
 
 fn global_totals(conn: &Connection) -> Result<StatsTotals> {
-    let q = |sql: &str| -> Result<i64> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
     // Build-time counters first (R7 L4): every filtered COUNT scanned rows;
     // the manifest already stores the authoritative totals (written from SQL
     // at build end), so stats is O(1). The (key, fallback SQL) pairs and the
@@ -56,7 +54,6 @@ fn global_totals(conn: &Connection) -> Result<StatsTotals> {
     // with the no-op build line.
     Ok(StatsTotals {
         files: db::meta_count(conn, db::meta_keys::FILE_COUNT)?,
-        generated: q("SELECT COUNT(*) FROM files WHERE generated = 1")?,
         symbols: db::meta_count(conn, db::meta_keys::SYMBOL_COUNT)?,
         edges: db::meta_count(conn, db::meta_keys::EDGE_COUNT)?,
         calls: db::meta_count(conn, db::meta_keys::EDGE_CALLS)?,
@@ -89,7 +86,6 @@ fn scoped_totals(conn: &Connection, scope: &str) -> Result<StatsTotals> {
     let edge_from = "edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id";
     Ok(StatsTotals {
         files,
-        generated: scalar("COUNT(*)", "files f", "AND f.generated = 1")?,
         symbols: scalar("COUNT(*)", "symbols s JOIN files f ON f.id = s.file_id", "")?,
         edges: scalar("COUNT(*)", edge_from, "")?,
         calls: scalar(
@@ -122,7 +118,6 @@ fn stats_line(
     let scope_prefix = scope.map(|s| format!("scope={s} ")).unwrap_or_default();
     let StatsTotals {
         files,
-        generated,
         symbols,
         edges,
         calls,
@@ -132,6 +127,6 @@ fn stats_line(
         unresolved,
     } = totals;
     format!(
-        "aw stats: {scope_prefix}files={files} generated={generated} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} aw={aw_version} grammar={grammar}"
+        "aw stats: {scope_prefix}files={files} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} aw={aw_version} grammar={grammar}"
     )
 }

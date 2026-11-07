@@ -56,29 +56,6 @@ const IMPACT_SRC_JOIN: &str = "JOIN symbols ss ON ss.id = e.src_id";
 /// Source-file join: source symbol -> its file.
 const IMPACT_SRC_FILE_JOIN: &str = "JOIN files sf ON sf.id = ss.file_id";
 
-fn impact_detail(
-    ctx: &ImpactCtx<'_>,
-    qualname: &str,
-    src_kind: &str,
-    kind: &str,
-    depth: usize,
-) -> String {
-    let mut parts = Vec::new();
-    if ctx.context
-        && !qualname.is_empty()
-        && matches!(
-            SymbolKind::parse(src_kind),
-            Some(SymbolKind::Function | SymbolKind::Method)
-        )
-    {
-        parts.push(format!("[in {qualname}]"));
-    }
-    if ctx.explain {
-        parts.push(format!("[{kind} depth={depth}]"));
-    }
-    parts.join(" ")
-}
-
 fn impact_empty_detail(kinds: &[EdgeKind]) -> String {
     let has_imports = kinds.contains(&EdgeKind::Imports);
     let has_inherits = kinds.contains(&EdgeKind::Inherits);
@@ -123,13 +100,12 @@ fn importer_caveat_detail(conn: &Connection, rel: &str) -> Result<String> {
 }
 
 /// Impact query options: call-site vs grouped, traversal depth, the validated
-/// edge kinds, and output detail.
+/// Impact query options: call-site vs grouped, traversal depth, and the validated
+/// edge kinds.
 pub struct ImpactOpts {
     pub sites: bool,
     pub depth: usize,
     pub kinds: Vec<EdgeKind>,
-    pub context: bool,
-    pub explain: bool,
 }
 
 pub fn impact(
@@ -142,14 +118,12 @@ pub fn impact(
         sites,
         depth,
         kinds,
-        context,
-        explain,
     } = opts;
     let limit = clamp_limit(limit)?;
     let depth = depth.clamp(1, 10);
     let kind_sql = db::edge_kind_sql(&kinds);
     let rel = indexed_file(qctx.conn, file)?;
-    let extended = depth > 1 || context || kinds.iter().any(|k| *k != EdgeKind::Calls);
+    let extended = depth > 1 || kinds.iter().any(|k| *k != EdgeKind::Calls);
     let caveat = if extended {
         if kinds.iter().any(|k| *k != EdgeKind::Calls) {
             IMPACT_EDGES_CAVEAT
@@ -159,9 +133,6 @@ pub fn impact(
     } else {
         ""
     };
-    // Grouped mode cannot carry a meaningful per-edge tag; --context and
-    // --explain switch to per-site rows at depth 1.
-    let sites = sites || (depth == 1 && (context || explain));
     if depth > 1 && sites {
         return Err(AwError::Usage(
             "--sites is only valid with --depth 1".to_string(),
@@ -175,8 +146,6 @@ pub fn impact(
         kind_sql: &kind_sql,
         caveat,
         kinds: &kinds,
-        context,
-        explain,
         extended,
     };
     if depth == 1 {
@@ -197,8 +166,6 @@ struct ImpactCtx<'a> {
     kind_sql: &'a str,
     caveat: &'static str,
     kinds: &'a [EdgeKind],
-    context: bool,
-    explain: bool,
     extended: bool,
 }
 
@@ -313,14 +280,11 @@ fn impact_site_rows(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<Vec<Pointe
         let site: i64 = r.get(0)?;
         let conf: String = r.get(1)?;
         let path: String = r.get(2)?;
-        let qn: String = r.get(3)?;
-        let src_kind: String = r.get(4)?;
-        let kind: String = r.get(5)?;
         Ok(Pointer {
             file: path,
             line: site,
             tag: confidence_tag(&conf),
-            detail: impact_detail(ctx, &qn, &src_kind, &kind, 1),
+            detail: String::new(),
         })
     })?;
     Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -368,9 +332,6 @@ impl TraversalState {
 /// Seed the BFS with depth-1 records; detailed mode also fills the frontier
 /// and visited set.
 fn seed_impact(conn: &Connection, ctx: &ImpactCtx<'_>, state: &mut TraversalState) -> Result<()> {
-    if ctx.context || ctx.explain {
-        return direct_impact_level(conn, ctx, state, 1);
-    }
     direct_impact_records(conn, ctx, &mut state.records)?;
     Ok(())
 }
@@ -417,13 +378,7 @@ fn impact_deep(qctx: &QueryCtx<'_>, ctx: &ImpactCtx<'_>) -> Result<QueryOutput> 
             file: record.path,
             line: record.line,
             tag: "",
-            detail: impact_detail(
-                ctx,
-                &record.qualname,
-                &record.src_kind,
-                &record.kind,
-                record.depth,
-            ),
+            detail: String::new(),
         })
         .collect();
     let out = collect_output(
@@ -558,35 +513,6 @@ fn impact_level_row(r: &rusqlite::Row<'_>, depth: usize) -> rusqlite::Result<(i6
             src_kind: r.get(5)?,
         },
     ))
-}
-
-fn direct_impact_level(
-    conn: &Connection,
-    ctx: &ImpactCtx<'_>,
-    state: &mut TraversalState,
-    depth: usize,
-) -> Result<()> {
-    let kind_sql = ctx.kind_sql;
-    let sql = format!(
-        "SELECT {IMPACT_LEVEL_COLUMNS}
-         FROM edges e
-         {IMPACT_DST_JOINS}
-         {IMPACT_SRC_JOIN}
-         WHERE df.path = ?1 AND e.kind IN ({kind_sql})"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([ctx.rel], |r| impact_level_row(r, depth))?;
-    // The file's own symbols are visited from the start: the BFS never
-    // expands back into the impacted file.
-    state.visited = file_symbol_ids(conn, ctx.rel)?.into_iter().collect();
-    for r in rows {
-        let (src, record) = r?;
-        state.records.insert(record);
-        if state.visited.insert(src) {
-            state.frontier.push(src);
-        }
-    }
-    Ok(())
 }
 
 fn level_impact(

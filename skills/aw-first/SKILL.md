@@ -28,10 +28,6 @@ source before making behavioral claims or edits; the index is not a substitute f
 These seven commands are the measured, validated routing set. Other aw commands
 exist, but they are not mandatory agent routing; use them only as described below.
 
-`--explain` on `callers`, `callees`, or `context` adds stored edge metadata for
-debugging. It is not required for routing and does not reveal the resolver
-branch.
-
 Avoid repeating a complete lookup with grep when a current, unambiguous aw result
 already answers it. Use source reads or grep for focused verification, missing
 relationships, unsupported syntax, or conflicting evidence. Verification required
@@ -48,17 +44,17 @@ relationships against source when the answer requires confidence in them.
 
 Verify with source or grep when:
 
-- the output is explicitly marked as "candidates only" (`aw dead`, `aw unresolved`),
+- the output is explicitly marked as "candidates only" (`aw reuse`, `aw unresolved`),
 - the result is capped (`showing N of M`), stale, ambiguous, or empty,
 - the question asks for a field the output does not carry,
 - you need behavioral, safety, or review evidence, or
 - a row conflicts with current source.
 
 Commands returning resolved navigation rows:
-`callers`, `callees`, `context`, `implementers`, `imports`, `impact`, `path`, `symbols`
+`callers`, `callees`, `context`, `imports`, `impact`, `path`, `symbols`, `search`
 
 Commands whose output is candidates:
-`dead`, `unresolved`
+`reuse`, `unresolved`
 
 This contract covers navigation answers only. Source reads remain required for
 behavioral claims, edits, safety, and review.
@@ -72,14 +68,11 @@ verify their output before acting on it.
 | question | command |
 |----------|---------|
 | what is in this file / its signatures | `aw symbols <file> [--outline]` — deterministic inventory of one indexed file |
-| find a symbol by (partial) name or signature vocabulary | `aw search <terms>` — token search over names, paths, and signatures; exact names rank first |
-| who inherits/implements a type | `aw implementers <name>` — resolved `inherits` edges only; cross-file impls omitted |
-| what is in this directory | `aw symbols <dir> --outline`; `aw files --path <dir>` for the file inventory |
-| resolve many names at once | `aw resolve --stdin < names.txt` — one `found`/`ambiguous`/`missing` line per name |
-| which functions are the longest | `aw complexity --min-loc 40` — effective line count, not cognitive complexity |
+| find a symbol by (partial) name or signature vocabulary | `aw search <terms>` — interface cards (`path:line kind qualname signature [callers=N]`), BM25 weighted by caller count |
+| what is in this directory | `aw symbols <dir> --outline` |
+| anti-reinvention / code reuse candidates | `aw reuse [paths...]` — candidate duplicate functions, callee footprint overlap, and utility abstraction opportunities |
 | where did resolution fail | `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
 | repository totals | `aw stats [--path <dir>]` — build-time summary, not a freshness check |
-| dead-code candidates | `aw dead` — candidate list only, never proof of deadness |
 
 ## Project memory (optional, not navigation routing)
 

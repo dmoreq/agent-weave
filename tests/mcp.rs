@@ -156,13 +156,6 @@ fn g10_initialize_tools_list_and_parity() {
         .args(["search", "normalize"])
         .output()
         .unwrap();
-    let cli_dead = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["dead"])
-        .output()
-        .unwrap();
-
     let mut srv = spawn(&repo);
     let names = init_and_list_tools(&mut srv);
     assert_eq!(
@@ -173,18 +166,11 @@ fn g10_initialize_tools_list_and_parity() {
             "callees",
             "path",
             "context",
-            "implementers",
             "imports",
             "impact",
-            "dead",
-            "unresolved",
             "symbols",
-            "complexity",
-            "files",
-            "resolve",
+            "reuse",
             "search",
-            "stats",
-            "usage",
             "mem_write",
             "mem_query",
             "mem_get",
@@ -268,11 +254,7 @@ fn g10_initialize_tools_list_and_parity() {
             json!({"file": "app.py"}),
             vec!["imports", "app.py"],
         ),
-        (
-            "complexity",
-            json!({"min_loc": 1}),
-            vec!["complexity", "--min-loc", "1"],
-        ),
+        ("reuse", json!({}), vec!["reuse"]),
     ] {
         let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
             .arg("--root")
@@ -291,32 +273,6 @@ fn g10_initialize_tools_list_and_parity() {
             result_text(&via_mcp),
             String::from_utf8_lossy(&cli.stdout).into_owned(),
             "{tool} byte parity"
-        );
-    }
-    // unresolved: empty-result parity (channel differs by contract: CLI stderr,
-    // MCP result text; same class text).
-    let cli_unres = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["unresolved"])
-        .output()
-        .unwrap();
-    let unres = rpc(
-        &mut srv,
-        14,
-        "tools/call",
-        json!({"name": "unresolved", "arguments": {}}),
-    );
-    if cli_unres.status.code() == Some(0) {
-        assert_eq!(
-            result_text(&unres),
-            String::from_utf8_lossy(&cli_unres.stdout).into_owned()
-        );
-    } else {
-        assert_eq!(unres["result"]["isError"], true);
-        assert_eq!(
-            result_text(&unres).trim_end(),
-            String::from_utf8_lossy(&cli_unres.stderr).trim_end()
         );
     }
 
@@ -384,34 +340,6 @@ fn g10_initialize_tools_list_and_parity() {
         result_text(&path_call)
     );
 
-    let dead = rpc(
-        &mut srv,
-        5,
-        "tools/call",
-        json!({"name": "dead", "arguments": {}}),
-    );
-    assert_eq!(
-        result_text(&dead),
-        String::from_utf8_lossy(&cli_dead.stdout).into_owned()
-    );
-    assert!(
-        result_text(&dead).starts_with("aw: dead-code candidates —"),
-        "caveat preserved: {}",
-        result_text(&dead)
-    );
-
-    let stats = rpc(
-        &mut srv,
-        6,
-        "tools/call",
-        json!({"name": "stats", "arguments": {}}),
-    );
-    assert!(
-        result_text(&stats).starts_with("aw stats: files=2"),
-        "{}",
-        result_text(&stats)
-    );
-
     let unknown = rpc(
         &mut srv,
         7,
@@ -423,18 +351,12 @@ fn g10_initialize_tools_list_and_parity() {
         "unregistered tool rejected"
     );
 
-    // Every dispatched tool call journaled with the mcp surface: callers,
-    // callers (depth 2), symbols (plain), symbols (outline), search, dead,
-    // stats, path, plus the R6e parity additions (callees, impact, unresolved,
-    // imports, complexity; imports no-result). The unknown tool is rejected
-    // before dispatch and journals nothing; CLI reference commands above add
-    // their own surface=cli entries.
     let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
     let mcp_lines = log
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
         .count();
-    assert_eq!(mcp_lines, 15, "{log}");
+    assert_eq!(mcp_lines, 12, "{log}");
 
     let _ = fs::remove_dir_all(&repo);
 }
@@ -478,8 +400,8 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 }
 
 #[test]
-fn resolve_empty_names_and_non_strings_are_tool_errors() {
-    let repo = fixture("mcp-resolve-empty");
+fn reuse_arguments_via_mcp() {
+    let repo = fixture("mcp-reuse");
     let build = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(&repo)
@@ -489,35 +411,21 @@ fn resolve_empty_names_and_non_strings_are_tool_errors() {
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
 
-    let empty = rpc(
+    let bad_paths = rpc(
         &mut srv,
         1,
         "tools/call",
-        json!({"name": "resolve", "arguments": {"names": [""]}}),
+        json!({"name": "reuse", "arguments": {"paths": "not_an_array"}}),
     );
-    assert_eq!(empty["result"]["isError"], true, "{empty}");
-    assert!(result_text(&empty).contains("no names provided"), "{empty}");
-
-    let mixed = rpc(
-        &mut srv,
-        2,
-        "tools/call",
-        json!({"name": "resolve", "arguments": {"names": ["normalize", 5]}}),
-    );
-    assert_eq!(mixed["result"]["isError"], true, "{mixed}");
-    assert!(
-        result_text(&mixed).contains("resolve names must be strings"),
-        "{mixed}"
-    );
+    assert_eq!(bad_paths["result"]["isError"], true, "{bad_paths}");
 
     let ok = rpc(
         &mut srv,
-        3,
+        2,
         "tools/call",
-        json!({"name": "resolve", "arguments": {"names": ["normalize"]}}),
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"]}}),
     );
     assert_eq!(ok["result"]["isError"], false, "{ok}");
-    assert!(result_text(&ok).contains("found normalize"), "{ok}");
     let _ = fs::remove_dir_all(&repo);
 }
 
@@ -539,122 +447,6 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
     assert!(
         log.contains("\"tool\":\"build\"") && log.contains("\"surface\":\"mcp\""),
         "{log}"
-    );
-    let _ = fs::remove_dir_all(&repo);
-}
-
-#[test]
-fn g10_explain_parity() {
-    let repo = fixture("explain");
-    fs::write(
-        repo.join("models.py"),
-        "class Order:\n    def total(self):\n        return 1\n",
-    )
-    .unwrap();
-    fs::write(
-        repo.join("service.py"),
-        "from models import Order\n\ndef use(order: Order):\n    return order.total()\n",
-    )
-    .unwrap();
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
-    assert_eq!(build.status.code(), Some(0));
-
-    let cli_callers = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["callers", "Order.total", "--explain"])
-        .output()
-        .unwrap();
-    assert_eq!(cli_callers.status.code(), Some(0));
-
-    let mut srv = spawn(&repo);
-    let callers = rpc(
-        &mut srv,
-        1,
-        "tools/call",
-        json!({"name": "callers", "arguments": {"name": "Order.total", "explain": true}}),
-    );
-    assert_eq!(
-        result_text(&callers),
-        String::from_utf8_lossy(&cli_callers.stdout).into_owned(),
-        "callers explain byte parity"
-    );
-
-    let cli_context = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["context", "Order.total", "--explain"])
-        .output()
-        .unwrap();
-    assert_eq!(cli_context.status.code(), Some(0));
-    let context = rpc(
-        &mut srv,
-        2,
-        "tools/call",
-        json!({"name": "context", "arguments": {"name": "Order.total", "explain": true}}),
-    );
-    assert_eq!(
-        result_text(&context),
-        String::from_utf8_lossy(&cli_context.stdout).into_owned(),
-        "context explain byte parity"
-    );
-
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
-    assert!(
-        log.contains("\"explain\":\"true\""),
-        "journal must record the explain argument: {log}"
-    );
-    let _ = fs::remove_dir_all(&repo);
-}
-
-#[test]
-fn g10_usage_quality_parity() {
-    let repo = fixture("usage-quality");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
-    assert_eq!(build.status.code(), Some(0));
-    let callers = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["callers", "normalize"])
-        .output()
-        .unwrap();
-    assert_eq!(callers.status.code(), Some(0));
-
-    let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["usage", "--quality"])
-        .output()
-        .unwrap();
-    assert_eq!(cli.status.code(), Some(0));
-
-    let mut srv = spawn(&repo);
-    let via_mcp = rpc(
-        &mut srv,
-        1,
-        "tools/call",
-        json!({"name": "usage", "arguments": {"quality": true}}),
-    );
-    assert_eq!(
-        result_text(&via_mcp),
-        String::from_utf8_lossy(&cli.stdout).into_owned(),
-        "usage quality byte parity"
-    );
-
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
-    assert!(
-        log.contains("\"tool\":\"usage\"") && log.contains("\"quality\":\"true\""),
-        "journal must record the usage quality argument: {log}"
     );
     let _ = fs::remove_dir_all(&repo);
 }
@@ -735,6 +527,8 @@ fn default_mcp_exposes_core_navigation_tools() {
             "imports",
             "impact",
             "symbols",
+            "reuse",
+            "search",
             "mem_write",
             "mem_query",
         ]
@@ -745,13 +539,13 @@ fn default_mcp_exposes_core_navigation_tools() {
         &mut srv,
         3,
         "tools/call",
-        json!({"name": "search", "arguments": {"terms": "normalize"}}),
+        json!({"name": "mem_get", "arguments": {"key": "k"}}),
     );
     assert_eq!(denied["error"]["code"], -32602);
     assert!(denied["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("unknown tool 'search'"));
+        .contains("unknown tool 'mem_get'"));
 }
 
 #[test]
@@ -863,56 +657,6 @@ fn mcp_build_rejects_symlinked_aw_directory() {
     assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep");
     assert!(!ext.join("index.db").exists());
     let _ = fs::remove_dir_all(&ext);
-}
-
-#[test]
-fn mcp_stats_path_matches_cli() {
-    // `stats` gained `--path`; MCP must accept the same argument and return
-    // the CLI's byte-identical scoped line.
-    let repo = fixture("stats-path");
-    fs::create_dir_all(repo.join("sub")).unwrap();
-    fs::write(
-        repo.join("sub/c.py"),
-        "def c1():\n    return c2()\n\ndef c2():\n    return 1\n",
-    )
-    .unwrap();
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
-    assert_eq!(build.status.code(), Some(0));
-    let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["stats", "--path", "sub"])
-        .output()
-        .unwrap();
-    assert_eq!(cli.status.code(), Some(0));
-    let expected = String::from_utf8_lossy(&cli.stdout).into_owned();
-    assert!(
-        expected.starts_with("aw stats: scope=sub files="),
-        "CLI scoped stats: {expected}"
-    );
-
-    let mut srv = spawn(&repo);
-    let init = rpc(
-        &mut srv,
-        1,
-        "initialize",
-        json!({"protocolVersion": "2025-06-18"}),
-    );
-    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
-    notification(&mut srv, "notifications/initialized");
-    let stats = rpc(
-        &mut srv,
-        2,
-        "tools/call",
-        json!({"name": "stats", "arguments": {"path": "sub"}}),
-    );
-    assert_eq!(stats["result"]["isError"], false, "{stats}");
-    assert_eq!(result_text(&stats), expected);
 }
 
 // ---------------------------------------------------------------------------

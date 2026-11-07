@@ -3,153 +3,6 @@
 
 use super::*;
 
-/// Referenced-id set shared by the `dead` COUNT and page query: a resolved
-/// destination, an AMBIGUOUS qualname match, or a same-file bare-name match.
-/// Built per call so the edge-kind vocabulary stays the one shared SQL
-/// fragment (`db::edge_kinds_sql`).
-fn dead_referenced() -> String {
-    let kinds = db::edge_kinds_sql();
-    let trait_parent = SymbolKind::Trait.as_str();
-    let interface = SymbolKind::Interface.as_str();
-    let ambiguous = Confidence::Ambiguous.as_str();
-    format!(
-        "WITH trait_parents(qualname) AS MATERIALIZED (
-           SELECT DISTINCT qualname FROM symbols
-            WHERE kind IN ('{trait_parent}', '{interface}')
-       ),
-       referenced_ids(id) AS MATERIALIZED (
-           SELECT dst_id FROM edges
-            WHERE kind IN {kinds}
-              AND dst_id IS NOT NULL
-           UNION
-           SELECT s2.id FROM edges e
-             JOIN symbols s2 ON s2.qualname = e.dst_name
-            WHERE e.kind IN {kinds}
-              AND e.confidence = '{ambiguous}'
-           UNION
-           SELECT s2.id FROM edges e
-             JOIN symbols src ON src.id = e.src_id
-             JOIN symbols s2 ON s2.name = e.dst_name AND s2.file_id = src.file_id
-            WHERE e.kind IN {kinds}
-              AND e.confidence = '{ambiguous}'
-       )"
-    )
-}
-
-pub fn dead(
-    ctx: &QueryCtx<'_>,
-    limit: usize,
-    exclude_tests: bool,
-    path: Option<&str>,
-) -> Result<QueryOutput> {
-    let QueryCtx { conn, .. } = *ctx;
-    let (limit, scope, params) = scoped_query(path, limit, "f", "path", 1)?;
-    let predicate = dead_filter(exclude_tests, &scope);
-    let total: usize = conn.query_row(
-        &format!(
-            "{} SELECT COUNT(*) FROM symbols s JOIN files f ON f.id = s.file_id WHERE {predicate}",
-            dead_referenced()
-        ),
-        rusqlite::params_from_iter(params.iter()),
-        |r| r.get::<_, i64>(0),
-    )? as usize;
-    let sql = format!(
-        "{} SELECT s.qualname, f.path, s.line_start
-         FROM symbols s JOIN files f ON f.id = s.file_id
-         WHERE {predicate}
-         ORDER BY f.path, s.line_start LIMIT {limit}",
-        dead_referenced()
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
-        let path: String = r.get(1)?;
-        let line: i64 = r.get(2)?;
-        Ok(Pointer {
-            file: path,
-            line,
-            tag: "",
-            detail: r.get::<_, String>(0)?,
-        })
-    })?;
-    if total == 0 {
-        return Err(AwError::NoResultsCaveated {
-            caveat: DEAD_CAVEAT,
-            detail: "0 dead-code candidates found".to_string(),
-        });
-    }
-    let mut out = collect_output(ctx, rows, limit, "0 dead-code candidates found", total)?;
-    prepend_header(&mut out, DEAD_CAVEAT);
-    Ok(out)
-}
-
-/// Dead-candidate predicate plus its bound path parameter. AMBIGUOUS
-/// suppression is per-symbol (R7): a bare-name ambiguous call suppresses only
-/// same-named symbols in the caller's own file.
-fn dead_filter(exclude_tests: bool, scope: &str) -> String {
-    let [function, method, class, trait_kind, interface] = [
-        SymbolKind::Function,
-        SymbolKind::Method,
-        SymbolKind::Class,
-        SymbolKind::Trait,
-        SymbolKind::Interface,
-    ]
-    .map(|k| k.as_str());
-    let mut predicate = format!(
-        "s.kind IN ('{function}', '{method}', '{class}', '{trait_kind}', '{interface}')
-           AND s.id NOT IN (SELECT id FROM referenced_ids)
-           AND NOT EXISTS (
-               SELECT 1 FROM trait_parents tp
-                WHERE s.qualname >= tp.qualname || '.'
-                  AND s.qualname < tp.qualname || '/'
-           )"
-    );
-    if exclude_tests {
-        // Schema v8: `symbols.is_test` classifies once at extraction (test
-        // paths, test-shaped names/files, Rust test attributes, TS describe
-        // scope), so one column check replaces the v7 LIKE/GLOB list.
-        predicate.push_str(" AND s.is_test = 0");
-    }
-    predicate.push_str(scope);
-    predicate
-}
-
-/// `aw complexity` (Amendment 19, v9 shape): per-symbol effective-LOC ranking.
-pub fn complexity(
-    ctx: &QueryCtx<'_>,
-    min_loc: usize,
-    path: Option<&str>,
-    limit: usize,
-) -> Result<LineQuery> {
-    let QueryCtx { conn, .. } = *ctx;
-    let (limit, gen_filter, scope_params) = scoped_query(path, limit, "s", "file_path", 2)?;
-    let mut params: Vec<rusqlite::types::Value> =
-        vec![rusqlite::types::Value::from(min_loc as i64)];
-    params.extend(scope_params);
-    let total = complexity_total(conn, min_loc, path, &gen_filter, &params)?;
-    if total == 0 {
-        return Err(AwError::NoResultsCaveated {
-            caveat: COMPLEXITY_CAVEAT,
-            detail: "0 symbols match the thresholds".to_string(),
-        });
-    }
-    let rows = complexity_rows(conn, path, limit, &gen_filter, &params)?;
-    let shown = rows.len().min(limit);
-    let displayed: BTreeSet<String> = rows.iter().take(shown).map(|(p, _)| p.clone()).collect();
-    let (header, stale) = staleness_header(ctx, &displayed);
-    let data_lines: Vec<String> = rows
-        .iter()
-        .take(shown)
-        .map(|(_, line)| line.clone())
-        .collect();
-    let mut out = vec![COMPLEXITY_CAVEAT.to_string()];
-    if let Some(header) = header {
-        out.push(header);
-    }
-    out.extend(data_lines.iter().cloned());
-    let cap = finish_capped(&mut out, shown, total as usize, stale, "");
-    Ok((out, cap))
-}
-
 /// Cap footer, journal line, and the stderr cap notice shared by the report
 /// queries. Returns the notice so callers route it through the stderr half of
 /// `LineQuery` (the single cap-notice channel) instead of `eprintln!`.
@@ -184,147 +37,6 @@ fn scoped_query(
     Ok((limit, scope, params))
 }
 
-/// Complexity total: the build-time counter for the default filters, else the
-/// filtered COUNT.
-fn complexity_total(
-    conn: &Connection,
-    min_loc: usize,
-    path: Option<&str>,
-    gen_filter: &str,
-    params: &[rusqlite::types::Value],
-) -> Result<i64> {
-    if min_loc == 0 && path.is_none() {
-        return Ok(db::meta_get(conn, db::meta_keys::CALLABLE_COUNT)
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0));
-    }
-    Ok(conn.query_row(
-        &format!(
-            "SELECT COUNT(*) FROM symbols s
-             WHERE s.kind IN ('{}','{}')
-               AND s.effective_loc > 0 AND s.effective_loc >= ?1 {gen_filter}",
-            SymbolKind::Function.as_str(),
-            SymbolKind::Method.as_str()
-        ),
-        rusqlite::params_from_iter(params.iter()),
-        |r| r.get(0),
-    )?)
-}
-
-/// Bounded per-symbol rows, formatted as `path:line loc=N qualname`.
-fn complexity_rows(
-    conn: &Connection,
-    path: Option<&str>,
-    limit: usize,
-    gen_filter: &str,
-    params: &[rusqlite::types::Value],
-) -> Result<Vec<(String, String)>> {
-    // A path scope is most selective through symbols_file_path; forcing the
-    // complexity index would defeat that plan.
-    let index_hint = if path.is_some() {
-        ""
-    } else {
-        " INDEXED BY symbols_complexity_idx"
-    };
-    let mut stmt = conn.prepare(&format!(
-        "SELECT s.file_path, s.line_start, s.effective_loc, s.qualname
-         FROM symbols s{index_hint}
-         WHERE s.kind IN ('{}','{}')
-           AND s.effective_loc > 0 AND s.effective_loc >= ?1 {gen_filter}
-         ORDER BY s.effective_loc DESC, s.qualname, s.file_path, s.line_start
-         LIMIT {limit}",
-        SymbolKind::Function.as_str(),
-        SymbolKind::Method.as_str()
-    ))?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                format!(
-                    "{}:{} loc={} {}",
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, String>(3)?
-                ),
-            ))
-        })?
-        .collect::<std::result::Result<_, _>>()?;
-    Ok(rows)
-}
-
-/// `aw resolve --stdin` (Amendment 19): batch name resolution with per-name
-/// found/ambiguous/missing lines and a CLI exit code (0/1/2).
-pub fn resolve_names(conn: &Connection, names: &[String]) -> Result<(Vec<String>, i32)> {
-    let mut out = Vec::new();
-    let mut exit = 0;
-    for name in names {
-        let name = name.trim();
-        if name.is_empty() || name.starts_with('#') {
-            continue;
-        }
-        let (ids, cands) = target_ids(conn, name)?;
-        if ids.is_empty() {
-            out.push(format!("missing {name}"));
-            exit = exit.max(1);
-        } else if ids.len() > 1 {
-            for (path, line, qualname) in cands.iter() {
-                out.push(format!("ambiguous {name} {path}:{line} {qualname}"));
-            }
-            if ids.len() > cands.len() {
-                out.push(format!(
-                    "showing {} of {} candidates",
-                    cands.len(),
-                    ids.len()
-                ));
-            }
-            exit = 2;
-        } else if let Some((path, line, qualname)) = cands.first() {
-            out.push(format!("found {name} {path}:{line} {qualname}"));
-        }
-    }
-    Ok((out, exit))
-}
-
-/// `aw files` (Amendment 19): indexed file inventory, build-time values.
-pub fn files(conn: &Connection, path: Option<&str>, limit: usize) -> Result<LineQuery> {
-    let (limit, scope, params) = scoped_query(path, limit, "f", "path", 1)?;
-    let total: usize = conn.query_row(
-        &format!("SELECT COUNT(*) FROM files f WHERE 1=1 {scope}"),
-        rusqlite::params_from_iter(params.iter()),
-        |r| r.get::<_, i64>(0),
-    )? as usize;
-    let sql = format!(
-        "SELECT f.path, COUNT(s.id), f.size, f.generated
-         FROM files f LEFT JOIN symbols s ON s.file_id = f.id
-         WHERE 1=1 {scope}
-         GROUP BY f.id ORDER BY f.path LIMIT {limit}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows: Vec<(String, i64, i64, i64)> = stmt
-        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-        })?
-        .collect::<std::result::Result<_, _>>()?;
-    let files_caveat = "aw: files — build-time inventory; files created after the build are absent";
-    if rows.is_empty() {
-        return Err(AwError::NoResultsCaveated {
-            caveat: files_caveat,
-            detail: match path.map(normalize_scope) {
-                Some(s) if !s.is_empty() => format!("0 indexed files in '{s}'"),
-                _ => "0 indexed files".to_string(),
-            },
-        });
-    }
-    let shown = rows.len();
-    let mut out = vec![files_caveat.to_string()];
-    out.extend(rows.into_iter().map(|(path, syms, bytes, gen)| {
-        format!("{path} symbols={syms} bytes={bytes} generated={gen}")
-    }));
-    let cap = finish_capped(&mut out, shown, total, false, "");
-    Ok((out, cap))
-}
-
 /// Unresolved edge names with locations (Amendment 19). Report shape: header,
 /// then one `path:line kind name` row per unresolved site.
 pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Result<LineQuery> {
@@ -343,9 +55,6 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
         .map(|(p, _, _, _)| p.clone())
         .collect();
     let (header, stale) = staleness_header(ctx, &displayed);
-    if unlocated > 0 {
-        eprintln!("[aw] {unlocated} unresolved row(s) have site_line=0 and are omitted");
-    }
     let mut out = vec![format!(
         "aw: unresolved={total} rows in {files} files (call/import/inherit)"
     )];
@@ -358,6 +67,11 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
             .map(|(path, line, kind, name)| format!("{path}:{line} {kind} {name}")),
     );
     let cap = finish_capped(&mut out, shown, total as usize, stale, "rows");
+    let cap = if unlocated > 0 {
+        format!("[aw] {unlocated} unresolved row(s) have site_line=0 and are omitted\n{cap}")
+    } else {
+        cap
+    };
     Ok((out, cap))
 }
 
@@ -517,10 +231,9 @@ fn unresolved_name_view(
 }
 
 /// Display knobs for `aw symbols` (mirrors `ImpactOpts`): `--outline` adds the
-/// stored one-line signature, `--metrics` the effective LOC.
+/// stored one-line signature.
 pub struct SymbolsOpts {
     pub outline: bool,
-    pub metrics: bool,
 }
 
 /// Symbols of one indexed file (Amendment 5): `path:line kind qualname` by
@@ -534,7 +247,7 @@ pub fn symbols(
     opts: SymbolsOpts,
 ) -> Result<LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
-    let SymbolsOpts { outline, metrics } = opts;
+    let SymbolsOpts { outline } = opts;
     let limit = clamp_limit(limit)?;
     let rel = normalize_scope(file);
     // `.` and `./` mean the repository root; the empty prefix matches every
@@ -552,7 +265,7 @@ pub fn symbols(
         {
             return Err(AwError::not_indexed(file));
         }
-        return symbols_directory(ctx, &rel, limit, SymbolsOpts { outline, metrics });
+        return symbols_directory(ctx, &rel, limit, SymbolsOpts { outline });
     };
     let rows = file_symbol_rows(conn, &rel, outline)?;
     if rows.is_empty() {
@@ -565,7 +278,7 @@ pub fn symbols(
     let data_lines: Vec<String> = rows
         .into_iter()
         .take(shown)
-        .map(|row| symbol_line(&rel, &row, metrics))
+        .map(|row| symbol_line(&rel, &row))
         .collect();
     let mut out = Vec::new();
     if let Some(header) = header {
@@ -579,7 +292,7 @@ pub fn symbols(
 fn file_symbol_rows(conn: &Connection, rel: &str, outline: bool) -> Result<Vec<SymbolRow>> {
     let signature_col = if outline { "s.signature" } else { "''" };
     let sql = format!(
-        "SELECT s.kind, s.qualname, s.line_start, {signature_col}, s.effective_loc
+        "SELECT s.kind, s.qualname, s.line_start, {signature_col}
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE f.path = ?1
          ORDER BY s.line_start, s.qualname"
@@ -592,23 +305,18 @@ fn file_symbol_rows(conn: &Connection, rel: &str, outline: bool) -> Result<Vec<S
                 qualname: r.get(1)?,
                 line: r.get(2)?,
                 signature: r.get(3)?,
-                loc: r.get(4)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
-/// One `path:line kind qualname` row; `--outline` appends the signature and
-/// `--metrics` the effective LOC.
-fn symbol_line(path: &str, row: &SymbolRow, metrics: bool) -> String {
+/// One `path:line kind qualname` row; `--outline` appends the signature.
+fn symbol_line(path: &str, row: &SymbolRow) -> String {
     let mut text = format!("{path}:{} {} {}", row.line, row.kind, row.qualname);
     if !row.signature.is_empty() {
         text.push(' ');
         text.push_str(&row.signature);
-    }
-    if metrics {
-        text.push_str(&format!(" loc={}", row.loc));
     }
     text
 }
@@ -619,7 +327,7 @@ fn symbols_directory(
     ctx: &QueryCtx<'_>,
     dir: &str,
     limit: usize,
-    SymbolsOpts { outline, metrics }: SymbolsOpts,
+    SymbolsOpts { outline }: SymbolsOpts,
 ) -> Result<LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
     validate_path_scope(dir, true)?;
@@ -659,7 +367,7 @@ fn symbols_directory(
             out.push(path.clone());
             last_path = path;
         }
-        out.push(symbol_line(path, row, metrics));
+        out.push(symbol_line(path, row));
     }
     let shown = rows.len();
     let cap = finish_capped(&mut out, shown, total as usize, stale, "");
@@ -673,7 +381,7 @@ fn dir_symbol_rows(
     limit: usize,
 ) -> Result<Vec<(String, SymbolRow)>> {
     let sql = format!(
-        "SELECT f.path, s.kind, s.qualname, s.line_start, s.signature, s.effective_loc
+        "SELECT f.path, s.kind, s.qualname, s.line_start, s.signature
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE substr(f.path, 1, length(?1)) = ?1
          ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
@@ -688,7 +396,6 @@ fn dir_symbol_rows(
                     qualname: r.get(2)?,
                     line: r.get(3)?,
                     signature: if outline { r.get(4)? } else { String::new() },
-                    loc: r.get(5)?,
                 },
             ))
         })?
@@ -755,25 +462,26 @@ fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String)> 
 }
 
 /// Columns of a search page row, in `search_pointer` order: file, line,
-/// qualname, stored one-line signature. Both search pages interpolate it so
-/// their column order cannot drift off the shared mapper.
-const SEARCH_PAGE_COLUMNS: &str = "f.path, s.line_start, s.qualname, s.signature";
+/// kind, qualname, stored one-line signature, callers count.
+const SEARCH_PAGE_COLUMNS: &str = "f.path, s.line_start, s.kind, s.qualname, s.signature, (SELECT COUNT(*) FROM edges e WHERE e.dst_id = s.id AND e.kind = 'calls') AS callers";
 
-/// Map a search row to the shared pointer shape. Amendment 14b: hits carry
-/// the stored one-line signature after the qualname; an empty signature keeps
-/// the 12b byte shape.
+/// Map a search row to the interface card pointer shape:
+/// `path:line kind qualname [signature] [callers=N]`.
 fn search_pointer(r: &rusqlite::Row<'_>) -> rusqlite::Result<Pointer> {
-    let qualname: String = r.get(2)?;
-    let signature: String = r.get(3)?;
+    let kind: String = r.get(2)?;
+    let qualname: String = r.get(3)?;
+    let signature: String = r.get(4)?;
+    let callers: i64 = r.get(5)?;
+    let detail = if signature.is_empty() {
+        format!("{kind} {qualname} [callers={callers}]")
+    } else {
+        format!("{kind} {qualname} {signature} [callers={callers}]")
+    };
     Ok(Pointer {
         file: r.get::<_, String>(0)?,
         line: r.get::<_, i64>(1)?,
         tag: "",
-        detail: if signature.is_empty() {
-            qualname
-        } else {
-            format!("{qualname} {signature}")
-        },
+        detail,
     })
 }
 
@@ -786,18 +494,36 @@ fn search_fts_page(conn: &Connection, expr: &str, limit: usize) -> Result<(Vec<P
         [expr],
         |r| r.get::<_, i64>(0),
     )? as usize;
+    let fetch_limit = (limit * 2).clamp(50, 1000);
     let mut stmt = conn.prepare(&format!(
-        "SELECT {SEARCH_PAGE_COLUMNS}
+        "SELECT {SEARCH_PAGE_COLUMNS}, bm25(symbols_fts) AS bm25_score
          FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid
          JOIN files f ON f.id = s.file_id
          WHERE symbols_fts MATCH ?1
-         -- Tie-break on stable columns: rowids differ between fresh and
-         -- carried builds, so bm25 alone is not deterministic (R6d A9).
-         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {limit}"
+         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {fetch_limit}"
     ))?;
-    let rows = stmt.query_map([expr], search_pointer)?;
-    let ptrs = rows.collect::<std::result::Result<_, _>>()?;
+    let mut candidates = stmt
+        .query_map([expr], |r| {
+            let pointer = search_pointer(r)?;
+            let bm25_score: f64 = r.get(6)?;
+            let callers: i64 = r.get(5)?;
+            let score = bm25_score - 0.3 * (1.0 + callers as f64).ln();
+            let path: String = r.get(0)?;
+            let line: i64 = r.get(1)?;
+            let qualname: String = r.get(3)?;
+            Ok((pointer, score, qualname, path, line))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    candidates.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.3.cmp(&b.3))
+            .then_with(|| a.4.cmp(&b.4))
+    });
+    candidates.truncate(limit);
+    let ptrs = candidates.into_iter().map(|c| c.0).collect();
     Ok((ptrs, total))
 }
 
@@ -822,7 +548,7 @@ fn search_exact_page(
         "SELECT {SEARCH_PAGE_COLUMNS}
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE {EXACT_IDENTITY_PREDICATE}
-         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
+         ORDER BY (SELECT COUNT(*) FROM edges e WHERE e.dst_id = s.id AND e.kind = 'calls') DESC, f.path, s.line_start, s.qualname LIMIT {limit}"
     ))?;
     let ptrs = stmt
         .query_map([exact_name], search_pointer)?

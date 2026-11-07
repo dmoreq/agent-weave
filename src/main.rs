@@ -3,21 +3,7 @@
 //! aborts with exit 6, never partial stdout.
 #![forbid(unsafe_code)]
 
-mod build;
-mod cli;
-mod db;
-mod doctor;
-mod error;
-mod extract;
-mod hash;
-mod insights;
-mod journal;
-mod mcp;
-mod memory;
-mod parse;
-mod query;
-mod service;
-mod walk;
+use agent_weave::{cli, error, journal, mcp, service, walk};
 
 use clap::Parser;
 use error::AwError;

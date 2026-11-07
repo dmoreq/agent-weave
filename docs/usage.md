@@ -44,10 +44,8 @@ aw impact src/build.rs --sites
 By default, impact uses calls and emits one row per caller file with a site count. When that default finds nothing but the target file has importers or inheritors, the empty result names those counts and points at `--edges imports,inherits`. Use `--sites` for individual sites, or extend the relationships and depth explicitly:
 
 ```sh
-aw impact src/hash.rs --edges all --depth 3 --context --explain
+aw impact src/hash.rs --edges all --depth 3
 ```
-
-`--context` adds the enclosing callable when available. `--explain` adds the relationship kind and traversal depth, so you can distinguish direct calls from indirect dependencies.
 
 Do not treat this list as every file that can break. Unresolved calls, external callers, imports, and inheritance relationships can be missing.
 
@@ -70,28 +68,22 @@ Open each hop before changing behavior. Dynamic dispatch, callbacks, and macros 
 aw search 'parse tree'
 aw search run_build
 aw symbols src --outline
-aw files --path src
 ```
 
-Quote multiword search terms: the CLI accepts one positional search string. Search ranks identifier, path, and signature tokens; it does not search source bodies, comments, or docstrings.
+Quote multiword search terms: the CLI accepts one positional search string. Search ranks identifier, path, and signature tokens; it outputs concise interface cards (`path:line kind qualname signature [callers=N]`). It does not search source bodies, comments, or docstrings.
 
 `symbols` lists definitions by path and line. Signatures are whitespace-collapsed and capped at 160 characters, so open the source for full declarations and bodies.
 
-`files` reports build-time file inventory and counts.
-
-For inheritance questions, query a class, trait, or interface name discovered in your own index with `aw implementers`. It follows resolved inheritance relationships, not arbitrary runtime implementations.
-
-## Investigate cleanup candidates
+## Detect anti-reinvention candidates
 
 ```sh
-aw dead --path src --exclude-tests
-aw complexity --path src --min-loc 40
+aw reuse
+aw reuse src
 ```
 
-- `dead` reports definitions without indexed inbound calls, imports, or inheritance references after its policy filters. Entry points and external consumers can still use them.
-- `complexity` ranks callables by effective non-comment line count. It is not cognitive complexity or a proof that a function needs refactoring.
+- `reuse` detects candidate duplicate functions, callee footprint overlap, and utility abstraction opportunities across the codebase.
 
-Do not delete or refactor code solely because it appears here. Confirm runtime entry points, visibility, framework discovery, and existing tests first.
+Do not refactor code solely because it appears here. Confirm semantics, visibility, and existing tests first.
 
 ## Read repository summaries
 

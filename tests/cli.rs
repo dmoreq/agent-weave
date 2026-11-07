@@ -2,9 +2,8 @@
 //! snapshot invariant, exercised against a throwaway fixture repo.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
@@ -163,72 +162,6 @@ fn cuj2_callers_with_cap_and_pointer_format() {
 }
 
 #[test]
-fn explain_appends_edge_metadata_without_changing_default_output() {
-    let repo = temp_repo("explain");
-    write(
-        &repo,
-        "models.py",
-        "class Order:\n    def total(self):\n        return 1\n",
-    );
-    write(
-        &repo,
-        "service.py",
-        "from models import Order\n\ndef use(order: Order):\n    return order.total()\n",
-    );
-    write(
-        &repo,
-        "diamond.py",
-        "class A:\n    def m(self):\n        return 1\n\n\
-         class B(A):\n    def m(self):\n        return 2\n\n\
-         class C(A):\n    def m(self):\n        return 3\n\n\
-         class D(B, C):\n    pass\n\n\
-         def go():\n    d = D()\n    return d.m()\n",
-    );
-    build(&repo);
-
-    let default = aw(&repo).args(["callers", "Order.total"]).output().unwrap();
-    assert_eq!(default.status.code(), Some(0));
-    let default_stdout = String::from_utf8_lossy(&default.stdout);
-    assert_eq!(default_stdout, "service.py:4 service.use\n");
-    assert!(!default_stdout.contains("edge=calls"));
-
-    let explained = aw(&repo)
-        .args(["callers", "Order.total", "--explain"])
-        .output()
-        .unwrap();
-    assert_eq!(explained.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&explained.stdout);
-    assert!(
-        stdout.starts_with(
-            "aw: explain — edge metadata from the index; resolution reason is not stored\n"
-        ),
-        "stdout: {stdout}"
-    );
-    assert!(
-        stdout.contains(
-            "service.py:4 service.use [edge=calls confidence=EXTRACTED site=4 dst=models.Order.total] receiver=models.Order"
-        ),
-        "stdout: {stdout}"
-    );
-
-    let ambiguous = aw(&repo)
-        .args(["callees", "go", "--explain"])
-        .output()
-        .unwrap();
-    assert_eq!(ambiguous.status.code(), Some(0));
-    let stdout = String::from_utf8_lossy(&ambiguous.stdout);
-    assert!(
-        stdout.contains("[ambiguous] diamond.D.m"),
-        "stdout: {stdout}"
-    );
-    assert!(
-        stdout.contains("confidence=AMBIGUOUS")
-            && stdout.contains("resolution=ambiguous (candidate set not stored)"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
 fn cuj3_corrupt_index_exit3() {
     let repo = fixture("cuj3");
     build(&repo);
@@ -288,7 +221,7 @@ fn cuj5_schema_skew_exit5() {
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v9 — run aw build"),
+        stderr.contains("schema v99, binary expects v10 — run aw build"),
         "{stderr}"
     );
 }
@@ -520,19 +453,6 @@ fn impact_default_empty_names_importers() {
 }
 
 #[test]
-fn dead_exclude_tests_matches_nested_test_filename() {
-    let repo = temp_repo("dead-nested-test");
-    write(&repo, "pkg/test_helpers.py", "def helper():\n    pass\n");
-    build(&repo);
-    let out = aw(&repo)
-        .args(["dead", "--exclude-tests"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains("pkg/test_helpers.py"), "{stdout}");
-}
-
-#[test]
 fn incremental_carries_trait_and_qualified_impl_targets() {
     let repo = temp_repo("incremental-trait");
     write(
@@ -547,10 +467,13 @@ fn incremental_carries_trait_and_qualified_impl_targets() {
         "use crate::Greet;\npub struct Thing;\nimpl Greet for Thing {\n    fn hello(&self) {}\n}\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["implementers", "Greet"]).output().unwrap();
+    let out = aw(&repo)
+        .args(["impact", "src/lib.rs", "--edges", "inherits"])
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("src/user.rs:2 src.user.Thing"), "{stdout}");
+    assert!(stdout.contains("src/user.rs"), "{stdout}");
 
     write(
         &repo,
@@ -558,12 +481,12 @@ fn incremental_carries_trait_and_qualified_impl_targets() {
         "use crate::Greet;\npub struct Other;\nimpl crate::Greet for Other {\n    fn hello(&self) {}\n}\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["implementers", "Greet"]).output().unwrap();
+    let out = aw(&repo)
+        .args(["impact", "src/lib.rs", "--edges", "inherits"])
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("src/qualified.rs:2 src.qualified.Other"),
-        "{stdout}"
-    );
+    assert!(stdout.contains("src/qualified.rs"), "{stdout}");
 }
 
 #[test]
@@ -596,35 +519,6 @@ fn root_ts_index_and_python_root_parent_imports_resolve() {
     assert!(stdout.contains("pkg/relinner.py:1 app"), "{stdout}");
     let out = aw(&repo).args(["unresolved"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "no unresolved expected");
-}
-
-#[test]
-fn pre_manifest_index_rebuilds_instead_of_empty_complexity() {
-    let repo = temp_repo("pre-manifest");
-    write(
-        &repo,
-        "app.py",
-        "def f(x):\n    if x:\n        return 1\n    return 0\n\ndef g():\n    if true:\n        return 2\n    return 3\n",
-    );
-    build(&repo);
-    let idx = repo.join(".aw/index.db");
-    let status = std::process::Command::new("sqlite3")
-        .args([
-            idx.to_string_lossy().as_ref(),
-            "DELETE FROM meta WHERE key='callable_count';",
-        ])
-        .output()
-        .unwrap();
-    assert!(status.status.success(), "sqlite3 demotion failed");
-    let (code, stdout, stderr) = build(&repo);
-    assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo)
-        .args(["complexity", "--limit", "1"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("showing 1 of"), "{stdout}");
 }
 
 #[test]
@@ -927,86 +821,6 @@ fn impact_unknown_path_exit1() {
 }
 
 #[test]
-fn dead_lists_uncalled_and_excludes_called() {
-    // fixture: normalize is called; Widget.render is called (self.render and
-    // app.run's w.render()); run, caller, and render2 have zero inbound edges.
-    let repo = fixture("dead");
-    build(&repo);
-    let out = aw(&repo).args(["dead"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(
-        stdout.starts_with("aw: dead-code candidates —"),
-        "caveat header first: {stdout}"
-    );
-    assert!(stdout.contains("app.py:4"), "run is dead: {stdout}");
-    assert!(stdout.contains("utils.py:4"), "caller is dead: {stdout}");
-    assert!(stdout.contains("widget.py:5"), "render2 is dead: {stdout}");
-    assert!(
-        !stdout.contains("utils.py:1"),
-        "normalize is called: {stdout}"
-    );
-    assert!(
-        !stdout.contains("widget.py:1"),
-        "Widget is constructed: {stdout}"
-    );
-    assert!(
-        !stdout.contains("widget.py:2"),
-        "render is called: {stdout}"
-    );
-}
-
-#[test]
-fn p8a_implementers_lists_subclasses_and_dead_keeps_inherited_base() {
-    let repo = temp_repo("implementers");
-    write(
-        &repo,
-        "hier.py",
-        "class Base:\n    def run(self):\n        pass\n\nclass Child(Base):\n    pass\n\nclass Uses(Base):\n    pass\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo).args(["implementers", "Base"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(
-        stdout.starts_with("aw: implementers — resolved static inherits edges only"),
-        "caveat first: {stdout}"
-    );
-    assert!(stdout.contains("hier.py:5 hier.Child"), "{stdout}");
-    assert!(stdout.contains("hier.py:8 hier.Uses"), "{stdout}");
-
-    let out = aw(&repo).args(["dead"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        !stdout.contains("hier.py:1"),
-        "Base has inheritors and is not dead: {stdout}"
-    );
-}
-
-#[test]
-fn p8a_implementers_resolves_rust_trait_impl_same_file() {
-    let repo = temp_repo("rust-trait");
-    write(
-        &repo,
-        "lib.rs",
-        "pub trait Greet {\n    fn hello(&self);\n}\n\npub struct English;\n\nimpl Greet for English {\n    fn hello(&self) {}\n}\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo).args(["symbols", "lib.rs"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("trait lib.Greet"), "{stdout}");
-    assert!(stdout.contains("class lib.English"), "{stdout}");
-
-    let out = aw(&repo).args(["implementers", "Greet"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("lib.rs:5 lib.English"), "{stdout}");
-}
-
-#[test]
 fn p8a_impact_edges_include_importers_and_inheritors() {
     let repo = temp_repo("impact-edges");
     write(
@@ -1191,47 +1005,6 @@ fn impact_import_site_counts_one_per_statement() {
         1,
         "duplicate site rows: {stdout}"
     );
-
-    let out = aw(&repo)
-        .args(["impact", "a.py", "--edges", "imports", "--context"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        !stdout.contains("[in b]"),
-        "module-level site tagged as context: {stdout}"
-    );
-    assert!(
-        stdout.starts_with("aw: impact — resolved static edges only"),
-        "imports context caveat missing: {stdout}"
-    );
-}
-
-#[test]
-fn impact_context_tags_only_callable_sites() {
-    let repo = temp_repo("impact-context");
-    write(&repo, "a.py", "def target():\n    return 1\n");
-    write(
-        &repo,
-        "b.py",
-        "from a import target\n\ndef caller():\n    return target()\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo)
-        .args(["impact", "a.py", "--context", "--edges", "calls"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(
-        stdout.contains("b.py:4 [in b.caller]"),
-        "callable context tag missing: {stdout}"
-    );
-    assert!(
-        stdout.starts_with("aw: impact — resolved static call edges only"),
-        "calls-only context caveat missing: {stdout}"
-    );
 }
 
 #[test]
@@ -1379,81 +1152,6 @@ fn imports_lists_outbound_resolved_edges() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.starts_with("aw: imports —"), "{stdout}");
     assert!(stdout.contains("b.py:1 a.only"), "{stdout}");
-}
-
-#[test]
-fn ts_arrow_metrics_use_the_arrow_range() {
-    let repo = temp_repo("ts-arrow-range");
-    write(
-        &repo,
-        "app.ts",
-        "const arrow =\n  (\n    x: number,\n  ) => {\n    return x;\n  };\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo)
-        .args(["symbols", "app.ts", "--metrics"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("app.arrow") && stdout.contains("loc=5"),
-        "arrow metrics range is inconsistent: {stdout}"
-    );
-}
-
-#[test]
-fn effective_loc_uses_comment_node_coverage() {
-    let repo = temp_repo("effective-loc");
-    write(
-        &repo,
-        "rs.rs",
-        "fn block_tail() {\n    let x = 1;\n    let y = 1; /* start\n    comment\n    comment */\n    x + y\n}\n\nfn raw_str() {\n    let s = r#\"line\n// literal\nline\"#;\n    s.len()\n}\n",
-    );
-    build(&repo);
-    let out = aw(&repo)
-        .args(["symbols", "rs.rs", "--metrics"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("rs.block_tail") && stdout.contains("loc=5"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("rs.raw_str") && stdout.contains("loc=6"),
-        "{stdout}"
-    );
-}
-
-#[test]
-fn p8c_complexity_excludes_zero_metric_trait_signatures() {
-    let repo = temp_repo("complexity-signatures");
-    write(
-        &repo,
-        "lib.rs",
-        "trait Shape {\n    fn area(&self) -> f64;\n}\n\n#[inline]\nfn real() {\n    // comment\n}\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo)
-        .args(["complexity", "--min-loc", "0"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(
-        !stdout.contains("Shape.area"),
-        "trait signature listed: {stdout}"
-    );
-    assert!(
-        stdout.contains("lib.real"),
-        "real function missing: {stdout}"
-    );
-    assert!(
-        stdout.contains("loc=2"),
-        "attribute/comment lines changed loc: {stdout}"
-    );
 }
 
 #[test]
@@ -1670,216 +1368,6 @@ fn p8c_unresolved_names_lists_sites_with_kind() {
 }
 
 #[test]
-fn p8c_complexity_ranks_symbols_and_symbols_metrics_append() {
-    let repo = temp_repo("complexity");
-    write(
-        &repo,
-        "app.py",
-        "def f(x):\n    if x:\n        return 1\n    elif x == 2:\n        return 2\n    return 0\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo)
-        .args(["symbols", "app.py", "--metrics"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("loc=6"), "{stdout}");
-
-    let out = aw(&repo)
-        .args(["complexity", "--min-loc", "4"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.starts_with("aw: complexity —"), "{stdout}");
-    assert!(stdout.contains("app.py:1 loc=6 app.f"), "{stdout}");
-}
-
-#[test]
-fn p8c_files_lists_indexed_inventory_and_generated_tag() {
-    let repo = temp_repo("files-cmd");
-    write(&repo, "src/a.py", "def a():\n    pass\n");
-    write(
-        &repo,
-        "src/gen.pb.py",
-        "# Code generated by tool. DO NOT EDIT.\ndef g():\n    pass\n",
-    );
-    build(&repo);
-
-    let out = aw(&repo).args(["files", "--path", "src"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("src/a.py symbols="), "{stdout}");
-    assert!(stdout.contains("generated=1"), "{stdout}");
-}
-
-#[test]
-fn generated_tag_negative_controls_remain_unfiltered() {
-    let repo = temp_repo("generated-negatives");
-    write(
-        &repo,
-        "src/auto.py",
-        "# @generated
-def auto():
-    pass
-",
-    );
-    write(
-        &repo,
-        "src/gen/inside.py",
-        "def handwritten():
-    pass
-",
-    );
-    write(
-        &repo,
-        "src/bare.ts",
-        "// DO NOT EDIT
-const bare = 1;
-",
-    );
-    build(&repo);
-
-    let out = aw(&repo).args(["files", "--path", "src"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let auto = stdout.lines().find(|l| l.contains("src/auto.py")).unwrap();
-    assert!(auto.contains("generated=1"), "{stdout}");
-    for row in ["src/gen/inside.py", "src/bare.ts"] {
-        let line = stdout
-            .lines()
-            .find(|l| l.contains(row))
-            .unwrap_or_else(|| panic!("missing {row}: {stdout}"));
-        assert!(line.contains("generated=0"), "{line}");
-    }
-    let stats = aw(&repo).args(["stats"]).output().unwrap();
-    assert!(
-        String::from_utf8_lossy(&stats.stdout).contains("generated=1"),
-        "{}",
-        String::from_utf8_lossy(&stats.stdout)
-    );
-}
-
-#[test]
-fn resolve_batch_reports_found_and_missing_with_exit1() {
-    let repo = temp_repo("resolve");
-    write(&repo, "app.py", "def public():\n    pass\n");
-    build(&repo);
-
-    let mut child = aw(&repo)
-        .args(["resolve", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"public\nmissing_thing\n")
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(1), "{stdout}");
-    assert!(
-        stdout.contains("found public app.py:1 app.public"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("missing missing_thing"), "{stdout}");
-}
-
-#[test]
-fn resolve_requires_the_stdin_flag() {
-    let repo = temp_repo("resolve-stdin-flag");
-    let out = aw(&repo).arg("resolve").output().unwrap();
-    assert_eq!(out.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("pass --stdin"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-#[test]
-fn resolve_honors_no_journal_and_records_parsed_count() {
-    let repo = temp_repo("resolve-journal");
-    write(&repo, "app.py", "def public():\n    pass\n");
-    aw(&repo)
-        .env("AW_NO_JOURNAL", "1")
-        .args(["build"])
-        .output()
-        .unwrap();
-    assert!(!repo.join(".aw/usage.log").exists(), "build opt-out");
-
-    let mut child = aw(&repo)
-        .args(["--no-journal", "resolve", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"public\n")
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        !repo.join(".aw/usage.log").exists(),
-        "--no-journal must suppress resolve journal"
-    );
-
-    let mut child = aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .args(["resolve", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"public\n# comment\n\n")
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
-    let line = log.lines().last().unwrap();
-    assert!(line.contains("\"tool\":\"resolve\""), "{line}");
-    assert!(line.contains("\"count\":\"1\""), "{line}");
-    assert!(line.contains("\"candidate_limit\":\"50\""), "{line}");
-}
-
-#[test]
-fn resolve_nonzero_exit_is_journaled() {
-    let repo = temp_repo("resolve-journal-nonzero");
-    write(&repo, "app.py", "def public():\n    pass\n");
-    build(&repo);
-
-    let mut child = aw(&repo)
-        .args(["resolve", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(b"public\nmissing_thing\n")
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
-    let line = log.lines().last().unwrap();
-    assert!(line.contains("\"tool\":\"resolve\""), "{line}");
-    assert!(line.contains("\"exit_code\":1"), "{line}");
-}
-
-#[test]
 fn import_edges_dedup_and_resolved_imports_are_not_unresolved() {
     let repo = temp_repo("import-dedup");
     write(&repo, "pkg/__init__.py", "");
@@ -1946,15 +1434,6 @@ fn inheritance_ts_path_alias_is_pinned_unresolved() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["implementers", "Base"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_eq!(out.status.code(), Some(1), "{stdout}");
-    assert!(
-        stderr.contains("1 unresolved inherit sites may refer to this symbol"),
-        "{stderr}"
-    );
-
     let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("src/child.ts:2 inherit Base"), "{stdout}");
@@ -1975,15 +1454,11 @@ fn inheritance_ignores_generic_arguments_and_external_paths() {
     );
     build(&repo);
 
-    for name in ["T", "std", "error", "Error"] {
-        let out = aw(&repo).args(["implementers", name]).output().unwrap();
-        assert_eq!(
-            out.status.code(),
-            Some(1),
-            "{name}: {}",
-            String::from_utf8_lossy(&out.stdout)
-        );
-    }
+    let out = aw(&repo)
+        .args(["impact", "lib.rs", "--edges", "inherits"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
 }
 
 #[test]
@@ -2522,7 +1997,7 @@ fn stats_path_scopes_counts() {
     assert_eq!(out.status.code(), Some(0));
     let global = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(
-        global.starts_with("aw stats: files=3 generated=0 symbols=8 edges="),
+        global.starts_with("aw stats: files=3 symbols=8 edges="),
         "global stats: {global}"
     );
     assert!(
@@ -2534,7 +2009,7 @@ fn stats_path_scopes_counts() {
     assert_eq!(out.status.code(), Some(0));
     let scoped = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(
-        scoped.starts_with("aw stats: scope=sub files=2 generated=0 symbols=5 edges="),
+        scoped.starts_with("aw stats: scope=sub files=2 symbols=5 edges="),
         "scoped stats: {scoped}"
     );
     assert!(
@@ -2595,16 +2070,14 @@ fn stats_path_scopes_counts() {
 }
 
 #[test]
-fn partial_complexity_index_rebuilds_fresh() {
-    // Amendment 19/20: an index missing a required index must disable the
-    // fast path and rebuild, not fail carry-forward.
+fn partial_secondary_index_rebuilds_fresh() {
     let repo = fixture("partial-index");
     build(&repo);
     let idx = repo.join(".aw/index.db");
     let status = std::process::Command::new("sqlite3")
         .args([
             idx.to_string_lossy().as_ref(),
-            "DROP INDEX symbols_complexity_idx;",
+            "DROP INDEX symbols_file_path;",
         ])
         .output()
         .unwrap();
@@ -2621,19 +2094,14 @@ fn partial_complexity_index_rebuilds_fresh() {
 
 #[test]
 fn partial_v7_file_path_column_rebuilds_fresh() {
-    // Amendment 20: a v9-stamped index missing symbols.file_path must disable
-    // the fast path. Recreate the v8 table shape behind a v9 stamp.
     let repo = fixture("partial-file-path");
     build(&repo);
     let idx = repo.join(".aw/index.db");
     let status = std::process::Command::new("sqlite3")
         .args([
             idx.to_string_lossy().as_ref(),
-            "DROP INDEX symbols_complexity_idx;
-             DROP INDEX symbols_file_path;
-             ALTER TABLE symbols DROP COLUMN file_path;
-             CREATE INDEX symbols_complexity_idx
-               ON symbols(effective_loc DESC, qualname, file_id, line_start);",
+            "DROP INDEX symbols_file_path;
+             ALTER TABLE symbols DROP COLUMN file_path;",
         ])
         .output()
         .unwrap();
@@ -2646,16 +2114,16 @@ fn partial_v7_file_path_column_rebuilds_fresh() {
         code, 0,
         "rebuild over missing file_path failed: {stdout}{stderr}"
     );
-    let out = aw(&repo).args(["complexity"]).output().unwrap();
+    let out = aw(&repo).args(["search", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     assert!(
-        String::from_utf8_lossy(&out.stdout).contains("app.py"),
-        "fresh index lost symbols after v9 rebuild"
+        String::from_utf8_lossy(&out.stdout).contains("utils.py"),
+        "fresh index lost symbols after v10 rebuild"
     );
 }
 
 #[test]
-fn old_version_database_rebuilds_to_v9() {
+fn old_version_database_rebuilds_to_v10() {
     // A v6 user_version disables the fast path; build rewrites the index at
     // the current schema version instead of carrying v6 rows.
     let repo = fixture("v6-to-v8");
@@ -2670,7 +2138,7 @@ fn old_version_database_rebuilds_to_v9() {
     assert_eq!(out.status.code(), Some(5), "v6 query open must exit 5");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v6, binary expects v9 — run aw build"),
+        stderr.contains("schema v6, binary expects v10 — run aw build"),
         "{stderr}"
     );
     let (code, stdout, stderr) = build(&repo);
@@ -2681,63 +2149,20 @@ fn old_version_database_rebuilds_to_v9() {
         .unwrap();
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).trim(),
-        "9",
-        "build did not stamp v9"
+        "10",
+        "build did not stamp v10"
     );
 }
 
 #[test]
-fn p8c_complexity_path_tiebreak_is_stable_fresh_and_carried() {
-    // Amendment 20: pkg.f exists in pkg.py and pkg/__init__.py with equal
-    // metrics. Ordering must use file_path, so a carried index whose file_id
-    // order differs from a fresh one still prints byte-identical output.
-    let repo = temp_repo("complexity-path");
-    let body = "def f(x):\n    if x:\n        return 1\n    return 0\n";
-    write(&repo, "pkg/__init__.py", body);
-    build(&repo);
-    write(&repo, "pkg.py", body);
-    build(&repo);
-
-    let carried = aw(&repo)
-        .args(["complexity", "--limit", "10"])
-        .output()
-        .unwrap();
-    let carried_out = String::from_utf8_lossy(&carried.stdout).into_owned();
-    assert_eq!(carried.status.code(), Some(0), "{carried_out}");
-    let py_at = carried_out.find("pkg.py:1").expect("pkg.py row");
-    let init_at = carried_out
-        .find("pkg/__init__.py:1")
-        .expect("pkg/__init__.py row");
-    assert!(
-        py_at < init_at,
-        "carried order must be path-ordered: {carried_out}"
-    );
-
-    fs::remove_dir_all(repo.join(".aw")).unwrap();
-    build(&repo);
-    let fresh = aw(&repo)
-        .args(["complexity", "--limit", "10"])
-        .output()
-        .unwrap();
-    let fresh_out = String::from_utf8_lossy(&fresh.stdout).into_owned();
-    assert_eq!(fresh.status.code(), Some(0), "{fresh_out}");
-    assert_eq!(
-        fresh_out, carried_out,
-        "fresh and carried complexity outputs differ"
-    );
-}
-
-#[test]
-fn partial_v9_index_rebuilds_fresh() {
-    // A v9-stamped index missing a required column must disable the fast
-    // path and rebuild fully, not fail carry-forward on the partial table.
+fn partial_v10_index_rebuilds_fresh() {
     let repo = fixture("partial-v4");
     build(&repo);
     let idx = repo.join(".aw/index.db");
     let status = std::process::Command::new("sqlite3")
         .args([
             idx.to_string_lossy().as_ref(),
-            "ALTER TABLE symbols DROP COLUMN exported;",
+            "ALTER TABLE symbols DROP COLUMN signature;",
         ])
         .output()
         .unwrap();
@@ -2748,9 +2173,9 @@ fn partial_v9_index_rebuilds_fresh() {
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(
         code, 0,
-        "rebuild over partial v9 index failed: {stdout}{stderr}"
+        "rebuild over partial index failed: {stdout}{stderr}"
     );
-    assert!(!stderr.contains("exported"), "{stdout}{stderr}");
+    assert!(!stderr.contains("signature"), "{stdout}{stderr}");
 }
 
 // ---------------------------------------------------------------------------
@@ -3221,8 +2646,8 @@ fn parallel_builds_produce_identical_tables() {
             .arg(format!(
                 "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\n\
                  rows=[tuple(str(x) for x in r) for q in [\
-                 'SELECT path,size,parse_status,error_nodes,unresolved,generated FROM files ORDER BY path',\
-                 'SELECT qualname,kind,line_start,line_end,signature,effective_loc,exported,file_path FROM symbols ORDER BY qualname,file_path,line_start',\
+                 'SELECT path,size,parse_status,error_nodes,unresolved FROM files ORDER BY path',\
+                 'SELECT qualname,kind,line_start,line_end,signature,is_test,file_path FROM symbols ORDER BY qualname,file_path,line_start',\
                  'SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line',\
                  'SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']\
                  for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
@@ -3329,22 +2754,6 @@ a.py:1 a.target\n";
 }
 
 #[test]
-fn empty_dead_carries_its_caveat_on_stdout() {
-    // Amendment 5 + R6 round-2: the caveat is the first stdout line even
-    // for an empty result (exit 1 reason stays on stderr).
-    let repo = temp_repo("empty-caveat");
-    // No indexable symbols => dead has zero candidates (module-only file).
-    write(&repo, "only.py", "x = 1\n");
-    build(&repo);
-    let out = aw(&repo).args(["dead"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("aw: dead-code candidates —"), "{stdout}");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("0 dead-code candidates"), "{stderr}");
-}
-
-#[test]
 fn serial_and_parallel_builds_are_identical() {
     // G12: the worker count must not change the resulting tables.
     let mk = |name: &str| {
@@ -3374,11 +2783,12 @@ fn serial_and_parallel_builds_are_identical() {
         let out = Command::new("python3")
             .arg("-c")
             .arg(format!(
-                "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\nrows=[]\nfor q in ['SELECT path,size,parse_status,error_nodes,unresolved,loc,cyclomatic,generated FROM files ORDER BY path','SELECT qualname,kind,line_start,line_end,signature,cyclomatic,branches,nesting,effective_loc,exported,file_path FROM symbols ORDER BY qualname,file_path,line_start','SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line','SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']:\n rows += [tuple(str(x) for x in r) for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
+                "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\nrows=[]\nfor q in ['SELECT path,size,parse_status,error_nodes,unresolved FROM files ORDER BY path','SELECT qualname,kind,line_start,line_end,signature,is_test,file_path FROM symbols ORDER BY qualname,file_path,line_start','SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line','SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']:\n rows += [tuple(str(x) for x in r) for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
                 repo.join(".aw/index.db").display()
             ))
             .output()
             .unwrap();
+        assert!(out.status.success(), "dump failed");
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     assert_eq!(
@@ -3436,30 +2846,6 @@ fn p8a_impact_defaults_to_files_with_site_counts() {
         stdout.contains("b.py:4") && stdout.contains("b.py:7"),
         "{stdout}"
     );
-}
-
-#[test]
-fn dead_exclude_tests_drops_test_paths_and_names() {
-    let repo = temp_repo("dead-exclude");
-    write(&repo, "src.py", "def helper():\n    return 1\n");
-    write(
-        &repo,
-        "tests/test_x.py",
-        "def test_helper():\n    return 1\n",
-    );
-    build(&repo);
-    let out = aw(&repo).args(["dead"]).output().unwrap();
-    let all = String::from_utf8_lossy(&out.stdout);
-    assert!(all.contains("tests/test_x.py"), "{all}");
-    let out = aw(&repo)
-        .args(["dead", "--exclude-tests"])
-        .output()
-        .unwrap();
-    let filtered = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{filtered}");
-    assert!(filtered.contains("src.py"), "{filtered}");
-    assert!(!filtered.contains("test_x.py"), "{filtered}");
-    assert!(!filtered.contains("test_helper"), "{filtered}");
 }
 
 /// Split a documented command line into shell-like words, honoring single and
@@ -3667,14 +3053,10 @@ fn ambiguous_pointer_keeps_space_before_the_tag() {
 }
 
 #[test]
-fn dead_rows_carry_the_qualname_and_root_symbols_work() {
-    let repo = temp_repo("dead-qualname");
+fn root_symbols_work() {
+    let repo = temp_repo("root-symbols");
     write(&repo, "a.py", "def orphan():\n    return 1\n");
     build(&repo);
-    let out = aw(&repo).args(["dead"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("a.py:1 a.orphan"), "{stdout}");
 
     let root = aw(&repo).args(["symbols", "."]).output().unwrap();
     let root_stdout = String::from_utf8_lossy(&root.stdout);
@@ -3682,30 +3064,6 @@ fn dead_rows_carry_the_qualname_and_root_symbols_work() {
     assert!(root_stdout.contains("aw: dir . —"), "{root_stdout}");
     let dotted = aw(&repo).args(["symbols", "./"]).output().unwrap();
     assert_eq!(dotted.status.code(), Some(0));
-}
-
-#[test]
-fn complexity_path_scope_filters_files() {
-    let repo = temp_repo("complexity-path");
-    write(
-        &repo,
-        "src/a.py",
-        "def a(n):\n    if n:\n        return 1\n    return 2\n",
-    );
-    write(
-        &repo,
-        "b.py",
-        "def b(n):\n    if n:\n        return 1\n    return 2\n",
-    );
-    build(&repo);
-    let out = aw(&repo)
-        .args(["complexity", "--path", "src"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("src/a.py"), "{stdout}");
-    assert!(!stdout.contains("b.py"), "{stdout}");
 }
 
 #[test]
@@ -3738,38 +3096,6 @@ fn doctor_does_not_warn_about_a_released_build_lock() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(!stdout.contains("lock file:"), "{stdout}");
-}
-
-#[test]
-fn complexity_path_scope_uses_the_file_path_index() {
-    let repo = temp_repo("complexity-plan");
-    write(
-        &repo,
-        "src/a.py",
-        "def a(n):\n    if n:\n        return 1\n    return 2\n",
-    );
-    build(&repo);
-    let conn = rusqlite::Connection::open(repo.join(".aw/index.db")).unwrap();
-    // Mirrors the scoped `aw complexity` predicate: the path range must drive
-    // the plan through symbols_file_path, not the complexity ranking index.
-    let sql = "EXPLAIN QUERY PLAN
-        SELECT s.file_path, s.line_start, s.effective_loc, s.qualname
-        FROM symbols s
-        WHERE s.kind IN ('function','method')
-          AND s.effective_loc > 0 AND s.effective_loc >= 0
-          AND (s.file_path = 'src' OR (s.file_path >= 'src' || '/' AND s.file_path < 'src' || '0'))
-        ORDER BY s.effective_loc DESC, s.qualname, s.file_path, s.line_start LIMIT 50";
-    let plan: Vec<String> = conn
-        .prepare(sql)
-        .unwrap()
-        .query_map([], |r| r.get::<_, String>(3))
-        .unwrap()
-        .collect::<std::result::Result<_, _>>()
-        .unwrap();
-    assert!(
-        plan.iter().any(|p| p.contains("symbols_file_path")),
-        "path scope must use symbols_file_path: {plan:?}"
-    );
 }
 
 #[test]
@@ -5756,4 +5082,180 @@ fn mem_query_output_is_deterministic_under_replay() {
     }
     let second = run_queries();
     assert_eq!(first, second, "same DB + same queries -> same bytes");
+}
+
+#[test]
+fn reuse_empty_reports_zero_candidates() {
+    let repo = temp_repo("reuse-empty");
+    write(&repo, "a.py", "def unique_one():\n    return 1\n");
+    build(&repo);
+    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(stdout.contains("0 reuse candidates found"), "{stdout}");
+}
+
+#[test]
+fn reuse_detects_candidate_duplicates() {
+    let repo = temp_repo("reuse-dupes");
+    write(
+        &repo,
+        "a.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("duplication candidate(s) found"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("parse_token"), "{stdout}");
+}
+
+#[test]
+fn search_outputs_interface_cards_and_callers_ranking() {
+    let repo = temp_repo("search-cards");
+    write(
+        &repo,
+        "util.py",
+        "def popular_helper(x: int) -> int:\n    return x + 1\n\ndef lone_helper(x: int) -> int:\n    return x + 2\n",
+    );
+    write(
+        &repo,
+        "main.py",
+        "from util import popular_helper\ndef run():\n    return popular_helper(1) + popular_helper(2)\n",
+    );
+    build(&repo);
+    let out = aw(&repo).args(["search", "helper"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains(
+            "util.py:1 function util.popular_helper def popular_helper(x: int) -> int [callers=2]"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "util.py:4 function util.lone_helper def lone_helper(x: int) -> int [callers=0]"
+        ),
+        "{stdout}"
+    );
+    let pop_idx = stdout.find("util.popular_helper").unwrap();
+    let lone_idx = stdout.find("util.lone_helper").unwrap();
+    assert!(
+        pop_idx < lone_idx,
+        "popular helper must rank ahead: {stdout}"
+    );
+}
+
+#[test]
+fn incremental_build_emits_reuse_hint_on_stderr() {
+    let repo = temp_repo("build-reuse-hint");
+    write(
+        &repo,
+        "core.py",
+        "def transform_data(data: str):\n    return data.strip().lower()\n",
+    );
+    build(&repo);
+
+    write(
+        &repo,
+        "extra.py",
+        "def transform_data(data: str):\n    return data.strip().lower()\n",
+    );
+    let (code, _stdout, stderr) = build(&repo);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        stderr.contains("aw: reuse-hint:"),
+        "expected reuse hint on stderr: {stderr}"
+    );
+    assert!(stderr.contains("transform_data"), "{stderr}");
+}
+
+#[test]
+fn reuse_scoped_path_filters_targets_and_no_duplicate_pairs() {
+    let repo = temp_repo("reuse-scope-dedup");
+    write(
+        &repo,
+        "a.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    build(&repo);
+
+    // Unscoped: exactly 1 candidate found (not duplicated as A->B and B->A)
+    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("aw: reuse — 1 duplication candidate(s) found"),
+        "must report exactly 1 candidate pair: {stdout}"
+    );
+
+    // Scoped to duplicate file b.py: reports candidate
+    let out_b = aw(&repo).args(["reuse", "b.py"]).output().unwrap();
+    let stdout_b = String::from_utf8_lossy(&out_b.stdout);
+    assert_eq!(out_b.status.code(), Some(0), "{stdout_b}");
+    assert!(
+        stdout_b.contains("aw: reuse — 1 duplication candidate(s) found"),
+        "must report b.py duplicate: {stdout_b}"
+    );
+
+    // Scoped to canonical file a.py: zero candidates (a.py is not duplicating anything)
+    let out_a = aw(&repo).args(["reuse", "a.py"]).output().unwrap();
+    let stdout_a = String::from_utf8_lossy(&out_a.stdout);
+    assert_eq!(out_a.status.code(), Some(0), "{stdout_a}");
+    assert!(
+        stdout_a.contains("0 reuse candidates found"),
+        "canonical a.py must not be reported as a duplicate: {stdout_a}"
+    );
+}
+
+#[test]
+fn reuse_d1_callee_footprint_requires_resolved_callees() {
+    let repo = temp_repo("reuse-d1");
+    write(
+        &repo,
+        "core.py",
+        "def helper1():\n    return 1\ndef helper2():\n    return 2\ndef helper3():\n    return 3\ndef canonical_pipeline():\n    return helper1() + helper2() + helper3()\n",
+    );
+    write(
+        &repo,
+        "main.py",
+        "from core import canonical_pipeline\ndef run():\n    return canonical_pipeline() + canonical_pipeline()\n",
+    );
+    write(
+        &repo,
+        "dup.py",
+        "from core import helper1, helper2, helper3\ndef duplicate_pipeline():\n    return helper1() + helper2() + helper3()\n",
+    );
+    build(&repo);
+
+    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("duplicate_pipeline"),
+        "must identify duplicate_pipeline: {stdout}"
+    );
+    assert!(
+        stdout.contains("callee footprint"),
+        "must be detected via D1 callee footprint: {stdout}"
+    );
+    assert!(
+        stdout.contains("shared callees: [helper1, helper2, helper3]"),
+        "must list shared resolved callees: {stdout}"
+    );
 }

@@ -268,36 +268,6 @@ fn walk_fallback(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     Ok(finish_walk(files, skipped_large))
 }
 
-/// Generated-file detection (Amendment 19): path suffix or a marker in the
-/// first five lines. A bare `DO NOT EDIT` or a `gen/` directory alone is not
-/// enough (hand-written negatives).
-pub fn is_generated(rel: &str, bytes: &[u8]) -> bool {
-    let lower = rel.to_ascii_lowercase();
-    const SUFFIXES: &[&str] = &[
-        ".g.dart",
-        ".freezed.dart",
-        ".generated.ts",
-        ".generated.js",
-        ".generated.py",
-        ".generated.rs",
-        ".generated.mts",
-        ".generated.cts",
-        ".generated.mjs",
-        ".generated.cjs",
-        "_pb2.py",
-    ];
-    if SUFFIXES.iter().any(|s| lower.ends_with(s)) {
-        return true;
-    }
-    let text = String::from_utf8_lossy(bytes);
-    text.lines().take(5).any(|line| {
-        line.contains("@generated")
-            || line.contains("Code generated") && line.contains("DO NOT EDIT")
-            || line.contains("This file was generated")
-            || line.contains("AUTO-GENERATED")
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
