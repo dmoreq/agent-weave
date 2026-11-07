@@ -18,6 +18,13 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
+- **Cross-project global memory: `aw mem --global`.** aw now supports a global
+  memory store in `~/.aw/memory.db` (`$AW_GLOBAL_DIR/memory.db`) for developer
+  profiles, personal preferences, and cross-project conventions. Transparent
+  layered queries (`aw mem query`) simultaneously retrieve from both local and
+  global stores with `[global]` badges and local key shadowing. Operations can
+  be targeted explicitly to the global store via `--global` across write, query,
+  get, delete, export, and gc, with full MCP parity.
 - **Project memory: `aw mem write/query/get/delete/export/gc`.** aw now keeps
   agent-authored project notes (decision/gotcha/fact/task) in
   `.aw/memory.db`, a separate SQLite store with its own FTS5 index, revision

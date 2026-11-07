@@ -381,6 +381,7 @@ pub struct Candidate {
     pub age_days: f64,
     /// Fused score, filled by [`fuse`].
     pub score: f64,
+    pub is_global: bool,
 }
 
 /// Min-max normalize with the design's all-equal convention: an all-equal
@@ -612,6 +613,7 @@ mod tests {
             ref_raw: r#ref,
             age_days: age,
             score: 0.0,
+            is_global: false,
         };
         // All-equal lex and ref -> both 1.0; recency alone separates.
         let fused = fuse(vec![mk(1, 2.0, 0.5, 0.0, 100), mk(2, 2.0, 0.5, 10.0, 100)]);

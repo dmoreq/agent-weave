@@ -77,22 +77,23 @@ verify their output before acting on it.
 
 ## Project memory (optional, not navigation routing)
 
-aw keeps agent-authored project notes in `.aw/memory.db` — decisions, gotchas,
-facts, and task wrap-ups that survive rebuilds. Memory is NOT part of the
-binding routing table above; use it deliberately:
+aw keeps agent-authored project notes in `.aw/memory.db` (local) and developer profile/cross-project preferences in `~/.aw/memory.db` (global) — decisions, gotchas, facts, and conventions that survive rebuilds. Memory is NOT part of the binding routing table above; use it deliberately:
 
-- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...]`)
+- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...] [--global]`)
   when a decision was settled after real investigation, a gotcha cost genuine
   debugging time, or a task ends with conclusions that are not yet in committed
-  docs. Keys are stable identities (e.g. `resolver-confidence-tiers`); `--refs`
-  takes the qualnames/paths the note is about.
-- **Query** (`aw mem query <terms>`; `--all` lists by recency) at session start
-  and before re-investigating an area you suspect was already worked through.
+  docs. Use `--global` to persist cross-project conventions, developer profile,
+  or stack preferences into `~/.aw/memory.db`. Keys are stable identities (e.g. `resolver-confidence-tiers`);
+  `--refs` takes the qualnames/paths the note is about.
+- **Query** (`aw mem query <terms>`; `--all` lists by recency; add `--global` to search only global store)
+  at session start and before re-investigating an area you suspect was already worked through.
+  Without `--global`, queries seamlessly search **both** local and global stores:
+  global rows are tagged with `[global]`, and local notes take precedence (shadowing global keys).
 - **Maintain**: rewrite under the same key to supersede; `--supersedes <key>`
   records a cross-key replacement; `--scope session` (default TTL 7 days,
   `--ttl` overrides) keeps transient scratch out of durable memory; `aw mem
-  get <key>`, `aw mem delete <key>`, `aw mem export` (JSONL backup),
-  `aw mem gc` (purge expired session notes + >30-day superseded revisions).
+  get <key> [--global]`, `aw mem delete <key> [--global]`, `aw mem export [--global]` (JSONL backup),
+  `aw mem gc [--global]` (purge expired session notes + >30-day superseded revisions).
 
 Trust note: notes are agent-authored claims, same standing as this contract's
 candidates — verify against source before any behavioral claim. The output

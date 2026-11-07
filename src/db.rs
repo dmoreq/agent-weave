@@ -1313,17 +1313,108 @@ fn memory_pragmas(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn resolve_default_home_aw_dir() -> Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| {
+            AwError::Internal(
+                "could not determine home directory (HOME/USERPROFILE unset)".to_string(),
+            )
+        })?;
+    Ok(PathBuf::from(home).join(".aw"))
+}
+
+/// Directory for the cross-project global memory store.
+/// Reads $AW_GLOBAL_DIR, falling back to $HOME/.aw or %USERPROFILE%/.aw.
+/// Refuses symlinks.
+pub fn global_aw_dir() -> Result<PathBuf> {
+    let path = if let Ok(val) = std::env::var("AW_GLOBAL_DIR") {
+        if !val.trim().is_empty() {
+            PathBuf::from(val)
+        } else {
+            resolve_default_home_aw_dir()?
+        }
+    } else {
+        resolve_default_home_aw_dir()?
+    };
+    reject_symlink(&path, "global .aw directory")?;
+    if let Ok(meta) = fs::symlink_metadata(&path) {
+        if !meta.is_dir() {
+            return Err(AwError::Internal(format!(
+                "global .aw exists but is not a directory: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(path)
+}
+
+fn ensure_global_aw_dir(path: &Path) -> Result<()> {
+    reject_symlink(path, "global .aw directory")?;
+    match fs::symlink_metadata(path) {
+        Ok(meta) if !meta.is_dir() => Err(AwError::Internal(format!(
+            "global .aw exists but is not a directory: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if let Err(create_err) = fs::create_dir_all(path) {
+                if create_err.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(create_err.into());
+                }
+            }
+            reject_symlink(path, "global .aw directory")?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn global_memory_db_path() -> Result<PathBuf> {
+    Ok(global_aw_dir()?.join("memory.db"))
+}
+
+fn global_memory_store_path() -> Result<PathBuf> {
+    let path = global_memory_db_path()?;
+    reject_symlink(&path, "global memory.db")?;
+    Ok(path)
+}
+
+fn no_global_memory_error(path: &Path) -> AwError {
+    AwError::NoMemory(format!(
+        "no {} — write with aw mem write --global",
+        path.display()
+    ))
+}
+
 /// Open the memory store for writing, creating `.aw/memory.db` (schema v1)
 /// when absent. An existing store must pass the version gate (read-forward:
 /// older structurally complete stores open read-write).
 pub fn open_memory_store(root: &Path) -> Result<Connection> {
-    open_memory_conn(root, true)
+    let path = memory_store_path(root)?;
+    if !path.exists() {
+        ensure_aw_gitignore(root)?;
+    }
+    open_memory_conn_path(&path, true, || no_memory_error(root))
 }
 
 /// Open an existing memory store for mutation WITHOUT creating one: a delete
 /// against a missing store must exit 1, never conjure an empty database.
 pub fn open_memory_mutation(root: &Path) -> Result<Connection> {
-    open_memory_conn(root, false)
+    let path = memory_store_path(root)?;
+    open_memory_conn_path(&path, false, || no_memory_error(root))
+}
+
+pub fn open_global_memory_store() -> Result<Connection> {
+    let dir = global_aw_dir()?;
+    ensure_global_aw_dir(&dir)?;
+    let path = global_memory_store_path()?;
+    open_memory_conn_path(&path, true, || no_global_memory_error(&path))
+}
+
+pub fn open_global_memory_mutation() -> Result<Connection> {
+    let path = global_memory_store_path()?;
+    open_memory_conn_path(&path, false, || no_global_memory_error(&path))
 }
 
 fn memory_store_path(root: &Path) -> Result<PathBuf> {
@@ -1333,24 +1424,24 @@ fn memory_store_path(root: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn no_memory_error(root: &Path) -> AwError {
+pub fn no_memory_error(root: &Path) -> AwError {
     AwError::NoMemory(format!(
         "no .aw/memory.db under {} — write with aw mem write",
         root.display()
     ))
 }
 
-fn open_memory_conn(root: &Path, create: bool) -> Result<Connection> {
-    let path = memory_store_path(root)?;
+fn open_memory_conn_path(
+    path: &Path,
+    create: bool,
+    missing_err: impl FnOnce() -> AwError,
+) -> Result<Connection> {
     let existed = path.exists();
     if !existed && !create {
-        return Err(no_memory_error(root));
-    }
-    if !existed {
-        ensure_aw_gitignore(root)?;
+        return Err(missing_err());
     }
     let conn = Connection::open_with_flags(
-        &path,
+        path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
     )
     .map_err(map_memory_err)?;
@@ -1392,18 +1483,30 @@ fn create_memory_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Open the memory store read-only for the read commands. Missing -> exit 1
-/// (no-memory), corrupt -> exit 3, skew -> exit 5 — the shared gate chain.
-pub fn open_memory_query(root: &Path) -> Result<Connection> {
-    let path = memory_store_path(root)?;
+fn open_memory_query_path(
+    path: &Path,
+    missing_err: impl FnOnce() -> AwError,
+) -> Result<Connection> {
     if !path.exists() {
-        return Err(no_memory_error(root));
+        return Err(missing_err());
     }
-    let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(map_memory_err)?;
     memory_pragmas(&conn)?;
     memory_version_gate(&conn)?;
     Ok(conn)
+}
+
+/// Open the memory store read-only for the read commands. Missing -> exit 1
+/// (no-memory), corrupt -> exit 3, skew -> exit 5 — the shared gate chain.
+pub fn open_memory_query(root: &Path) -> Result<Connection> {
+    let path = memory_store_path(root)?;
+    open_memory_query_path(&path, || no_memory_error(root))
+}
+
+pub fn open_global_memory_query() -> Result<Connection> {
+    let path = global_memory_store_path()?;
+    open_memory_query_path(&path, || no_global_memory_error(&path))
 }
 
 /// Unix seconds (writes stamp created_at/superseded_at).
@@ -1801,6 +1904,9 @@ pub fn memory_get(conn: &Connection, key: &str) -> Result<Option<(MemRow, i64)>>
     let Some(row) = row else {
         return Ok(None);
     };
+    if row.expires_at != 0 && row.expires_at <= unix_now() {
+        return Ok(None);
+    }
     let revs: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM memories WHERE key = ?1",
@@ -2466,5 +2572,75 @@ mod memory_tests {
         );
         drop(conn);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    static GLOBAL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn global_memory_creates_dir_and_schema_safely() {
+        let _guard = GLOBAL_ENV_LOCK.lock().unwrap();
+        let base = temp_root("global-mem-schema");
+        let tmp = base.join("sub-global-aw");
+        let prev = std::env::var("AW_GLOBAL_DIR").ok();
+        std::env::set_var("AW_GLOBAL_DIR", &tmp);
+
+        let path = global_memory_db_path().unwrap();
+        assert_eq!(path, tmp.join("memory.db"));
+        assert!(!tmp.is_dir(), "path resolution must not create directory");
+
+        let conn = open_global_memory_store().unwrap();
+        assert!(tmp.is_dir(), "store creation must create directory");
+        let v: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, MEMORY_SCHEMA_VERSION);
+        drop(conn);
+
+        if let Some(val) = prev {
+            std::env::set_var("AW_GLOBAL_DIR", val);
+        } else {
+            std::env::remove_var("AW_GLOBAL_DIR");
+        }
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn global_memory_write_and_query_roundtrip() {
+        let _guard = GLOBAL_ENV_LOCK.lock().unwrap();
+        let tmp = temp_root("global-mem-roundtrip");
+        let prev = std::env::var("AW_GLOBAL_DIR").ok();
+        std::env::set_var("AW_GLOBAL_DIR", &tmp);
+
+        // Before creation, query returns NoMemory
+        assert!(matches!(
+            open_global_memory_query().unwrap_err(),
+            AwError::NoMemory(_)
+        ));
+
+        let mut conn = open_global_memory_store().unwrap();
+        let now = unix_now();
+        let outcome = memory_write(
+            &mut conn,
+            &note("global-pref", "rust minimal", "decision"),
+            now,
+        )
+        .unwrap();
+        assert!(matches!(outcome, MemWriteOutcome::Written { rev: 1, .. }));
+        drop(conn);
+
+        // Read back with query
+        let q_conn = open_global_memory_query().unwrap();
+        let (row, revs) = memory_get(&q_conn, "global-pref").unwrap().unwrap();
+        assert_eq!(row.key, "global-pref");
+        assert_eq!(row.body, "rust minimal");
+        assert_eq!(revs, 1);
+        drop(q_conn);
+
+        if let Some(val) = prev {
+            std::env::set_var("AW_GLOBAL_DIR", val);
+        } else {
+            std::env::remove_var("AW_GLOBAL_DIR");
+        }
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

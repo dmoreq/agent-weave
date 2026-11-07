@@ -88,17 +88,24 @@ Use the [workflow guide](docs/usage.md) to decide what to do with a result.
 
 ## Carry knowledge across sessions
 
-Code navigation answers where things are; project memory keeps what your
-sessions concluded. `aw mem write` persists a decision, gotcha, or task note
-as agent-authored prose; `aw mem query` retrieves it by content in a later
-session. Notes live in `.aw/memory.db`, survive rebuilds, and open every
-result with the caveat that they are candidates, never proof of current
-behavior:
+Code navigation answers where things are; memory keeps what your sessions
+concluded. `aw mem write` persists a decision, gotcha, or task note as
+agent-authored prose; `aw mem query` retrieves it in a later session. Notes
+live in `.aw/memory.db` for repository-specific context or `~/.aw/memory.db`
+(`--global`) for cross-project developer profiles and conventions. Queries
+seamlessly search both stores with local shadowing and a `[global]` badge:
 
 ```sh
+# Repository-specific decision
 aw mem write resolver-confidence-tiers --kind decision \
   --body "the resolver keeps confidence tiers; AMBIGUOUS edges keep dst_id NULL" \
   --refs src/query/callgraph.rs
+
+# Cross-project developer profile
+aw mem write dev-profile --kind decision --global \
+  --body "Preferred stack: Rust. Coding style: Minimalist."
+
+# Layered search (queries both local and global stores)
 aw mem query confidence tiers
 ```
 

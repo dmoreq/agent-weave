@@ -210,6 +210,9 @@ pub enum MemAction {
         /// unknown target exits 1, same key exits 2)
         #[arg(long)]
         supersedes: Option<String>,
+        /// Persist to the cross-project global memory store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
     },
     /// Rank current notes for the terms (bm25 + ref-token overlap + recency)
     Query {
@@ -230,16 +233,25 @@ pub enum MemAction {
         /// With --all, also list superseded revisions (tagged [superseded])
         #[arg(long)]
         include_superseded: bool,
+        /// Restrict search exclusively to the global store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
     },
     /// Show the current note for one exact key plus its revision count
     Get {
         /// The note's stable identity
         key: String,
+        /// Fetch from the cross-project global memory store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
     },
     /// Hard-delete every revision of one key (its FTS rows go with it)
     Delete {
         /// The note's stable identity
         key: String,
+        /// Delete from the cross-project global memory store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
     },
     /// Write current notes as JSONL to stdout (restore = mem write replay);
     /// the caveat goes to stderr so restore pipelines parse stdout directly
@@ -247,8 +259,15 @@ pub enum MemAction {
         /// Take the N most recent notes instead of all of them
         #[arg(long)]
         limit: Option<usize>,
+        /// Export from the cross-project global memory store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
     },
     /// Reclaim disk: purge expired session notes and superseded revisions
     /// older than the 30-day retention clock, then report counts
-    Gc,
+    Gc {
+        /// Run GC on the cross-project global memory store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
+    },
 }

@@ -113,13 +113,20 @@ aw mem query confidence tiers
 
 # Rework the decision: same key, new content -> a new revision, nothing overwritten:
 aw mem write resolver-confidence-tiers --kind decision --body "confidence tiers v2: ..."
+
+# Cross-project developer profile or conventions:
+aw mem write dev-profile --kind decision --body "Preferred stack: Rust." --global
 ```
 
 Write when a decision was settled, a gotcha cost genuine time, or a task ends
-with unmerged conclusions. Query at session start and before re-investigating
-an area. `mem get <key>` shows one note with its revision count; `mem delete`
-removes a key; `mem export` writes a JSONL backup (restore = `mem write`
-replay); `mem gc` purges expired session notes and superseded revisions
+with unmerged conclusions. Use `--global` to persist developer profiles and
+cross-project conventions into `~/.aw/memory.db`. Query at session start and
+before re-investigating an area. Without `--global`, `aw mem query` searches both
+local (`.aw/memory.db`) and global (`~/.aw/memory.db`) stores seamlessly: global
+notes carry a `[global]` badge, and local notes shadow colliding global keys.
+`mem get <key> [--global]` shows one note with its revision count; `mem delete <key> [--global]`
+removes a key; `mem export [--global]` writes a JSONL backup (restore = `mem write`
+replay); `mem gc [--global]` purges expired session notes and superseded revisions
 older than 30 days, then reports counts.
 
 Transient scratch ("tried X, it failed here") belongs to the session lane:

@@ -5259,3 +5259,243 @@ fn reuse_d1_callee_footprint_requires_resolved_callees() {
         "must list shared resolved callees: {stdout}"
     );
 }
+
+fn mem_out_global(repo: &Path, global_dir: &Path, args: &[&str]) -> (i32, String, String) {
+    let out = aw(repo)
+        .env("AW_GLOBAL_DIR", global_dir)
+        .args(["mem"])
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn global_memory_write_and_local_layered_query_with_global_tag() {
+    let repo = temp_repo("mem-global-layered");
+    let global_dir = temp_repo("global-aw-store");
+
+    // 1. Write a global note
+    let (code, stdout, stderr) = mem_out_global(
+        &repo,
+        &global_dir,
+        &[
+            "write",
+            "developer_profile",
+            "--body",
+            "Preferred stack: Rust. Style: Minimal.",
+            "--kind",
+            "decision",
+            "--global",
+        ],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("ok: 'developer_profile' rev 1 written"));
+
+    // Verify .aw/memory.db was NOT created in repo root, but memory.db WAS created in global_dir
+    assert!(!repo.join(".aw/memory.db").exists());
+    assert!(global_dir.join("memory.db").exists());
+
+    // 2. Query from inside repo without flags: layered search finds global note and tags it [global]
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["query", "stack"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("developer_profile r1 decision durable "));
+    assert!(stdout.contains(" [global]"));
+    assert!(stdout.contains("Preferred stack: Rust. Style: Minimal."));
+
+    // 3. Query --all also lists the global note with [global] tag
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["query", "--all"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("developer_profile r1 decision durable "));
+    assert!(stdout.contains(" [global]"));
+
+    // 4. Get from repo without flags falls back to global and tags with [global]
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["get", "developer_profile"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("developer_profile r1 decision durable "));
+    assert!(stdout.contains(" [global]"));
+    assert!(stdout.contains("revs: 1"));
+
+    // 5. Write a local note with the SAME key
+    let (code, stdout, stderr) = mem_out_global(
+        &repo,
+        &global_dir,
+        &[
+            "write",
+            "developer_profile",
+            "--body",
+            "Repo override: Python stack.",
+            "--kind",
+            "decision",
+        ],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(repo.join(".aw/memory.db").exists());
+
+    // 6. Query from repo without flags: local shadows global!
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["query", "--all"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("Repo override: Python stack."));
+    assert!(!stdout.contains("[global]"));
+    assert!(!stdout.contains("Preferred stack: Rust."));
+
+    // 7. Ranked query also shows local note shadowing global note
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["query", "developer"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("Repo override: Python stack."));
+    assert!(!stdout.contains("[global]"));
+
+    // 8. Get from repo returns the local note
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["get", "developer_profile"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("Repo override: Python stack."));
+    assert!(!stdout.contains("[global]"));
+
+    // 9. Query with --global explicitly targets global store, returning the global note
+    let (code, stdout, stderr) =
+        mem_out_global(&repo, &global_dir, &["query", "--all", "--global"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("Preferred stack: Rust. Style: Minimal."));
+    assert!(stdout.contains(" [global]"));
+    assert!(!stdout.contains("Repo override"));
+
+    // 10. Delete --global deletes from global store
+    let (code, stdout, stderr) = mem_out_global(
+        &repo,
+        &global_dir,
+        &["delete", "developer_profile", "--global"],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("deleted 'developer_profile' revs=1"));
+
+    // Global query now returns empty/no-results
+    let (code, _, _) = mem_out_global(&repo, &global_dir, &["query", "--all", "--global"]);
+    assert_eq!(code, 1);
+
+    // Local note is untouched!
+    let (code, stdout, _) = mem_out_global(&repo, &global_dir, &["get", "developer_profile"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("Repo override: Python stack."));
+}
+
+#[test]
+fn global_memory_export_and_gc() {
+    let repo = temp_repo("mem-global-export-gc");
+    let global_dir = temp_repo("global-aw-store-export");
+
+    let (code, stdout, stderr) = mem_out_global(
+        &repo,
+        &global_dir,
+        &[
+            "write",
+            "global_item",
+            "--body",
+            "item body for export",
+            "--kind",
+            "fact",
+            "--global",
+        ],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+
+    // Export with --global
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["export", "--global"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("\"key\":\"global_item\""), "{stdout}");
+    assert!(
+        stdout.contains("\"body\":\"item body for export\""),
+        "{stdout}"
+    );
+
+    // GC with --global
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["gc", "--global"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.contains("expired=0 removed, superseded=0 removed, durable=1 rows"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn global_memory_read_never_creates_missing_directory() {
+    let repo = temp_repo("mem-no-create-read");
+    let non_existent_global = repo.join("definitely-does-not-exist-global-dir");
+    assert!(!non_existent_global.exists());
+
+    // A read-only query must exit 1 and never create the directory on disk
+    let (code, _, _) = mem_out_global(&repo, &non_existent_global, &["query", "test"]);
+    assert_eq!(code, 1);
+    assert!(
+        !non_existent_global.exists(),
+        "query must not create missing global directory"
+    );
+
+    let (code, _, _) = mem_out_global(&repo, &non_existent_global, &["get", "test"]);
+    assert_eq!(code, 1);
+    assert!(
+        !non_existent_global.exists(),
+        "get must not create missing global directory"
+    );
+}
+
+#[test]
+fn global_memory_expired_local_does_not_shadow_global() {
+    let repo = temp_repo("mem-expired-shadow");
+    let global_dir = temp_repo("global-aw-expired-shadow");
+
+    // Global note
+    let (code, _, _) = mem_out_global(
+        &repo,
+        &global_dir,
+        &[
+            "write",
+            "active_topic",
+            "--body",
+            "durable global knowledge",
+            "--kind",
+            "decision",
+            "--global",
+        ],
+    );
+    assert_eq!(code, 0);
+
+    // Local note with short TTL (1 second)
+    let (code, _, _) = mem_out_global(
+        &repo,
+        &global_dir,
+        &[
+            "write",
+            "active_topic",
+            "--body",
+            "transient local note",
+            "--kind",
+            "decision",
+            "--scope",
+            "session",
+            "--ttl",
+            "1",
+        ],
+    );
+    assert_eq!(code, 0);
+
+    // Sleep until local note is expired
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+
+    // Query must return the global note tagged [global], not be shadowed by dead local session note
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["query", "knowledge"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("active_topic r1 decision durable "));
+    assert!(stdout.contains(" [global]"));
+    assert!(stdout.contains("durable global knowledge"));
+
+    // Get must also return the active global note
+    let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["get", "active_topic"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("active_topic r1 decision durable "));
+    assert!(stdout.contains(" [global]"));
+    assert!(stdout.contains("durable global knowledge"));
+}

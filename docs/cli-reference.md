@@ -218,6 +218,7 @@ stays pure JSONL).
 ```text
 aw mem write <KEY> --body <TEXT> --kind <decision|gotcha|fact|task>
     [--tags <TOKENS>] [--refs <NAMES>] [--scope durable] [--ttl <SECS>]
+    [--supersedes <KEY>] [--global]
 ```
 
 Persist one note under a stable identity (`<= 200` chars, no control
@@ -233,6 +234,7 @@ never a verbatim source dump; source evidence stays in the repository.
 | `--scope <SCOPE>` | `durable` | `durable` never expires; `session` expires after the TTL |
 | `--ttl <SECS>` | `604800` with `--scope session` | Session lifetime in seconds; only valid with `--scope session` (OQ2 default: 7 days) |
 | `--supersedes <KEY>` | absent | Mark the named key's current note as replaced by this one; unknown target exits 1, the same key exits 2 |
+| `--global` | absent | Persist to the cross-project global memory store (`~/.aw/memory.db` or `$AW_GLOBAL_DIR/memory.db`) |
 
 Identical content under the same key (compared by an FNV-1a hash over kind,
 body, tags, refs, and scope after normalization) is a successful no-op naming
@@ -249,8 +251,8 @@ treated as a defect (one retry, then exit 6).
 ### `mem query [TERMS]`
 
 ```text
-aw mem query <TERMS> [--kind <KIND>] [--scope <SCOPE>] [--limit <N>]
-aw mem query --all [--kind <KIND>] [--scope <SCOPE>] [--limit <N>]
+aw mem query <TERMS> [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--global]
+aw mem query --all [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--global]
 ```
 
 Rank current notes for the terms: FTS5 BM25 over key/tags/body tokens plus
@@ -261,36 +263,53 @@ stored text and the query, so `calleeEmptyReason` in a body matches the query
 `callee empty reason`. At most 256 FTS candidates are fused per query.
 `--all` (mutually exclusive with terms) lists current notes by recency;
 `--all --include-superseded` extends the listing with superseded revisions,
-each header tagged `[superseded]` (not valid with terms). `--limit` defaults
-to 10 and clamps to 1..100. Rows print
-`key rev kind scope created_at` followed by the indented body; a capped
-result ends with `showing N of M` on stdout and the cap notice on stderr.
+each header tagged `[superseded]` (not valid with terms).
+
+Without `--global`, queries seamlessly search **both** local (`.aw/memory.db`)
+and global (`~/.aw/memory.db`) stores. Global notes are rendered with a
+`[global]` badge. If a key exists in both stores, the local note shadows the
+global note (local takes precedence). Passing `--global` restricts the query
+exclusively to the global store. `--limit` defaults to 10 and clamps to 1..100.
+Rows print `key rev kind scope created_at [tags]` followed by the indented body;
+a capped result ends with `showing N of M` on stdout and the cap notice on stderr.
 `--kind`/`--scope` are plain equality filters. A query without hits exits 1.
 
 ### `mem get <KEY>`
 
+```text
+aw mem get <KEY> [--global]
+```
+
 Print the current note for the exact key — the same row shape as `mem query`
-plus a final `revs: <N>` line with the key's total revision count. Unknown
-keys exit 1.
+plus a final `revs: <N>` line with the key's total revision count. Without
+`--global`, checks the local store first and falls back to the global store
+(rendering with `[global]`). With `--global`, checks the global store only.
+Unknown keys exit 1.
 
 ### `mem delete <KEY>`
 
+```text
+aw mem delete <KEY> [--global]
+```
+
 Hard-delete every revision of the key and their search-index rows in one
-transaction, and print `deleted '<KEY>' revs=<N>`. Unknown keys exit 1 and
+transaction, and print `deleted '<KEY>' revs=<N>`. With `--global`, deletes
+from the global store instead of the local store. Unknown keys exit 1 and
 nothing is created. There is no undo — `mem export` beforehand is the backup.
 
 ### `mem export`
 
 ```text
-aw mem export [--limit <N>]
+aw mem export [--limit <N>] [--global]
 ```
 
 Write current notes as one JSON object per line to stdout — key, rev, kind,
 scope, session, body, tags, refs, source, created_at, expires_at — so a
-restore preserves the TTL shape. stdout carries ONLY the JSONL; the caveat
-goes to stderr. Without `--limit` every current note is exported; with
-`--limit <N>` the N most recent by `created_at` (deterministic). The caller
-redirects the output to a file outside `.aw/` — aw writes only under `.aw/`.
+restore preserves the TTL shape. With `--global`, exports from the global store.
+stdout carries ONLY the JSONL; the caveat goes to stderr. Without `--limit`
+every current note is exported; with `--limit <N>` the N most recent by
+`created_at` (deterministic). The caller redirects the output to a file outside
+`.aw/` — aw writes only under `.aw/` or `~/.aw/`.
 
 Restore = replay `aw mem write` per line into a fresh store (idempotent by
 content-hash dedup; session rows would re-derive `--ttl` as
@@ -299,21 +318,26 @@ replica: `created_at` and rev are re-stamped by the replay.
 
 ### `mem gc`
 
+```text
+aw mem gc [--global]
+```
+
 Reclaim disk in one transaction: expired session notes are deleted with their
 search-index rows, and superseded revisions whose supersession is older than
 the 30-day retention constant are purged (the clock is `superseded_at`, so a
-revision superseded yesterday but created 40 days ago survives). Prints
+revision superseded yesterday but created 40 days ago survives). With
+`--global`, runs GC on the global store. Prints
 `expired=<N> removed, superseded=<M> removed, durable=<K> rows`. Missing
 store exits 1; nothing is created.
 
 ### Memory exit and data contracts
 
-Missing `.aw/memory.db` on a read path exits 1 with
-`aw: no-memory: no .aw/memory.db under <root> — write with aw mem write`. A
-corrupt store exits 3. A store newer than the binary, or one missing required
-structure, exits 5 with a message naming `aw mem export` as the recovery path
-— memory cannot be rebuilt from source, unlike the index, so an older
-structurally complete store still opens read-write. Every mem command
+Missing store on a read path exits 1 with
+`aw: no-memory: no .aw/memory.db under <root> — write with aw mem write` (or
+global equivalent). A corrupt store exits 3. A store newer than the binary, or
+one missing required structure, exits 5 with a message naming `aw mem export`
+as the recovery path — memory cannot be rebuilt from source, unlike the index,
+so an older structurally complete store still opens read-write. Every mem command
 journaled carries `body_len`, never the body text. Expired session notes are
 invisible to every read regardless of `gc`; the purge only reclaims disk.
 

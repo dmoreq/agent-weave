@@ -1139,3 +1139,147 @@ fn mcp_usage_tool_returns_telemetry() {
 
     let _ = fs::remove_dir_all(&repo);
 }
+
+fn spawn_with_global(repo: &Path, global_dir: &Path) -> Server {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(repo)
+        .env("AW_GLOBAL_DIR", global_dir)
+        .arg("mcp")
+        .arg("--all-tools")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let reader = BufReader::new(child.stdout.take().unwrap());
+    Server {
+        child,
+        stdin,
+        reader,
+    }
+}
+
+#[test]
+fn global_memory_mcp_protocol_parity() {
+    let repo = mem_fixture("mcp-global-memory");
+    let global_dir = mem_fixture("mcp-global-aw");
+    let mut srv = spawn_with_global(&repo, &global_dir);
+    init_and_list_tools(&mut srv);
+
+    // 1. mem_write with global: true
+    let write_res = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({
+            "name": "mem_write",
+            "arguments": {
+                "key": "user_pref",
+                "body": "Language: Vietnamese. Style: Concise.",
+                "kind": "decision",
+                "global": true
+            }
+        }),
+    );
+    assert_eq!(write_res["result"]["isError"], false, "{write_res}");
+    let text = result_text(&write_res);
+    assert!(text.contains("ok: 'user_pref' rev 1 written"), "{text}");
+
+    // Global file exists, local file does not
+    assert!(global_dir.join("memory.db").exists());
+    assert!(!repo.join(".aw/memory.db").exists());
+
+    // 2. mem_query without global flag (layered query) returns the global note tagged [global]
+    let query_res = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({
+            "name": "mem_query",
+            "arguments": {
+                "terms": "Vietnamese"
+            }
+        }),
+    );
+    assert_eq!(query_res["result"]["isError"], false, "{query_res}");
+    let text = result_text(&query_res);
+    assert!(text.contains("user_pref r1 decision durable "));
+    assert!(text.contains(" [global]"), "{text}");
+    assert!(text.contains("Language: Vietnamese"), "{text}");
+
+    // 3. mem_get with global: true
+    let get_res = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({
+            "name": "mem_get",
+            "arguments": {
+                "key": "user_pref",
+                "global": true
+            }
+        }),
+    );
+    assert_eq!(get_res["result"]["isError"], false, "{get_res}");
+    let text = result_text(&get_res);
+    assert!(text.contains("user_pref r1 decision durable "));
+    assert!(text.contains(" [global]"), "{text}");
+    assert!(text.contains("revs: 1"), "{text}");
+
+    // 4. mem_export with global: true
+    let export_res = rpc(
+        &mut srv,
+        4,
+        "tools/call",
+        json!({
+            "name": "mem_export",
+            "arguments": {
+                "global": true
+            }
+        }),
+    );
+    assert_eq!(export_res["result"]["isError"], false, "{export_res}");
+    let text = result_text(&export_res);
+    assert!(text.contains("\"key\":\"user_pref\""), "{text}");
+
+    // 5. mem_gc with global: true
+    let gc_res = rpc(
+        &mut srv,
+        5,
+        "tools/call",
+        json!({
+            "name": "mem_gc",
+            "arguments": {
+                "global": true
+            }
+        }),
+    );
+    assert_eq!(gc_res["result"]["isError"], false, "{gc_res}");
+    let text = result_text(&gc_res);
+    assert!(
+        text.contains("expired=0 removed, superseded=0 removed, durable=1 rows"),
+        "{text}"
+    );
+
+    // 6. mem_delete with global: true
+    let del_res = rpc(
+        &mut srv,
+        6,
+        "tools/call",
+        json!({
+            "name": "mem_delete",
+            "arguments": {
+                "key": "user_pref",
+                "global": true
+            }
+        }),
+    );
+    assert_eq!(del_res["result"]["isError"], false, "{del_res}");
+    let text = result_text(&del_res);
+    assert!(text.contains("deleted 'user_pref' revs=1"), "{text}");
+
+    let _ = fs::remove_dir_all(&repo);
+    let _ = fs::remove_dir_all(&global_dir);
+}
