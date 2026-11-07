@@ -8,7 +8,7 @@
 set -euo pipefail
 AW="$1"; REPO="$2"
 PROFILE="$(mktemp -t aw-seatbelt.XXXXXX).sb"
-PORT="${AW_SEATBELT_PORT:-49152}"
+PORT="${AW_SEATBELT_PORT:-$((20000 + RANDOM % 20000))}"
 SERVER_PID=""
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
@@ -27,10 +27,17 @@ SB
 /usr/bin/python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null || true
-sleep 0.5
 if ! /usr/bin/python3 - "$PORT" <<'PY'
-import socket, sys
-socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=3)
+import socket, sys, time
+port = int(sys.argv[1])
+for _ in range(30):
+    try:
+        s = socket.create_connection(("127.0.0.1", port), timeout=1)
+        s.close()
+        sys.exit(0)
+    except Exception:
+        time.sleep(0.1)
+sys.exit(1)
 PY
 then
   echo "G5 seatbelt: positive control cannot reach the local endpoint — probe/setup failed" >&2

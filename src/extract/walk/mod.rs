@@ -62,14 +62,14 @@ pub(super) fn signature_of(node: Node<'_>, src: &[u8]) -> String {
             b'}' => depth -= 1,
             b';' if depth == 0 && !python => break,
             b':' if depth == 0 && python => break,
-            b'\n' if depth == 0 => {
-                // Continue only when the line wraps inside an expression.
-                if !matches!(
-                    prev_non_space,
-                    b',' | b'(' | b'[' | b'{' | b'&' | b'|' | b'=' | b'>'
-                ) {
-                    break;
-                }
+            b'\n'
+                if depth == 0
+                    && !matches!(
+                        prev_non_space,
+                        b',' | b'(' | b'[' | b'{' | b'&' | b'|' | b'=' | b'>'
+                    ) =>
+            {
+                break;
             }
             _ => {}
         }
