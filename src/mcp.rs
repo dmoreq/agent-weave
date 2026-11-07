@@ -280,14 +280,145 @@ fn handle_tools_call(
                 6,
             ),
         };
+    let latency_us = started.elapsed().as_micros() as u64;
+    let latency_ms = latency_us as f64 / 1000.0;
     // Finalize covers the panic path (the pending journal line is still
     // armed); non-panic paths were finalized in the service.
-    crate::journal::finalize(Some(root), exit_code, started.elapsed().as_micros() as u64);
+    crate::journal::finalize(Some(root), exit_code, latency_us);
+    let text = format_mcp_output(&tool_name, text, is_error, latency_ms);
     reply_result(
         out,
         id,
         json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
     )
+}
+
+fn format_mcp_output(tool: &str, text: String, is_error: bool, latency_ms: f64) -> String {
+    // Project memory notes (mem_*) and telemetry (usage) are not
+    // code-indexing / navigation queries; they maintain clean report format
+    // without appending navigation KPI footers.
+    if tool.starts_with("mem_") || tool == "usage" {
+        return text;
+    }
+
+    if is_error || text.trim().is_empty() {
+        if text.trim().is_empty() {
+            return format!("⚡ aw: {latency_ms:.1}ms | 0 items\n");
+        }
+        let mut out = text.trim_end().to_string();
+        out.push_str(&format!("\n───\n⚡ aw: {latency_ms:.1}ms | 0 items\n"));
+        return out;
+    }
+
+    let (shown, file_count) = count_items_and_files(tool, &text);
+    let output_tokens = text.len() / 4;
+
+    let saved_tokens = if shown == 0 {
+        0
+    } else {
+        match tool {
+            "context" | "callers" | "callees" | "path" | "impact" | "imports" | "symbols" => {
+                (file_count * 400).saturating_sub(output_tokens)
+            }
+            "search" => (file_count.max(2) * 350).saturating_sub(output_tokens),
+            "reuse" => (shown * 800 + 1200).saturating_sub(output_tokens),
+            "build" => (file_count * 300).saturating_sub(output_tokens),
+            _ => 0,
+        }
+    };
+
+    let mut out = text.trim_end().to_string();
+    if saved_tokens > 0 {
+        let saved_str = format_token_count(saved_tokens);
+        out.push_str(&format!(
+            "\n───\n⚡ aw: {latency_ms:.1}ms | {shown} items | ~{saved_str} tokens saved vs file reads\n"
+        ));
+    } else {
+        out.push_str(&format!(
+            "\n───\n⚡ aw: {latency_ms:.1}ms | {shown} items\n"
+        ));
+    }
+    out
+}
+
+fn format_token_count(tokens: usize) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k", tokens as f64 / 1000.0)
+    } else {
+        tokens.to_string()
+    }
+}
+
+fn count_items_and_files(tool: &str, text: &str) -> (usize, usize) {
+    let mut files = std::collections::HashSet::new();
+
+    if tool == "reuse" {
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("aw: reuse — ") {
+                if let Some(num_str) = rest.split_whitespace().next() {
+                    if let Ok(n) = num_str.parse::<usize>() {
+                        return (n, n.max(1));
+                    }
+                }
+            }
+            if line.contains("0 reuse candidates found") {
+                return (0, 0);
+            }
+        }
+    }
+
+    if tool == "build" {
+        for line in text.lines() {
+            if let Some(pos) = line.find("files=") {
+                let rest = &line[pos + 6..];
+                let count_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if let Ok(n) = count_str.parse::<usize>() {
+                    return (n, n);
+                }
+            }
+        }
+    }
+
+    let mut item_count = 0;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("───")
+            || trimmed.starts_with("aw:")
+            || trimmed.starts_with("[aw]")
+            || trimmed.starts_with("showing ")
+            || trimmed.starts_with("top unresolved")
+            || trimmed == "callers:"
+            || trimmed == "callees:"
+            || trimmed.starts_with("callers (")
+            || trimmed.starts_with("callees (")
+        {
+            continue;
+        }
+
+        item_count += 1;
+
+        let token =
+            trimmed.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' ');
+        if let Some(pos) = token.find(':') {
+            let candidate = &token[..pos];
+            if candidate.contains('.') && !candidate.contains(' ') {
+                files.insert(candidate.to_string());
+            }
+        } else if let Some(first_word) = token.split_whitespace().next() {
+            if first_word.contains('.')
+                && (first_word.ends_with(".rs")
+                    || first_word.ends_with(".ts")
+                    || first_word.ends_with(".js")
+                    || first_word.ends_with(".py"))
+            {
+                files.insert(first_word.to_string());
+            }
+        }
+    }
+
+    let file_count = files.len().max(if item_count > 0 { 1 } else { 0 });
+    (item_count, file_count)
 }
 
 fn write_result(out: &mut impl Write, id: Option<Value>, result: Value) -> std::io::Result<()> {

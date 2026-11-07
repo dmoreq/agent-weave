@@ -73,6 +73,7 @@ verify their output before acting on it.
 | anti-reinvention / code reuse candidates | `aw reuse [paths...]` — candidate duplicate functions, callee footprint overlap, and utility abstraction opportunities |
 | where did resolution fail | `aw unresolved`; `aw unresolved --names` lists sites; `[internal]` marks names that exist in the index (a resolver gap) |
 | repository totals | `aw stats [--path <dir>]` — build-time summary, not a freshness check |
+| session performance, speed & ROI telemetry | `aw usage [--quality]` — check query counts, p50/p95 latency, error rates, token savings, and anti-reinvention effectiveness (or MCP `usage`) |
 
 ## Project memory (optional, not navigation routing)
 

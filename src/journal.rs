@@ -283,6 +283,8 @@ struct ToolAgg {
     ambiguous: usize,
     capped: usize,
     latencies: Vec<u64>,
+    total_shown: usize,
+    total_results: usize,
 }
 
 /// Summarize `usage.log` (+ `.1`): per-tool calls, errors, p50/p95, rates.
@@ -345,6 +347,8 @@ fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
             agg.stale += 1;
         }
         agg.ambiguous += fields.ambiguous.max(0) as usize;
+        agg.total_shown += fields.shown.max(0) as usize;
+        agg.total_results += fields.result_count.max(0) as usize;
         if let Some(us) = fields.latency_us {
             agg.latencies.push(us.max(0) as u64);
         }
@@ -358,6 +362,38 @@ fn render_summary(
 ) -> Vec<String> {
     let total: usize = aggs.values().map(|a| a.calls).sum();
     let mut out = vec![format!("aw usage: {total} journaled calls")];
+
+    let mut all_lat: Vec<u64> = aggs
+        .values()
+        .flat_map(|a| a.latencies.iter().copied())
+        .collect();
+    all_lat.sort_unstable();
+    let p50 = percentile(&all_lat, 0.5);
+    let p95 = percentile(&all_lat, 0.95);
+
+    let total_errors: usize = aggs.values().map(|a| a.errors).sum();
+    let total_stale: usize = aggs.values().map(|a| a.stale).sum();
+    let reliability_pct = if total > 0 {
+        100.0 * (total.saturating_sub(total_errors) as f64) / (total as f64)
+    } else {
+        100.0
+    };
+
+    let (saved_tokens, reuse_hits) = calculate_telemetry_totals(aggs);
+    let dollars = (saved_tokens as f64) * 0.000003;
+    let saved_tokens_formatted = format_number_with_commas(saved_tokens);
+
+    out.push(format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"));
+    out.push(format!(
+        "  ├─ Reliability: {reliability_pct:.1}% ok ({total_errors} errors, {total_stale} stale reads)"
+    ));
+    out.push(format!(
+        "  ├─ Estimated Token Savings: ~{saved_tokens_formatted} tokens (~${dollars:.2})"
+    ));
+    out.push(format!(
+        "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
+    ));
+
     let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
     rows.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
     out.extend(
@@ -365,6 +401,51 @@ fn render_summary(
             .map(|(tool, agg)| tool_row(tool, agg, quality)),
     );
     out
+}
+
+fn calculate_telemetry_totals(
+    aggs: &std::collections::BTreeMap<String, ToolAgg>,
+) -> (usize, usize) {
+    let mut saved_tokens = 0;
+    let mut reuse_hits = 0;
+
+    for (tool, agg) in aggs {
+        let successful_calls = agg.calls.saturating_sub(agg.errors);
+        match tool.as_str() {
+            "context" | "callers" | "callees" | "path" | "impact" | "imports" => {
+                saved_tokens += agg.total_shown * 350 + successful_calls * 100;
+            }
+            "search" => {
+                saved_tokens += agg.total_shown * 300 + successful_calls * 100;
+            }
+            "reuse" => {
+                reuse_hits += agg.total_results.max(agg.total_shown);
+                saved_tokens += agg.total_results * 800 + successful_calls * 1200;
+            }
+            "symbols" => {
+                saved_tokens += agg.total_shown * 150;
+            }
+            "build" => {
+                saved_tokens += successful_calls * 500;
+            }
+            _ => {}
+        }
+    }
+
+    (saved_tokens, reuse_hits)
+}
+
+fn format_number_with_commas(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    let len = s.len();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
 }
 
 fn percent(n: usize, d: usize) -> String {

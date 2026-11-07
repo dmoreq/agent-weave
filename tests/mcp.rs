@@ -101,6 +101,16 @@ fn result_text(resp: &Value) -> String {
         .to_string()
 }
 
+fn strip_footer(text: &str) -> &str {
+    if let Some(pos) = text.rfind("\n───\n⚡ aw:") {
+        &text[..=pos]
+    } else if let Some(pos) = text.rfind("⚡ aw:") {
+        &text[..pos]
+    } else {
+        text
+    }
+}
+
 fn fixture(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("aw-mcp-{}-{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -171,6 +181,7 @@ fn g10_initialize_tools_list_and_parity() {
             "symbols",
             "reuse",
             "search",
+            "usage",
             "mem_write",
             "mem_query",
             "mem_get",
@@ -194,9 +205,10 @@ fn g10_initialize_tools_list_and_parity() {
     );
     assert_eq!(callers["result"]["isError"], false);
     assert_eq!(
-        result_text(&callers),
+        strip_footer(&result_text(&callers)),
         String::from_utf8_lossy(&cli_callers.stdout).into_owned()
     );
+    assert!(result_text(&callers).contains("⚡ aw:"));
 
     let symbols = rpc(
         &mut srv,
@@ -205,9 +217,10 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "symbols", "arguments": {"file": "utils.py"}}),
     );
     assert_eq!(
-        result_text(&symbols),
+        strip_footer(&result_text(&symbols)),
         String::from_utf8_lossy(&cli_symbols.stdout).into_owned()
     );
+    assert!(result_text(&symbols).contains("⚡ aw:"));
 
     let symbols_outline = rpc(
         &mut srv,
@@ -216,9 +229,10 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "symbols", "arguments": {"file": "utils.py", "outline": true}}),
     );
     assert_eq!(
-        result_text(&symbols_outline),
+        strip_footer(&result_text(&symbols_outline)),
         String::from_utf8_lossy(&cli_symbols_outline.stdout).into_owned()
     );
+    assert!(result_text(&symbols_outline).contains("⚡ aw:"));
 
     let search = rpc(
         &mut srv,
@@ -227,9 +241,10 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "search", "arguments": {"terms": "normalize"}}),
     );
     assert_eq!(
-        result_text(&search),
+        strip_footer(&result_text(&search)),
         String::from_utf8_lossy(&cli_search.stdout).into_owned()
     );
+    assert!(result_text(&search).contains("⚡ aw:"));
 
     // R6e: parity covers every pointer tool that does not depend on
     // wall-clock timings or journal state.
@@ -270,10 +285,11 @@ fn g10_initialize_tools_list_and_parity() {
             json!({"name": tool, "arguments": args}),
         );
         assert_eq!(
-            result_text(&via_mcp),
+            strip_footer(&result_text(&via_mcp)),
             String::from_utf8_lossy(&cli.stdout).into_owned(),
             "{tool} byte parity"
         );
+        assert!(result_text(&via_mcp).contains("⚡ aw:"));
     }
 
     // P8 no-result parity: imports on an unknown file (CLI stderr, MCP text).
@@ -292,9 +308,10 @@ fn g10_initialize_tools_list_and_parity() {
     );
     assert_eq!(imports_missing["result"]["isError"], true);
     assert_eq!(
-        result_text(&imports_missing).trim_end(),
+        strip_footer(&result_text(&imports_missing)).trim_end(),
         String::from_utf8_lossy(&cli_imports_missing.stderr).trim_end()
     );
+    assert!(result_text(&imports_missing).contains("⚡ aw:"));
 
     // G10 parity extends to context (Amendment 17).
     let cli_context = Command::new(env!("CARGO_BIN_EXE_aw"))
@@ -311,9 +328,10 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "context", "arguments": {"name": "normalize"}}),
     );
     assert_eq!(
-        result_text(&context_call),
+        strip_footer(&result_text(&context_call)),
         String::from_utf8_lossy(&cli_context.stdout).into_owned()
     );
+    assert!(result_text(&context_call).contains("⚡ aw:"));
 
     // G10 parity extends to path (Amendment 13): hop pointers + chain line
     // byte-equal between the surfaces.
@@ -331,9 +349,10 @@ fn g10_initialize_tools_list_and_parity() {
         json!({"name": "path", "arguments": {"from": "caller", "to": "normalize"}}),
     );
     assert_eq!(
-        result_text(&path_call),
+        strip_footer(&result_text(&path_call)),
         String::from_utf8_lossy(&cli_path.stdout).into_owned()
     );
+    assert!(result_text(&path_call).contains("⚡ aw:"));
     assert!(
         result_text(&path_call).starts_with("aw: path — resolved static edges only;"),
         "path caveat first: {}",
@@ -529,6 +548,7 @@ fn default_mcp_exposes_core_navigation_tools() {
             "symbols",
             "reuse",
             "search",
+            "usage",
             "mem_write",
             "mem_query",
         ]
@@ -979,4 +999,143 @@ fn mem_all_tools_exposes_full_family_with_parity() {
         "{}",
         result_text(&missing)
     );
+}
+
+#[test]
+fn mcp_response_includes_kpi_footer() {
+    let repo = fixture("kpi-footer");
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    init_and_list_tools(&mut srv);
+
+    // 1. context
+    let ctx = rpc(
+        &mut srv,
+        10,
+        "tools/call",
+        json!({"name": "context", "arguments": {"name": "normalize"}}),
+    );
+    assert_eq!(ctx["result"]["isError"], false);
+    let text = result_text(&ctx);
+    assert!(text.contains("\n───\n⚡ aw:"), "context footer: {text}");
+    assert!(
+        text.contains("tokens saved vs file reads"),
+        "context tokens: {text}"
+    );
+
+    // 2. search
+    let search = rpc(
+        &mut srv,
+        11,
+        "tools/call",
+        json!({"name": "search", "arguments": {"terms": "normalize"}}),
+    );
+    assert_eq!(search["result"]["isError"], false);
+    let text = result_text(&search);
+    assert!(text.contains("\n───\n⚡ aw:"), "search footer: {text}");
+    assert!(
+        text.contains("tokens saved vs file reads"),
+        "search tokens: {text}"
+    );
+
+    // 3. reuse
+    let reuse = rpc(
+        &mut srv,
+        12,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {}}),
+    );
+    assert_eq!(reuse["result"]["isError"], false);
+    let text = result_text(&reuse);
+    assert!(text.contains("\n───\n⚡ aw:"), "reuse footer: {text}");
+    assert!(
+        text.contains("tokens saved vs file reads"),
+        "reuse tokens: {text}"
+    );
+
+    // 4. callees on a leaf function (0 items -> clean footer without tokens saved)
+    let leaf = rpc(
+        &mut srv,
+        13,
+        "tools/call",
+        json!({"name": "callees", "arguments": {"name": "normalize"}}),
+    );
+    assert_eq!(leaf["result"]["isError"], true);
+    let leaf_text = result_text(&leaf);
+    assert!(
+        leaf_text.contains("\n───\n⚡ aw:"),
+        "leaf footer: {leaf_text}"
+    );
+    assert!(
+        leaf_text.contains("| 0 items"),
+        "leaf zero items: {leaf_text}"
+    );
+    assert!(
+        !leaf_text.contains("tokens saved"),
+        "leaf no savings: {leaf_text}"
+    );
+
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn mcp_usage_tool_returns_telemetry() {
+    let repo = fixture("mcp-usage");
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    init_and_list_tools(&mut srv);
+
+    // Call a couple of tools first to populate the journal
+    let _ = rpc(
+        &mut srv,
+        10,
+        "tools/call",
+        json!({"name": "callers", "arguments": {"name": "normalize"}}),
+    );
+    let _ = rpc(
+        &mut srv,
+        11,
+        "tools/call",
+        json!({"name": "search", "arguments": {"terms": "normalize"}}),
+    );
+
+    // Now call usage tool via MCP
+    let usage = rpc(
+        &mut srv,
+        12,
+        "tools/call",
+        json!({"name": "usage", "arguments": {}}),
+    );
+    assert_eq!(usage["result"]["isError"], false, "{usage}");
+    let text = result_text(&usage);
+    assert!(text.contains("aw usage:"), "header: {text}");
+    assert!(text.contains("Speed: p50 ="), "speed: {text}");
+    assert!(text.contains("Reliability:"), "reliability: {text}");
+    assert!(text.contains("Estimated Token Savings:"), "savings: {text}");
+    assert!(
+        text.contains("Anti-Reinvention:"),
+        "anti-reinvention: {text}"
+    );
+    assert!(text.contains("callers:"), "callers: {text}");
+    // usage is an on-demand telemetry card; it must not append a redundant footer
+    assert!(
+        !text.contains("⚡ aw:"),
+        "usage has no redundant footer: {text}"
+    );
+
+    let _ = fs::remove_dir_all(&repo);
 }

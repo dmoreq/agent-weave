@@ -1394,6 +1394,19 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
         core: true,
     },
     ToolSpec {
+        name: "usage",
+        description: "Telemetry & performance summary: total calls, p50/p95 latency, error rates, token savings, and anti-reinvention effectiveness",
+        params: &[
+            ParamSpec {
+                name: "quality",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Include latency and error breakdown (default true)",
+            },
+        ],
+        core: true,
+    },
+    ToolSpec {
         name: "mem_write",
         description: "Persist a project-memory note (agent-authored prose, never source dumps) — identical content under the same key is a no-op; different content opens a new revision",
         params: &[
@@ -1654,7 +1667,7 @@ fn unknown_tool(tool: &str) -> AwError {
 pub fn from_tool_args(tool: &str, args: &serde_json::Value) -> Result<CommandRequest> {
     let a = ArgReader(args);
     match tool {
-        "build" => from_tool_args_diag(&a, tool),
+        "build" | "usage" => from_tool_args_diag(&a, tool),
         "callers" | "callees" | "context" | "imports" | "path" | "impact" => {
             from_tool_args_graph(&a, tool)
         }
@@ -1671,6 +1684,9 @@ fn from_tool_args_diag(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> 
         "build" => CommandRequest::Build {
             force: a.b("force"),
             max_parse_error_rate: a.f_spec(tool, "max_parse_error_rate", 0.05)?,
+        },
+        "usage" => CommandRequest::Usage {
+            quality: a.0.get("quality").and_then(|v| v.as_bool()).unwrap_or(true),
         },
         _ => return Err(unknown_tool(tool)),
     })
@@ -1856,9 +1872,7 @@ mod tests {
             .filter(|r| {
                 !matches!(
                     r,
-                    CommandRequest::Unresolved { .. }
-                        | CommandRequest::Stats { .. }
-                        | CommandRequest::Usage { .. }
+                    CommandRequest::Unresolved { .. } | CommandRequest::Stats { .. }
                 )
             })
             .map(CommandRequest::tool_name)
