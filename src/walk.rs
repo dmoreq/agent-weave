@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
 
 use ignore::WalkBuilder;
 
@@ -12,10 +11,13 @@ use crate::error::{AwError, Result};
 
 pub const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
-/// P2 extension allowlist: Python + TypeScript/TSX + JavaScript/JSX.
-pub const SOURCE_EXTS: &[&str] = &[
-    "py", "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs", "rs",
-];
+/// Walk allowlist (P2: Python + TypeScript/TSX + JavaScript/JSX + Rust),
+/// derived from the master extension table `parse::SOURCE_EXTENSIONS` — one
+/// row there adds the extension to the walk, `Lang::from_rel`, module stems,
+/// and the query guards.
+pub fn source_exts() -> Vec<&'static str> {
+    crate::parse::source_ext_names().collect()
+}
 
 #[derive(Clone)]
 pub struct WalkedFile {
@@ -104,6 +106,15 @@ fn git_visible_paths(root: &Path) -> Option<Vec<String>> {
     )
 }
 
+/// Shared walk tail: one deterministic path order, one stats shape.
+fn finish_walk(mut files: Vec<WalkedFile>, skipped_large: usize) -> WalkStats {
+    files.sort_by(|a, b| a.rel.cmp(&b.rel));
+    WalkStats {
+        files,
+        skipped_large,
+    }
+}
+
 /// Stat each git-visible path once. Missing paths (staged deletions), symlinks,
 /// directories (submodules), `.aw/`, unsupported extensions, and files over
 /// `MAX_FILE_SIZE` are skipped; the size cap is counted for the build report.
@@ -152,12 +163,9 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
             skipped_large += 1;
             continue;
         }
-        let mtime = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as i64)
-            .unwrap_or(0);
+        // The single nanosecond arithmetic lives in db::metadata_mtime; the
+        // walk passes its already-stat'ed metadata so no path is stat'ed twice.
+        let mtime = crate::db::metadata_mtime(&metadata).unwrap_or(0);
         files.push(WalkedFile {
             abs: path,
             rel: rel.clone(),
@@ -165,11 +173,20 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
             mtime,
         });
     }
-    files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    WalkStats {
-        files,
-        skipped_large,
+    finish_walk(files, skipped_large)
+}
+
+/// Shared "open a plain file" frame: reject symlinks and special files via
+/// `symlink_metadata` before opening; a path whose metadata is unavailable
+/// falls through to the open error. `Ok(None)` is a rejected non-regular
+/// path; callers keep their own cap and error contract on top.
+pub(crate) fn open_regular_file(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if !meta.is_file() {
+            return Ok(None);
+        }
     }
+    std::fs::File::open(path).map(Some)
 }
 
 /// Read a file with a hard allocation bound. The walk captured the size, but
@@ -178,21 +195,14 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
 /// than a truncated parse.
 pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     use std::io::Read;
-    if let Ok(meta) = std::fs::symlink_metadata(path) {
-        if !meta.is_file() {
-            return Err(AwError::Internal(format!(
-                "not a regular file: {}",
-                path.display()
-            )));
-        }
-    }
-    let file = std::fs::File::open(path)?;
+    let not_regular = || AwError::Internal(format!("not a regular file: {}", path.display()));
+    let file = match open_regular_file(path)? {
+        Some(file) => file,
+        None => return Err(not_regular()),
+    };
     let meta = file.metadata()?;
     if !meta.is_file() {
-        return Err(AwError::Internal(format!(
-            "not a regular file: {}",
-            path.display()
-        )));
+        return Err(not_regular());
     }
     if meta.len() > MAX_FILE_SIZE {
         return Err(AwError::Internal(format!(
@@ -245,9 +255,8 @@ fn walk_fallback(root: &Path, exts: &[&str]) -> Result<WalkStats> {
             continue;
         }
         let mtime = metadata
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as i64)
+            .as_ref()
+            .and_then(crate::db::metadata_mtime)
             .unwrap_or(0);
         files.push(WalkedFile {
             abs: path.to_path_buf(),
@@ -256,11 +265,7 @@ fn walk_fallback(root: &Path, exts: &[&str]) -> Result<WalkStats> {
             mtime,
         });
     }
-    files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    Ok(WalkStats {
-        files,
-        skipped_large,
-    })
+    Ok(finish_walk(files, skipped_large))
 }
 
 /// Generated-file detection (Amendment 19): path suffix or a marker in the

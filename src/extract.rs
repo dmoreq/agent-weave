@@ -2,8 +2,8 @@
 //!
 //! Two-phase design:
 //! Phase A (per file, single tree walk): symbols (module/class/function/method),
-//! contains edges, inherits candidates, import bindings, typed parameters,
-//! constructor assignments, and raw call sites.
+//! inherits candidates, import bindings, typed parameters, constructor
+//! assignments, and raw call sites.
 //! Phase B (global): resolution over merged symbol tables — first match wins
 //! per the spec order: local module -> import alias map -> receiver-class
 //! method -> builtin table.
@@ -12,11 +12,11 @@
 //! (dst_id NULL, dst_name carries the dotted callee); zero -> no edge, counted
 //! unresolved. Dynamic dispatch (unknown receivers, getattr) is a non-goal.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
-use crate::parse::{Lang, ParsedFile};
+use crate::parse::{Lang, ParsedFile, SOURCE_EXTENSIONS};
 
 pub const SCHEMA_VERSION: i32 = 9;
 
@@ -218,9 +218,145 @@ const STDLIB_MODULES: &[&str] = &[
     "os.path",
 ];
 
+/// Generate the shared lexical-vocabulary impl for one enum: the `VARIANTS`
+/// table plus a `parse` that derives accepted spellings from `as_str` (defined
+/// beside each enum), so a new variant cannot drift between the write and read
+/// boundaries. One body replaces the per-enum copies; `as_str` stays per enum
+/// because the spellings differ per vocabulary.
+macro_rules! lexical_parse {
+    ($name:ident { $($variant:ident),+ $(,)? }) => {
+        impl $name {
+            /// Every variant, in declaration order.
+            const VARIANTS: &'static [$name] = &[$($name::$variant),+];
+
+            /// Read boundary: `None` for foreign spellings, so carried rows
+            /// with unknown spellings stay dropped.
+            pub(crate) fn parse(kind: &str) -> Option<Self> {
+                Self::VARIANTS
+                    .iter()
+                    .find(|variant| variant.as_str() == kind)
+                    .copied()
+            }
+        }
+    };
+}
+
+/// Symbol vocabulary stored in `symbols.kind` (schema contract). DB rows spell
+/// kinds through `as_str()` at the bind boundary and parse back through
+/// `parse` at the read boundary; in-memory comparisons use the variants so a
+/// misspelled kind is a compile error instead of a silent wrong filter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SymbolKind {
+    #[default]
+    Module,
+    Class,
+    Function,
+    Method,
+    Trait,
+    Interface,
+}
+
+impl SymbolKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Module => "module",
+            Self::Class => "class",
+            Self::Function => "function",
+            Self::Method => "method",
+            Self::Trait => "trait",
+            Self::Interface => "interface",
+        }
+    }
+}
+
+lexical_parse!(SymbolKind {
+    Module,
+    Class,
+    Function,
+    Method,
+    Trait,
+    Interface,
+});
+
+/// Edge vocabulary stored in `edges.kind`. No surface reads `contains` rows
+/// (`db::edge_kinds_sql` omits it, matching the dead-code and gap-heal
+/// semantics) and extraction no longer emits them, so the variant is gone;
+/// legacy indexes may still carry the rows unread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EdgeKind {
+    Calls,
+    Imports,
+    Inherits,
+    TypeRef,
+}
+
+impl EdgeKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Calls => "calls",
+            Self::Imports => "imports",
+            Self::Inherits => "inherits",
+            Self::TypeRef => "type_ref",
+        }
+    }
+}
+
+lexical_parse!(EdgeKind {
+    Calls,
+    Imports,
+    Inherits,
+    TypeRef,
+});
+
+/// Edge confidence vocabulary stored in `edges.confidence` (schema contract).
+/// DB rows spell confidences through `as_str()` at the bind boundary; SQL
+/// filters render the spelling from the variant, and in-memory comparisons
+/// use the variants so a misspelled confidence is a compile error instead of
+/// a silent wrong filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confidence {
+    Extracted,
+    Ambiguous,
+}
+
+impl Confidence {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Extracted => "EXTRACTED",
+            Self::Ambiguous => "AMBIGUOUS",
+        }
+    }
+}
+
+lexical_parse!(Confidence {
+    Extracted,
+    Ambiguous,
+});
+
+/// Unresolved-site vocabulary stored in `unresolved_calls.kind` (schema
+/// contract). Same boundary discipline as `SymbolKind`/`EdgeKind`: rows spell
+/// kinds through `as_str()` at the bind boundary and in-memory comparisons
+/// use the variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EdgeSiteKind {
+    Call,
+    Import,
+    Inherit,
+}
+
+impl EdgeSiteKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Import => "import",
+            Self::Inherit => "inherit",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NewSymbol {
-    pub kind: &'static str, // module | class | function | method | trait | interface
+    pub kind: SymbolKind,
     pub name: String,
     pub qualname: String,
     pub file_idx: usize,
@@ -244,12 +380,12 @@ pub struct NewSymbol {
 }
 
 /// Test classification (schema v8). One source of truth for every `is_test`
-/// writer; the set below covers every pattern the v7 dead-code predicate
-/// matched (`f.path LIKE 'tests/%' ... 'test\_%.py'`, `%.test.%`, `%.spec.%`,
-/// `%\_test.py`, `%\_test.dart`, plus `s.name` `test_*` / `test[A-Z]*`), so
-/// `is_test = 0` drops exactly the rows that predicate dropped. SQLite LIKE
-/// is ASCII case-insensitive and GLOB is case-sensitive; the helpers mirror
-/// that split.
+/// writer; the set below is a SUPERSET of the v7 dead-code predicate
+/// (`f.path LIKE 'tests/%' ... 'test\_%.py'`, `%.test.%`, `%.spec.%`,
+/// `%\_test.py`, `%\_test.dart`, plus `s.name` `test_*` / `test[A-Z]*`): it
+/// also matches a `test/` or `tests/` segment at any depth, not only at the
+/// repo root. SQLite LIKE is ASCII case-insensitive and GLOB is
+/// case-sensitive; the helpers mirror that split.
 pub(crate) fn is_test_path(rel: &str) -> bool {
     let lower = rel.to_ascii_lowercase();
     let file = lower.rsplit('/').next().unwrap_or(&lower);
@@ -279,8 +415,8 @@ pub struct NewEdge {
     pub src_idx: usize,
     pub dst_idx: Option<usize>,
     pub dst_name: String,
-    pub kind: &'static str,       // calls | imports | contains | inherits
-    pub confidence: &'static str, // EXTRACTED | AMBIGUOUS
+    pub kind: EdgeKind,
+    pub confidence: Confidence,
     pub site_line: usize,
 }
 
@@ -290,13 +426,13 @@ pub struct ExtractStats {
     pub unresolved_callees: usize,
 }
 
-/// One unresolved edge site (Amendment 19). `kind` is call|import|inherit;
-/// `site_line` is 1-based in the source file.
+/// One unresolved edge site (Amendment 19). `site_line` is 1-based in the
+/// source file.
 #[derive(Debug, Clone)]
 pub struct UnresolvedSite {
     pub file_idx: usize,
     pub name: String,
-    pub kind: &'static str,
+    pub kind: EdgeSiteKind,
     pub site_line: usize,
 }
 
@@ -322,7 +458,7 @@ pub struct Resolution {
 /// already in the DB and are never re-inserted.
 pub struct CarriedSymbol {
     pub row_id: i64,
-    pub kind: &'static str,
+    pub kind: SymbolKind,
     pub name: String,
     pub qualname: String,
     /// Module path of the carrying file (drives module_paths + bare-name table).
@@ -405,6 +541,29 @@ struct ImportEdgeCandidate {
     target: ImportTarget,
 }
 
+impl ImportEdgeCandidate {
+    fn module(line: usize, path: String) -> Self {
+        Self {
+            line,
+            target: ImportTarget::Module { path },
+        }
+    }
+
+    fn symbol(line: usize, module: String, name: String) -> Self {
+        Self {
+            line,
+            target: ImportTarget::Symbol { module, name },
+        }
+    }
+
+    fn module_root(line: usize, path: String) -> Self {
+        Self {
+            line,
+            target: ImportTarget::ModuleRoot { path },
+        }
+    }
+}
+
 pub struct FileExtraction {
     pub file_idx: usize,
     pub module: String,
@@ -420,8 +579,10 @@ pub struct FileExtraction {
     pub is_test_file: bool,
     pub lang: Lang,
     pub symbols: Vec<NewSymbol>,
-    /// contains edges (indices local to this file's symbols; offset on merge).
-    pub edges: Vec<NewEdge>,
+    /// qualname -> first symbol index, maintained by [`Self::push_symbol`].
+    /// Every parent lookup (`export_method`, Rust impl targets) is one map
+    /// hit instead of a linear scan over the file's symbols.
+    symbol_index: HashMap<String, usize>,
     /// (src local idx, base dotted chain)
     inherits: Vec<(usize, Vec<String>)>,
     /// Rust `impl Trait for Type` edges: edge-only, never `class_bases`.
@@ -455,20 +616,100 @@ pub struct FileExtraction {
     import_edges: Vec<ImportEdgeCandidate>,
 }
 
+impl FileExtraction {
+    /// Empty extraction for one file: module path, language, crate root, and
+    /// the module symbol. The caller walks the tree; the language comes from
+    /// the caller, which resolved it explicitly against the walk allowlist.
+    fn for_file(file_idx: usize, rel: &str, lang: Lang, code_lines: Vec<bool>) -> Self {
+        let (module, is_package) = module_path_for(rel);
+        let crate_root = if lang == Lang::Rust {
+            rust_crate_root(rel)
+        } else {
+            None
+        };
+        let mod_name = module.rsplit('.').next().unwrap_or(&module).to_string();
+        let is_test_file = is_test_path(rel);
+        let dir = match rel.rfind('/') {
+            Some(i) => rel[..i].replace('/', "."),
+            None => String::new(),
+        };
+        FileExtraction {
+            file_idx,
+            module: module.clone(),
+            crate_root,
+            dir,
+            is_package,
+            is_test_file,
+            lang,
+            symbols: vec![NewSymbol {
+                kind: SymbolKind::Module,
+                name: mod_name,
+                qualname: module.clone(),
+                file_idx,
+                line_start: 1,
+                line_end: 1,
+                signature: String::new(),
+
+                is_test: is_test_file,
+                ..Default::default()
+            }],
+            symbol_index: HashMap::from([(module, 0usize)]),
+            inherits: Vec::new(),
+            impl_inherits: Vec::new(),
+            rust_impls: Vec::new(),
+            assignments: Vec::new(),
+            params: Vec::new(),
+            locals: Vec::new(),
+            arrow_params: Vec::new(),
+            self_fields: Vec::new(),
+            aliases: Vec::new(),
+            stars: Vec::new(),
+            from_import_parents: HashSet::new(),
+            unresolved_inherits: Vec::new(),
+            trait_impl_methods: Vec::new(),
+            code_lines,
+            calls: Vec::new(),
+            import_edges: Vec::new(),
+        }
+    }
+
+    /// Push one symbol row and record its qualname in the lookup index.
+    /// First occurrence wins, matching the linear `find`/`position` scans the
+    /// parent lookups replaced.
+    fn push_symbol(&mut self, sym: NewSymbol) {
+        let idx = self.symbols.len();
+        self.symbol_index.entry(sym.qualname.clone()).or_insert(idx);
+        self.symbols.push(sym);
+    }
+
+    /// First same-file symbol index whose kind is Class and qualname is
+    /// `target_qn`. The qualname index answers the common case in O(1); a
+    /// qualname shared across kinds (broken source) falls back to the scan
+    /// so a later Class still wins, matching the old linear search.
+    fn class_symbol_idx(&self, target_qn: &str) -> Option<usize> {
+        match self.symbol_index.get(target_qn) {
+            Some(&idx) if self.symbols[idx].kind == SymbolKind::Class => Some(idx),
+            Some(_) => self
+                .symbols
+                .iter()
+                .position(|s| s.kind == SymbolKind::Class && s.qualname == target_qn),
+            None => None,
+        }
+    }
+}
+
 /// Derive the dot-joined module path from the repo-relative file path.
-/// Package/root markers (`__init__.py`, `index.ts(x)`, `index.js(x)`,
-/// `mod.rs`, `lib.rs`) collapse into the containing module path.
+/// Package/root markers (`__init__.py`, `index.*` TS/JS files, `mod.rs`,
+/// `lib.rs`) collapse into the containing module path.
 pub fn module_path_for(rel: &str) -> (String, bool) {
     let file_name = rel.rsplit('/').next().unwrap_or(rel);
     let is_py_pkg = file_name == "__init__.py";
-    let is_ts_pkg = file_name == "index.ts"
-        || file_name == "index.tsx"
-        || file_name == "index.js"
-        || file_name == "index.jsx"
-        || file_name == "index.mts"
-        || file_name == "index.cts"
-        || file_name == "index.mjs"
-        || file_name == "index.cjs";
+    // index.* package markers exist for every TS/JS extension in the master
+    // table (`parse::SOURCE_EXTENSIONS`), so a new TS-family extension needs
+    // no edit here.
+    let is_ts_pkg = SOURCE_EXTENSIONS
+        .iter()
+        .any(|(ext, lang)| lang.is_ts_js() && file_name.strip_suffix(ext) == Some("index"));
     let is_rust_root = file_name == "mod.rs" || file_name == "lib.rs" || file_name == "main.rs";
     if is_py_pkg || is_ts_pkg || is_rust_root {
         let dir = rel
@@ -486,17 +727,12 @@ pub fn module_path_for(rel: &str) -> (String, bool) {
         }
         return (dir, true);
     }
-    let stem = rel
-        .trim_end_matches(".tsx")
-        .trim_end_matches(".ts")
-        .trim_end_matches(".jsx")
-        .trim_end_matches(".js")
-        .trim_end_matches(".mts")
-        .trim_end_matches(".cts")
-        .trim_end_matches(".mjs")
-        .trim_end_matches(".cjs")
-        .trim_end_matches(".rs")
-        .trim_end_matches(".py");
+    // Strip the source extension (dotted rows in the master table; each
+    // suffix strips repeatedly, matching the historical chain behavior).
+    let mut stem = rel;
+    for (ext, _) in SOURCE_EXTENSIONS {
+        stem = stem.trim_end_matches(ext);
+    }
     if stem.is_empty() {
         return ("root".to_string(), false);
     }
@@ -519,79 +755,49 @@ fn rust_crate_root(rel: &str) -> Option<String> {
     }
 }
 
+/// One file's extraction inputs: merged-vector index, repo-relative path,
+/// language, and source bytes — bundled so both entry points pass one
+/// argument instead of four loose ones.
+pub struct FileInput<'a> {
+    pub file_idx: usize,
+    pub rel: &'a str,
+    pub lang: Lang,
+    pub src: &'a [u8],
+}
+
 /// Lib API used by tests and fixtures; the bin uses
 /// `extract_file_with_code_lines` with the caller's syntax-stats mask.
 #[allow(dead_code)]
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {
     let root = parsed.tree.root_node();
     let stats = crate::parse::syntax_stats(root, src);
-    extract_file_with_code_lines(file_idx, rel, src, root, stats.code_lines)
+    // Fixture path: an unsupported extension is a fixture bug and fails
+    // loudly instead of defaulting to a language.
+    let lang = Lang::from_rel(rel).unwrap_or_else(|| panic!("unsupported source extension: {rel}"));
+    extract_file_with_code_lines(
+        FileInput {
+            file_idx,
+            rel,
+            lang,
+            src,
+        },
+        root,
+        stats.code_lines,
+    )
 }
 
 /// Extraction with the file comment mask computed by the caller's single
 /// `syntax_stats` walk (B1). Keeps the public `extract_file` wrapper for tests.
 pub fn extract_file_with_code_lines(
-    file_idx: usize,
-    rel: &str,
-    src: &[u8],
+    input: FileInput<'_>,
     root: Node<'_>,
     code_lines: Vec<bool>,
 ) -> FileExtraction {
-    let (module, is_package) = module_path_for(rel);
-    let lang = Lang::from_rel(rel);
-    let crate_root = if lang == Lang::Rust {
-        rust_crate_root(rel)
-    } else {
-        None
-    };
-    let mod_name = module.rsplit('.').next().unwrap_or(&module).to_string();
-    let is_test_file = is_test_path(rel);
-    let dir = match rel.rfind('/') {
-        Some(i) => rel[..i].replace('/', "."),
-        None => String::new(),
-    };
-    let mut fx = FileExtraction {
-        file_idx,
-        module: module.clone(),
-        crate_root,
-        dir,
-        is_package,
-        is_test_file,
-        lang,
-        symbols: vec![NewSymbol {
-            kind: "module",
-            name: mod_name,
-            qualname: module,
-            file_idx,
-            line_start: 1,
-            line_end: 1,
-            signature: String::new(),
-
-            is_test: is_test_file,
-            ..Default::default()
-        }],
-        edges: Vec::new(),
-        inherits: Vec::new(),
-        impl_inherits: Vec::new(),
-        rust_impls: Vec::new(),
-        assignments: Vec::new(),
-        params: Vec::new(),
-        locals: Vec::new(),
-        arrow_params: Vec::new(),
-        self_fields: Vec::new(),
-        aliases: Vec::new(),
-        stars: Vec::new(),
-        from_import_parents: HashSet::new(),
-        unresolved_inherits: Vec::new(),
-        trait_impl_methods: Vec::new(),
-        code_lines,
-        calls: Vec::new(),
-        import_edges: Vec::new(),
-    };
-    let mut ctx = WalkCtx::for_file(lang, src);
-    walk_children(root, src, &mut fx, &mut ctx);
+    let mut fx = FileExtraction::for_file(input.file_idx, input.rel, input.lang, code_lines);
+    let mut ctx = WalkCtx::for_file(fx.lang, input.src);
+    walk_children(root, input.src, &mut fx, &mut ctx);
     finalize_rust_impls(&mut fx);
-    finalize_exports(&mut fx, src, root);
+    finalize_exports(&mut fx, input.src, root);
     fx
 }
 
@@ -652,12 +858,12 @@ fn finalize_exports(fx: &mut FileExtraction, src: &[u8], root: Node<'_>) {
         HashSet::new()
     };
     for i in 0..fx.symbols.len() {
-        if fx.symbols[i].kind != "method" {
+        if fx.symbols[i].kind != SymbolKind::Method {
             fx.symbols[i].exported = export_base(fx, i, all_names.as_ref(), &ts_local);
         }
     }
     for i in 0..fx.symbols.len() {
-        if fx.symbols[i].kind == "method" {
+        if fx.symbols[i].kind == SymbolKind::Method {
             fx.symbols[i].exported = export_method(fx, i, &lines);
         }
     }
@@ -679,7 +885,7 @@ fn export_base(
     ts_local: &HashSet<String>,
 ) -> bool {
     let sym = &fx.symbols[i];
-    if sym.kind == "module" {
+    if sym.kind == SymbolKind::Module {
         return false;
     }
     let top_level = is_direct_child(&fx.module, &sym.name, &sym.qualname);
@@ -690,7 +896,13 @@ fn export_base(
         },
         Lang::Rust => rust_is_pub(&sym.signature),
         Lang::TypeScript | Lang::Tsx | Lang::JavaScript => {
-            if !matches!(sym.kind, "class" | "function" | "interface" | "trait") {
+            if !matches!(
+                sym.kind,
+                SymbolKind::Class
+                    | SymbolKind::Function
+                    | SymbolKind::Interface
+                    | SymbolKind::Trait
+            ) {
                 return false;
             }
             sym.exported || (top_level && ts_local.contains(&sym.name))
@@ -703,11 +915,13 @@ fn export_method(fx: &FileExtraction, i: usize, lines: &[&[u8]]) -> bool {
     let parent_qn = sym.qualname.rsplit_once('.').map(|(p, _)| p.to_string());
     let parent = parent_qn
         .as_ref()
-        .and_then(|p| fx.symbols.iter().find(|s| &s.qualname == p));
+        .and_then(|p| fx.symbol_index.get(p).map(|&i| &fx.symbols[i]));
     let parent_exported = parent.map(|s| s.exported).unwrap_or(false);
-    let parent_is_module = parent.map(|s| s.kind == "module").unwrap_or(false);
+    let parent_is_module = parent
+        .map(|s| s.kind == SymbolKind::Module)
+        .unwrap_or(false);
     let parent_is_trait = parent
-        .map(|s| matches!(s.kind, "trait" | "interface"))
+        .map(|s| matches!(s.kind, SymbolKind::Trait | SymbolKind::Interface))
         .unwrap_or(false);
     let trait_impl_method = fx.trait_impl_methods.contains(&sym.qualname);
     match fx.lang {
@@ -776,11 +990,7 @@ fn ts_local_export_names(root: Node<'_>, src: &[u8]) -> HashSet<String> {
 fn finalize_rust_impls(fx: &mut FileExtraction) {
     let impls = std::mem::take(&mut fx.rust_impls);
     for (target_qn, trait_chain, line) in impls {
-        if let Some(idx) = fx
-            .symbols
-            .iter()
-            .position(|s| s.kind == "class" && s.qualname == target_qn)
-        {
+        if let Some(idx) = fx.class_symbol_idx(&target_qn) {
             fx.impl_inherits.push((idx, trait_chain, line));
         } else if let Some(base) = trait_chain.last() {
             fx.unresolved_inherits.push((base.clone(), line));

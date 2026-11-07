@@ -62,6 +62,27 @@ fn notification(server: &mut Server, method: &str) {
     server.stdin.flush().unwrap();
 }
 
+/// Initialize the server, send the initialized notification, and return the
+/// advertised tool names from `tools/list`.
+fn init_and_list_tools(server: &mut Server) -> Vec<String> {
+    let init = rpc(
+        server,
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18"}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    assert!(init["result"]["protocolVersion"].is_string());
+    notification(server, "notifications/initialized");
+    let list = rpc(server, 2, "tools/list", json!({}));
+    list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
 fn send_raw(server: &mut Server, frame: &str) {
     writeln!(server.stdin, "{frame}").unwrap();
     server.stdin.flush().unwrap();
@@ -143,26 +164,10 @@ fn g10_initialize_tools_list_and_parity() {
         .unwrap();
 
     let mut srv = spawn(&repo);
-    let init = rpc(
-        &mut srv,
-        1,
-        "initialize",
-        json!({"protocolVersion": "2025-06-18"}),
-    );
-    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
-    assert!(init["result"]["protocolVersion"].is_string());
-    notification(&mut srv, "notifications/initialized");
-
-    let list = rpc(&mut srv, 2, "tools/list", json!({}));
-    let names: Vec<&str> = list["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
+    let names = init_and_list_tools(&mut srv);
     assert_eq!(
         names,
-        vec![
+        [
             "build",
             "callers",
             "callees",
@@ -187,9 +192,10 @@ fn g10_initialize_tools_list_and_parity() {
             "mem_gc",
             "mem_export"
         ]
+        .map(str::to_string)
     );
     assert!(
-        !names.contains(&"doctor"),
+        !names.iter().any(|name| name == "doctor"),
         "doctor is not exposed (Amendment 8)"
     );
 
@@ -490,7 +496,7 @@ fn resolve_empty_names_and_non_strings_are_tool_errors() {
         json!({"name": "resolve", "arguments": {"names": [""]}}),
     );
     assert_eq!(empty["result"]["isError"], true, "{empty}");
-    assert!(result_text(&empty).contains("no names on stdin"), "{empty}");
+    assert!(result_text(&empty).contains("no names provided"), "{empty}");
 
     let mixed = rpc(
         &mut srv,
@@ -717,25 +723,10 @@ fn missing_required_argument_returns_invalid_params() {
 fn default_mcp_exposes_core_navigation_tools() {
     let repo = fixture("core");
     let mut srv = spawn_with(&repo, false);
-    let init = rpc(
-        &mut srv,
-        1,
-        "initialize",
-        json!({"protocolVersion": "2025-06-18"}),
-    );
-    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
-    notification(&mut srv, "notifications/initialized");
-
-    let list = rpc(&mut srv, 2, "tools/list", json!({}));
-    let names: Vec<&str> = list["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
+    let names = init_and_list_tools(&mut srv);
     assert_eq!(
         names,
-        vec![
+        [
             "build",
             "callers",
             "callees",
@@ -747,6 +738,7 @@ fn default_mcp_exposes_core_navigation_tools() {
             "mem_write",
             "mem_query",
         ]
+        .map(str::to_string)
     );
 
     let denied = rpc(
@@ -925,9 +917,9 @@ fn mcp_stats_path_matches_cli() {
 
 // ---------------------------------------------------------------------------
 // Project memory over MCP (companion design, Phase 1): OQ1 puts mem_write +
-// mem_query in the default CORE_TOOLS; the other four stay behind
-// --all-tools. Every call dispatches through service::execute, so the result
-// text is the CLI's stdout byte for byte.
+// mem_query in the default `aw mcp` tool set (ToolSpec::core); the other four
+// stay behind --all-tools. Every call dispatches through service::execute, so
+// the result text is the CLI's stdout byte for byte.
 // ---------------------------------------------------------------------------
 
 fn mem_fixture(name: &str) -> PathBuf {

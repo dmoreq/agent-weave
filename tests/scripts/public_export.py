@@ -180,48 +180,36 @@ def gate(out: Path) -> int:
             "-----BEGIN [A-Z ]*PRIVATE KEY-----"]),
     }
     rc = 0
-    for label, pat in checks.items():
-        try:
-            res = subprocess.run(
-                ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
-                cwd=out, capture_output=True, text=True,
-            )
-        except OSError as exc:
-            print(f"{label:16s} scan-error: {exc}")
-            rc = 1
-            continue
-        if res.returncode not in (0, 1):
-            print(f"{label:16s} scan-error {res.returncode}")
-            print(res.stderr[:2000])
-            rc = 1
-            continue
-        n = len([l for l in res.stdout.splitlines() if l.strip()])
-        print(f"{label:16s} {n}")
-        if n:
-            print(res.stdout[:2000])
-            rc = 1
-    for label, pat in {
+
+    def scan(patterns) -> int:
+        failed = 0
+        for label, pat in patterns.items():
+            try:
+                res = subprocess.run(
+                    ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
+                    cwd=out, capture_output=True, text=True,
+                )
+            except OSError as exc:
+                print(f"{label:16s} scan-error: {exc}")
+                failed = 1
+                continue
+            if res.returncode not in (0, 1):
+                print(f"{label:16s} scan-error {res.returncode}")
+                print(res.stderr[:2000])
+                failed = 1
+                continue
+            n = len([l for l in res.stdout.splitlines() if l.strip()])
+            print(f"{label:16s} {n}")
+            if n:
+                print(res.stdout[:2000])
+                failed = 1
+        return failed
+
+    rc |= scan(checks)
+    rc |= scan({
         "vault_prose": "the private evidence vault",
         "empty_link": "\\]\\(\\)",
-    }.items():
-        try:
-            res = subprocess.run(
-                ["git", "grep", "--cached", "-I", "-n", "-E", pat, "--", "."],
-                cwd=out, capture_output=True, text=True,
-            )
-        except OSError as exc:
-            print(f"{label:16s} scan-error: {exc}")
-            rc = 1
-            continue
-        if res.returncode not in (0, 1):
-            print(f"{label:16s} scan-error {res.returncode}")
-            print(res.stderr[:2000])
-            rc = 1
-            continue
-        n = len([l for l in res.stdout.splitlines() if l.strip()])
-        print(f"{label:16s} {n}")
-        if n:
-            print(res.stdout[:2000]); rc = 1
+    })
     cargo = (out / "Cargo.toml").read_text()
     if "include = [" not in cargo or "exclude = [" in cargo:
         print("Cargo.toml include allowlist is missing or exclude is still set")

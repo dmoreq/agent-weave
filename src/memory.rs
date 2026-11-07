@@ -40,6 +40,10 @@ pub const SCOPE_SESSION: &str = "session";
 /// OQ2 (owner, 2026-11-05): a session note without an explicit `--ttl` lives
 /// for 7 days. Explicit `--ttl` always wins.
 pub const DEFAULT_SESSION_TTL_SECS: i64 = 604_800;
+/// Upper bound for an explicit `--ttl` (10 years). Keeps the `u64 -> i64`
+/// conversion and `now + ttl` free of overflow and keeps a session note inside
+/// a range the storage clock can honor.
+pub const MAX_SESSION_TTL_SECS: u64 = 10 * 365 * 86_400;
 /// gc retention clock for superseded revisions (Phase 2): revs superseded
 /// more than this many days ago are purged, clocked by `superseded_at`.
 pub const RETENTION_DAYS: i64 = 30;
@@ -113,9 +117,13 @@ fn split_run(run: &str) -> Vec<String> {
     parts
 }
 
-/// The design's single tokenizer: split on non-alphanumeric runs, split
-/// camelCase boundaries, lowercase. Query terms, stored FTS text, tags, and
-/// ref-overlap token sets all flow through this one function.
+/// The design's single tokenizer for the memory store: split on
+/// non-alphanumeric runs, split camelCase boundaries, lowercase. Query terms,
+/// stored FTS text, tags, and ref-overlap token sets all flow through this
+/// one function. Deliberately separate from the symbol-search tokenizer
+/// (`extract::split_ident`): the two index different stores with different
+/// digit/camelCase boundaries ("v2Fix" -> ["v","2","fix"] here vs "v2 fix"
+/// there), so a camelCase fix must not silently change the other index.
 pub fn mem_tokens(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut run = String::new();
@@ -189,18 +197,53 @@ pub struct NormalizedNote {
     pub ttl_secs: i64,
 }
 
+/// Raw `mem write` input before normalization: one bundle both surfaces
+/// build (CLI flags and MCP arguments), so a new field is one struct change
+/// instead of a longer parameter list. Field semantics match the flags:
+/// `tags`/`refs` are optional raw sets, `ttl` is the explicit `--ttl`.
+pub struct NoteInput<'a> {
+    pub key: &'a str,
+    pub kind: &'a str,
+    pub tags: Option<&'a str>,
+    pub refs: Option<&'a str>,
+    pub scope: &'a str,
+    pub body: &'a str,
+    pub ttl: Option<u64>,
+}
+
 /// Validate and normalize a `mem write` input. Scope rules (Phase 2):
 /// `durable` never expires and rejects `--ttl`; `session` expires at
 /// `now + ttl`, defaulting to the 7-day OQ2 constant without one.
-pub fn normalize_note(
-    key: &str,
-    kind: &str,
-    tags: Option<&str>,
-    refs: Option<&str>,
-    scope: &str,
-    body: &str,
-    ttl: Option<u64>,
-) -> Result<NormalizedNote> {
+pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
+    let NoteInput {
+        key,
+        kind,
+        tags,
+        refs,
+        scope,
+        body,
+        ttl,
+    } = input;
+    let key = validate_key(key)?;
+    if !MEM_KINDS.contains(&kind) {
+        return Err(AwError::Usage(format!(
+            "mem write: kind must be one of {} (got '{kind}')",
+            MEM_KINDS.join("|")
+        )));
+    }
+    validate_body(body)?;
+    Ok(NormalizedNote {
+        key: key.to_string(),
+        kind: kind.to_string(),
+        tags: normalize_tags(tags.unwrap_or(""))?,
+        refs: normalize_refs(refs.unwrap_or(""))?,
+        scope: scope.to_string(),
+        body: body.to_string(),
+        ttl_secs: normalize_ttl(scope, ttl)?,
+    })
+}
+
+fn validate_key(key: &str) -> Result<&str> {
     let key = key.trim();
     if key.is_empty() {
         return Err(AwError::Usage("mem write: key must not be empty".into()));
@@ -215,12 +258,10 @@ pub fn normalize_note(
             "mem write: key must not contain control characters".into(),
         ));
     }
-    if !MEM_KINDS.contains(&kind) {
-        return Err(AwError::Usage(format!(
-            "mem write: kind must be one of {} (got '{kind}')",
-            MEM_KINDS.join("|")
-        )));
-    }
+    Ok(key)
+}
+
+fn validate_body(body: &str) -> Result<()> {
     let body_len = body.len();
     if body.trim().is_empty() {
         return Err(AwError::Usage("mem write: body must not be empty".into()));
@@ -230,63 +271,65 @@ pub fn normalize_note(
             "mem write: body exceeds {MAX_BODY_BYTES} bytes (got {body_len})"
         )));
     }
-    let normalize_tokens = |raw: &str, max: usize, max_len: usize, label: &str| -> Result<String> {
-        let tokens: Vec<String> = raw.split_whitespace().map(str::to_string).collect();
-        if tokens.len() > max {
-            return Err(AwError::Usage(format!(
-                "mem write: more than {max} {label}"
-            )));
-        }
-        if let Some(t) = tokens.iter().find(|t| t.len() > max_len) {
-            return Err(AwError::Usage(format!(
-                "mem write: {label} token exceeds {max_len} bytes: '{t}'"
-            )));
-        }
-        Ok(tokens.join(" "))
-    };
-    let tags = normalize_tokens(tags.unwrap_or(""), MAX_TAGS, MAX_TAG_BYTES, "tags")?;
-    // Canonical set form: tokens are lowercased and SORTED so the stored
-    // bytes — and therefore the content hash — are order-insensitive. The
-    // same canonical rule applies to refs (a set of qualnames/paths).
-    let tags = tags
+    Ok(())
+}
+
+fn normalize_token_set(raw: &str, max: usize, max_len: usize, label: &str) -> Result<String> {
+    let tokens: Vec<String> = raw.split_whitespace().map(str::to_string).collect();
+    if tokens.len() > max {
+        return Err(AwError::Usage(format!(
+            "mem write: more than {max} {label}"
+        )));
+    }
+    if let Some(t) = tokens.iter().find(|t| t.len() > max_len) {
+        return Err(AwError::Usage(format!(
+            "mem write: {label} token exceeds {max_len} bytes: '{t}'"
+        )));
+    }
+    Ok(tokens.join(" "))
+}
+
+/// Canonical set form: tags are lowercased and sorted so the stored bytes —
+/// and therefore the content hash — are order-insensitive.
+fn normalize_tags(raw: &str) -> Result<String> {
+    let tokens = normalize_token_set(raw, MAX_TAGS, MAX_TAG_BYTES, "tags")?;
+    let mut tags: Vec<String> = tokens
         .split_whitespace()
         .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>();
-    let mut tags = tags;
+        .collect();
     tags.sort();
-    let tags = tags.join(" ");
-    let refs = normalize_tokens(refs.unwrap_or(""), MAX_REFS, MAX_REF_BYTES, "refs")?;
-    let mut refs = refs
-        .split_whitespace()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    Ok(tags.join(" "))
+}
+
+/// Refs use the same canonical set rule (a set of qualnames/paths).
+fn normalize_refs(raw: &str) -> Result<String> {
+    let tokens = normalize_token_set(raw, MAX_REFS, MAX_REF_BYTES, "refs")?;
+    let mut refs: Vec<String> = tokens.split_whitespace().map(str::to_string).collect();
     refs.sort();
-    let refs = refs.join(" ");
-    let ttl_secs = match scope {
+    Ok(refs.join(" "))
+}
+
+fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<i64> {
+    match scope {
         SCOPE_DURABLE => {
             if ttl.is_some() {
                 return Err(AwError::Usage(
                     "mem write: --ttl is only valid with --scope session".to_string(),
                 ));
             }
-            0
+            Ok(0)
         }
-        SCOPE_SESSION => ttl.map_or(DEFAULT_SESSION_TTL_SECS, |t| t as i64),
-        other => {
-            return Err(AwError::Usage(format!(
-                "mem write: scope must be '{SCOPE_DURABLE}' or '{SCOPE_SESSION}' (got '{other}')"
-            )))
-        }
-    };
-    Ok(NormalizedNote {
-        key: key.to_string(),
-        kind: kind.to_string(),
-        tags,
-        refs,
-        scope: scope.to_string(),
-        body: body.to_string(),
-        ttl_secs,
-    })
+        SCOPE_SESSION => match ttl {
+            None => Ok(DEFAULT_SESSION_TTL_SECS),
+            Some(t) if t == 0 || t > MAX_SESSION_TTL_SECS => Err(AwError::Usage(format!(
+                "mem write: --ttl must be in 1..={MAX_SESSION_TTL_SECS} seconds"
+            ))),
+            Some(t) => Ok(t as i64),
+        },
+        other => Err(AwError::Usage(format!(
+            "mem write: scope must be '{SCOPE_DURABLE}' or '{SCOPE_SESSION}' (got '{other}')"
+        ))),
+    }
 }
 
 /// Content hash over the normalized (kind, body, tags, refs, scope) tuple with
@@ -377,11 +420,6 @@ pub fn render_row_header(row: &crate::db::MemRow) -> String {
     )
 }
 
-/// Render a row: header line plus the body indented two spaces per line.
-pub fn render_row(row: &crate::db::MemRow) -> String {
-    render_row_tagged(row, "")
-}
-
 /// Render a row with a trailing header tag (the `--include-superseded`
 /// listing marks replaced revisions with ` [superseded]`).
 pub fn render_row_tagged(row: &crate::db::MemRow, tag: &str) -> String {
@@ -395,12 +433,26 @@ pub fn render_row_tagged(row: &crate::db::MemRow, tag: &str) -> String {
 
 /// `showing N of M` cap line (stdout, last line of a capped query).
 pub fn render_showing(shown: usize, total: usize) -> String {
-    format!("showing {shown} of {total}")
+    crate::query::cap_line(shown, total, "").unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Default `mem write` input (tags/refs/ttl unset); tests override the
+    /// differing fields with struct-update syntax.
+    fn note<'a>(key: &'a str, kind: &'a str, body: &'a str, scope: &'a str) -> NoteInput<'a> {
+        NoteInput {
+            key,
+            kind,
+            tags: None,
+            refs: None,
+            scope,
+            body,
+            ttl: None,
+        }
+    }
 
     #[test]
     fn tokenizer_splits_camel_snake_and_nonalnum() {
@@ -432,54 +484,67 @@ mod tests {
 
     #[test]
     fn normalize_rejects_bad_kind_and_unknown_scope() {
-        let err = normalize_note("k", "mood", None, None, "durable", "b", None).unwrap_err();
+        let err = normalize_note(note("k", "mood", "b", "durable")).unwrap_err();
         assert_eq!(err.exit_code(), 2);
-        let err = normalize_note("k", "fact", None, None, "orbit", "b", None).unwrap_err();
+        let err = normalize_note(note("k", "fact", "b", "orbit")).unwrap_err();
         assert_eq!(err.exit_code(), 2);
-        assert!(normalize_note("k", "fact", None, None, "durable", "b", None).is_ok());
-        assert!(normalize_note("k", "fact", None, None, "session", "b", None).is_ok());
+        assert!(normalize_note(note("k", "fact", "b", "durable")).is_ok());
+        assert!(normalize_note(note("k", "fact", "b", "session")).is_ok());
     }
 
     #[test]
     fn session_ttl_defaults_to_seven_days_and_durable_rejects_ttl() {
         // OQ2: session without --ttl expires in 7 days; explicit ttl wins.
-        let note = normalize_note("k", "fact", None, None, "session", "b", None).unwrap();
-        assert_eq!(note.ttl_secs, DEFAULT_SESSION_TTL_SECS);
-        let note = normalize_note("k", "fact", None, None, "session", "b", Some(60)).unwrap();
-        assert_eq!(note.ttl_secs, 60);
+        let normalized = normalize_note(note("k", "fact", "b", "session")).unwrap();
+        assert_eq!(normalized.ttl_secs, DEFAULT_SESSION_TTL_SECS);
+        let normalized = normalize_note(NoteInput {
+            ttl: Some(60),
+            ..note("k", "fact", "b", "session")
+        })
+        .unwrap();
+        assert_eq!(normalized.ttl_secs, 60);
+        // Out-of-range values cannot wrap the u64 -> i64 cast or `now + ttl`.
+        for bad in [0, u64::MAX, MAX_SESSION_TTL_SECS + 1] {
+            let err = normalize_note(NoteInput {
+                ttl: Some(bad),
+                ..note("k", "fact", "b", "session")
+            })
+            .unwrap_err();
+            assert_eq!(err.exit_code(), 2, "ttl {bad}");
+        }
+        let max = normalize_note(NoteInput {
+            ttl: Some(MAX_SESSION_TTL_SECS),
+            ..note("k", "fact", "b", "session")
+        })
+        .unwrap();
+        assert_eq!(max.ttl_secs, MAX_SESSION_TTL_SECS as i64);
         // Durable never expires and rejects --ttl (exit 2).
-        let note = normalize_note("k", "fact", None, None, "durable", "b", None).unwrap();
-        assert_eq!(note.ttl_secs, 0);
-        let err = normalize_note("k", "fact", None, None, "durable", "b", Some(60)).unwrap_err();
+        let normalized = normalize_note(note("k", "fact", "b", "durable")).unwrap();
+        assert_eq!(normalized.ttl_secs, 0);
+        let err = normalize_note(NoteInput {
+            ttl: Some(60),
+            ..note("k", "fact", "b", "durable")
+        })
+        .unwrap_err();
         assert_eq!(err.exit_code(), 2);
         assert!(err.to_string().contains("only valid with --scope session"));
     }
 
     #[test]
     fn normalize_caps_and_lowercases_tags() {
-        let note = normalize_note(
-            "k",
-            "fact",
-            Some("Auth Login AUTH"),
-            None,
-            "durable",
-            "b",
-            None,
-        )
+        let normalized = normalize_note(NoteInput {
+            tags: Some("Auth Login AUTH"),
+            ..note("k", "fact", "b", "durable")
+        })
         .unwrap();
         assert_eq!(
-            note.tags, "auth auth login",
+            normalized.tags, "auth auth login",
             "tags are a sorted lowercase set"
         );
-        let err = normalize_note(
-            "k",
-            "fact",
-            Some(&vec!["t"; MAX_TAGS + 1].join(" ")),
-            None,
-            "durable",
-            "b",
-            None,
-        )
+        let err = normalize_note(NoteInput {
+            tags: Some(&vec!["t"; MAX_TAGS + 1].join(" ")),
+            ..note("k", "fact", "b", "durable")
+        })
         .unwrap_err();
         assert_eq!(err.exit_code(), 2);
     }
@@ -487,10 +552,18 @@ mod tests {
     #[test]
     fn body_cap_is_enforced() {
         let big = "x".repeat(MAX_BODY_BYTES + 1);
-        let err = normalize_note("k", "fact", None, None, "durable", &big, None).unwrap_err();
+        let err = normalize_note(NoteInput {
+            body: &big,
+            ..note("k", "fact", "b", "durable")
+        })
+        .unwrap_err();
         assert_eq!(err.exit_code(), 2);
         let ok = "x".repeat(MAX_BODY_BYTES);
-        assert!(normalize_note("k", "fact", None, None, "durable", &ok, None).is_ok());
+        assert!(normalize_note(NoteInput {
+            body: &ok,
+            ..note("k", "fact", "b", "durable")
+        })
+        .is_ok());
     }
 
     #[test]
@@ -531,39 +604,27 @@ mod tests {
     fn content_hash_ignores_tag_order_and_whitespace() {
         // Dedup hashes the NORMALIZED note (writes always normalize first),
         // so tag order and whitespace runs are not part of the identity.
-        let a = normalize_note(
-            "k",
-            "fact",
-            Some("a b"),
-            Some("src/main.rs"),
-            "durable",
-            "body",
-            None,
-        )
+        let a = normalize_note(NoteInput {
+            tags: Some("a b"),
+            refs: Some("src/main.rs"),
+            ..note("k", "fact", "body", "durable")
+        })
         .unwrap();
-        let b = normalize_note(
-            "k",
-            "fact",
-            Some("b   a"),
-            Some("src/main.rs"),
-            "durable",
-            "body",
-            None,
-        )
+        let b = normalize_note(NoteInput {
+            tags: Some("b   a"),
+            refs: Some("src/main.rs"),
+            ..note("k", "fact", "body", "durable")
+        })
         .unwrap();
         assert_eq!(
             mem_content_hash(&a.kind, &a.body, &a.tags, &a.refs, &a.scope),
             mem_content_hash(&b.kind, &b.body, &b.tags, &b.refs, &b.scope)
         );
-        let c = normalize_note(
-            "k",
-            "fact",
-            Some("a b"),
-            Some("src/main.rs"),
-            "durable",
-            "body ",
-            None,
-        )
+        let c = normalize_note(NoteInput {
+            tags: Some("a b"),
+            refs: Some("src/main.rs"),
+            ..note("k", "fact", "body ", "durable")
+        })
         .unwrap();
         assert_ne!(
             mem_content_hash(&a.kind, &a.body, &a.tags, &a.refs, &a.scope),

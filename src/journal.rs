@@ -85,20 +85,45 @@ pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)])
     });
 }
 
+/// The three same-typed outcome counters `record_result` journals. Named
+/// fields keep `result_count`/`shown`/`total` from being swapped silently at
+/// the call sites.
+pub struct OutcomeCounts {
+    pub result_count: usize,
+    pub shown: usize,
+    pub total: usize,
+}
+
+impl OutcomeCounts {
+    /// One count for all three counters: the non-paginated commands that
+    /// journal no truncation and no filtering.
+    pub fn uniform(n: usize) -> Self {
+        Self {
+            result_count: n,
+            shown: n,
+            total: n,
+        }
+    }
+
+    /// The paginated pointer queries: the journal count is the displayed set,
+    /// so `result_count` equals `shown` and only `total` can differ.
+    pub fn of(shown: usize, total: usize) -> Self {
+        Self {
+            result_count: shown,
+            shown,
+            total,
+        }
+    }
+}
+
 /// Handlers inject the query outcome before the process exits. No-op when the
 /// journal was not armed (disabled, or a non-journaled subcommand).
-pub fn record_result(
-    result_count: usize,
-    shown: usize,
-    total: usize,
-    stale: bool,
-    ambiguous: usize,
-) {
+pub fn record_result(counts: OutcomeCounts, stale: bool, ambiguous: usize) {
     PENDING.with(|p| {
         if let Some(pending) = p.borrow_mut().as_mut() {
-            pending.result_count = result_count;
-            pending.shown = shown;
-            pending.total = total;
+            pending.result_count = counts.result_count;
+            pending.shown = counts.shown;
+            pending.total = counts.total;
             pending.stale = stale;
             pending.ambiguous = ambiguous;
         }
@@ -140,6 +165,22 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
 }
 
 fn append_line(path: &Path, line: &str) {
+    // Write confinement: the journal is derived state and may only grow a
+    // regular file under a real `.aw/` directory. A symlinked directory or log
+    // would append attacker-chosen content outside the repo (the read path
+    // already rejects non-regular files).
+    if let Some(dir) = path.parent() {
+        if let Ok(meta) = fs::symlink_metadata(dir) {
+            if !meta.is_dir() {
+                return;
+            }
+        }
+    }
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if !meta.is_file() {
+            return;
+        }
+    }
     rotate_if_needed(path, ROTATE_BYTES);
     // Whether `.aw` exists before this append: the journal seeds the gitignore
     // marker only when IT creates the directory. A pre-existing `.aw` is owned
@@ -153,13 +194,7 @@ fn append_line(path: &Path, line: &str) {
     let mut file = match OpenOptions::new().append(true).open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if aw_created_here {
-                if let Some(aw) = path.parent() {
-                    if let Some(root) = aw.parent() {
-                        let _ = crate::db::ensure_aw_gitignore(root);
-                    }
-                }
-            }
+            recreate_journal(path, aw_created_here);
             match OpenOptions::new().create_new(true).append(true).open(path) {
                 Ok(file) => file,
                 Err(_) => return,
@@ -170,16 +205,25 @@ fn append_line(path: &Path, line: &str) {
     let _ = file.write_all(line.as_bytes());
 }
 
+/// Seed the `.aw` gitignore marker on the recreate path, but only when THIS
+/// append created the directory: a pre-existing `.aw` is owned by
+/// build/doctor (or the user) and appending must not touch its marker.
+fn recreate_journal(path: &Path, aw_created_here: bool) {
+    if !aw_created_here {
+        return;
+    }
+    let Some(root) = path.parent().and_then(Path::parent) else {
+        return;
+    };
+    let _ = crate::db::ensure_aw_gitignore(root);
+}
+
 /// Bounded reader for one journal generation: reject non-regular files and
 /// cap allocation at 16 MiB even when the file is oversized or growing.
 const MAX_LOG_READ: u64 = 16 * 1024 * 1024;
 
 fn read_log_bounded(path: &Path) -> Option<String> {
-    let meta = fs::symlink_metadata(path).ok()?;
-    if !meta.is_file() {
-        return None;
-    }
-    let file = fs::File::open(path).ok()?;
+    let file = crate::walk::open_regular_file(path).ok().flatten()?;
     let mut reader = file.take(MAX_LOG_READ);
     let mut out = String::new();
     reader.read_to_string(&mut out).ok()?;
@@ -245,6 +289,13 @@ struct ToolAgg {
 /// `quality` adds the empty-result split and the cap count without changing
 /// the journal schema or the default text.
 pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> {
+    let lines = load_usage_lines(root)?;
+    let aggs = aggregate_usage(&lines);
+    Ok(render_summary(&aggs, quality))
+}
+
+/// Read both journal generations, newest last (`""` is current, `.1` rotated).
+fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
     let mut lines = String::new();
     for gen in [".1", ""] {
         let path = usage_log_path(root);
@@ -264,6 +315,11 @@ pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> 
             "no journal entries — usage.log is empty or absent".to_string(),
         ));
     }
+    Ok(lines)
+}
+
+/// Fold every parsed line into one `ToolAgg` per tool.
+fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
     let mut aggs: std::collections::BTreeMap<String, ToolAgg> = Default::default();
     for line in lines.lines().filter(|l| !l.trim().is_empty()) {
         let Some(fields) = parse_usage_line(line) else {
@@ -293,58 +349,65 @@ pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> 
             agg.latencies.push(us.max(0) as u64);
         }
     }
+    aggs
+}
+
+fn render_summary(
+    aggs: &std::collections::BTreeMap<String, ToolAgg>,
+    quality: bool,
+) -> Vec<String> {
     let total: usize = aggs.values().map(|a| a.calls).sum();
     let mut out = vec![format!("aw usage: {total} journaled calls")];
-    let pct = |n: usize, d: usize| -> String {
-        if d == 0 {
-            "-".to_string()
-        } else {
-            format!("{:.1}%", 100.0 * n as f64 / d as f64)
-        }
-    };
     let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
     rows.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
-    for (tool, agg) in rows {
-        let mut lat = agg.latencies.clone();
-        lat.sort_unstable();
-        let p = |q: f64| -> String {
-            if lat.is_empty() {
-                "-".to_string()
-            } else {
-                let idx = ((lat.len() as f64 * q).ceil() as usize)
-                    .saturating_sub(1)
-                    .min(lat.len() - 1);
-                format!("{:.1}ms", lat[idx] as f64 / 1000.0)
-            }
-        };
-        if quality {
-            out.push(format!(
-                "  {tool}: {} calls, errors={} empty_ok={} ({}) empty_error={} stale={} ambiguous={} capped={} p50={} p95={}",
-                agg.calls,
-                agg.errors,
-                agg.empty_ok,
-                pct(agg.empty_ok, agg.calls),
-                agg.empty_error,
-                agg.stale,
-                agg.ambiguous,
-                agg.capped,
-                p(0.5),
-                p(0.95),
-            ));
-        } else {
-            out.push(format!(
-                "  {tool}: {} calls, errors={} empty={} stale={} ambiguous={} p50={} p95={}",
-                agg.calls,
-                agg.errors,
-                agg.empty,
-                agg.stale,
-                agg.ambiguous,
-                p(0.5),
-                p(0.95),
-            ));
-        }
+    out.extend(
+        rows.into_iter()
+            .map(|(tool, agg)| tool_row(tool, agg, quality)),
+    );
+    out
+}
+
+fn percent(n: usize, d: usize) -> String {
+    if d == 0 {
+        "-".to_string()
+    } else {
+        format!("{:.1}%", 100.0 * n as f64 / d as f64)
     }
-    Ok(out)
+}
+
+fn percentile(lat: &[u64], q: f64) -> String {
+    if lat.is_empty() {
+        return "-".to_string();
+    }
+    let idx = ((lat.len() as f64 * q).ceil() as usize)
+        .saturating_sub(1)
+        .min(lat.len() - 1);
+    format!("{:.1}ms", lat[idx] as f64 / 1000.0)
+}
+
+fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
+    let mut lat = agg.latencies.clone();
+    lat.sort_unstable();
+    let p50 = percentile(&lat, 0.5);
+    let p95 = percentile(&lat, 0.95);
+    if quality {
+        format!(
+            "  {tool}: {} calls, errors={} empty_ok={} ({}) empty_error={} stale={} ambiguous={} capped={} p50={p50} p95={p95}",
+            agg.calls,
+            agg.errors,
+            agg.empty_ok,
+            percent(agg.empty_ok, agg.calls),
+            agg.empty_error,
+            agg.stale,
+            agg.ambiguous,
+            agg.capped,
+        )
+    } else {
+        format!(
+            "  {tool}: {} calls, errors={} empty={} stale={} ambiguous={} p50={p50} p95={p95}",
+            agg.calls, agg.errors, agg.empty, agg.stale, agg.ambiguous,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -430,5 +493,29 @@ mod tests {
         assert_eq!(env_tag("AW_TEST_TAG").len(), 64);
         std::env::remove_var("AW_TEST_TAG");
         assert_eq!(env_tag("AW_TEST_TAG"), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn append_refuses_symlinked_log_and_directory() {
+        let dir = std::env::temp_dir().join(format!("aw-journal-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target.txt");
+        fs::write(&target, b"keep").unwrap();
+        let log = dir.join("usage.log");
+        std::os::unix::fs::symlink(&target, &log).unwrap();
+        append_line(&log, "line\n");
+        assert_eq!(fs::read(&target).unwrap(), b"keep");
+
+        // A symlinked `.aw` directory must not redirect the write either.
+        let outside = dir.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        let linked_root = dir.join("repo");
+        fs::create_dir_all(&linked_root).unwrap();
+        std::os::unix::fs::symlink(&outside, linked_root.join(".aw")).unwrap();
+        append_line(&linked_root.join(".aw/usage.log"), "line\n");
+        assert!(!outside.join("usage.log").exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

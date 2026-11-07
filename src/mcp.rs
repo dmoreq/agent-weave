@@ -12,7 +12,9 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use crate::service::{from_tool_args, CommandRequest, ParamKind, Surface, CORE_TOOLS, TOOL_SPECS};
+use crate::service::{
+    from_tool_args, CommandRequest, ParamKind, Surface, RESOLVE_MAX_NAMES, TOOL_SPECS,
+};
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -21,7 +23,7 @@ const PROTOCOL_VERSION: &str = "2025-06-18";
 fn tools(all: bool) -> Value {
     let list: Vec<Value> = TOOL_SPECS
         .iter()
-        .filter(|spec| all || CORE_TOOLS.contains(&spec.name))
+        .filter(|spec| all || spec.core)
         .map(|spec| {
             let mut props = serde_json::Map::new();
             let mut required: Vec<Value> = Vec::new();
@@ -40,7 +42,11 @@ fn tools(all: bool) -> Value {
                     }
                     ParamKind::Bool => json!({"type": "boolean"}),
                     ParamKind::StrArray => {
-                        json!({"type": "array", "items": {"type": "string"}, "maxItems": 1000})
+                        json!({
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "maxItems": RESOLVE_MAX_NAMES
+                        })
                     }
                 };
                 schema["description"] = json!(param.description);
@@ -64,7 +70,8 @@ fn tools(all: bool) -> Value {
 }
 
 /// Serve until stdin closes. All protocol output goes to stdout; the only
-/// stdout bytes ever written are complete JSON-RPC messages.
+/// stdout bytes ever written are complete JSON-RPC messages. One loop owns
+/// the protocol state; tool dispatch is the only extraction boundary.
 pub fn serve(
     root_arg: Option<&Path>,
     no_journal: bool,
@@ -79,198 +86,208 @@ pub fn serve(
     let mut reader = stdin.lock();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
-    // Bounded frame size (R6d A7): the MCP input is untrusted; without a cap
-    // a single oversized frame forces memory linear in its size.
-    const MAX_FRAME_BYTES: u64 = 8 * 1024 * 1024;
     let mut buf: Vec<u8> = Vec::new();
     loop {
-        buf.clear();
-        let read = reader
-            .by_ref()
-            .take(MAX_FRAME_BYTES + 1)
-            .read_until(b'\n', &mut buf)?;
-        if read == 0 {
-            return Ok(());
-        }
-        let newline_seen = buf.last() == Some(&b'\n');
-        if read as u64 > MAX_FRAME_BYTES {
-            // Drain the rest of the oversized frame in fixed-size chunks so
-            // memory stays bounded. If the bounded read already consumed the
-            // delimiter, do not drain: the next line is a fresh request.
-            if !newline_seen {
-                loop {
-                    let chunk = reader.fill_buf()?;
-                    if chunk.is_empty() {
-                        break;
-                    }
-                    let nl = chunk.iter().position(|&b| b == b'\n');
-                    let take = nl.map(|i| i + 1).unwrap_or(chunk.len());
-                    reader.consume(take);
-                    if nl.is_some() {
-                        break;
-                    }
-                }
-            }
-            write_error(&mut out, None, -32600, "frame too large")?;
-            continue;
-        }
-        let frame = match std::str::from_utf8(&buf) {
-            Ok(text) => text.trim(),
-            Err(_) => {
-                write_error(&mut out, None, -32700, "parse error")?;
-                continue;
-            }
-        };
-        if frame.is_empty() {
-            continue;
-        }
-        let msg: Value = match serde_json::from_str(frame) {
-            Ok(v) => v,
-            Err(_) => {
-                write_error(&mut out, None, -32700, "parse error")?;
-                continue;
-            }
-        };
-        let id = msg.get("id").cloned();
-        let is_notification = id.is_none();
-        if !msg.is_object() {
-            write_error(&mut out, None, -32600, "invalid request")?;
-            continue;
-        }
-        if msg.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
-            if !is_notification {
-                write_error(
-                    &mut out,
-                    id,
-                    -32600,
-                    "invalid request: jsonrpc must be \"2.0\"",
-                )?;
-            }
-            continue;
-        }
-        let Some(method_value) = msg.get("method") else {
-            // A client response carries result/error and no method; ignore it.
-            // Any other envelope without a method is an invalid request.
-            if !is_notification && msg.get("result").is_none() && msg.get("error").is_none() {
-                write_error(&mut out, id, -32600, "invalid request: missing method")?;
-            }
-            continue;
-        };
-        let Some(method) = method_value.as_str().map(str::to_string) else {
-            if !is_notification {
-                write_error(
-                    &mut out,
-                    id,
-                    -32600,
-                    "invalid request: method must be a string",
-                )?;
-            }
-            continue;
-        };
-        match method.as_str() {
-            "initialize" => {
-                let requested = msg
-                    .get("params")
-                    .and_then(|p| p.get("protocolVersion"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(PROTOCOL_VERSION)
-                    .to_string();
-                let result = json!({
-                    "protocolVersion": requested,
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
-                });
-                if !is_notification {
-                    write_result(&mut out, id, result)?;
-                }
-            }
-            "notifications/initialized" => {}
-            "ping" => {
-                if !is_notification {
-                    write_result(&mut out, id, json!({}))?;
-                }
-            }
-            "tools/list" => {
-                if !is_notification {
-                    write_result(&mut out, id, json!({"tools": tools(all_tools)}))?;
-                }
-            }
-            "tools/call" => {
-                let params = msg.get("params").cloned().unwrap_or(Value::Null);
-                let tool_name = params
-                    .get("name")
-                    .and_then(|n| n.as_str())
-                    .map(str::to_string);
-                let Some(tool_name) = tool_name else {
-                    if !is_notification {
-                        write_error(&mut out, id, -32602, "missing tool name")?;
-                    }
-                    continue;
-                };
-                if !TOOL_SPECS
-                    .iter()
-                    .any(|t| (all_tools || CORE_TOOLS.contains(&t.name)) && t.name == tool_name)
-                {
-                    if !is_notification {
-                        write_error(
-                            &mut out,
-                            id,
-                            -32602,
-                            format!("unknown tool '{tool_name}'").as_str(),
-                        )?;
-                    }
-                    continue;
-                }
-                let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
-                // Protocol-level invalid params (R7 L4): a missing required
-                // string must be -32602, not a downstream "symbol '' not in
-                // index" tool result that masks client bugs.
-                if let Some(reason) = missing_required_arg(&tool_name, &arguments) {
-                    if !is_notification {
-                        write_error(&mut out, id, -32602, &reason)?;
-                    }
-                    continue;
-                }
-                let started = Instant::now();
-                // Panic isolation (R6d A7): one tool must not kill the server.
-                let (text, is_error, exit_code) =
-                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        call_tool(&root, &tool_name, &arguments)
-                    })) {
-                        Ok(v) => v,
-                        Err(_) => (
-                            "aw: internal: tool panicked — server still running\n".to_string(),
-                            true,
-                            6,
-                        ),
-                    };
-                // Finalize covers the panic path (the pending journal line is
-                // still armed); non-panic paths were finalized in the service.
-                crate::journal::finalize(
-                    Some(&root),
-                    exit_code,
-                    started.elapsed().as_micros() as u64,
-                );
-                if !is_notification {
-                    write_result(
-                        &mut out,
-                        id,
-                        json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
-                    )?;
-                }
-            }
-            _ => {
-                if !is_notification {
-                    write_error(
-                        &mut out,
-                        id,
-                        -32601,
-                        format!("method not found: {method}").as_str(),
-                    )?;
-                }
-            }
+        match read_frame(&mut reader, &mut out, &mut buf)? {
+            Frame::Eof => return Ok(()),
+            Frame::Skip => continue,
+            Frame::Message(msg) => handle_message(msg, &root, all_tools, &mut out)?,
         }
     }
+}
+
+/// One bounded input frame: a parsed message, a skipped frame (error already
+/// written), or end of input.
+enum Frame {
+    Eof,
+    Skip,
+    Message(Value),
+}
+
+/// Read one newline-delimited frame. The MCP input is untrusted: the 8 MiB
+/// cap keeps memory bounded, and an oversized frame is drained in chunks so
+/// the next request still starts at a clean line.
+fn read_frame(
+    reader: &mut impl BufRead,
+    out: &mut impl Write,
+    buf: &mut Vec<u8>,
+) -> std::io::Result<Frame> {
+    const MAX_FRAME_BYTES: u64 = 8 * 1024 * 1024;
+    buf.clear();
+    let read = reader
+        .by_ref()
+        .take(MAX_FRAME_BYTES + 1)
+        .read_until(b'\n', buf)?;
+    if read == 0 {
+        return Ok(Frame::Eof);
+    }
+    let newline_seen = buf.last() == Some(&b'\n');
+    if read as u64 > MAX_FRAME_BYTES {
+        // Drain the rest of the oversized frame. If the bounded read already
+        // consumed the delimiter, do not drain: the next line is a fresh request.
+        if !newline_seen {
+            loop {
+                let chunk = reader.fill_buf()?;
+                if chunk.is_empty() {
+                    break;
+                }
+                let nl = chunk.iter().position(|&b| b == b'\n');
+                let take = nl.map(|i| i + 1).unwrap_or(chunk.len());
+                reader.consume(take);
+                if nl.is_some() {
+                    break;
+                }
+            }
+        }
+        write_error(out, None, -32600, "frame too large")?;
+        return Ok(Frame::Skip);
+    }
+    let frame = match std::str::from_utf8(buf) {
+        Ok(text) => text.trim(),
+        Err(_) => {
+            write_error(out, None, -32700, "parse error")?;
+            return Ok(Frame::Skip);
+        }
+    };
+    if frame.is_empty() {
+        return Ok(Frame::Skip);
+    }
+    match serde_json::from_str(frame) {
+        Ok(v) => Ok(Frame::Message(v)),
+        Err(_) => {
+            write_error(out, None, -32700, "parse error")?;
+            Ok(Frame::Skip)
+        }
+    }
+}
+
+/// Validate the JSON-RPC envelope guards (object shape, protocol version, a
+/// string method) and return the frame id with its method; `None` when the
+/// frame was rejected (the error reply is already written) or is a client
+/// response without a method (silently ignored). Every early return matches
+/// the original `continue`: the loop reads the next frame.
+fn validate_envelope(
+    msg: &Value,
+    out: &mut impl Write,
+) -> std::io::Result<Option<(Option<Value>, String)>> {
+    if !msg.is_object() {
+        write_error(out, None, -32600, "invalid request")?;
+        return Ok(None);
+    }
+    let id = msg.get("id").cloned();
+    if msg.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
+        reply_error(out, id, -32600, "invalid request: jsonrpc must be \"2.0\"")?;
+        return Ok(None);
+    }
+    let Some(method_value) = msg.get("method") else {
+        // A client response carries result/error and no method; ignore it.
+        // Any other envelope without a method is an invalid request.
+        if msg.get("result").is_none() && msg.get("error").is_none() {
+            reply_error(out, id, -32600, "invalid request: missing method")?;
+        }
+        return Ok(None);
+    };
+    let Some(method) = method_value.as_str().map(str::to_string) else {
+        reply_error(out, id, -32600, "invalid request: method must be a string")?;
+        return Ok(None);
+    };
+    Ok(Some((id, method)))
+}
+
+/// Dispatch one validated JSON-RPC message; the envelope guards live in
+/// `validate_envelope` and already wrote any error reply.
+fn handle_message(
+    msg: Value,
+    root: &Path,
+    all_tools: bool,
+    out: &mut impl Write,
+) -> std::io::Result<()> {
+    let Some((id, method)) = validate_envelope(&msg, out)? else {
+        return Ok(());
+    };
+    match method.as_str() {
+        "initialize" => {
+            let requested = msg
+                .get("params")
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(|v| v.as_str())
+                .unwrap_or(PROTOCOL_VERSION)
+                .to_string();
+            let result = json!({
+                "protocolVersion": requested,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
+            });
+            reply_result(out, id, result)?;
+        }
+        "notifications/initialized" => {}
+        "ping" => {
+            reply_result(out, id, json!({}))?;
+        }
+        "tools/list" => {
+            reply_result(out, id, json!({"tools": tools(all_tools)}))?;
+        }
+        "tools/call" => {
+            let params = msg.get("params").cloned().unwrap_or(Value::Null);
+            handle_tools_call(&params, root, all_tools, id, out)?;
+        }
+        _ => {
+            reply_error(out, id, -32601, &format!("method not found: {method}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// One `tools/call`: validate the tool name and required args, run the tool
+/// behind a panic boundary, and write the result.
+fn handle_tools_call(
+    params: &Value,
+    root: &Path,
+    all_tools: bool,
+    id: Option<Value>,
+    out: &mut impl Write,
+) -> std::io::Result<()> {
+    let tool_name = params
+        .get("name")
+        .and_then(|n| n.as_str())
+        .map(str::to_string);
+    let Some(tool_name) = tool_name else {
+        return reply_error(out, id, -32602, "missing tool name");
+    };
+    if !TOOL_SPECS
+        .iter()
+        .any(|t| (all_tools || t.core) && t.name == tool_name)
+    {
+        return reply_error(out, id, -32602, &format!("unknown tool '{tool_name}'"));
+    }
+    let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+    // Protocol-level invalid params (R7 L4): a missing required string must
+    // be -32602, not a downstream "symbol '' not in index" tool result that
+    // masks client bugs.
+    if let Some(reason) = missing_required_arg(&tool_name, &arguments) {
+        return reply_error(out, id, -32602, &reason);
+    }
+    let started = Instant::now();
+    // Panic isolation (R6d A7): one tool must not kill the server.
+    let (text, is_error, exit_code) =
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            call_tool(root, &tool_name, &arguments)
+        })) {
+            Ok(v) => v,
+            Err(_) => (
+                "aw: internal: tool panicked — server still running\n".to_string(),
+                true,
+                6,
+            ),
+        };
+    // Finalize covers the panic path (the pending journal line is still
+    // armed); non-panic paths were finalized in the service.
+    crate::journal::finalize(Some(root), exit_code, started.elapsed().as_micros() as u64);
+    reply_result(
+        out,
+        id,
+        json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
+    )
 }
 
 fn write_result(out: &mut impl Write, id: Option<Value>, result: Value) -> std::io::Result<()> {
@@ -290,6 +307,26 @@ fn write_error(
         "error": {"code": code, "message": message},
     });
     writeln!(out, "{msg}")
+}
+
+/// Reply to a request; a notification (no id) gets no response frame.
+fn reply_result(out: &mut impl Write, id: Option<Value>, result: Value) -> std::io::Result<()> {
+    if id.is_some() {
+        write_result(out, id, result)?;
+    }
+    Ok(())
+}
+
+fn reply_error(
+    out: &mut impl Write,
+    id: Option<Value>,
+    code: i64,
+    message: &str,
+) -> std::io::Result<()> {
+    if id.is_some() {
+        write_error(out, id, code, message)?;
+    }
+    Ok(())
 }
 
 /// Required-argument check rendered from the shared specs (protocol-level

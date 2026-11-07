@@ -11,7 +11,7 @@ pub const CORRUPT_INDEX_MSG: &str = "index.db failed integrity check — run aw 
 /// SQLite reports corruption as SQLITE_NOTADB (header unreadable at open) or
 /// SQLITE_CORRUPT (malformed page hit during a statement). Either maps to the
 /// exit-3 contract; everything else stays an internal error (exit 6).
-fn is_index_corruption(e: &rusqlite::Error) -> bool {
+pub(crate) fn is_sqlite_corruption(e: &rusqlite::Error) -> bool {
     matches!(
         e,
         rusqlite::Error::SqliteFailure(ffi, _)
@@ -27,7 +27,7 @@ fn is_index_corruption(e: &rusqlite::Error) -> bool {
 pub enum AwError {
     NoResults(String),
     /// Empty result for a tool whose contract requires a first-line caveat
-    /// on stdout even when nothing is found (dead, clones).
+    /// on stdout even when nothing is found (dead).
     NoResultsCaveated {
         caveat: &'static str,
         detail: String,
@@ -83,51 +83,52 @@ pub enum AwError {
 }
 
 impl AwError {
-    pub fn exit_code(&self) -> i32 {
+    fn code_class(&self) -> (i32, &'static str) {
         match self {
-            AwError::NoResults(_) | AwError::NoResultsCaveated { .. } => 1,
-            AwError::Usage(_) => 2,
-            AwError::Ambiguous { .. } => 2,
-            AwError::CorruptIndex(_) => 3,
-            AwError::NoMemory(_) => 1,
-            AwError::CorruptMemory(_) => 3,
-            AwError::MemoryLocked => 4,
-            AwError::MemorySchema { .. } => 5,
-            AwError::Locked(_) => 4,
-            AwError::SchemaMismatch { .. } => 5,
-            AwError::Internal(_) => 6,
-            AwError::BatchOutput { code, .. } => *code,
-            AwError::ParseQuality { .. } => 7,
+            AwError::NoResults(_) | AwError::NoResultsCaveated { .. } => (1, "no-results"),
+            AwError::Usage(_) => (2, "usage"),
+            AwError::Ambiguous { .. } => (2, "usage"),
+            AwError::CorruptIndex(_) => (3, "corrupt-index"),
+            AwError::NoMemory(_) => (1, "no-memory"),
+            AwError::CorruptMemory(_) => (3, "corrupt-memory"),
+            AwError::MemoryLocked => (4, "locked"),
+            AwError::MemorySchema { .. } => (5, "memory-schema-mismatch"),
+            AwError::Locked(_) => (4, "locked"),
+            AwError::SchemaMismatch { .. } => (5, "schema-mismatch"),
+            AwError::Internal(_) => (6, "internal"),
+            AwError::BatchOutput { code, .. } => (*code, "batch"),
+            AwError::ParseQuality { .. } => (7, "parse-quality"),
         }
     }
 
+    /// Shared not-indexed error (exit 1). Single source of the CLI-asserted
+    /// `path '<file>' not indexed` string: the file gate in `query::indexed_file`
+    /// and the `symbols` fall-through both construct it here, so the contract
+    /// text cannot drift between surfaces.
+    pub(crate) fn not_indexed(file: &str) -> AwError {
+        AwError::NoResults(format!("path '{file}' not indexed"))
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        self.code_class().0
+    }
+
     fn class(&self) -> &'static str {
-        match self {
-            AwError::NoResults(_) | AwError::NoResultsCaveated { .. } => "no-results",
-            AwError::Usage(_) => "usage",
-            AwError::Ambiguous { .. } => "usage",
-            AwError::CorruptIndex(_) => "corrupt-index",
-            AwError::NoMemory(_) => "no-memory",
-            AwError::CorruptMemory(_) => "corrupt-memory",
-            AwError::MemoryLocked => "locked",
-            AwError::MemorySchema { .. } => "memory-schema-mismatch",
-            AwError::Locked(_) => "locked",
-            AwError::SchemaMismatch { .. } => "schema-mismatch",
-            AwError::ParseQuality { .. } => "parse-quality",
-            AwError::Internal(_) => "internal",
-            AwError::BatchOutput { .. } => "batch",
-        }
+        self.code_class().1
     }
 }
 
 impl fmt::Display for AwError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AwError::NoResults(detail) => write!(f, "aw: {}: {}", self.class(), detail),
-            AwError::NoResultsCaveated { detail, .. } => {
-                write!(f, "aw: {}: {}", self.class(), detail)
-            }
-            AwError::Usage(detail) => write!(f, "aw: {}: {}", self.class(), detail),
+            AwError::NoResults(detail)
+            | AwError::NoResultsCaveated { detail, .. }
+            | AwError::Usage(detail)
+            | AwError::CorruptIndex(detail)
+            | AwError::NoMemory(detail)
+            | AwError::CorruptMemory(detail)
+            | AwError::MemorySchema { detail }
+            | AwError::Internal(detail) => write!(f, "aw: {}: {}", self.class(), detail),
             AwError::Ambiguous { name, total, role, .. } => write!(
                 f,
                 "aw: {}: ambiguous name '{name}' — {total} candidates{}; use the Class.method qualname form",
@@ -137,14 +138,10 @@ impl fmt::Display for AwError {
                     None => String::new(),
                 }
             ),
-            AwError::CorruptIndex(detail) => write!(f, "aw: {}: {}", self.class(), detail),
-            AwError::NoMemory(detail) => write!(f, "aw: {}: {}", self.class(), detail),
-            AwError::CorruptMemory(detail) => write!(f, "aw: {}: {}", self.class(), detail),
             AwError::MemoryLocked => write!(
                 f,
                 "aw: locked: memory write in progress — retry"
             ),
-            AwError::MemorySchema { detail } => write!(f, "aw: {}: {}", self.class(), detail),
             AwError::Locked(pid) => {
                 write!(f, "aw: locked: build in progress (pid {pid}) — retry after it exits")
             }
@@ -158,7 +155,6 @@ impl fmt::Display for AwError {
                 rate * 100.0,
                 threshold * 100.0
             ),
-            AwError::Internal(detail) => write!(f, "aw: {}: {}", self.class(), detail),
             AwError::BatchOutput { text, .. } => write!(f, "{text}"),
         }
     }
@@ -170,7 +166,7 @@ impl From<rusqlite::Error> for AwError {
     fn from(e: rusqlite::Error) -> Self {
         // Amendment 11a: corruption is detected where SQLite reports it (open
         // or any statement), replacing the per-open quick_check scan.
-        if is_index_corruption(&e) {
+        if is_sqlite_corruption(&e) {
             AwError::CorruptIndex(CORRUPT_INDEX_MSG.to_string())
         } else {
             AwError::Internal(format!("database error: {e}"))

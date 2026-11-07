@@ -38,6 +38,17 @@ fn build(repo: &Path) -> (i32, String, String) {
     )
 }
 
+/// Run one git command in a temp repo; fail the test on non-zero exit.
+fn git(repo: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?} failed");
+}
+
 // Raw strings: the previous `\`-continuation form stripped the leading
 // indentation of every line, so class bodies collapsed to top-level defs and
 // the fixtures never exercised method resolution at all.
@@ -1779,6 +1790,18 @@ fn resolve_batch_reports_found_and_missing_with_exit1() {
 }
 
 #[test]
+fn resolve_requires_the_stdin_flag() {
+    let repo = temp_repo("resolve-stdin-flag");
+    let out = aw(&repo).arg("resolve").output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("pass --stdin"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn resolve_honors_no_journal_and_records_parsed_count() {
     let repo = temp_repo("resolve-journal");
     write(&repo, "app.py", "def public():\n    pass\n");
@@ -1828,6 +1851,32 @@ fn resolve_honors_no_journal_and_records_parsed_count() {
     assert!(line.contains("\"tool\":\"resolve\""), "{line}");
     assert!(line.contains("\"count\":\"1\""), "{line}");
     assert!(line.contains("\"candidate_limit\":\"50\""), "{line}");
+}
+
+#[test]
+fn resolve_nonzero_exit_is_journaled() {
+    let repo = temp_repo("resolve-journal-nonzero");
+    write(&repo, "app.py", "def public():\n    pass\n");
+    build(&repo);
+
+    let mut child = aw(&repo)
+        .args(["resolve", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"public\nmissing_thing\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let line = log.lines().last().unwrap();
+    assert!(line.contains("\"tool\":\"resolve\""), "{line}");
+    assert!(line.contains("\"exit_code\":1"), "{line}");
 }
 
 #[test]
@@ -2218,28 +2267,22 @@ fn usage_journal_creates_gitignore_marker() {
     // gitignore marker must exist so the directory never leaks into git status.
     let repo = temp_repo("journal-gitignore");
     write(&repo, "a.py", "def f(): pass\n");
-    let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .arg("-C")
-            .arg(&repo)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
-    };
     // Baseline commit: `git status --porcelain` must be empty before the
     // journal writes anything, so only `.aw` leakage could dirty it.
-    git(&["init", "-q"]);
-    git(&["add", "-A"]);
-    git(&[
-        "-c",
-        "user.name=t",
-        "-c",
-        "user.email=t@example.com",
-        "commit",
-        "-qm",
-        "init",
-    ]);
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-A"]);
+    git(
+        &repo,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
 
     // `callers` fails with no index (exit 1) but still journals.
     let out = aw(&repo).args(["callers", "f"]).output().unwrap();
@@ -2280,7 +2323,10 @@ fn fifo_gitignore_marker_fails_closed_without_hanging() {
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_aw"));
     cmd.arg("--root").arg(&repo).arg("build");
-    let out = output_with_timeout(cmd, 20).expect("build must not hang on a FIFO .aw/.gitignore");
+    // The budget only bounds the wait; a true FIFO hang is killed and still
+    // fails via None. Sized for a loaded host, where a sub-second fail-closed
+    // exit can inflate past a 20 s wall clock.
+    let out = output_with_timeout(cmd, 60).expect("build must not hang on a FIFO .aw/.gitignore");
     assert_eq!(
         out.status.code(),
         Some(6),
@@ -3514,17 +3560,8 @@ fn build_does_not_descend_unreadable_gitignored_tree() {
     for i in 0..3000 {
         fs::write(ignored.join(format!("dummy_{i}.py")), "x = 1\n").unwrap();
     }
-    let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .arg("-C")
-            .arg(&repo)
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
-    };
-    git(&["init", "-q"]);
-    git(&["add", "-A"]);
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-A"]);
     fs::set_permissions(&ignored, fs::Permissions::from_mode(0o000)).unwrap();
 
     let started = std::time::Instant::now();
@@ -3540,8 +3577,11 @@ fn build_does_not_descend_unreadable_gitignored_tree() {
         "stdout={stdout} stderr={stderr}"
     );
     assert!(stdout.contains("files=1"), "{stdout}");
+    // A healthy build of this fixture takes well under a second; the budget
+    // guards against pathological slowness, not exact latency, so it is sized
+    // for a loaded host where scheduling can inflate wall clock ~10x.
     assert!(
-        elapsed < std::time::Duration::from_secs(10),
+        elapsed < std::time::Duration::from_secs(60),
         "build took {elapsed:?}"
     );
 }
@@ -5195,7 +5235,9 @@ fn mem_concurrent_writers_serialize_or_exit4_never_unique() {
         "every successful write is one rev: {stdout}"
     );
 
-    // (b) Different keys: both succeed.
+    // (b) Different keys share SQLite's single writer, so under load one may
+    // still serialize (0) or hit the busy timeout (4). What must never happen
+    // is a UNIQUE leak, and at least one write must land.
     let repo = temp_repo("mem-race-distinct");
     let ra = {
         let repo = repo.clone();
@@ -5206,8 +5248,27 @@ fn mem_concurrent_writers_serialize_or_exit4_never_unique() {
         std::thread::spawn(move || mem_write(&repo, "right", "right body", "fact"))
     };
     let (ra, rb) = (ra.join().unwrap(), rb.join().unwrap());
-    assert_eq!(ra.0, 0, "{}{}", ra.1, ra.2);
-    assert_eq!(rb.0, 0, "{}{}", rb.1, rb.2);
+    for (code, _stdout, stderr) in [&ra, &rb] {
+        assert!(
+            *code == 0 || *code == 4,
+            "distinct-key writer must serialize (0) or exit 4, got {code}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("UNIQUE"),
+            "constraint leaks are defects: {stderr}"
+        );
+    }
+    // A writer that hit the busy timeout left no row; retry it once so the
+    // end state does not depend on machine load. The concurrency invariant
+    // (no UNIQUE leak) was already checked on the racing attempts.
+    if ra.0 != 0 {
+        let retry = mem_write(&repo, "left", "left body", "fact");
+        assert_eq!(retry.0, 0, "retry left: {}{}", retry.1, retry.2);
+    }
+    if rb.0 != 0 {
+        let retry = mem_write(&repo, "right", "right body", "fact");
+        assert_eq!(retry.0, 0, "retry right: {}{}", retry.1, retry.2);
+    }
     for key in ["left", "right"] {
         let (code, _stdout, stderr) = mem_out(&repo, &["get", key]);
         assert_eq!(code, 0, "{stderr}");

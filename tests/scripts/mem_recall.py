@@ -29,26 +29,15 @@ import argparse
 import json
 import random
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from precision_recall import wilson
+from precision_recall import run_aw, wilson
 
 CAVEAT_PREFIX = "aw: memory"
 SHOWING_PREFIX = "showing "
-
-
-def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [aw, "--root", str(root), "--no-journal", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=120,
-    )
 
 
 def parse_query_keys(stdout: str) -> list[str]:

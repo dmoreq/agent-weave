@@ -3,8 +3,7 @@
 //! (negative), and module-qualified constructor. Each asserts the exact
 //! resolution outcome on a minimal fixture.
 
-use agent_weave::extract::extract_file;
-use agent_weave::extract::resolve;
+use agent_weave::extract::{extract_file, resolve, Confidence, EdgeKind, SymbolKind};
 use agent_weave::parse::{parse_source, Lang};
 
 fn edges_for(src: &str) -> Vec<(String, String, String)> {
@@ -17,8 +16,8 @@ fn edges_for(src: &str) -> Vec<(String, String, String)> {
         .iter()
         .map(|e| {
             (
-                e.kind.to_string(),
-                e.confidence.to_string(),
+                e.kind.as_str().to_string(),
+                e.confidence.as_str().to_string(),
                 e.dst_name.clone(),
             )
         })
@@ -42,13 +41,15 @@ fn star_import_defers_to_star_module() {
         .map(|x| (x.kind, x.confidence, x.dst_name.clone()))
         .collect();
     assert!(
-        e.iter()
-            .any(|(k, c, n)| *k == "imports" && *c == "AMBIGUOUS" && n.ends_with(".utils")),
+        e.iter().any(|(k, c, n)| *k == EdgeKind::Imports
+            && *c == Confidence::Ambiguous
+            && n.ends_with(".utils")),
         "star import edge: {e:?}"
     );
     assert!(
-        e.iter()
-            .any(|(k, c, n)| *k == "calls" && *c == "EXTRACTED" && n.contains("helper")),
+        e.iter().any(|(k, c, n)| *k == EdgeKind::Calls
+            && *c == Confidence::Extracted
+            && n.contains("helper")),
         "bare call under star import resolves to utils.helper: {e:?}"
     );
 }
@@ -87,7 +88,9 @@ fn import_x_as_y_binds_module_root() {
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
         resolution.edges.iter().any(|e| {
-            e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "helpers.help_me"
+            e.kind == EdgeKind::Calls
+                && e.confidence == Confidence::Extracted
+                && e.dst_name == "helpers.help_me"
         }),
         "hp.help_me() must resolve to helpers.help_me: {:?}",
         resolution.edges
@@ -111,7 +114,7 @@ fn long_chain_respects_local_module_shadowing() {
     let sites: Vec<_> = resolution
         .edges
         .iter()
-        .filter(|edge| edge.kind == "calls" && edge.dst_name == "pkg.mod.f")
+        .filter(|edge| edge.kind == EdgeKind::Calls && edge.dst_name == "pkg.mod.f")
         .map(|edge| edge.site_line)
         .collect();
     assert_eq!(sites, vec![5]);
@@ -155,10 +158,11 @@ fn module_qualified_constructor_resolves() {
     let fx1 = extract_file(0, "pkg/pkg2/mod.py", src1.as_bytes(), &parsed1);
     let fx2 = extract_file(1, "pkg/other.py", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
-    let hit = resolution
-        .edges
-        .iter()
-        .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("mod.K"));
+    let hit = resolution.edges.iter().any(|e| {
+        e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
+            && e.dst_name.contains("mod.K")
+    });
     assert!(hit, "mod.K() must resolve: {:?}", resolution.edges);
 }
 
@@ -203,7 +207,7 @@ fn typed_receiver_emits_type_ref_edge() {
     let type_refs: Vec<_> = resolution
         .edges
         .iter()
-        .filter(|e| e.kind == "type_ref")
+        .filter(|e| e.kind == EdgeKind::TypeRef)
         .collect();
     assert_eq!(
         type_refs.len(),
@@ -211,10 +215,16 @@ fn typed_receiver_emits_type_ref_edge() {
         "exactly one type_ref edge: {type_refs:?}"
     );
     assert_eq!(type_refs[0].dst_name, "b.B", "{type_refs:?}");
-    assert_eq!(type_refs[0].confidence, "EXTRACTED", "{type_refs:?}");
+    assert_eq!(
+        type_refs[0].confidence,
+        Confidence::Extracted,
+        "{type_refs:?}"
+    );
     assert!(
         resolution.edges.iter().any(|e| {
-            e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "a.A.foo"
+            e.kind == EdgeKind::Calls
+                && e.confidence == Confidence::Extracted
+                && e.dst_name == "a.A.foo"
         }),
         "MRO hit before Mid.foo exists: {:?}",
         resolution.edges
@@ -248,15 +258,15 @@ fn root_level_relative_import_resolves_without_stray_dot() {
     let fx2 = extract_file(1, "app.py", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
-        resolution.edges.iter().any(|e| e.kind == "calls"
-            && e.confidence == "EXTRACTED"
+        resolution.edges.iter().any(|e| e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
             && e.dst_name == "widget.Widget"),
         "W() must resolve to widget.Widget: {:?}",
         resolution.edges
     );
     assert!(
-        resolution.edges.iter().any(|e| e.kind == "calls"
-            && e.confidence == "EXTRACTED"
+        resolution.edges.iter().any(|e| e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
             && e.dst_name == "widget.Widget.render"),
         "w.render() must resolve: {:?}",
         resolution.edges
@@ -285,7 +295,9 @@ fn ts_class_method_and_this_call() {
     );
     let resolution = agent_weave::extract::resolve(vec![fx], Default::default());
     let hit = resolution.edges.iter().any(|e| {
-        e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Ledger.normalize")
+        e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
+            && e.dst_name.contains("Ledger.normalize")
     });
     assert!(
         hit,
@@ -307,10 +319,11 @@ fn ts_new_expression_resolves_to_constructor() {
     let fx1 = agent_weave::extract::extract_file(0, "apps/core/widget.ts", src1.as_bytes(), &p1);
     let fx2 = agent_weave::extract::extract_file(1, "apps/core/factory.ts", src2.as_bytes(), &p2);
     let resolution = agent_weave::extract::resolve(vec![fx1, fx2], Default::default());
-    let hit = resolution
-        .edges
-        .iter()
-        .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("Widget"));
+    let hit = resolution.edges.iter().any(|e| {
+        e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
+            && e.dst_name.contains("Widget")
+    });
     assert!(hit, "new Widget() must resolve: {:?}", resolution.edges);
 }
 
@@ -329,10 +342,11 @@ fn ts_relative_import_resolves_by_path() {
     let fx2 =
         agent_weave::extract::extract_file(1, "apps/web/src/features/run.ts", src2.as_bytes(), &p2);
     let resolution = agent_weave::extract::resolve(vec![fx1, fx2], Default::default());
-    let hit = resolution
-        .edges
-        .iter()
-        .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.contains("format"));
+    let hit = resolution.edges.iter().any(|e| {
+        e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
+            && e.dst_name.contains("format")
+    });
     assert!(
         hit,
         "../lib/format import must resolve: {:?}",
@@ -353,7 +367,7 @@ fn ts_external_import_calls_drop() {
         !resolution
             .edges
             .iter()
-            .any(|e| e.kind == "calls" && e.dst_name.contains("useState")),
+            .any(|e| e.kind == EdgeKind::Calls && e.dst_name.contains("useState")),
         "no useState edge"
     );
     assert!(
@@ -379,8 +393,8 @@ fn rust_crate_three_segment_call_resolves() {
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
         resolution.edges.iter().any(|e| {
-            e.kind == "calls"
-                && e.confidence == "EXTRACTED"
+            e.kind == EdgeKind::Calls
+                && e.confidence == Confidence::Extracted
                 && e.dst_name == "src.query.file_changed"
         }),
         "crate::query::file_changed must resolve: {:?}",
@@ -397,8 +411,8 @@ fn local_variable_shadows_same_named_module() {
     let fx = extract_file(0, "d.py", src.as_bytes(), &parsed);
     let resolution = resolve(vec![fx], Default::default());
     assert!(
-        resolution.edges.iter().any(|e| e.kind == "calls"
-            && e.confidence == "EXTRACTED"
+        resolution.edges.iter().any(|e| e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
             && e.dst_name.contains("D.m")),
         "local-var receiver typing must shadow the module name: {:?}",
         resolution.edges
@@ -465,10 +479,9 @@ fn pep420_namespace_package_import_resolves() {
     let fx2 = extract_file(1, "use.py", src2.as_bytes(), &p2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
-        resolution
-            .edges
-            .iter()
-            .any(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name == "pkg.mod.f"),
+        resolution.edges.iter().any(|e| e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
+            && e.dst_name == "pkg.mod.f"),
         "namespace import must resolve: {:?}",
         resolution.edges
     );
@@ -482,16 +495,20 @@ fn super_calls_resolve_to_base_methods() {
     let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
     let fx = extract_file(0, "s.py", src.as_bytes(), &parsed);
     let res = resolve(vec![fx], Default::default());
-    let names: Vec<(&str, &str)> = res
+    let names: Vec<(Confidence, &str)> = res
         .edges
         .iter()
-        .filter(|e| e.kind == "calls")
+        .filter(|e| e.kind == EdgeKind::Calls)
         .map(|e| (e.confidence, e.dst_name.as_str()))
         .collect();
     let sites: Vec<usize> = res
         .edges
         .iter()
-        .filter(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.ends_with("A.m"))
+        .filter(|e| {
+            e.kind == EdgeKind::Calls
+                && e.confidence == Confidence::Extracted
+                && e.dst_name.ends_with("A.m")
+        })
         .map(|e| e.site_line)
         .collect();
     for line in [7, 11] {
@@ -504,7 +521,11 @@ fn super_calls_resolve_to_base_methods() {
     let b_sites: Vec<usize> = res
         .edges
         .iter()
-        .filter(|e| e.kind == "calls" && e.confidence == "EXTRACTED" && e.dst_name.ends_with("B.m"))
+        .filter(|e| {
+            e.kind == EdgeKind::Calls
+                && e.confidence == Confidence::Extracted
+                && e.dst_name.ends_with("B.m")
+        })
         .map(|e| e.site_line)
         .collect();
     assert!(
@@ -530,21 +551,21 @@ fn class_re_export_base_resolves() {
     assert!(
         res.edges
             .iter()
-            .any(|e| e.kind == "inherits" && e.dst_name == "pkg.base.Base"),
+            .any(|e| e.kind == EdgeKind::Inherits && e.dst_name == "pkg.base.Base"),
         "inherits edge through re-export: {:?}",
         res.edges
             .iter()
-            .filter(|e| e.kind == "inherits")
+            .filter(|e| e.kind == EdgeKind::Inherits)
             .collect::<Vec<_>>()
     );
     assert!(
-        res.edges.iter().any(|e| e.kind == "calls"
-            && e.confidence == "EXTRACTED"
+        res.edges.iter().any(|e| e.kind == EdgeKind::Calls
+            && e.confidence == Confidence::Extracted
             && e.dst_name == "pkg.base.Base.helper"),
         "self.helper() must resolve through the re-exported base: {:?}",
         res.edges
             .iter()
-            .filter(|e| e.kind == "calls")
+            .filter(|e| e.kind == EdgeKind::Calls)
             .collect::<Vec<_>>()
     );
 }
@@ -644,8 +665,8 @@ fn rust_call_edges(files: &[(&str, &str)]) -> Vec<(String, String)> {
     resolve(extractions, Default::default())
         .edges
         .iter()
-        .filter(|e| e.kind == "calls")
-        .map(|e| (e.confidence.to_string(), e.dst_name.clone()))
+        .filter(|e| e.kind == EdgeKind::Calls)
+        .map(|e| (e.confidence.as_str().to_string(), e.dst_name.clone()))
         .collect()
 }
 
@@ -716,7 +737,8 @@ fn rust_inline_mod_functions_keep_function_kind() {
         .expect("helper symbol");
     assert_eq!(helper.qualname, "src.child.helper");
     assert_eq!(
-        helper.kind, "function",
+        helper.kind,
+        SymbolKind::Function,
         "free function in mod is not a method"
     );
 }
@@ -759,4 +781,16 @@ fn rust_inline_mod_self_and_super_paths_resolve() {
             .any(|(c, n)| c == "EXTRACTED" && n == "src.outer"),
         "super::outer() must resolve in the parent module: {edges:?}"
     );
+}
+
+#[test]
+fn deep_call_nesting_stays_iterative() {
+    // A recursive walk re-enters walk_children once per nested call and
+    // overflows the default test-thread stack at this size (SIGABRT). The
+    // traversal must stay heap-bound.
+    let depth = 10_000;
+    let src = format!("{}1{}\n", "f(".repeat(depth), ")".repeat(depth));
+    let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
+    let fx = extract_file(0, "deep.py", src.as_bytes(), &parsed);
+    assert!(fx.symbols.iter().all(|s| s.kind == SymbolKind::Module));
 }

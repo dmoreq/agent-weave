@@ -102,7 +102,11 @@ pub(super) fn signature_of(node: Node<'_>, src: &[u8]) -> String {
 /// separators all become single spaces. `HierarchicalAddressParser.parse`
 /// -> "hierarchical address parser parse". Known limitation (pinned by test):
 /// consecutive-capital runs are not split — `HTTPServer` stays one token —
-/// so acronym-led identifiers match by full prefix only.
+/// so acronym-led identifiers match by full prefix only. Deliberately
+/// separate from the memory-store tokenizer (`memory::mem_tokens`): the two
+/// index different stores with different digit/camelCase boundaries
+/// ("v2Fix" -> "v2 fix" here vs ["v","2","fix"] there), so a camelCase fix
+/// must not silently change the other index.
 pub fn split_ident(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     let mut chars = s.chars().peekable();
@@ -140,9 +144,16 @@ pub(super) fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
         "identifier" | "this" | "super" | "crate" | "type_identifier" => {
             Some(vec![text(node, src)])
         }
-        "attribute" => {
-            let obj = node.child_by_field_name("object")?;
-            let attr = node.child_by_field_name("attribute")?;
+        // Python `a.b` (field `attribute`), TS `a.b` (field `property`), and
+        // Rust `a.b` (fields `value`/`field`) share the same chain rule.
+        "attribute" | "member_expression" | "field_expression" => {
+            let (obj_field, attr_field) = match node.kind() {
+                "field_expression" => ("value", "field"),
+                "attribute" => ("object", "attribute"),
+                _ => ("object", "property"),
+            };
+            let obj = node.child_by_field_name(obj_field)?;
+            let attr = node.child_by_field_name(attr_field)?;
             let mut chain = dotted_chain(obj, src)?;
             chain.push(text(attr, src));
             Some(chain)
@@ -150,47 +161,7 @@ pub(super) fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
         // Rust scoped type paths in impl/trait positions: crate::Shape,
         // std::fmt::Display. Treat them like scoped_identifier so a qualified
         // impl target still produces an edge or unresolved row.
-        "scoped_type_identifier" => {
-            let mut chain = Vec::new();
-            if let Some(path) = node.child_by_field_name("path") {
-                if let Some(mut sub) = dotted_chain(path, src) {
-                    chain.append(&mut sub);
-                }
-            }
-            if let Some(name) = node.child_by_field_name("name") {
-                chain.push(text(name, src));
-            }
-            if chain.is_empty() {
-                None
-            } else {
-                Some(chain)
-            }
-        }
-        // Rust scoped_identifier: a::b::c (fields path + name).
-        "scoped_identifier" => {
-            let mut chain = Vec::new();
-            if let Some(path) = node.child_by_field_name("path") {
-                if let Some(mut sub) = dotted_chain(path, src) {
-                    chain.append(&mut sub);
-                }
-            }
-            if let Some(name) = node.child_by_field_name("name") {
-                chain.push(text(name, src));
-            }
-            if chain.is_empty() {
-                None
-            } else {
-                Some(chain)
-            }
-        }
-        // TypeScript member_expression: a.b.c (field `property`, not `attribute`).
-        "member_expression" => {
-            let obj = node.child_by_field_name("object")?;
-            let attr = node.child_by_field_name("property")?;
-            let mut chain = dotted_chain(obj, src)?;
-            chain.push(text(attr, src));
-            Some(chain)
-        }
+        "scoped_type_identifier" | "scoped_identifier" => scoped_chain(node, src),
         "type" => {
             let mut cursor = node.walk();
             let inner = node.named_children(&mut cursor).next();
@@ -206,33 +177,12 @@ pub(super) fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
             };
             inner.and_then(|ch| dotted_chain(ch, src))
         }
-        "generic_type" => {
-            // `Trait<T>`: use the first type identifier as the base name.
-            let mut stack = vec![node];
-            while let Some(n) = stack.pop() {
-                if n.kind() == "type_identifier" {
-                    return Some(vec![text(n, src)]);
-                }
-                let mut c = n.walk();
-                let children: Vec<_> = n.children(&mut c).collect();
-                for child in children.into_iter().rev() {
-                    stack.push(child);
-                }
-            }
-            None
-        }
+        "generic_type" => generic_base(node, src),
         // Rust receiver and field access: `self.foo()` / `x.foo()`. The
         // field_expression carries `value` (receiver) and `field` (member);
         // `self` is its own node kind in the Rust grammar.
         "self" => Some(vec![text(node, src)]),
         "field_identifier" => Some(vec![text(node, src)]),
-        "field_expression" => {
-            let value = node.child_by_field_name("value")?;
-            let field = node.child_by_field_name("field")?;
-            let mut chain = dotted_chain(value, src)?;
-            chain.push(text(field, src));
-            Some(chain)
-        }
         // Constructor-call receiver: `Base().m()` / `super().m()` /
         // `super(C, self).m()` (Amendment 18). Non-uppercase factory calls
         // are left unresolved to avoid manufacturing class edges.
@@ -248,6 +198,40 @@ pub(super) fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
         }
         _ => None,
     }
+}
+
+/// Rust scoped path (`a::b::c`): append `name` to the chain of `path`.
+fn scoped_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
+    let mut chain = Vec::new();
+    if let Some(path) = node.child_by_field_name("path") {
+        if let Some(mut sub) = dotted_chain(path, src) {
+            chain.append(&mut sub);
+        }
+    }
+    if let Some(name) = node.child_by_field_name("name") {
+        chain.push(text(name, src));
+    }
+    if chain.is_empty() {
+        None
+    } else {
+        Some(chain)
+    }
+}
+
+/// `Trait<T>`: use the first type identifier as the base name.
+fn generic_base(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "type_identifier" {
+            return Some(vec![text(n, src)]);
+        }
+        let mut cursor = n.walk();
+        let children: Vec<_> = n.children(&mut cursor).collect();
+        for child in children.into_iter().rev() {
+            stack.push(child);
+        }
+    }
+    None
 }
 
 /// One pending traversal step. `Visit` dispatches a node; the restore steps
@@ -276,9 +260,11 @@ fn push_children_rev<'a>(work: &mut Vec<Step<'a>>, node: Node<'a>) {
     }
 }
 
-/// Walk a subtree with an explicit work stack: traversal depth is heap-bound
-/// (bounded by the 1 MiB file cap), never stack-bound, so parse workers run on
-/// the default thread stack (R6d Blocker 1, iterative form).
+/// Entry point for one subtree. The traversal is heap-bound: `run_steps` owns
+/// the only loop, and `visit_node` must only QUEUE children on that same stack
+/// (`push_children_rev`), never call back into this function. A recursive
+/// re-entry would make depth stack-bound and abort the build on deeply nested
+/// calls (stack overflow, not catchable by `catch_unwind`).
 pub(super) fn walk_children(
     node: Node<'_>,
     src: &[u8],
@@ -293,7 +279,16 @@ pub(super) fn walk_children(
 fn run_steps<'a>(work: &mut Vec<Step<'a>>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
     while let Some(step) = work.pop() {
         match step {
-            Step::Visit(node) => visit_node(node, src, fx, ctx, work),
+            Step::Visit(node) => {
+                let mut w = Walker {
+                    node,
+                    src,
+                    fx: &mut *fx,
+                    ctx: &mut *ctx,
+                    work: &mut *work,
+                };
+                visit_node(&mut w);
+            }
             Step::PopFunc => {
                 ctx.func_stack.pop();
             }
@@ -308,7 +303,7 @@ fn run_steps<'a>(work: &mut Vec<Step<'a>>, src: &[u8], fx: &mut FileExtraction, 
             }
             Step::MarkTraitImpls { method_start } => {
                 for sym in &fx.symbols[method_start..] {
-                    if sym.kind == "method" {
+                    if sym.kind == SymbolKind::Method {
                         fx.trait_impl_methods.push(sym.qualname.clone());
                     }
                 }
@@ -317,424 +312,395 @@ fn run_steps<'a>(work: &mut Vec<Step<'a>>, src: &[u8], fx: &mut FileExtraction, 
     }
 }
 
-fn visit_node<'a>(
-    node: Node<'a>,
-    src: &[u8],
-    fx: &mut FileExtraction,
-    ctx: &mut WalkCtx,
-    work: &mut Vec<Step<'a>>,
-) {
-    match node.kind() {
-        // ---- Rust definitions (P2.5) ----
-        "function_item" => {
-            define_function(
-                node,
-                src,
-                fx,
-                ctx,
-                work,
-                if ctx.class_stack.is_empty() {
-                    "function"
-                } else {
-                    "method"
-                },
-            );
-        }
-        "struct_item" | "enum_item" => {
-            typescript::define_class_ts(node, src, fx, ctx, work, "class");
-        }
-        "trait_item" => {
-            typescript::define_class_ts(node, src, fx, ctx, work, "trait");
-        }
-        "function_signature_item" => {
-            define_function(
-                node,
-                src,
-                fx,
-                ctx,
-                work,
-                if ctx.class_stack.is_empty() {
-                    "function"
-                } else {
-                    "method"
-                },
-            );
-        }
-        "mod_item" if node.child_by_field_name("body").is_some() => {
-            // Inline `mod name { ... }` is a scope, not just an alias (R7).
-            let name = node
-                .child_by_field_name("name")
-                .map(|n| text(n, src))
-                .unwrap_or_default();
-            let parent = ctx.class_stack.last().or_else(|| ctx.mod_stack.last());
-            let qualname = match parent {
-                Some(parent) => format!("{parent}.{name}"),
-                // A repo-root lib.rs/main.rs is the crate root; its inline
-                // modules share the file-module namespace (`a`, not `lib.a`),
-                // so `crate::a` resolves for file and inline modules alike.
-                None if fx.crate_root.as_deref() == Some("") => name.clone(),
-                None => format!("{}.{}", fx.module, name),
-            };
-            let sym_idx = fx.symbols.len();
-            let item_is_test = fx.is_test_file
-                || ctx.test_scope
-                || crate::extract::is_test_name(&name)
-                || rust::has_test_attr(node, src);
-            fx.symbols.push(NewSymbol {
-                kind: "module",
-                name,
-                qualname: qualname.clone(),
-                file_idx: fx.file_idx,
-                signature: String::new(),
-                line_start: node.start_position().row + 1,
-                line_end: node.end_position().row + 1,
+/// Dispatch one node by language, then handle the kinds every language shares.
+/// The per-language matches keep the original arm precedence: overlapping
+/// kinds (`import_statement`, `mod_item`) are separated by language here.
+fn visit_node<'a>(w: &mut Walker<'a, '_, '_>) {
+    let handled = match w.fx.lang {
+        Lang::Rust => visit_rust_node(w),
+        Lang::Python => visit_python_node(w),
+        Lang::TypeScript | Lang::Tsx | Lang::JavaScript => visit_ts_node(w),
+    };
+    if handled {
+        return;
+    }
+    match w.node.kind() {
+        "call" | "call_expression" => visit_call(w),
+        _ => push_children_rev(w.work, w.node),
+    }
+}
 
-                is_test: item_is_test,
-                ..Default::default()
-            });
-            if let Some(pidx) = parent_symbol_idx(fx, ctx) {
-                fx.edges.push(NewEdge {
-                    src_idx: pidx,
-                    dst_idx: Some(sym_idx),
-                    dst_name: qualname.clone(),
-                    kind: "contains",
-                    confidence: "EXTRACTED",
-                    site_line: node.start_position().row + 1,
-                });
-            }
-            if let Some(body) = node.child_by_field_name("body") {
-                ctx.mod_stack.push(qualname);
-                // `#[cfg(test)] mod tests { ... }` (or any test-attributed
-                // item module): every symbol inside inherits the test flag.
-                let was_test_scope = ctx.test_scope;
-                if rust::has_test_attr(node, src) {
-                    ctx.test_scope = true;
-                }
-                work.push(Step::PopMod);
-                work.push(Step::RestoreTest(was_test_scope));
-                push_children_rev(work, body);
-            }
-        }
-        "internal_module" | "module" => {
-            // TypeScript `namespace N { ... }` (R7).
-            let name = node
-                .child_by_field_name("name")
-                .map(|n| text(n, src))
-                .unwrap_or_default();
-            let qualname = if ctx.class_stack.is_empty() {
-                format!("{}.{}", fx.module, name)
-            } else {
-                format!("{}.{}", ctx.class_stack.last().unwrap(), name)
-            };
-            let sym_idx = fx.symbols.len();
-            let item_is_test =
-                fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name);
-            fx.symbols.push(NewSymbol {
-                kind: "module",
-                name,
-                qualname: qualname.clone(),
-                file_idx: fx.file_idx,
-                signature: String::new(),
-                line_start: node.start_position().row + 1,
-                line_end: node.end_position().row + 1,
-
-                is_test: item_is_test,
-                ..Default::default()
-            });
-            if let Some(pidx) = parent_symbol_idx(fx, ctx) {
-                fx.edges.push(NewEdge {
-                    src_idx: pidx,
-                    dst_idx: Some(sym_idx),
-                    dst_name: qualname.clone(),
-                    kind: "contains",
-                    confidence: "EXTRACTED",
-                    site_line: node.start_position().row + 1,
-                });
-            }
-            ctx.class_stack.push(qualname);
-            let mut cursor = node.walk();
-            let children: Vec<_> = node.children(&mut cursor).collect();
-            work.push(Step::PopClass);
-            // Old semantics: the body child itself is not dispatched as a
-            // node; only its children are queued.
-            for child in children.into_iter().rev() {
-                if child.child_by_field_name("body").is_some() || child.kind() == "statement_block"
-                {
-                    push_children_rev(work, child);
-                }
-            }
-        }
-        "impl_item" => {
-            // impl Type { ... } — scope methods under the type name.
-            let type_name = rust::impl_type_name(node, src);
-            let parent = ctx.class_stack.last().or_else(|| ctx.mod_stack.last());
-            let qualname = match parent {
-                Some(parent) => format!("{parent}.{type_name}"),
-                None => format!("{}.{}", fx.module, type_name),
-            };
-            let trait_impl = node
-                .child_by_field_name("trait")
-                .and_then(|trait_node| dotted_chain(trait_node, src));
-            if let Some(chain) = &trait_impl {
-                fx.rust_impls.push((
-                    qualname.clone(),
-                    chain.clone(),
-                    node.start_position().row + 1,
-                ));
-            }
-            let method_start = fx.symbols.len();
-            ctx.class_stack.push(qualname);
-            work.push(Step::MarkTraitImpls { method_start });
-            work.push(Step::PopClass);
-            push_children_rev(work, node);
-        }
-        // ---- TypeScript/TSX/JSX definitions (P2) ----
-        "function_declaration" | "generator_function_declaration" => {
-            define_function(node, src, fx, ctx, work, "function");
-        }
-        "class_declaration" | "abstract_class_declaration" => {
-            typescript::define_class_ts(node, src, fx, ctx, work, "class");
-        }
-        "interface_declaration" => {
-            typescript::define_class_ts(node, src, fx, ctx, work, "interface");
-        }
-        "method_definition" => {
-            typescript::define_method_ts(node, src, fx, ctx, work);
-        }
-        "variable_declarator" => {
-            if !typescript::record_ts_arrow_function(node, src, fx, ctx, work) {
-                typescript::record_ts_variable_binding(node, src, fx, ctx);
-                walk_children(node, src, fx, ctx);
-            }
-        }
-        "arrow_function" | "function_expression" if fx.lang != Lang::Python => {
-            let start = node.start_position().row + 1;
-            let end = node.end_position().row + 1;
-            collect_arrow_params(node, src, fx, &ctx.scope_func(), Some((start, end)));
-            push_children_rev(work, node);
-        }
-        "new_expression" => {
-            record_call(node, src, fx, ctx);
-            push_children_rev(work, node);
-        }
-        "import_statement" if fx.lang != Lang::Python => {
-            typescript::record_import_ts(node, src, fx);
-        }
-        "export_statement" if fx.lang != Lang::Python => {
-            typescript::record_export_ts(node, src, fx);
-            walk_children(node, src, fx, ctx);
-        }
-        "mod_item" if fx.lang == Lang::Rust => {
-            // `mod db;` declares a child of the current module (inline module
-            // or file module), not of the crate root.
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let name = text(name_node, src);
-                if node.child_by_field_name("body").is_none() {
-                    let scope = ctx
-                        .class_stack
-                        .last()
-                        .cloned()
-                        .unwrap_or_else(|| fx.module.clone());
-                    let path = if ctx.class_stack.is_empty() && fx.crate_root.as_deref() == Some("")
-                    {
-                        name.clone()
-                    } else {
-                        format!("{scope}.{name}")
-                    };
-                    fx.aliases.push((
-                        String::new(),
-                        name,
-                        ImportTarget::ModuleRoot { path: path.clone() },
-                    ));
-                    fx.import_edges.push(ImportEdgeCandidate {
-                        line: node.start_position().row + 1,
-                        target: ImportTarget::Module { path },
-                    });
-                }
-            }
-            push_children_rev(work, node);
-        }
-        "use_declaration" if fx.lang == Lang::Rust => {
-            let scope = ctx
+fn visit_rust_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
+    match w.node.kind() {
+        "function_item" | "function_signature_item" => visit_function_item(w),
+        "struct_item" | "enum_item" => typescript::define_class(w, SymbolKind::Class),
+        "trait_item" => typescript::define_class(w, SymbolKind::Trait),
+        "mod_item" if w.node.child_by_field_name("body").is_some() => visit_inline_mod(w),
+        "impl_item" => visit_impl_item(w),
+        "mod_item" => visit_rust_mod_item(w),
+        "use_declaration" => {
+            let scope = w
+                .ctx
                 .class_stack
                 .last()
-                .or_else(|| ctx.mod_stack.last())
+                .or_else(|| w.ctx.mod_stack.last())
                 .cloned()
-                .unwrap_or_else(|| fx.module.clone());
-            rust::record_use_decl(node, src, fx, &scope);
-            walk_children(node, src, fx, ctx);
+                .unwrap_or_else(|| w.fx.module.clone());
+            rust::record_use_decl(w.node, w.src, w.fx, &scope);
+            push_children_rev(w.work, w.node);
         }
-        "decorated_definition" => {
-            let mut cursor = node.walk();
-            let mut decorators = Vec::new();
-            for child in node.children(&mut cursor) {
-                if child.kind() == "decorator" {
-                    decorators.push(child);
-                }
-            }
-            // Decorator calls execute at definition scope (before the function
-            // is pushed), so collect them with the current context.
-            for d in decorators {
-                let mut stack = vec![d];
-                while let Some(n) = stack.pop() {
-                    if n.kind() == "call" {
-                        record_call(n, src, fx, ctx);
-                    }
-                    let mut c = n.walk();
-                    for child in n.children(&mut c) {
-                        stack.push(child);
-                    }
-                }
-            }
-            if let Some(def) = node.child_by_field_name("definition") {
-                work.push(Step::Visit(def));
-            }
+        "let_declaration" => {
+            rust::record_rust_let(w.node, w.src, w.fx, w.ctx);
+            push_children_rev(w.work, w.node);
         }
-        "function_definition" => {
-            let Some(name_node) = node.child_by_field_name("name") else {
-                return;
-            };
-            let name = text(name_node, src);
-            // Innermost lexical scope wins: class > enclosing function when
-            // the class is nested in that function, and function > class when
-            // a nested function sits inside a method.
-            let parent_qn = innermost_scope(ctx, &fx.module);
-            let kind = if ctx.class_stack.last() == Some(&parent_qn) {
-                "method"
-            } else {
-                "function"
-            };
-            let qualname = format!("{parent_qn}.{name}");
-            let start = node.start_position().row + 1;
-            let sym_idx = fx.symbols.len();
-            let loc = callable_effective_loc(node, src, fx.lang, &fx.code_lines, &ctx.line_bounds);
-            fx.symbols.push(NewSymbol {
-                kind,
-                name: name.clone(),
-                qualname: qualname.clone(),
-                file_idx: fx.file_idx,
-                signature: signature_of(node, src),
-                line_start: start,
-                line_end: node.end_position().row + 1,
-                effective_loc: loc,
-                is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
-                ..Default::default()
-            });
-            if let Some(params) = node.child_by_field_name("parameters") {
-                collect_param_types(params, src, fx, &qualname, kind == "method");
-            }
-            if let Some(pidx) = parent_symbol_idx(fx, ctx) {
-                fx.edges.push(NewEdge {
-                    src_idx: pidx,
-                    dst_idx: Some(sym_idx),
-                    dst_name: qualname.clone(),
-                    kind: "contains",
-                    confidence: "EXTRACTED",
-                    site_line: start,
-                });
-            }
-            ctx.func_stack.push(qualname);
-            if let Some(body) = node.child_by_field_name("body") {
-                work.push(Step::PopFunc);
-                push_children_rev(work, body);
-            } else {
-                ctx.func_stack.pop();
-            }
+        "macro_invocation" => {
+            rust::record_macro_calls(w.node, w.src, w.fx, w.ctx);
+            push_children_rev(w.work, w.node);
         }
-        "class_definition" => {
-            let Some(name_node) = node.child_by_field_name("name") else {
-                return;
-            };
-            let name = text(name_node, src);
-            // Innermost lexical scope wins: a class nested in a function
-            // belongs to that function; a class nested in a method belongs to
-            // the method.
-            let parent_qn = innermost_scope(ctx, &fx.module);
-            let qualname = format!("{parent_qn}.{name}");
-            let start = node.start_position().row + 1;
-            let sym_idx = fx.symbols.len();
-            fx.symbols.push(NewSymbol {
-                kind: "class",
-                name: name.clone(),
-                qualname: qualname.clone(),
-                file_idx: fx.file_idx,
-                signature: signature_of(node, src),
-                line_start: start,
-                line_end: node.end_position().row + 1,
+        "assignment_expression" => {
+            record_reassignment(w.node, w.src, w.fx, w.ctx);
+            push_children_rev(w.work, w.node);
+        }
+        _ => return false,
+    }
+    true
+}
 
-                is_test: fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(&name),
-                ..Default::default()
-            });
-            if let Some(bases) = node.child_by_field_name("superclasses") {
-                let mut cursor = bases.walk();
-                for b in bases.named_children(&mut cursor) {
-                    if let Some(chain) = dotted_chain(b, src) {
-                        fx.inherits.push((sym_idx, chain));
-                    }
-                }
-            }
-            if let Some(pidx) = parent_symbol_idx(fx, ctx) {
-                fx.edges.push(NewEdge {
-                    src_idx: pidx,
-                    dst_idx: Some(sym_idx),
-                    dst_name: qualname.clone(),
-                    kind: "contains",
-                    confidence: "EXTRACTED",
-                    site_line: start,
-                });
-            }
-            ctx.class_stack.push(qualname);
-            if let Some(body) = node.child_by_field_name("body") {
-                work.push(Step::PopClass);
-                push_children_rev(work, body);
-            } else {
-                ctx.class_stack.pop();
-            }
-        }
-        "assignment" => {
-            record_assignment(node, src, fx, ctx);
-            walk_children(node, src, fx, ctx);
-        }
-        "augmented_assignment" if fx.lang == Lang::Python => {
-            record_assignment(node, src, fx, ctx);
-            walk_children(node, src, fx, ctx);
-        }
-        "assignment_expression" if fx.lang != Lang::Python => {
-            record_reassignment(node, src, fx, ctx);
-            walk_children(node, src, fx, ctx);
-        }
-        "let_declaration" if fx.lang == Lang::Rust => {
-            rust::record_rust_let(node, src, fx, ctx);
-            walk_children(node, src, fx, ctx);
-        }
-        "call" | "call_expression" => {
-            record_call(node, src, fx, ctx);
-            // TS/JS test frameworks: declarations inside describe/it callbacks
-            // are test-scoped (schema v8 is_test).
-            let ts_test_call = matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
-                && matches!(
-                    node.child_by_field_name("function")
-                        .map(|f| text(f, src))
-                        .as_deref(),
-                    Some("describe" | "it")
-                );
-            if ts_test_call {
-                let was_test_scope = ctx.test_scope;
-                ctx.test_scope = true;
-                walk_children(node, src, fx, ctx);
-                ctx.test_scope = was_test_scope;
-            } else {
-                walk_children(node, src, fx, ctx);
-            }
-        }
-        "macro_invocation" if fx.lang == Lang::Rust => {
-            rust::record_macro_calls(node, src, fx, ctx);
-            walk_children(node, src, fx, ctx);
-        }
+fn visit_python_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
+    match w.node.kind() {
+        "decorated_definition" => visit_decorated_definition(w),
+        "function_definition" => visit_python_function(w),
+        "class_definition" => visit_python_class(w),
         "import_statement" | "import_from_statement" => {
-            python::record_import(node, src, fx, &ctx.scope_func());
+            python::record_import(w.node, w.src, w.fx, &w.ctx.scope_func());
         }
-        _ => push_children_rev(work, node),
+        "assignment" | "augmented_assignment" => {
+            record_assignment(w.node, w.src, w.fx, w.ctx);
+            push_children_rev(w.work, w.node);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn visit_ts_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
+    match w.node.kind() {
+        "class_declaration" | "abstract_class_declaration" => {
+            typescript::define_class(w, SymbolKind::Class);
+        }
+        "function_declaration" | "generator_function_declaration" => {
+            define_function(w, SymbolKind::Function);
+        }
+        "interface_declaration" => typescript::define_class(w, SymbolKind::Interface),
+        "method_definition" => typescript::define_method_ts(w),
+        "variable_declarator" => {
+            if !typescript::record_ts_arrow_function(w) {
+                typescript::record_ts_variable_binding(w.node, w.src, w.fx, w.ctx);
+                push_children_rev(w.work, w.node);
+            }
+        }
+        "arrow_function" | "function_expression" => {
+            let start = w.node.start_position().row + 1;
+            let end = w.node.end_position().row + 1;
+            collect_arrow_params(w.node, w.src, w.fx, &w.ctx.scope_func(), Some((start, end)));
+            push_children_rev(w.work, w.node);
+        }
+        "new_expression" => {
+            record_call(w.node, w.src, w.fx, w.ctx);
+            push_children_rev(w.work, w.node);
+        }
+        "import_statement" => typescript::record_import_ts(w.node, w.src, w.fx),
+        "export_statement" => {
+            typescript::record_export_ts(w.node, w.src, w.fx);
+            push_children_rev(w.work, w.node);
+        }
+        "internal_module" | "module" => visit_internal_module(w),
+        "assignment_expression" => {
+            record_reassignment(w.node, w.src, w.fx, w.ctx);
+            push_children_rev(w.work, w.node);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Register one module/namespace scope symbol.
+fn push_scope_symbol(
+    fx: &mut FileExtraction,
+    node: Node<'_>,
+    name: String,
+    qualname: &str,
+    is_test: bool,
+) {
+    fx.push_symbol(NewSymbol {
+        kind: SymbolKind::Module,
+        name,
+        qualname: qualname.to_string(),
+        file_idx: fx.file_idx,
+        signature: String::new(),
+        line_start: node.start_position().row + 1,
+        line_end: node.end_position().row + 1,
+        is_test,
+        ..Default::default()
+    });
+}
+
+/// True when an item inherits the test flag from its file, scope, or name.
+fn is_test_item(fx: &FileExtraction, ctx: &WalkCtx, name: &str) -> bool {
+    fx.is_test_file || ctx.test_scope || crate::extract::is_test_name(name)
+}
+
+/// Record one assignment binding at `line`.
+fn push_assignment(
+    fx: &mut FileExtraction,
+    var: String,
+    target_dotted: Vec<String>,
+    ctx: &WalkCtx,
+    line: usize,
+) {
+    fx.assignments.push(Assignment {
+        var,
+        target_dotted,
+        scope_func: ctx.scope_func(),
+        site_line: line,
+    });
+}
+
+fn visit_inline_mod<'a>(w: &mut Walker<'a, '_, '_>) {
+    // Inline `mod name { ... }` is a scope, not just an alias (R7).
+    let name = w
+        .node
+        .child_by_field_name("name")
+        .map(|n| text(n, w.src))
+        .unwrap_or_default();
+    let parent = w.ctx.class_stack.last().or_else(|| w.ctx.mod_stack.last());
+    let qualname = match parent {
+        Some(parent) => format!("{parent}.{name}"),
+        // A repo-root lib.rs/main.rs is the crate root; its inline
+        // modules share the file-module namespace (`a`, not `lib.a`),
+        // so `crate::a` resolves for file and inline modules alike.
+        None if w.fx.crate_root.as_deref() == Some("") => name.clone(),
+        None => format!("{}.{}", w.fx.module, name),
+    };
+    let has_test_attr = rust::has_test_attr(w.node, w.src);
+    let item_is_test = is_test_item(w.fx, w.ctx, &name) || has_test_attr;
+    push_scope_symbol(w.fx, w.node, name, &qualname, item_is_test);
+    if let Some(body) = w.node.child_by_field_name("body") {
+        w.ctx.mod_stack.push(qualname);
+        // `#[cfg(test)] mod tests { ... }` (or any test-attributed
+        // item module): every symbol inside inherits the test flag.
+        let was_test_scope = w.ctx.test_scope;
+        if has_test_attr {
+            w.ctx.test_scope = true;
+        }
+        w.work.push(Step::PopMod);
+        w.work.push(Step::RestoreTest(was_test_scope));
+        push_children_rev(w.work, body);
+    }
+}
+
+fn visit_rust_mod_item<'a>(w: &mut Walker<'a, '_, '_>) {
+    // `mod db;` declares a child of the current module (inline module
+    // or file module), not of the crate root.
+    if let Some(name_node) = w.node.child_by_field_name("name") {
+        let name = text(name_node, w.src);
+        if w.node.child_by_field_name("body").is_none() {
+            let scope = w
+                .ctx
+                .class_stack
+                .last()
+                .cloned()
+                .unwrap_or_else(|| w.fx.module.clone());
+            let path = if w.ctx.class_stack.is_empty() && w.fx.crate_root.as_deref() == Some("") {
+                name.clone()
+            } else {
+                format!("{scope}.{name}")
+            };
+            w.fx.aliases.push((
+                String::new(),
+                name,
+                ImportTarget::ModuleRoot { path: path.clone() },
+            ));
+            w.fx.import_edges.push(ImportEdgeCandidate::module(
+                w.node.start_position().row + 1,
+                path,
+            ));
+        }
+    }
+    push_children_rev(w.work, w.node);
+}
+
+fn visit_function_item<'a>(w: &mut Walker<'a, '_, '_>) {
+    let kind = if w.ctx.class_stack.is_empty() {
+        SymbolKind::Function
+    } else {
+        SymbolKind::Method
+    };
+    define_function(w, kind);
+}
+
+fn visit_internal_module<'a>(w: &mut Walker<'a, '_, '_>) {
+    // TypeScript `namespace N { ... }` (R7).
+    let name = w
+        .node
+        .child_by_field_name("name")
+        .map(|n| text(n, w.src))
+        .unwrap_or_default();
+    let qualname = if w.ctx.class_stack.is_empty() {
+        format!("{}.{}", w.fx.module, name)
+    } else {
+        format!("{}.{}", w.ctx.class_stack.last().unwrap(), name)
+    };
+    let item_is_test = is_test_item(w.fx, w.ctx, &name);
+    push_scope_symbol(w.fx, w.node, name, &qualname, item_is_test);
+    w.ctx.class_stack.push(qualname);
+    let mut cursor = w.node.walk();
+    let children: Vec<_> = w.node.children(&mut cursor).collect();
+    w.work.push(Step::PopClass);
+    // Old semantics: the body child itself is not dispatched as a
+    // node; only its children are queued.
+    for child in children.into_iter().rev() {
+        if child.child_by_field_name("body").is_some() || child.kind() == "statement_block" {
+            push_children_rev(w.work, child);
+        }
+    }
+}
+
+fn visit_impl_item<'a>(w: &mut Walker<'a, '_, '_>) {
+    // impl Type { ... } — scope methods under the type name.
+    let type_name = rust::impl_type_name(w.node, w.src);
+    let parent = w.ctx.class_stack.last().or_else(|| w.ctx.mod_stack.last());
+    let qualname = match parent {
+        Some(parent) => format!("{parent}.{type_name}"),
+        None => format!("{}.{}", w.fx.module, type_name),
+    };
+    let trait_impl = w
+        .node
+        .child_by_field_name("trait")
+        .and_then(|trait_node| dotted_chain(trait_node, w.src));
+    if let Some(chain) = &trait_impl {
+        w.fx.rust_impls.push((
+            qualname.clone(),
+            chain.clone(),
+            w.node.start_position().row + 1,
+        ));
+    }
+    let method_start = w.fx.symbols.len();
+    w.ctx.class_stack.push(qualname);
+    w.work.push(Step::MarkTraitImpls { method_start });
+    w.work.push(Step::PopClass);
+    push_children_rev(w.work, w.node);
+}
+
+fn visit_decorated_definition<'a>(w: &mut Walker<'a, '_, '_>) {
+    let mut cursor = w.node.walk();
+    let mut decorators = Vec::new();
+    for child in w.node.children(&mut cursor) {
+        if child.kind() == "decorator" {
+            decorators.push(child);
+        }
+    }
+    // Decorator calls execute at definition scope (before the function
+    // is pushed), so collect them with the current context.
+    for d in decorators {
+        let mut stack = vec![d];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "call" {
+                record_call(n, w.src, w.fx, w.ctx);
+            }
+            let mut c = n.walk();
+            for child in n.children(&mut c) {
+                stack.push(child);
+            }
+        }
+    }
+    if let Some(def) = w.node.child_by_field_name("definition") {
+        w.work.push(Step::Visit(def));
+    }
+}
+
+fn visit_python_function<'a>(w: &mut Walker<'a, '_, '_>) {
+    let Some(name_node) = w.node.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, w.src);
+    // Innermost lexical scope wins: class > enclosing function when
+    // the class is nested in that function, and function > class when
+    // a nested function sits inside a method.
+    let parent_qn = innermost_scope(w.ctx, &w.fx.module);
+    let kind = if w.ctx.class_stack.last() == Some(&parent_qn) {
+        SymbolKind::Method
+    } else {
+        SymbolKind::Function
+    };
+    let qualname = format!("{parent_qn}.{name}");
+    let mut spec = w.callable_spec(kind, &name, &qualname);
+    spec.always_push_scope = true;
+    define_callable(w, &spec);
+}
+
+fn visit_python_class<'a>(w: &mut Walker<'a, '_, '_>) {
+    let Some(name_node) = w.node.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, w.src);
+    // Innermost lexical scope wins: a class nested in a function
+    // belongs to that function; a class nested in a method belongs to
+    // the method.
+    let parent_qn = innermost_scope(w.ctx, &w.fx.module);
+    let qualname = format!("{parent_qn}.{name}");
+    let start = w.node.start_position().row + 1;
+    let sym_idx = w.fx.symbols.len();
+    w.fx.push_symbol(NewSymbol {
+        kind: SymbolKind::Class,
+        name: name.clone(),
+        qualname: qualname.clone(),
+        file_idx: w.fx.file_idx,
+        signature: signature_of(w.node, w.src),
+        line_start: start,
+        line_end: w.node.end_position().row + 1,
+
+        is_test: is_test_item(w.fx, w.ctx, &name),
+        ..Default::default()
+    });
+    if let Some(bases) = w.node.child_by_field_name("superclasses") {
+        let mut cursor = bases.walk();
+        for b in bases.named_children(&mut cursor) {
+            if let Some(chain) = dotted_chain(b, w.src) {
+                w.fx.inherits.push((sym_idx, chain));
+            }
+        }
+    }
+    w.ctx.class_stack.push(qualname);
+    if let Some(body) = w.node.child_by_field_name("body") {
+        w.work.push(Step::PopClass);
+        push_children_rev(w.work, body);
+    } else {
+        w.ctx.class_stack.pop();
+    }
+}
+
+fn visit_call<'a>(w: &mut Walker<'a, '_, '_>) {
+    record_call(w.node, w.src, w.fx, w.ctx);
+    // TS/JS test frameworks: declarations inside describe/it callbacks
+    // are test-scoped (schema v8 is_test).
+    let ts_test_call = matches!(w.fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+        && matches!(
+            w.node
+                .child_by_field_name("function")
+                .map(|f| text(f, w.src))
+                .as_deref(),
+            Some("describe" | "it")
+        );
+    if ts_test_call {
+        let was_test_scope = w.ctx.test_scope;
+        w.ctx.test_scope = true;
+        // Queue the restore BEFORE the children so it pops after them
+        // (LIFO), keeping the walk on one iterative stack.
+        w.work.push(Step::RestoreTest(was_test_scope));
+        push_children_rev(w.work, w.node);
+    } else {
+        push_children_rev(w.work, w.node);
     }
 }
 
@@ -751,9 +717,73 @@ fn innermost_scope(ctx: &WalkCtx, module: &str) -> String {
     .unwrap_or_else(|| module.to_string())
 }
 
-fn parent_symbol_idx(fx: &FileExtraction, ctx: &WalkCtx) -> Option<usize> {
-    let qn = innermost_scope(ctx, &fx.module);
-    fx.symbols.iter().position(|s| s.qualname == qn)
+/// Symbol fields shared by the callable constructors (function/method).
+pub(super) struct CallableSpec<'a> {
+    pub kind: SymbolKind,
+    pub name: &'a str,
+    pub qualname: &'a str,
+    pub start: usize,
+    pub effective_loc: usize,
+    pub is_test: bool,
+    pub exported: bool,
+    /// Python pushes the scope before the body check and pops it when there
+    /// is no body; Rust/TS push it only when a body exists.
+    pub always_push_scope: bool,
+}
+
+/// One node's mutable walk state, so the callable helpers need only a spec.
+struct Walker<'a, 's, 'b> {
+    node: Node<'a>,
+    src: &'s [u8],
+    fx: &'b mut FileExtraction,
+    ctx: &'b mut WalkCtx,
+    work: &'b mut Vec<Step<'a>>,
+}
+
+impl<'a, 's> Walker<'a, 's, '_> {
+    /// Push the symbol row.
+    fn push_callable(&mut self, spec: &CallableSpec<'_>) {
+        self.fx.push_symbol(NewSymbol {
+            kind: spec.kind,
+            name: spec.name.to_string(),
+            qualname: spec.qualname.to_string(),
+            file_idx: self.fx.file_idx,
+            signature: signature_of(self.node, self.src),
+            line_start: spec.start,
+            line_end: self.node.end_position().row + 1,
+            effective_loc: spec.effective_loc,
+            is_test: spec.is_test,
+            exported: spec.exported,
+        });
+    }
+
+    /// Record parameter types, then queue the body with its scope pop.
+    fn finish_callable(&mut self, spec: &CallableSpec<'_>) {
+        if let Some(params) = self.node.child_by_field_name("parameters") {
+            collect_param_types(
+                params,
+                self.src,
+                self.fx,
+                spec.qualname,
+                spec.kind == SymbolKind::Method,
+            );
+        }
+        if spec.always_push_scope || self.node.child_by_field_name("body").is_some() {
+            self.ctx.func_stack.push(spec.qualname.to_string());
+        }
+        if let Some(body) = self.node.child_by_field_name("body") {
+            self.work.push(Step::PopFunc);
+            push_children_rev(self.work, body);
+        } else if spec.always_push_scope {
+            self.ctx.func_stack.pop();
+        }
+    }
+}
+
+/// Push one callable symbol and queue its body under the new scope.
+fn define_callable<'a>(w: &mut Walker<'a, '_, '_>, spec: &CallableSpec<'_>) {
+    w.push_callable(spec);
+    w.finish_callable(spec);
 }
 
 fn collect_param_types(
@@ -765,78 +795,94 @@ fn collect_param_types(
 ) {
     let mut cursor = params.walk();
     for p in params.children(&mut cursor) {
-        if let Some(var) = param_binding(p, src) {
-            if var == "self" || var == "cls" || var == "this" {
-                // Only the method's own implicit receiver is skipped; an
-                // explicit self/cls/this parameter of a nested function
-                // shadows the class receiver.
-                if !is_method_receiver {
-                    fx.locals.push((scope.to_string(), var));
-                }
-            } else {
-                fx.locals.push((scope.to_string(), var));
-            }
-        }
-        // Rust: `x: Foo`, `x: &Foo`, `x: &mut Foo`. `self`/`&self` parameters
-        // carry no type and are skipped.
-        if p.kind() == "parameter" {
-            let (Some(pattern), Some(ty)) = (
-                p.child_by_field_name("pattern"),
-                p.child_by_field_name("type"),
-            ) else {
-                continue;
-            };
-            let Some(var) = pattern_name(pattern, src) else {
-                continue;
-            };
-            let Some(chain) = dotted_chain(unwrap_ref_type(ty), src) else {
-                continue;
-            };
-            fx.params.push(ParamType {
-                var,
-                ann_dotted: chain,
-                scope_func: scope.to_string(),
-            });
-            continue;
-        }
-        // TS: required_parameter / optional_parameter carry pattern + type.
-        if matches!(p.kind(), "required_parameter" | "optional_parameter") {
-            let Some(ty) = p.child_by_field_name("type") else {
-                continue;
-            };
-            let Some(ident) = p.child_by_field_name("pattern") else {
-                continue;
-            };
-            if let Some(chain) = dotted_chain(ty, src) {
-                fx.params.push(ParamType {
-                    var: text(ident, src),
-                    ann_dotted: chain,
-                    scope_func: scope.to_string(),
-                });
-            }
-            continue;
-        }
-        if matches!(p.kind(), "typed_parameter" | "typed_default_parameter") {
-            // typed_parameter has NO 'name' field (positional identifier);
-            // typed_default_parameter does. The annotation lives in the
-            // 'type' field, wrapped in a 'type' node.
-            let ident = p.child_by_field_name("name").or_else(|| {
-                let mut c = p.walk();
-                let found = p.children(&mut c).find(|ch| ch.kind() == "identifier");
-                found
-            });
-            let ty = p.child_by_field_name("type");
-            let (Some(ident), Some(ty)) = (ident, ty) else {
-                continue;
-            };
-            if let Some(chain) = dotted_chain(ty, src) {
-                fx.params.push(ParamType {
-                    var: text(ident, src),
-                    ann_dotted: chain,
-                    scope_func: scope.to_string(),
-                });
-            }
-        }
+        push_param_local(p, src, fx, scope, is_method_receiver);
+        push_rust_param(p, src, fx, scope);
+        push_ts_param(p, src, fx, scope);
+        push_typed_param(p, src, fx, scope);
+    }
+}
+
+/// Binding-name locals. Only the method's own implicit receiver is skipped; an
+/// explicit self/cls/this parameter of a nested function shadows the class
+/// receiver.
+fn push_param_local(
+    p: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    scope: &str,
+    is_method_receiver: bool,
+) {
+    let Some(var) = param_binding(p, src) else {
+        return;
+    };
+    if (var == "self" || var == "cls" || var == "this") && is_method_receiver {
+        return;
+    }
+    fx.locals.push((scope.to_string(), var));
+}
+
+/// Rust: `x: Foo`, `x: &Foo`, `x: &mut Foo`. `self`/`&self` parameters
+/// carry no type and are skipped.
+fn push_rust_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+    if p.kind() != "parameter" {
+        return;
+    }
+    let (Some(pattern), Some(ty)) = (
+        p.child_by_field_name("pattern"),
+        p.child_by_field_name("type"),
+    ) else {
+        return;
+    };
+    let Some(var) = pattern_name(pattern, src) else {
+        return;
+    };
+    let Some(chain) = dotted_chain(unwrap_ref_type(ty), src) else {
+        return;
+    };
+    push_param_type(fx, var, Some(chain), scope);
+}
+
+/// TS: required_parameter / optional_parameter carry pattern + type.
+fn push_ts_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+    if !matches!(p.kind(), "required_parameter" | "optional_parameter") {
+        return;
+    }
+    let Some(ty) = p.child_by_field_name("type") else {
+        return;
+    };
+    let Some(ident) = p.child_by_field_name("pattern") else {
+        return;
+    };
+    push_param_type(fx, text(ident, src), dotted_chain(ty, src), scope);
+}
+
+/// typed_parameter has NO 'name' field (positional identifier);
+/// typed_default_parameter does. The annotation lives in the 'type' field,
+/// wrapped in a 'type' node.
+fn push_typed_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+    if !matches!(p.kind(), "typed_parameter" | "typed_default_parameter") {
+        return;
+    }
+    let ident = p.child_by_field_name("name").or_else(|| {
+        let mut c = p.walk();
+        let found = p.children(&mut c).find(|ch| ch.kind() == "identifier");
+        found
+    });
+    let ty = p.child_by_field_name("type");
+    let (Some(ident), Some(ty)) = (ident, ty) else {
+        return;
+    };
+    push_param_type(fx, text(ident, src), dotted_chain(ty, src), scope);
+}
+
+/// Record one typed parameter when its annotation resolves to a dotted chain.
+fn push_param_type(fx: &mut FileExtraction, var: String, chain: Option<Vec<String>>, scope: &str) {
+    if let Some(ann_dotted) = chain {
+        fx.params.push(ParamType {
+            var,
+            ann_dotted,
+            scope_func: scope.to_string(),
+        });
     }
 }
 
@@ -888,9 +934,6 @@ fn push_arrow_binding(
 
 /// Binding name of a parameter node: identifier, named pattern, or typed name.
 fn param_binding(node: Node<'_>, src: &[u8]) -> Option<String> {
-    if node.kind() == "identifier" {
-        return Some(text(node, src));
-    }
     node.child_by_field_name("name")
         .or_else(|| node.child_by_field_name("pattern"))
         .and_then(|n| pattern_name(n, src))
@@ -945,66 +988,85 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
     let Some(right) = node.child_by_field_name("right") else {
         return;
     };
-    let direct_call_chain = |call: Node<'_>| -> Option<Vec<String>> {
+    let Some(target) = direct_call_target(right, src) else {
+        // A simple `x = <unknown>` still overwrites an earlier constructor
+        // type; record it as an unknown binding instead of leaving the old
+        // assignment in place.
+        if left.kind() == "identifier" {
+            push_assignment(
+                fx,
+                text(left, src),
+                Vec::new(),
+                ctx,
+                node.start_position().row + 1,
+            );
+        }
+        return;
+    };
+    match left.kind() {
+        "identifier" => push_assignment(
+            fx,
+            text(left, src),
+            target,
+            ctx,
+            node.start_position().row + 1,
+        ),
+        "attribute" => record_self_field_assignment(left, target, ctx, fx, src),
+        _ => {}
+    }
+}
+
+/// `self.field = Ctor(...)` -> class-wide receiver typing.
+fn record_self_field_assignment(
+    left: Node<'_>,
+    target: Vec<String>,
+    ctx: &WalkCtx,
+    fx: &mut FileExtraction,
+    src: &[u8],
+) {
+    let Some(field) = left
+        .child_by_field_name("object")
+        .zip(left.child_by_field_name("attribute"))
+        .and_then(|(obj, attr)| self_field_target(obj, attr, src))
+    else {
+        return;
+    };
+    let Some(class_qn) = ctx.class_stack.last().cloned() else {
+        return;
+    };
+    fx.self_fields.push(SelfField {
+        class_qn,
+        field,
+        target_dotted: target,
+    });
+}
+
+/// `x = Ctor(...)` / `x = a or Ctor(...)`: the constructor chain, if any.
+fn direct_call_target(right: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
+    let direct = |call: Node<'_>| -> Option<Vec<String>> {
         let f = call
             .child_by_field_name("function")
             .or_else(|| call.child_by_field_name("constructor"))?;
         dotted_chain(f, src)
     };
-    let target: Option<Vec<String>> =
-        if matches!(right.kind(), "call" | "call_expression" | "new_expression") {
-            direct_call_chain(right)
-        } else if matches!(right.kind(), "boolean_operator" | "bool_op") {
-            // `x = a or B(...)`: the last top-level operand that is a direct call.
-            let mut cursor = right.walk();
-            let operands: Vec<Node<'_>> = right.named_children(&mut cursor).collect();
-            operands
-                .iter()
-                .rev()
-                .find(|o| matches!(o.kind(), "call" | "call_expression"))
-                .and_then(|o| direct_call_chain(*o))
-        } else {
-            None
-        };
-    let Some(target) = target else {
-        // A simple `x = <unknown>` still overwrites an earlier constructor
-        // type; record it as an unknown binding instead of leaving the old
-        // assignment in place.
-        if left.kind() == "identifier" {
-            fx.assignments.push(Assignment {
-                var: text(left, src),
-                target_dotted: Vec::new(),
-                scope_func: ctx.scope_func(),
-                site_line: node.start_position().row + 1,
-            });
-        }
-        return;
-    };
-    match left.kind() {
-        "identifier" => fx.assignments.push(Assignment {
-            var: text(left, src),
-            target_dotted: target,
-            scope_func: ctx.scope_func(),
-            site_line: node.start_position().row + 1,
-        }),
-        "attribute" => {
-            // self.field = Ctor(...) -> class-wide receiver typing.
-            let obj = left.child_by_field_name("object");
-            let attr = left.child_by_field_name("attribute");
-            if let (Some(obj), Some(attr)) = (obj, attr) {
-                if obj.kind() == "identifier" && text(obj, src) == "self" {
-                    if let Some(class_qn) = ctx.class_stack.last().cloned() {
-                        fx.self_fields.push(SelfField {
-                            class_qn,
-                            field: text(attr, src),
-                            target_dotted: target,
-                        });
-                    }
-                }
-            }
-        }
-        _ => {}
+    if matches!(right.kind(), "call" | "call_expression" | "new_expression") {
+        direct(right)
+    } else if matches!(right.kind(), "boolean_operator" | "bool_op") {
+        // `x = a or B(...)`: the last top-level operand that is a direct call.
+        let mut cursor = right.walk();
+        right
+            .named_children(&mut cursor)
+            .filter(|o| matches!(o.kind(), "call" | "call_expression"))
+            .last()
+            .and_then(direct)
+    } else {
+        None
     }
+}
+
+/// The field name when the assignment target is `self.<field>`.
+fn self_field_target(obj: Node<'_>, attr: Node<'_>, src: &[u8]) -> Option<String> {
+    (obj.kind() == "identifier" && text(obj, src) == "self").then(|| text(attr, src))
 }
 
 /// TS/Rust `value = ...` reassignment. A direct constructor updates the
@@ -1020,12 +1082,7 @@ fn record_pattern_shadow(
     site_line: usize,
 ) {
     if node.kind() == "identifier" {
-        fx.assignments.push(Assignment {
-            var: text(node, src),
-            target_dotted: Vec::new(),
-            scope_func: ctx.scope_func(),
-            site_line,
-        });
+        push_assignment(fx, text(node, src), Vec::new(), ctx, site_line);
         return;
     }
     let mut cursor = node.walk();
@@ -1053,12 +1110,13 @@ fn record_reassignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx:
         Lang::Rust => rust::rust_constructor_target(right, src, ctx),
         _ => None,
     };
-    fx.assignments.push(Assignment {
-        var: text(left, src),
-        target_dotted: target.unwrap_or_default(),
-        scope_func: ctx.scope_func(),
-        site_line: node.start_position().row + 1,
-    });
+    push_assignment(
+        fx,
+        text(left, src),
+        target.unwrap_or_default(),
+        ctx,
+        node.start_position().row + 1,
+    );
 }
 
 fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
@@ -1067,25 +1125,8 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
         .child_by_field_name("function")
         .or_else(|| node.child_by_field_name("constructor"));
     let Some(f) = f else { return };
-    if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
-        let callee = text(f, src);
-        if callee == "require" || callee == "import" {
-            if let Some(args) = node.child_by_field_name("arguments") {
-                let mut c = args.walk();
-                if let Some(arg) = args.named_children(&mut c).next() {
-                    if arg.kind() == "string" {
-                        let raw = text(arg, src);
-                        let source = raw.trim_matches(|ch| ch == '\'' || ch == '"');
-                        let module = typescript::resolve_ts_module(source, &fx.dir);
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line: node.start_position().row + 1,
-                            target: ImportTarget::Module { path: module },
-                        });
-                        return;
-                    }
-                };
-            }
-        }
+    if try_ts_module_import(node, f, src, fx) {
+        return;
     }
     let callee = match dotted_chain(f, src) {
         Some(chain) if chain.len() == 1 => Callee::Name(chain.into_iter().next().unwrap()),
@@ -1113,133 +1154,157 @@ fn record_call(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut Wa
     });
 }
 
-/// Effective LOC from the file-wide comment mask plus the Python docstring.
-/// A line counts when it has a non-whitespace byte outside every comment node;
-/// docstring bytes are excluded only when the whole line is inside the string.
-fn callable_effective_loc(
-    node: Node<'_>,
-    src: &[u8],
-    lang: Lang,
-    code_lines: &[bool],
-    line_bounds: &[(usize, usize)],
-) -> usize {
-    let base_row = node.start_position().row;
-    let end_row = node.end_position().row;
-    let mut effective = (base_row..=end_row)
-        .filter(|row| code_lines.get(*row).copied().unwrap_or(true))
-        .count();
-    if lang != Lang::Python {
-        return effective;
+/// TS/JS `require("...")` / `import("...")`: one static module edge. Returns
+/// true when the call was fully handled as a module import.
+fn try_ts_module_import(node: Node<'_>, f: Node<'_>, src: &[u8], fx: &mut FileExtraction) -> bool {
+    if !matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+        return false;
     }
-    let Some(body) = node.child_by_field_name("body") else {
-        return effective;
-    };
-    let mut c = body.walk();
-    let first = body.named_children(&mut c).next();
-    let Some(stmt) = first.filter(|s| s.kind() == "expression_statement") else {
-        return effective;
-    };
-    let mut c2 = stmt.walk();
-    let inner = stmt.named_children(&mut c2).next();
-    let Some(doc) = inner.filter(|s| s.kind() == "string") else {
-        return effective;
-    };
-    let doc_start = doc.start_byte();
-    let doc_end = doc.end_byte();
-    for row in doc.start_position().row..=doc.end_position().row {
-        let Some(&(start, end)) = line_bounds.get(row) else {
-            continue;
-        };
-        let has_code_outside_doc = src[start..end].iter().enumerate().any(|(i, byte)| {
-            if byte.is_ascii_whitespace() {
-                return false;
-            }
-            let pos = start + i;
-            !(doc_start <= pos && pos < doc_end)
-        });
-        if !has_code_outside_doc && code_lines.get(row).copied().unwrap_or(true) {
-            effective = effective.saturating_sub(1);
-        }
+    let callee = text(f, src);
+    if callee != "require" && callee != "import" {
+        return false;
     }
-    effective
+    let Some(arg) = node
+        .child_by_field_name("arguments")
+        .and_then(|args| {
+            let mut c = args.walk();
+            let first = args.named_children(&mut c).next();
+            first
+        })
+        .filter(|arg| arg.kind() == "string")
+    else {
+        return false;
+    };
+    typescript::push_ts_module_edge(fx, src, arg, node.start_position().row + 1);
+    true
 }
 
-fn define_function<'a>(
-    node: Node<'a>,
-    src: &[u8],
-    fx: &mut FileExtraction,
-    ctx: &mut WalkCtx,
-    work: &mut Vec<Step<'a>>,
-    kind: &'static str,
-) {
-    let Some(name_node) = node.child_by_field_name("name") else {
+impl Walker<'_, '_, '_> {
+    /// Effective LOC from the file-wide comment mask plus the Python
+    /// docstring. A line counts when it has a non-whitespace byte outside
+    /// every comment node; docstring bytes are excluded only when the whole
+    /// line is inside the string.
+    fn callable_effective_loc(&self, node: Node<'_>) -> usize {
+        let code_lines = &self.fx.code_lines;
+        let base_row = node.start_position().row;
+        let end_row = node.end_position().row;
+        let mut effective = (base_row..=end_row)
+            .filter(|row| code_lines.get(*row).copied().unwrap_or(true))
+            .count();
+        if self.fx.lang != Lang::Python {
+            return effective;
+        }
+        let Some(body) = node.child_by_field_name("body") else {
+            return effective;
+        };
+        let mut c = body.walk();
+        let first = body.named_children(&mut c).next();
+        let Some(stmt) = first.filter(|s| s.kind() == "expression_statement") else {
+            return effective;
+        };
+        let mut c2 = stmt.walk();
+        let inner = stmt.named_children(&mut c2).next();
+        let Some(doc) = inner.filter(|s| s.kind() == "string") else {
+            return effective;
+        };
+        let doc_start = doc.start_byte();
+        let doc_end = doc.end_byte();
+        for row in doc.start_position().row..=doc.end_position().row {
+            let Some(&(start, end)) = self.ctx.line_bounds.get(row) else {
+                continue;
+            };
+            let has_code_outside_doc = self.src[start..end].iter().enumerate().any(|(i, byte)| {
+                if byte.is_ascii_whitespace() {
+                    return false;
+                }
+                let pos = start + i;
+                !(doc_start <= pos && pos < doc_end)
+            });
+            if !has_code_outside_doc && code_lines.get(row).copied().unwrap_or(true) {
+                effective = effective.saturating_sub(1);
+            }
+        }
+        effective
+    }
+
+    /// Shared CallableSpec constructor: start line, effective LOC, and the
+    /// base is-test flag all come from the walked node. Callers override the
+    /// export/scope policy (and, for `define_function`, the bodyless LOC and
+    /// Rust test attribute) on the returned spec.
+    fn callable_spec<'a>(
+        &self,
+        kind: SymbolKind,
+        name: &'a str,
+        qualname: &'a str,
+    ) -> CallableSpec<'a> {
+        CallableSpec {
+            kind,
+            name,
+            qualname,
+            start: self.node.start_position().row + 1,
+            effective_loc: self.callable_effective_loc(self.node),
+            is_test: is_test_item(self.fx, self.ctx, name),
+            exported: false,
+            always_push_scope: false,
+        }
+    }
+}
+
+fn define_function<'a>(w: &mut Walker<'a, '_, '_>, kind: SymbolKind) {
+    let Some(name_node) = w.node.child_by_field_name("name") else {
         return;
     };
-    let name = text(name_node, src);
-    let parent_qn = ctx
+    let name = text(name_node, w.src);
+    let qualname = parent_qualname(w.ctx, w.fx, &name);
+    let mut spec = w.callable_spec(kind, &name, &qualname);
+    spec.exported = is_exported(w.fx, w.node);
+    // Bodyless declarations (Rust trait fns) carry no LOC.
+    if w.node.child_by_field_name("body").is_none() {
+        spec.effective_loc = 0;
+    }
+    if w.fx.lang == Lang::Rust && rust::has_test_attr(w.node, w.src) {
+        spec.is_test = true;
+    }
+    w.push_callable(&spec);
+    bind_default_export(w, &name);
+    w.finish_callable(&spec);
+}
+
+fn parent_qualname(ctx: &WalkCtx, fx: &FileExtraction, name: &str) -> String {
+    let parent = ctx
         .func_stack
         .last()
         .or_else(|| ctx.class_stack.last())
         .or_else(|| ctx.mod_stack.last())
         .cloned()
         .unwrap_or_else(|| fx.module.clone());
-    let qualname = format!("{parent_qn}.{name}");
-    let start = node.start_position().row + 1;
-    let sym_idx = fx.symbols.len();
-    let loc = if node.child_by_field_name("body").is_some() {
-        callable_effective_loc(node, src, fx.lang, &fx.code_lines, &ctx.line_bounds)
-    } else {
-        0
-    };
-    fx.symbols.push(NewSymbol {
-        kind,
-        name: name.clone(),
-        qualname: qualname.clone(),
-        file_idx: fx.file_idx,
-        signature: signature_of(node, src),
-        line_start: start,
-        line_end: node.end_position().row + 1,
-        effective_loc: loc,
-        is_test: fx.is_test_file
-            || ctx.test_scope
-            || crate::extract::is_test_name(&name)
-            || (fx.lang == Lang::Rust && rust::has_test_attr(node, src)),
-        exported: matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
-            && node
-                .parent()
-                .is_some_and(|p| p.kind() == "export_statement"),
-    });
-    if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
-        && typescript::ts_default_export_ancestor(node)
-    {
-        // `export default function work()` has no `worker.default` symbol;
-        // bind `default` to the real exported identity so a default import
-        // resolves to `worker.work`.
-        fx.aliases.push((
-            String::new(),
-            "default".to_string(),
-            ImportTarget::Symbol {
-                module: fx.module.clone(),
-                name: name.clone(),
-            },
-        ));
+    format!("{parent}.{name}")
+}
+
+fn is_exported(fx: &FileExtraction, node: Node<'_>) -> bool {
+    matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+        && node
+            .parent()
+            .is_some_and(|p| p.kind() == "export_statement")
+}
+
+/// `export default function work()` has no `worker.default` symbol; bind
+/// `default` to the real exported identity so a default import resolves to
+/// `worker.work`.
+fn bind_default_export<'a>(w: &mut Walker<'a, '_, '_>, name: &str) {
+    if !matches!(w.fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+        return;
     }
-    if let Some(params) = node.child_by_field_name("parameters") {
-        collect_param_types(params, src, fx, &qualname, false);
+    if !typescript::ts_default_export_ancestor(w.node) {
+        return;
     }
-    if let Some(pidx) = parent_symbol_idx(fx, ctx) {
-        fx.edges.push(NewEdge {
-            src_idx: pidx,
-            dst_idx: Some(sym_idx),
-            dst_name: qualname.clone(),
-            kind: "contains",
-            confidence: "EXTRACTED",
-            site_line: start,
-        });
-    }
-    if let Some(body) = node.child_by_field_name("body") {
-        ctx.func_stack.push(qualname);
-        work.push(Step::PopFunc);
-        push_children_rev(work, body);
-    }
+    let module = w.fx.module.clone();
+    w.fx.aliases.push((
+        String::new(),
+        "default".to_string(),
+        ImportTarget::Symbol {
+            module,
+            name: name.to_string(),
+        },
+    ));
 }

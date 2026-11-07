@@ -5,162 +5,161 @@ use super::*;
 pub(super) fn record_import(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
     let line = node.start_position().row + 1;
     match node.kind() {
-        "import_statement" => {
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                match child.kind() {
-                    "dotted_name" => {
-                        let path = text(child, src);
-                        let root = path.split('.').next().unwrap_or(&path).to_string();
-                        fx.aliases.push((
-                            scope.to_string(),
-                            root.clone(),
-                            ImportTarget::ModuleRoot { path: root },
-                        ));
-                        let parts: Vec<&str> = path.split('.').collect();
-                        for i in 1..=parts.len() {
-                            fx.import_edges.push(ImportEdgeCandidate {
-                                line,
-                                target: ImportTarget::Module {
-                                    path: parts[..i].join("."),
-                                },
-                            });
-                        }
-                    }
-                    // `import a.b as c` wraps in aliased_import; a bare
-                    // "alias" node appears in some grammar versions.
-                    "aliased_import" | "alias" => {
-                        let Some(target) = child.child_by_field_name("name") else {
-                            continue;
-                        };
-                        let Some(alias) = child.child_by_field_name("alias") else {
-                            continue;
-                        };
-                        let target_path = text(target, src);
-                        fx.aliases.push((
-                            scope.to_string(),
-                            text(alias, src),
-                            ImportTarget::ModuleRoot {
-                                path: target_path.clone(),
-                            },
-                        ));
-                        let parts: Vec<&str> = target_path.split('.').collect();
-                        for i in 1..=parts.len() {
-                            fx.import_edges.push(ImportEdgeCandidate {
-                                line,
-                                target: ImportTarget::Module {
-                                    path: parts[..i].join("."),
-                                },
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        "import_from_statement" => {
-            let module_node = node.child_by_field_name("module_name");
-            let module_abs =
-                module_node.map(|m| resolve_from_module(m, src, &fx.module, fx.is_package));
-            let Some(m) = module_abs else { return };
-            if !m.is_empty() {
-                fx.import_edges.push(ImportEdgeCandidate {
-                    line,
-                    target: ImportTarget::Module { path: m.clone() },
-                });
-                fx.from_import_parents.insert((line, m.clone()));
-            }
-            let mut cursor = node.walk();
-            for child in node.children(&mut cursor) {
-                if Some(child) == module_node {
-                    continue;
-                }
-                match child.kind() {
-                    "wildcard_import" => {
-                        fx.stars.push((m.clone(), line));
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line,
-                            target: ImportTarget::ModuleRoot { path: m.clone() },
-                        });
-                    }
-                    "dotted_name" => {
-                        let name = text(child, src);
-                        // `from .. import X` at a first-level package has an
-                        // empty parent: bind the root child directly.
-                        let alias = if m.is_empty() {
-                            ImportTarget::ModuleRoot { path: name.clone() }
-                        } else {
-                            ImportTarget::Symbol {
-                                module: m.clone(),
-                                name: name.clone(),
-                            }
-                        };
-                        fx.aliases.push((scope.to_string(), name.clone(), alias));
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line,
-                            target: ImportTarget::Module {
-                                path: if m.is_empty() {
-                                    name.clone()
-                                } else {
-                                    format!("{m}.{name}")
-                                },
-                            },
-                        });
-                        if !m.is_empty() {
-                            fx.import_edges.push(ImportEdgeCandidate {
-                                line,
-                                target: ImportTarget::Symbol {
-                                    module: m.clone(),
-                                    name,
-                                },
-                            });
-                        }
-                    }
-                    // `from m import n as y` wraps the binding in an
-                    // aliased_import node (import_statement uses "alias").
-                    "aliased_import" | "alias" => {
-                        let Some(target) = child.child_by_field_name("name") else {
-                            continue;
-                        };
-                        let Some(alias) = child.child_by_field_name("alias") else {
-                            continue;
-                        };
-                        let name = text(target, src);
-                        let alias_target = if m.is_empty() {
-                            ImportTarget::ModuleRoot { path: name.clone() }
-                        } else {
-                            ImportTarget::Symbol {
-                                module: m.clone(),
-                                name: name.clone(),
-                            }
-                        };
-                        fx.aliases
-                            .push((scope.to_string(), text(alias, src), alias_target));
-                        fx.import_edges.push(ImportEdgeCandidate {
-                            line,
-                            target: ImportTarget::Module {
-                                path: if m.is_empty() {
-                                    name.clone()
-                                } else {
-                                    format!("{m}.{name}")
-                                },
-                            },
-                        });
-                        if !m.is_empty() {
-                            fx.import_edges.push(ImportEdgeCandidate {
-                                line,
-                                target: ImportTarget::Symbol {
-                                    module: m.clone(),
-                                    name,
-                                },
-                            });
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        "import_statement" => record_plain_import(node, src, fx, scope, line),
+        "import_from_statement" => record_from_import(node, src, fx, scope, line),
         _ => {}
+    }
+}
+
+/// Push one `Module` import edge per dotted prefix (`a`, `a.b`, `a.b.c`).
+fn push_module_prefix_edges(fx: &mut FileExtraction, line: usize, path: &str) {
+    let parts: Vec<&str> = path.split('.').collect();
+    for i in 1..=parts.len() {
+        fx.import_edges
+            .push(ImportEdgeCandidate::module(line, parts[..i].join(".")));
+    }
+}
+
+/// The `name`/`alias` field pair of an aliased import node; `None` when the
+/// grammar shape lacks either field.
+fn aliased_import_pair(node: Node<'_>) -> Option<(Node<'_>, Node<'_>)> {
+    Some((
+        node.child_by_field_name("name")?,
+        node.child_by_field_name("alias")?,
+    ))
+}
+
+/// `import a.b`, `import a.b as c`: bind the root (or alias) and emit one
+/// module edge per prefix.
+fn record_plain_import(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    scope: &str,
+    line: usize,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "dotted_name" => {
+                let path = text(child, src);
+                let root = path.split('.').next().unwrap_or(&path).to_string();
+                fx.aliases.push((
+                    scope.to_string(),
+                    root.clone(),
+                    ImportTarget::ModuleRoot { path: root },
+                ));
+                push_module_prefix_edges(fx, line, &path);
+            }
+            // `import a.b as c` wraps in aliased_import; a bare
+            // "alias" node appears in some grammar versions.
+            "aliased_import" | "alias" => {
+                let Some((target, alias)) = aliased_import_pair(child) else {
+                    continue;
+                };
+                let target_path = text(target, src);
+                fx.aliases.push((
+                    scope.to_string(),
+                    text(alias, src),
+                    ImportTarget::ModuleRoot {
+                        path: target_path.clone(),
+                    },
+                ));
+                push_module_prefix_edges(fx, line, &target_path);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `from <m> import ...`: emit the parent module edge plus one binding and
+/// edge per imported name (wildcard, dotted, aliased).
+fn record_from_import(
+    node: Node<'_>,
+    src: &[u8],
+    fx: &mut FileExtraction,
+    scope: &str,
+    line: usize,
+) {
+    let module_node = node.child_by_field_name("module_name");
+    let module_abs = module_node.map(|m| resolve_from_module(m, src, &fx.module, fx.is_package));
+    let Some(m) = module_abs else { return };
+    if !m.is_empty() {
+        fx.import_edges
+            .push(ImportEdgeCandidate::module(line, m.clone()));
+        fx.from_import_parents.insert((line, m.clone()));
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if Some(child) == module_node {
+            continue;
+        }
+        match child.kind() {
+            "wildcard_import" => {
+                fx.stars.push((m.clone(), line));
+                fx.import_edges
+                    .push(ImportEdgeCandidate::module_root(line, m.clone()));
+            }
+            "dotted_name" => {
+                let name = text(child, src);
+                push_from_binding(fx, scope, &m, &name, None, line);
+            }
+            // `from m import n as y` wraps the binding in an
+            // aliased_import node (import_statement uses "alias").
+            "aliased_import" | "alias" => {
+                let Some((target, alias)) = aliased_import_pair(child) else {
+                    continue;
+                };
+                let name = text(target, src);
+                push_from_binding(fx, scope, &m, &name, Some(text(alias, src)), line);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// One imported name: bind `bound` (the alias text, or the same name when
+/// `None`) to the module/symbol alias and emit the module edge plus (for a
+/// non-empty parent) the symbol edge.
+fn push_from_binding(
+    fx: &mut FileExtraction,
+    scope: &str,
+    module: &str,
+    name: &str,
+    bound: Option<String>,
+    line: usize,
+) {
+    // `from .. import X` at a first-level package has an empty parent: bind
+    // the root child directly.
+    let alias = if module.is_empty() {
+        ImportTarget::ModuleRoot {
+            path: name.to_string(),
+        }
+    } else {
+        ImportTarget::Symbol {
+            module: module.to_string(),
+            name: name.to_string(),
+        }
+    };
+    fx.aliases.push((
+        scope.to_string(),
+        bound.unwrap_or_else(|| name.to_string()),
+        alias,
+    ));
+    fx.import_edges.push(ImportEdgeCandidate::module(
+        line,
+        if module.is_empty() {
+            name.to_string()
+        } else {
+            format!("{module}.{name}")
+        },
+    ));
+    if !module.is_empty() {
+        fx.import_edges.push(ImportEdgeCandidate::symbol(
+            line,
+            module.to_string(),
+            name.to_string(),
+        ));
     }
 }
 
@@ -197,7 +196,3 @@ pub(super) fn resolve_from_module(
         format!("{}.{}", parts.join("."), rest)
     }
 }
-
-// ---------------------------------------------------------------------------
-// TypeScript/TSX/JSX definitions (P2)
-// ---------------------------------------------------------------------------

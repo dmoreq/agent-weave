@@ -21,6 +21,18 @@ import math
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+
+def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
+    """Run aw with journaling off; shared by the measurement scripts."""
+    return subprocess.run(
+        [aw, "--root", str(root), "--no-journal", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+    )
 
 ROW_RE = re.compile(
     r"^\|\s*(G\d+)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*\[x\]\s*\|\s*$"

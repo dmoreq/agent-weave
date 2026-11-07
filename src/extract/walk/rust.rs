@@ -19,13 +19,12 @@ pub(super) fn record_rust_let(
         return;
     };
     if let Some(ty) = node.child_by_field_name("type") {
-        if let Some(chain) = dotted_chain(unwrap_ref_type(ty), src) {
-            fx.params.push(ParamType {
-                var,
-                ann_dotted: chain,
-                scope_func: ctx.scope_func(),
-            });
-        }
+        push_param_type(
+            fx,
+            var,
+            dotted_chain(unwrap_ref_type(ty), src),
+            &ctx.scope_func(),
+        );
         return;
     }
     let Some(value) = node.child_by_field_name("value") else {
@@ -44,12 +43,7 @@ pub(super) fn record_rust_let(
     let Some(chain) = rust_constructor_target(value, src, ctx) else {
         return;
     };
-    fx.assignments.push(Assignment {
-        var,
-        target_dotted: chain,
-        scope_func: ctx.scope_func(),
-        site_line: node.start_position().row + 1,
-    });
+    push_assignment(fx, var, chain, ctx, node.start_position().row + 1);
 }
 
 /// Constructor-shaped Rust value: `Foo::new()`, `Self::new()`, or a struct
@@ -179,6 +173,27 @@ pub(super) fn record_macro_calls(
     }
 }
 
+/// Extend `name` across the `::`-separated path segments starting at `i`
+/// (`a::b::c`); returns the extended name and the new cursor. A bare `::`
+/// with no following identifier stops the walk.
+fn scan_path_suffix(text: &str, bytes: &[u8], mut name: String, mut i: usize) -> (String, usize) {
+    let n = bytes.len();
+    while i + 1 < n && bytes[i] == b':' && bytes[i + 1] == b':' {
+        let seg = i + 2;
+        let mut j = seg;
+        while j < n && is_ident_char(bytes[j]) {
+            j += 1;
+        }
+        if j == seg {
+            break;
+        }
+        name.push_str("::");
+        name.push_str(&text[seg..j]);
+        i = j;
+    }
+    (name, i)
+}
+
 /// Byte scanner over macro token text: captures identifier and `::`-path
 /// calls, skips string/char literals, and ignores method-call receivers
 /// (`x.f(`) whose receiver expression a text scan cannot reconstruct.
@@ -200,21 +215,9 @@ pub(super) fn scan_macro_call_names(raw: &str) -> Vec<String> {
                 while i < n && is_ident_char(bytes[i]) {
                     i += 1;
                 }
-                let mut name = text[start..i].to_string();
                 // `a::b::c(` — walk the path to its final segment.
-                while i + 1 < n && bytes[i] == b':' && bytes[i + 1] == b':' {
-                    let seg = i + 2;
-                    let mut j = seg;
-                    while j < n && is_ident_char(bytes[j]) {
-                        j += 1;
-                    }
-                    if j == seg {
-                        break;
-                    }
-                    name.push_str("::");
-                    name.push_str(&text[seg..j]);
-                    i = j;
-                }
+                let (name, next) = scan_path_suffix(text, bytes, text[start..i].to_string(), i);
+                i = next;
                 if i < n && bytes[i] == b'(' && prev_nonspace != b'.' && prev_nonspace != b')' {
                     calls.push(name);
                     prev_nonspace = b'(';
@@ -331,32 +334,7 @@ pub(super) fn walk_use_tree(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileEx
                 walk_use_tree(child, ctx, fx);
             }
         }
-        "scoped_use_list" => {
-            let Some(path) = node.child_by_field_name("path") else {
-                return;
-            };
-            let Some(base) = resolve_use_path(path, ctx) else {
-                return;
-            };
-            if !base.is_empty() {
-                fx.import_edges.push(ImportEdgeCandidate {
-                    line: ctx.line,
-                    target: ImportTarget::Module {
-                        path: base.join("."),
-                    },
-                });
-            }
-            if let Some(list) = node.child_by_field_name("list") {
-                walk_use_tree(
-                    list,
-                    UseTreeCtx {
-                        prefix: &base,
-                        ..ctx
-                    },
-                    fx,
-                );
-            }
-        }
+        "scoped_use_list" => emit_scoped_use_list(node, ctx, fx),
         "use_as_clause" => {
             let Some(path) = node.child_by_field_name("path") else {
                 return;
@@ -364,29 +342,52 @@ pub(super) fn walk_use_tree(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileEx
             let alias = node.child_by_field_name("alias").map(|n| text(n, ctx.src));
             emit_use_leaf(path, ctx, alias, fx);
         }
-        "use_wildcard" => {
-            // tree-sitter-rust has no `path` field here: `crate::a::*` puts the
-            // path in a named child, while a grouped `{ * }` has none.
-            let mut c = node.walk();
-            let path = node
-                .child_by_field_name("path")
-                .or_else(|| node.named_children(&mut c).next());
-            let full = match path {
-                Some(path) => resolve_use_path(path, ctx),
-                None => Some(ctx.prefix.to_vec()),
-            };
-            let Some(full) = full.filter(|p| !p.is_empty()) else {
-                return;
-            };
-            let qn = full.join(".");
-            fx.stars.push((qn.clone(), ctx.line));
-            fx.import_edges.push(ImportEdgeCandidate {
-                line: ctx.line,
-                target: ImportTarget::ModuleRoot { path: qn },
-            });
-        }
+        "use_wildcard" => emit_use_wildcard(node, ctx, fx),
         _ => emit_use_leaf(node, ctx, None, fx),
     }
+}
+
+fn emit_scoped_use_list(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileExtraction) {
+    let Some(path) = node.child_by_field_name("path") else {
+        return;
+    };
+    let Some(base) = resolve_use_path(path, ctx) else {
+        return;
+    };
+    if !base.is_empty() {
+        fx.import_edges
+            .push(ImportEdgeCandidate::module(ctx.line, base.join(".")));
+    }
+    if let Some(list) = node.child_by_field_name("list") {
+        walk_use_tree(
+            list,
+            UseTreeCtx {
+                prefix: &base,
+                ..ctx
+            },
+            fx,
+        );
+    }
+}
+
+fn emit_use_wildcard(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileExtraction) {
+    // tree-sitter-rust has no `path` field here: `crate::a::*` puts the
+    // path in a named child, while a grouped `{ * }` has none.
+    let mut c = node.walk();
+    let path = node
+        .child_by_field_name("path")
+        .or_else(|| node.named_children(&mut c).next());
+    let full = match path {
+        Some(path) => resolve_use_path(path, ctx),
+        None => Some(ctx.prefix.to_vec()),
+    };
+    let Some(full) = full.filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let qn = full.join(".");
+    fx.stars.push((qn.clone(), ctx.line));
+    fx.import_edges
+        .push(ImportEdgeCandidate::module_root(ctx.line, qn));
 }
 
 pub(super) fn emit_use_leaf(
@@ -401,62 +402,20 @@ pub(super) fn emit_use_leaf(
     if full.is_empty() {
         return;
     }
-    let qn = full.join(".");
-    let raw = text(node, ctx.src);
-    let marker_only = raw == "self";
-    let after_marker = raw.split("::").skip(1).filter(|p| !p.is_empty()).count();
-    let module_leaf = marker_only || (ctx.prefix.is_empty() && after_marker <= 1);
-    if module_leaf {
-        fx.import_edges.push(ImportEdgeCandidate {
-            line: ctx.line,
-            target: ImportTarget::Module { path: qn.clone() },
-        });
-        let binding = alias.or_else(|| {
-            if node.kind() == "self" {
-                None
-            } else {
-                full.last().cloned()
-            }
-        });
-        if let Some(binding) = binding {
-            if let Some((name, parent)) = full.split_last() {
-                if parent.is_empty() {
-                    fx.aliases.push((
-                        ctx.scope.to_string(),
-                        binding,
-                        ImportTarget::ModuleRoot { path: qn },
-                    ));
-                } else {
-                    fx.aliases.push((
-                        ctx.scope.to_string(),
-                        binding,
-                        ImportTarget::Symbol {
-                            module: parent.join("."),
-                            name: name.clone(),
-                        },
-                    ));
-                }
-            }
-        }
+    if emit_module_leaf(node, ctx, &full, &alias, fx) {
         return;
     }
     let Some((name, parent)) = full.split_last() else {
         return;
     };
     let module = parent.join(".");
-    fx.import_edges.push(ImportEdgeCandidate {
-        line: ctx.line,
-        target: ImportTarget::Module {
-            path: module.clone(),
-        },
-    });
-    fx.import_edges.push(ImportEdgeCandidate {
-        line: ctx.line,
-        target: ImportTarget::Symbol {
-            module: module.clone(),
-            name: name.clone(),
-        },
-    });
+    fx.import_edges
+        .push(ImportEdgeCandidate::module(ctx.line, module.clone()));
+    fx.import_edges.push(ImportEdgeCandidate::symbol(
+        ctx.line,
+        module.clone(),
+        name.clone(),
+    ));
     fx.aliases.push((
         ctx.scope.to_string(),
         alias.unwrap_or_else(|| name.clone()),
@@ -465,6 +424,55 @@ pub(super) fn emit_use_leaf(
             name: name.clone(),
         },
     ));
+}
+
+/// A module-root leaf (`use a::b` where `b` is a module, or `use self`) emits a
+/// module edge plus an optional binding. Returns false for a symbol leaf.
+fn emit_module_leaf(
+    node: Node<'_>,
+    ctx: UseTreeCtx<'_>,
+    full: &[String],
+    alias: &Option<String>,
+    fx: &mut FileExtraction,
+) -> bool {
+    let qn = full.join(".");
+    let raw = text(node, ctx.src);
+    let marker_only = raw == "self";
+    let after_marker = raw.split("::").skip(1).filter(|p| !p.is_empty()).count();
+    let module_leaf = marker_only || (ctx.prefix.is_empty() && after_marker <= 1);
+    if !module_leaf {
+        return false;
+    }
+    fx.import_edges
+        .push(ImportEdgeCandidate::module(ctx.line, qn.clone()));
+    let binding = alias.clone().or_else(|| {
+        if node.kind() == "self" {
+            None
+        } else {
+            full.last().cloned()
+        }
+    });
+    if let Some(binding) = binding {
+        if let Some((name, parent)) = full.split_last() {
+            if parent.is_empty() {
+                fx.aliases.push((
+                    ctx.scope.to_string(),
+                    binding,
+                    ImportTarget::ModuleRoot { path: qn },
+                ));
+            } else {
+                fx.aliases.push((
+                    ctx.scope.to_string(),
+                    binding,
+                    ImportTarget::Symbol {
+                        module: parent.join("."),
+                        name: name.clone(),
+                    },
+                ));
+            }
+        }
+    }
+    true
 }
 
 /// Resolve one use-tree path node against the enclosing module scope.
@@ -481,46 +489,51 @@ pub(super) fn resolve_use_path(node: Node<'_>, ctx: UseTreeCtx<'_>) -> Option<Ve
     let first = parts.next()?;
     let rest: Vec<String> = parts.collect();
     let extra_supers = rest.iter().take_while(|p| p.as_str() == "super").count();
-    let mut plain = true;
-    let mut out: Vec<String> = match first.as_str() {
-        "crate" => {
-            plain = false;
-            ctx.crate_root?
-                .split('.')
-                .filter(|p| !p.is_empty())
-                .map(str::to_string)
-                .collect()
-        }
-        "self" if !ctx.prefix.is_empty() => {
-            plain = false;
-            ctx.prefix.to_vec()
-        }
-        "self" => {
-            plain = false;
-            ctx.scope.split('.').map(str::to_string).collect()
-        }
-        "super" if !ctx.prefix.is_empty() => {
-            plain = false;
-            let mut scoped = ctx.prefix.to_vec();
-            for _ in 0..=extra_supers {
-                scoped.pop();
-            }
-            scoped
-        }
-        "super" => {
-            plain = false;
-            let mut scoped: Vec<String> = ctx.scope.split('.').map(str::to_string).collect();
-            for _ in 0..=extra_supers {
-                scoped.pop();
-            }
-            scoped
-        }
-        _ if ctx.prefix.is_empty() => return None,
-        _ => ctx.prefix.to_vec(),
-    };
+    let (mut out, plain) = first_segment_prefix(&first, extra_supers, ctx)?;
     if plain {
         out.push(first);
     }
     out.extend(rest.into_iter().skip(extra_supers));
     Some(out)
+}
+
+/// Resolve the first `::` segment against the crate root, scope, or prefix.
+/// The flag is true when the segment is a plain name to append after it.
+fn first_segment_prefix(
+    first: &str,
+    extra_supers: usize,
+    ctx: UseTreeCtx<'_>,
+) -> Option<(Vec<String>, bool)> {
+    let (out, plain) = match first {
+        "crate" => (
+            ctx.crate_root?
+                .split('.')
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect(),
+            false,
+        ),
+        "self" if !ctx.prefix.is_empty() => (ctx.prefix.to_vec(), false),
+        "self" => (ctx.scope.split('.').map(str::to_string).collect(), false),
+        "super" if !ctx.prefix.is_empty() => {
+            (pop_segments(ctx.prefix.to_vec(), extra_supers), false)
+        }
+        "super" => (
+            pop_segments(
+                ctx.scope.split('.').map(str::to_string).collect(),
+                extra_supers,
+            ),
+            false,
+        ),
+        _ if ctx.prefix.is_empty() => return None,
+        _ => (ctx.prefix.to_vec(), true),
+    };
+    Some((out, plain))
+}
+
+fn pop_segments(mut segments: Vec<String>, extra_supers: usize) -> Vec<String> {
+    for _ in 0..=extra_supers {
+        segments.pop();
+    }
+    segments
 }

@@ -16,24 +16,59 @@ pub enum Lang {
     Rust,
 }
 
+/// The single source of truth for source-extension vocabulary: one row per
+/// supported extension, dotted as it appears in paths, with its language.
+/// Every other surface derives from this table — the walk allowlist
+/// (`walk::source_exts`), `Lang::from_rel`, module stems and `index.*`
+/// package markers (`extract::module_path_for`), the TS/JS import resolution
+/// order (`extract::walk::typescript`), and the path guards in `query` — so
+/// adding an extension is one line here.
+pub const SOURCE_EXTENSIONS: &[(&str, Lang)] = &[
+    (".py", Lang::Python),
+    (".ts", Lang::TypeScript),
+    (".tsx", Lang::Tsx),
+    (".js", Lang::JavaScript),
+    (".jsx", Lang::JavaScript),
+    (".mts", Lang::TypeScript),
+    (".cts", Lang::TypeScript),
+    (".mjs", Lang::JavaScript),
+    (".cjs", Lang::JavaScript),
+    (".rs", Lang::Rust),
+];
+
 impl Lang {
-    pub fn from_rel(rel: &str) -> Lang {
+    /// Language for a repo-relative path; `None` when the extension is not in
+    /// `SOURCE_EXTENSIONS`. An unknown extension is the caller's explicit
+    /// error — never a silent default language.
+    pub fn from_rel(rel: &str) -> Option<Lang> {
         let name = rel.rsplit('/').next().unwrap_or(rel);
-        if name.ends_with(".tsx") {
-            Lang::Tsx
-        } else if name.ends_with(".ts") || name.ends_with(".mts") || name.ends_with(".cts") {
-            Lang::TypeScript
-        } else if name.ends_with(".jsx") || name.ends_with(".mjs") || name.ends_with(".cjs") {
-            Lang::JavaScript
-        } else if name.ends_with(".py") {
-            Lang::Python
-        } else if name.ends_with(".rs") {
-            Lang::Rust
-        } else {
-            Lang::JavaScript
-        }
+        SOURCE_EXTENSIONS
+            .iter()
+            .find(|(ext, _)| name.ends_with(ext))
+            .map(|(_, lang)| *lang)
     }
 
+    /// True for the TS/JS family: import resolution and `index.*` package
+    /// markers treat these extensions as one group.
+    pub fn is_ts_js(self) -> bool {
+        matches!(self, Lang::TypeScript | Lang::Tsx | Lang::JavaScript)
+    }
+}
+
+/// Bare (dot-less) extension membership: `query` treats a final path segment
+/// naming a source extension as a file, not a directory.
+pub fn is_source_ext(ext: &str) -> bool {
+    SOURCE_EXTENSIONS
+        .iter()
+        .any(|(dotted, _)| &dotted[1..] == ext)
+}
+
+/// Bare extension names in table order (the walk allowlist derives from it).
+pub fn source_ext_names() -> impl Iterator<Item = &'static str> {
+    SOURCE_EXTENSIONS.iter().map(|(dotted, _)| &dotted[1..])
+}
+
+impl Lang {
     pub fn grammar(self) -> Result<Language> {
         let lang: Language = match self {
             Lang::Python => tree_sitter_python::LANGUAGE.into(),
@@ -46,7 +81,7 @@ impl Lang {
     }
 }
 
-/// Lib API used by tests and fixtures; the bin uses parse_tree/syntax_stats.
+/// Lib API used by tests and fixtures.
 #[allow(dead_code)]
 pub struct ParsedFile {
     pub tree: Tree,
@@ -107,12 +142,11 @@ pub fn parse_tree(src: &[u8], lang: Lang) -> Result<Tree> {
 #[allow(dead_code)]
 pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
     let tree = parse_tree(src, lang)?;
-    let error_nodes = count_error_nodes(tree.root_node());
-    let status = if error_nodes == 0 { "ok" } else { "partial" };
+    let stats = syntax_stats(tree.root_node(), src);
     Ok(ParsedFile {
         tree,
-        error_nodes,
-        status,
+        error_nodes: stats.error_nodes,
+        status: stats.status,
     })
 }
 
@@ -124,6 +158,8 @@ pub fn syntax_stats(root: Node<'_>, src: &[u8]) -> SyntaxStats {
         || src.contains(&b'#');
     let mut error_nodes = 0usize;
     let mut ranges: Vec<(usize, usize)> = Vec::new();
+    // Explicit stack: source nesting depth is attacker-controlled, and a
+    // recursive walk aborts the process on pathological files (R6d Blocker 1).
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if node.is_error() || node.is_missing() {
@@ -148,22 +184,6 @@ pub fn syntax_stats(root: Node<'_>, src: &[u8]) -> SyntaxStats {
         status: if error_nodes == 0 { "ok" } else { "partial" },
         code_lines,
     }
-}
-
-#[allow(dead_code)]
-fn count_error_nodes(root: Node<'_>) -> usize {
-    // Explicit stack: source nesting depth is attacker-controlled, and a
-    // recursive walk aborts the process on pathological files (R6d Blocker 1).
-    let mut n = 0usize;
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        n += usize::from(node.is_error() || node.is_missing());
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            stack.push(child);
-        }
-    }
-    n
 }
 
 fn is_comment_kind(kind: &str) -> bool {

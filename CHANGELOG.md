@@ -60,6 +60,13 @@ changes bump the minor while 0.x is unstable.
   Graft-learning Decision B1 (`aw note add`) is superseded by this store
   (owner decision OQ6).
 
+### Fixed
+
+- **`aw resolve --stdin` journals non-zero batch exits.** A missing or
+  ambiguous name returns exit 1/2 through the batch-output path, which now
+  finalizes the pending journal line; `aw usage --quality` counts those
+  invocations instead of dropping them.
+
 ## [0.5.0] - 2026-11-05
 
 ### Changed (breaking)

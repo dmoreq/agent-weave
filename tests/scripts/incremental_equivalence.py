@@ -25,6 +25,9 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from precision_recall import run_aw
+
 FLAT = {
     "a.py": "def entry():\n    return helper()\n\n\ndef helper():\n    return 1\n",
     "b.py": "from a import entry\n\n\ndef call_a():\n    return entry()\n",
@@ -180,16 +183,6 @@ def write_tree(root: Path, files: dict[str, str | None]) -> None:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-
-
-def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [aw, "--root", str(root), "--no-journal", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=120,
-    )
 
 
 def build(aw: str, root: Path, force: bool) -> subprocess.CompletedProcess:

@@ -29,22 +29,12 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from precision_recall import wilson
+from precision_recall import run_aw, wilson
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests" / "fixtures" / "callees"
 POINTER_RE = re.compile(r"^(\S+?):(\d+)(?:-\d+)?\s+(.*)$")
 AMBIG = "[ambiguous]"
-
-
-def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [aw, "--root", str(root), "--no-journal", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=120,
-    )
 
 
 def parse_callees(stdout: str) -> tuple[list[str], list[str]]:
