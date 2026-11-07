@@ -46,6 +46,9 @@ pub enum Cmd {
         /// Transitive depth for the caller closure (default 1 = direct callers)
         #[arg(long, default_value_t = 1)]
         depth: usize,
+        /// Explain edge metadata (kind, confidence, site, destination)
+        #[arg(long)]
+        explain: bool,
     },
     /// What does this symbol call
     Callees {
@@ -57,6 +60,9 @@ pub enum Cmd {
         /// Transitive depth for the call closure (default 1 = direct callees)
         #[arg(long, default_value_t = 1)]
         depth: usize,
+        /// Explain edge metadata (kind, confidence, site, destination)
+        #[arg(long)]
+        explain: bool,
     },
     /// One-call symbol context: definition + signature, direct callers, and
     /// direct callees. Resolved static edges plus tagged ambiguous candidates.
@@ -66,6 +72,9 @@ pub enum Cmd {
         /// Maximum callers and callees shown per section (default 10, max 50)
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        /// Explain edge metadata (kind, confidence, site, destination)
+        #[arg(long)]
+        explain: bool,
     },
     /// Who inherits from or implements this symbol (resolved inherits edges)
     Implementers {
@@ -249,7 +258,12 @@ pub enum Cmd {
         invalidate: bool,
     },
     /// Summarize the usage journal: calls, errors, latency, empty/stale rates.
-    Usage {},
+    Usage {
+        /// Show the empty-result split, capped-result count, and percentages
+        /// from existing journal fields
+        #[arg(long)]
+        quality: bool,
+    },
     /// Run the MCP stdio server (newline-delimited JSON-RPC 2.0)
     Mcp {
         /// Expose every tool instead of the core navigation set

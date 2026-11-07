@@ -141,26 +141,44 @@ fn journal_args(cmd: &cli::Cmd) -> Vec<(&'static str, String)> {
             ("force", force.to_string()),
             ("threshold", max_parse_error_rate.to_string()),
         ],
-        cli::Cmd::Callers { name, limit, depth } => {
+        cli::Cmd::Callers {
+            name,
+            limit,
+            depth,
+            explain,
+        } => {
             vec![
                 ("name", name.clone()),
                 ("depth", depth.to_string()),
                 ("limit", limit.to_string()),
+                ("explain", explain.to_string()),
             ]
         }
-        cli::Cmd::Callees { name, limit, depth } => vec![
+        cli::Cmd::Callees {
+            name,
+            limit,
+            depth,
+            explain,
+        } => vec![
             ("name", name.clone()),
             ("depth", depth.to_string()),
             ("limit", limit.to_string()),
+            ("explain", explain.to_string()),
         ],
         cli::Cmd::Path { from, to, depth } => vec![
             ("name", from.clone()),
             ("to", to.clone()),
             ("depth", depth.to_string()),
         ],
-        cli::Cmd::Context { name, limit } => {
-            vec![("name", name.clone()), ("limit", limit.to_string())]
-        }
+        cli::Cmd::Context {
+            name,
+            limit,
+            explain,
+        } => vec![
+            ("name", name.clone()),
+            ("limit", limit.to_string()),
+            ("explain", explain.to_string()),
+        ],
         cli::Cmd::Implementers { name, limit } => {
             vec![("name", name.clone()), ("limit", limit.to_string())]
         }
@@ -271,10 +289,15 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             println!("{line}");
             Ok(())
         }
-        cli::Cmd::Callers { name, limit, depth } => {
+        cli::Cmd::Callers {
+            name,
+            limit,
+            depth,
+            explain,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::callers(&conn, &root, &name, limit, depth)?;
+            let out = query::callers(&conn, &root, &name, limit, depth, explain)?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,
@@ -285,10 +308,15 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
-        cli::Cmd::Callees { name, limit, depth } => {
+        cli::Cmd::Callees {
+            name,
+            limit,
+            depth,
+            explain,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            let out = query::callees(&conn, &root, &name, limit, depth)?;
+            let out = query::callees(&conn, &root, &name, limit, depth, explain)?;
             journal::record_result(
                 out.pointers.len(),
                 out.shown,
@@ -299,10 +327,14 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
-        cli::Cmd::Context { name, limit } => {
+        cli::Cmd::Context {
+            name,
+            limit,
+            explain,
+        } => {
             let root = walk::discover_root(root_arg)?;
             let conn = db::open_for_query(&root)?;
-            for line in query::context(&conn, &root, &name, limit)? {
+            for line in query::context(&conn, &root, &name, limit, explain)? {
                 println!("{line}");
             }
             Ok(())
@@ -399,9 +431,9 @@ fn run(cli: cli::Cli, no_journal: bool, started: Instant) -> Result<()> {
             query::print_output(&out);
             Ok(())
         }
-        cli::Cmd::Usage {} => {
+        cli::Cmd::Usage { quality } => {
             let root = walk::discover_root(root_arg)?;
-            for line in journal::summary(&root)? {
+            for line in journal::summary(&root, quality)? {
                 println!("{line}");
             }
             Ok(())

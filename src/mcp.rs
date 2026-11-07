@@ -38,13 +38,13 @@ fn tools(all: bool) -> Value {
              "max_parse_error_rate": {"type": "number", "description": "Abort above this fraction of parse-error files (default 0.05)"}
          }), &[])},
         {"name": "callers", "description": "Who calls this symbol — direct by default; transitive with depth; pointer list path:line",
-         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Transitive depth (default 1)"}, "limit": limit}), &["name"])},
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Transitive depth (default 1)"}, "limit": limit, "explain": {"type": "boolean", "description": "Append edge kind, confidence, site, and destination metadata"}}), &["name"])},
         {"name": "callees", "description": "What does this symbol call — transitive with depth",
-         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit}), &["name"])},
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10}, "limit": limit, "explain": {"type": "boolean", "description": "Append edge kind, confidence, site, and destination metadata"}}), &["name"])},
         {"name": "path", "description": "Shortest call path between two symbols — hop call-site pointers path:line over resolved edges; dynamic dispatch may hide paths",
          "inputSchema": schema_obj(json!({"from": {"type": "string"}, "to": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 10, "description": "Maximum hops (default 10)"}}), &["from", "to"])},
         {"name": "context", "description": "One-call symbol context: definition + signature, direct callers, direct callees over resolved edges plus tagged ambiguous candidates",
-         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Callers/callees shown per section (default 10)"}}), &["name"])},
+         "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 50, "description": "Callers/callees shown per section (default 10)"}, "explain": {"type": "boolean", "description": "Append edge kind, confidence, site, and destination metadata"}}), &["name"])},
         {"name": "implementers", "description": "Who inherits from or implements this symbol — resolved inherits edges only; cross-file impls omitted",
          "inputSchema": schema_obj(json!({"name": {"type": "string"}, "limit": limit}), &["name"])},
         {"name": "imports", "description": "What does this file import — outbound resolved imports; external/unresolved omitted",
@@ -77,7 +77,7 @@ fn tools(all: bool) -> Value {
         {"name": "report", "description": "Four-section architecture report",
          "inputSchema": schema_obj(json!({"path": {"type": "string"}}), &[])},
         {"name": "usage", "description": "Usage-journal summary: calls, errors, latency, empty/stale rates",
-         "inputSchema": schema_obj(json!({}), &[])},
+         "inputSchema": schema_obj(json!({"quality": {"type": "boolean", "description": "Add the empty-result split, cap count, and percentages"}}), &[])},
     ]);
     if !all {
         if let Some(list) = v.as_array_mut() {
@@ -409,6 +409,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &arg_str(args, "name").unwrap_or_default(),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
                 arg_usize(args, "depth", 1),
+                arg_bool(args, "explain"),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
@@ -421,6 +422,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 &arg_str(args, "name").unwrap_or_default(),
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT),
                 arg_usize(args, "depth", 1),
+                arg_bool(args, "explain"),
             )?;
             record(&out);
             Ok(crate::query::render_output(&out))
@@ -432,6 +434,7 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
                 root,
                 &arg_str(args, "name").unwrap_or_default(),
                 arg_usize(args, "limit", 10),
+                arg_bool(args, "explain"),
             )?))
         }
         "implementers" => {
@@ -641,7 +644,10 @@ fn dispatch_tool(root: &Path, tool: &str, args: &Value) -> crate::error::Result<
             root,
             arg_str(args, "path").as_deref(),
         )?)),
-        "usage" => Ok(join_lines(&crate::journal::summary(root)?)),
+        "usage" => Ok(join_lines(&crate::journal::summary(
+            root,
+            arg_bool(args, "quality"),
+        )?)),
         _ => Err(AwError::Usage(format!("unknown tool '{tool}'"))),
     }
 }
@@ -668,6 +674,7 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
     let mut out: Vec<(&'static str, String)> = Vec::new();
     match tool {
         "build" => out.push(("force", arg_bool(args, "force").to_string())),
+        "usage" => out.push(("quality", arg_bool(args, "quality").to_string())),
         "callers" => {
             if let Some(name) = arg_str(args, "name") {
                 out.push(("name", name));
@@ -677,6 +684,7 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
             ));
+            out.push(("explain", arg_bool(args, "explain").to_string()));
         }
         "callees" => {
             if let Some(name) = arg_str(args, "name") {
@@ -687,12 +695,14 @@ fn tool_journal_args(tool: &str, args: &Value) -> Vec<(&'static str, String)> {
                 "limit",
                 arg_usize(args, "limit", crate::query::DEFAULT_LIMIT).to_string(),
             ));
+            out.push(("explain", arg_bool(args, "explain").to_string()));
         }
         "context" => {
             if let Some(name) = arg_str(args, "name") {
                 out.push(("name", name));
             }
             out.push(("limit", arg_usize(args, "limit", 10).to_string()));
+            out.push(("explain", arg_bool(args, "explain").to_string()));
         }
         "path" => {
             if let Some(from) = arg_str(args, "from") {

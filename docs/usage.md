@@ -121,6 +121,8 @@ aw report --path src
 
 ## Recover from uncertain results
 
+See [Concepts](concepts.md) for the index model behind pointers, confidence, and staleness. The table below describes what each signal does and does not mean.
+
 | Result | Meaning | Next action |
 |---|---|---|
 | Name is ambiguous; exit 2 | Multiple indexed definitions match | Copy a full printed qualified name; do not merge candidates silently |
@@ -156,4 +158,4 @@ This guide makes no measured savings claim. See [Evaluation](EVALUATION.md) for 
 
 Most commands append local usage metadata. Use `aw --no-journal` or `AW_NO_JOURNAL=1` to disable the usage journal for an invocation.
 
-`aw usage` summarizes recorded activity; see [journal controls](cli-reference.md#journal-and-environment).
+`aw usage` summarizes recorded activity; see [journal controls](cli-reference.md#journal-and-environment). `aw usage --quality` adds the empty-result split, the capped-result count, and percentages from the existing journal fields.

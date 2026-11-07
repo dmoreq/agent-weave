@@ -28,6 +28,10 @@ source before making behavioral claims or edits; the index is not a substitute f
 These seven commands are the measured, validated routing set. Other aw commands
 exist, but they are not mandatory agent routing; use them only as described below.
 
+`--explain` on `callers`, `callees`, or `context` adds stored edge metadata for
+debugging. It is not required for routing and does not reveal the resolver
+branch.
+
 Avoid repeating a complete lookup with grep when a current, unambiguous aw result
 already answers it. Use source reads or grep for focused verification, missing
 relationships, unsupported syntax, or conflicting evidence. Verification required

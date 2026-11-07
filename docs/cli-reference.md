@@ -85,28 +85,28 @@ Without options, report database integrity, versions, parse errors, changed inde
 ### `context <NAME>`
 
 ```text
-aw context <NAME> [--limit <N>]
+aw context <NAME> [--limit <N>] [--explain]
 ```
 
-Print a definition range, kind, qualified name, signature, direct caller sites, and direct callees. `--limit` defaults to 10 per section, maximum 50.
+Print a definition range, kind, qualified name, signature, direct caller sites, and direct callees. `--limit` defaults to 10 per section, maximum 50. `--explain` appends the stored edge kind, confidence, site line, destination, and a typed-receiver hint when a `type_ref` edge exists; it does not reconstruct the resolver branch.
 
-Resolved callees point to definitions; ambiguous callee entries can point to the originating site and carry `[ambiguous]`. Missing sections do not fail a query when the target exists. This is static context, not a complete runtime call graph.
+Resolved callees point to definitions; ambiguous callee entries can point to the originating site and carry `[ambiguous]`. Missing sections do not fail a query when the target exists. This is static context, not a complete runtime call graph. Does not prove: every runtime caller or callee is present.
 
 ### `callers <NAME>`
 
 ```text
-aw callers <NAME> [--limit <N>] [--depth <N>]
+aw callers <NAME> [--limit <N>] [--depth <N>] [--explain]
 ```
 
-Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. Each caller symbol appears once at its shortest depth; a symbol reached by a shorter route is not repeated on a longer route, and its inbound edges are expanded once. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target.
+Print sites that call the symbol, with the enclosing caller's qualified name. `--depth` defaults to 1 for direct callers; larger depths follow the reverse call closure and append `[depth=N]` to each row. Each caller symbol appears once at its shortest depth; a symbol reached by a shorter route is not repeated on a longer route, and its inbound edges are expanded once. The queried symbol is the closure seed and is excluded from transitive rows, so a self-call is visible only with `--depth 1`. `--limit` uses the shared default and cap. Possible ambiguous edges are tagged; they are not proven calls to the target. `--explain` appends stored edge metadata; it does not reconstruct the resolver branch. Does not prove: no other caller exists; dynamic dispatch can hide callers.
 
 ### `callees <NAME>`
 
 ```text
-aw callees <NAME> [--limit <N>] [--depth <N>]
+aw callees <NAME> [--limit <N>] [--depth <N>] [--explain]
 ```
 
-Print outgoing callees; resolved rows point to definitions and include callee identity. `--depth` defaults to 1 for direct callees; larger depths follow the forward call closure. `--limit` uses the shared default and cap.
+Print outgoing callees; resolved rows point to definitions and include callee identity. `--depth` defaults to 1 for direct callees; larger depths follow the forward call closure. `--limit` uses the shared default and cap. `--explain` appends stored edge metadata and grouped site counts; it does not reconstruct the resolver branch. Does not prove: the symbol has no other outgoing calls; external and dynamic calls can be missing.
 
 ### `path <FROM> <TO>`
 
@@ -116,7 +116,7 @@ aw path <FROM> <TO> [--depth <N>]
 
 Find one shortest forward route over resolved call edges. Print a static-analysis caveat, call-site pointers in hop order, and the symbol chain. `--depth` defaults to 10; there is no `--limit` option.
 
-Swap arguments for the reverse question. Equal endpoints or no route within the depth limit return exit 1. Ambiguity identifies the failing endpoint; dynamic dispatch can hide routes.
+Swap arguments for the reverse question. Equal endpoints or no route within the depth limit return exit 1. Ambiguity identifies the failing endpoint; dynamic dispatch can hide routes. Does not prove: no route exists at runtime, or that every hop is exercised.
 
 ## Inspect dependencies and test candidates
 
@@ -137,7 +137,7 @@ Find files that depend on the indexed target file, not its outbound dependencies
 | `--context` | Off | Append the enclosing callable when available |
 | `--explain` | Off | Append relationship kind and depth |
 
-Unresolved imports and bases are omitted from extended dependency traversal. Dynamic calls can hide dependents even when only calls are selected.
+Unresolved imports and bases are omitted from extended dependency traversal. Dynamic calls can hide dependents even when only calls are selected. Does not prove: runtime impact, required tests, or effects outside indexed edges.
 
 ### `imports <FILE>`
 
@@ -145,7 +145,7 @@ Unresolved imports and bases are omitted from extended dependency traversal. Dyn
 aw imports <FILE> [--limit <N>]
 ```
 
-List outbound resolved import targets for an indexed file. External and unresolved imports are omitted. `--limit` uses the shared default and cap.
+List outbound resolved import targets for an indexed file. External and unresolved imports are omitted. `--limit` uses the shared default and cap. Does not prove: the file has no other dependencies; external and unresolved imports are omitted.
 
 ### `implementers <NAME>`
 
@@ -153,7 +153,7 @@ List outbound resolved import targets for an indexed file. External and unresolv
 aw implementers <NAME> [--limit <N>]
 ```
 
-Find direct resolved inbound inheritance or implementation relationships. Dynamic inheritance and cross-file Rust implementation blocks can be missing. `--limit` uses the shared default and cap.
+Find direct resolved inbound inheritance or implementation relationships. Dynamic inheritance and cross-file Rust implementation blocks can be missing. `--limit` uses the shared default and cap. Does not prove: no other implementation exists; dynamic inheritance and cross-file Rust blocks can be missing.
 
 ### `tests <NAME_OR_FILE>`
 
@@ -163,7 +163,7 @@ aw tests <NAME_OR_FILE> [--depth <N>] [--limit <N>]
 
 Find statically reachable test candidates for a symbol or exact indexed file. `--depth` defaults to 10; `--limit` uses the shared default and cap.
 
-Candidates carry the index's test classification: test paths (`tests/`, `test/`, `__tests__/`), test-shaped names (`test_*`, `test` + uppercase), test-shaped files (`test_*.py`, `*_test.py`, `*_test.go`, `*_test.dart`, `*.test.*`, `*.spec.*`), Rust `#[test]`/`#[cfg(test)]` items, and TS `describe`/`it` scopes. Fixtures, generated tests, and indirect tests can be missed. This command does not run tests.
+Candidates carry the index's test classification: test paths (`tests/`, `test/`, `__tests__/`), test-shaped names (`test_*`, `test` + uppercase), test-shaped files (`test_*.py`, `*_test.py`, `*_test.go`, `*_test.dart`, `*.test.*`, `*.spec.*`), Rust `#[test]`/`#[cfg(test)]` items, and TS `describe`/`it` scopes. Fixtures, generated tests, and indirect tests can be missed. This command does not run tests. Does not prove: a listed test validates the target, or that no other test reaches it.
 
 ## Find symbols and files
 
@@ -179,7 +179,7 @@ Rank symbols using BM25 token search over names, qualified names, file paths, an
 |---|---|---|
 | `--limit <N>` | `50` | Maximum displayed matches, cap 10000 |
 
-camelCase and snake_case split into tokens. Normal search uses prefix terms and keeps at most 32 tokens, with a warning when truncated. It does not search bodies, comments, or docstrings. Rows carry a location, qualified name, and available signature.
+camelCase and snake_case split into tokens. Normal search uses prefix terms and keeps at most 32 tokens, with a warning when truncated. It does not search bodies, comments, or docstrings. Rows carry a location, qualified name, and available signature. Does not prove: the symbol does not exist elsewhere; bodies, comments, and docstrings are not searched.
 
 ### `symbols <FILE_OR_DIRECTORY>`
 
@@ -221,7 +221,7 @@ List candidate functions, methods, classes, traits, and interfaces without index
 
 `--exclude-tests` drops rows carrying the index's test classification (test paths, test-shaped names and files, Rust `#[test]`/`#[cfg(test)]` items, TS `describe`/`it` scopes), not test-runner discovery. All switches default to off, `--path` defaults to absent, and `--limit` uses the shared default and cap.
 
-Always treat the output as candidates. Entry points, external consumers, dynamic dispatch, star imports, module-level imports, type references, and attribute references are not proven absent.
+Always treat the output as candidates. Entry points, external consumers, dynamic dispatch, star imports, module-level imports, type references, and attribute references are not proven absent. Does not prove: the symbol is dead.
 
 ### `unresolved`
 
@@ -302,10 +302,12 @@ Print four sections: index overview, top packages by symbol count, five hotspots
 ### `usage`
 
 ```text
-aw usage
+aw usage [--quality]
 ```
 
 Summarize invocation counts, errors, latency, empty/stale rates, and ambiguous-pointer counts. No index is needed; an empty journal returns exit 1.
+
+`--quality` adds the empty-result split (`empty_ok` for exit 0, `empty_error` for non-zero), the capped-result count (`total > shown`), and the `empty_ok` percentage. It reads only fields already present in `.aw/usage.log`; the journal schema and the default summary do not change.
 
 ### Local data and controls
 

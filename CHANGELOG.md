@@ -18,6 +18,18 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
+- `--explain` for `aw callers`, `aw callees`, and `aw context` appends the
+  stored edge metadata: kind, confidence, site line, destination, grouped
+  edge count, and a typed-receiver hint when a `type_ref` edge exists. It
+  reports ambiguous rows as ambiguous and states that the candidate set is not
+  stored. The flag is opt-in; default output is byte-identical and no schema
+  change is required.
+
+- `aw usage --quality` adds the empty-result split (`empty_ok` for exit 0,
+  `empty_error` for non-zero), the capped-result count (`total > shown`), and
+  the `empty_ok` percentage. It reads only fields already written to
+  `.aw/usage.log`; the default summary and the journal schema are unchanged.
+
 - `symbols.is_test` (schema v7 -> v8): test classification computed once at
   extraction from test paths (`tests/`, `test/`, `__tests__/`), test-shaped
   names (`test_*`, `test` + uppercase) and files (`test_*.py`, `*_test.py`,

@@ -91,6 +91,8 @@ Read [Evaluation](EVALUATION.md) before applying measured benefits to another ho
 
 ## Trust contract
 
+See [Concepts](concepts.md) for symbols, edges, confidence, and the static boundaries behind these rules.
+
 When an `aw` query exits 0, treat its navigation fields as candidates, not ground
 truth. Static resolution can return false positives even when the index is
 current and results are not capped or ambiguous. Avoid repeating a complete

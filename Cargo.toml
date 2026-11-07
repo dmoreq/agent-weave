@@ -14,6 +14,7 @@ categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.90"
 include = [
     "/src/**",
+    "/bench/**",
     "/tests/*.rs",
     "/tests/scripts/timing_assert.sh",
     "/schema.sql",

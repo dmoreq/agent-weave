@@ -33,6 +33,10 @@ const PATH_CAVEAT: &str = "aw: path — resolved static edges only; dynamic disp
 const CONTEXT_CAVEAT: &str =
     "aw: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees";
 
+/// `--explain` caveat: the index stores edge metadata, not the resolution path.
+pub const EXPLAIN_CAVEAT: &str =
+    "aw: explain — edge metadata from the index; resolution reason is not stored";
+
 /// Permanent honesty caveat for `aw implementers` (Amendment 19).
 const IMPLEMENTERS_CAVEAT: &str = "aw: implementers — resolved static inherits edges only; dynamic inheritance and cross-file impls are omitted";
 
@@ -158,6 +162,18 @@ pub struct QueryOutput {
     pub total: usize,
     /// True when the staleness header fired on the displayed set (journal).
     pub stale: bool,
+}
+
+/// Prepend the `--explain` caveat to any existing header without changing the
+/// default (non-explain) output.
+pub fn with_explain_header(mut out: QueryOutput, explain: bool) -> QueryOutput {
+    if explain {
+        out.header = Some(match out.header.take() {
+            Some(header) => format!("{EXPLAIN_CAVEAT}\n{header}"),
+            None => EXPLAIN_CAVEAT.to_string(),
+        });
+    }
+    out
 }
 
 pub fn clamp_limit(limit: usize) -> Result<usize> {

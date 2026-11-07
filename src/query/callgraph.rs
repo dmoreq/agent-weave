@@ -370,6 +370,7 @@ pub fn callers(
     name: &str,
     limit: usize,
     depth: usize,
+    explain: bool,
 ) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
     let depth = depth.clamp(1, 10);
@@ -388,7 +389,7 @@ pub fn callers(
         });
     }
     if depth > 1 {
-        let (rows, total) = transitive_callers(conn, &ids, depth, limit)?;
+        let (rows, total) = transitive_callers(conn, &ids, depth, limit, explain)?;
         let mut out = collect_output(
             conn,
             root,
@@ -403,11 +404,23 @@ pub fn callers(
             Some(stale) => format!("{caveat}\n{stale}"),
             None => caveat,
         });
-        return Ok(out);
+        return Ok(with_explain_header(out, explain));
     }
 
     let (callers, total) = direct_callers(conn, &ids, limit)?;
     let rows = callers.into_iter().map(|row| {
+        let mut detail = row.qualname;
+        if explain {
+            detail.push_str(&explain_edge(
+                "calls",
+                &row.confidence,
+                row.site_line,
+                &row.dst_name,
+            ));
+            if let Some(receiver) = receiver_hint(conn, row.src_id, row.site_line) {
+                detail.push_str(&format!(" receiver={receiver}"));
+            }
+        }
         Ok(Pointer {
             file: row.path,
             line: row.site_line,
@@ -416,17 +429,18 @@ pub fn callers(
             } else {
                 ""
             },
-            detail: row.qualname,
+            detail,
         })
     });
-    collect_output(
+    let out = collect_output(
         conn,
         root,
         rows,
         limit,
         "0 callers found (dynamic dispatch possible — grep fallback recommended)",
         Some(total),
-    )
+    )?;
+    Ok(with_explain_header(out, explain))
 }
 
 /// Reverse call-edge BFS. Each caller symbol is expanded once at its shortest
@@ -437,6 +451,7 @@ fn transitive_callers(
     targets: &[i64],
     depth: usize,
     limit: usize,
+    explain: bool,
 ) -> Result<(Vec<Pointer>, usize)> {
     let mut visited: HashSet<i64> = targets.iter().copied().collect();
     let mut frontier: Vec<i64> = targets.to_vec();
@@ -451,10 +466,12 @@ fn transitive_callers(
         for chunk in frontier.chunks(500) {
             let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!(
-                "SELECT e.src_id, e.site_line, e.confidence, f.path, s.qualname
+                "SELECT e.src_id, e.site_line, e.confidence, f.path, s.qualname,
+                        COALESCE(ds.qualname, e.dst_name)
                  FROM edges e
                  JOIN symbols s ON s.id = e.src_id
                  JOIN files f ON f.id = s.file_id
+                 LEFT JOIN symbols ds ON ds.id = e.dst_id
                  WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
                  ORDER BY f.path, e.site_line, s.qualname"
             );
@@ -473,11 +490,19 @@ fn transitive_callers(
                 let conf: String = row.get(2)?;
                 let path: String = row.get(3)?;
                 let qualname: String = row.get(4)?;
+                let dst: String = row.get(5)?;
                 if queued.insert(src) {
                     next.push(src);
                 }
                 total += 1;
                 if displayed.len() < limit {
+                    let detail = if explain {
+                        format!(
+                            "{qualname} [depth={level}] [edge=calls confidence={conf} dst={dst}]"
+                        )
+                    } else {
+                        format!("{qualname} [depth={level}]")
+                    };
                     displayed.push(Pointer {
                         file: path,
                         line: site,
@@ -486,7 +511,7 @@ fn transitive_callers(
                         } else {
                             ""
                         },
-                        detail: format!("{qualname} [depth={level}]"),
+                        detail,
                     });
                 }
             }
@@ -499,6 +524,42 @@ fn transitive_callers(
     Ok((displayed, total))
 }
 
+/// Edge metadata suffix for `--explain` on direct caller rows.
+fn explain_edge(kind: &str, confidence: &str, site: i64, dst: &str) -> String {
+    let mut text = format!(" [edge={kind} confidence={confidence} site={site} dst={dst}]");
+    if confidence == "AMBIGUOUS" {
+        text.push_str(" resolution=ambiguous (candidate set not stored)");
+    }
+    text
+}
+
+/// Edge metadata suffix for grouped direct callee rows.
+fn explain_callee(confidence: &str, edges: i64, first: i64, last: i64, dst: &str) -> String {
+    let sites = if edges <= 1 || first == last {
+        format!("site={first}")
+    } else {
+        format!("sites={first}..{last}")
+    };
+    let mut text = format!(" [edge=calls confidence={confidence} edges={edges} {sites} dst={dst}]");
+    if confidence == "AMBIGUOUS" {
+        text.push_str(" resolution=ambiguous (candidate set not stored)");
+    }
+    text
+}
+
+/// Typed-receiver hint stored as a `type_ref` edge at the same call site.
+fn receiver_hint(conn: &Connection, src_id: i64, site_line: i64) -> Option<String> {
+    conn.query_row(
+        "SELECT ds.qualname
+         FROM edges e JOIN symbols ds ON ds.id = e.dst_id
+         WHERE e.src_id = ?1 AND e.site_line = ?2 AND e.kind = 'type_ref'
+         ORDER BY ds.qualname LIMIT 1",
+        rusqlite::params![src_id, site_line],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+}
+
 /// One direct caller row. Private loader output; rendering and journaling stay
 /// at the public surface.
 struct CallerRow {
@@ -506,6 +567,8 @@ struct CallerRow {
     confidence: String,
     path: String,
     qualname: String,
+    src_id: i64,
+    dst_name: String,
 }
 
 /// One direct callee row (depth 1). `confidence` is carried so `callees` and
@@ -515,6 +578,9 @@ struct CalleeRow {
     confidence: String,
     path: String,
     qualname: String,
+    edges: i64,
+    first_site: i64,
+    last_site: i64,
 }
 
 /// Side-effect-free direct-caller load. The count and the bounded display set
@@ -533,10 +599,12 @@ fn direct_callers(conn: &Connection, ids: &[i64], limit: usize) -> Result<(Vec<C
             r.get::<_, i64>(0)
         })? as usize;
     let sql = format!(
-        "SELECT e.site_line, e.confidence, f.path, s.qualname
+        "SELECT e.site_line, e.confidence, f.path, s.qualname, e.src_id,
+                COALESCE(ds.qualname, e.dst_name)
          FROM edges e
          JOIN symbols s ON s.id = e.src_id
          JOIN files f ON f.id = s.file_id
+         LEFT JOIN symbols ds ON ds.id = e.dst_id
          WHERE e.dst_id IN ({placeholders}) AND e.kind = 'calls'
          ORDER BY f.path, e.site_line LIMIT {limit}"
     );
@@ -548,6 +616,8 @@ fn direct_callers(conn: &Connection, ids: &[i64], limit: usize) -> Result<(Vec<C
                 confidence: r.get(1)?,
                 path: r.get(2)?,
                 qualname: r.get(3)?,
+                src_id: r.get(4)?,
+                dst_name: r.get(5)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -575,7 +645,10 @@ fn direct_callees(conn: &Connection, ids: &[i64], limit: usize) -> Result<(Vec<C
         "SELECT MIN(COALESCE(ds.line_start, e.site_line)) AS line,
                 MAX(e.confidence) AS confidence,
                 MAX(COALESCE(df.path, sf.path)) AS path,
-                COALESCE(ds.qualname, e.dst_name) AS qn
+                COALESCE(ds.qualname, e.dst_name) AS qn,
+                COUNT(*) AS edges,
+                MIN(e.site_line) AS first_site,
+                MAX(e.site_line) AS last_site
          FROM edges e
          JOIN symbols s ON s.id = e.src_id JOIN files sf ON sf.id = s.file_id
          LEFT JOIN symbols ds ON ds.id = e.dst_id
@@ -592,6 +665,9 @@ fn direct_callees(conn: &Connection, ids: &[i64], limit: usize) -> Result<(Vec<C
                 confidence: r.get(1)?,
                 path: r.get(2)?,
                 qualname: r.get(3)?,
+                edges: r.get(4)?,
+                first_site: r.get(5)?,
+                last_site: r.get(6)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -688,6 +764,7 @@ pub fn callees(
     name: &str,
     limit: usize,
     depth: usize,
+    explain: bool,
 ) -> Result<QueryOutput> {
     let limit = clamp_limit(limit)?;
     let depth = depth.clamp(1, 10);
@@ -708,6 +785,16 @@ pub fn callees(
     if depth == 1 {
         let (callees, total) = direct_callees(conn, &ids, limit)?;
         let rows = callees.into_iter().map(|row| {
+            let mut detail = row.qualname.clone();
+            if explain {
+                detail.push_str(&explain_callee(
+                    &row.confidence,
+                    row.edges,
+                    row.first_site,
+                    row.last_site,
+                    &row.qualname,
+                ));
+            }
             Ok(Pointer {
                 file: row.path,
                 line: row.line,
@@ -716,10 +803,11 @@ pub fn callees(
                 } else {
                     ""
                 },
-                detail: row.qualname,
+                detail,
             })
         });
-        return collect_output(conn, root, rows, limit, "0 callees found", Some(total));
+        let out = collect_output(conn, root, rows, limit, "0 callees found", Some(total))?;
+        return Ok(with_explain_header(out, explain));
     }
     // depth > 1: recursive closure over call edges from the reached set.
     let mut params: Vec<rusqlite::types::Value> = ids
@@ -764,6 +852,12 @@ pub fn callees(
         let line: i64 = r.get(0)?;
         let conf: String = r.get(1)?;
         let path: String = r.get(2)?;
+        let qualname: String = r.get(3)?;
+        let detail = if explain {
+            format!("{qualname} [edge=calls confidence={conf} projection=path]")
+        } else {
+            qualname
+        };
         Ok(Pointer {
             file: path,
             line,
@@ -772,10 +866,11 @@ pub fn callees(
             } else {
                 ""
             },
-            detail: r.get::<_, String>(3)?,
+            detail,
         })
     })?;
-    collect_output(conn, root, rows, limit, "0 callees found", Some(total))
+    let out = collect_output(conn, root, rows, limit, "0 callees found", Some(total))?;
+    Ok(with_explain_header(out, explain))
 }
 
 /// Shortest call path (Amendment 13): does `from` reach `to` through resolved
@@ -1043,7 +1138,13 @@ fn path_bfs(conn: &Connection, from_id: i64, to_id: i64, depth: usize) -> Result
 /// One-call symbol context (Amendment 17): definition line with signature,
 /// direct callers, and direct callees — replaces composing callers/callees/
 /// symbols for "what does this symbol do and who uses it" questions.
-pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Result<Vec<String>> {
+pub fn context(
+    conn: &Connection,
+    root: &Path,
+    name: &str,
+    limit: usize,
+    explain: bool,
+) -> Result<Vec<String>> {
     // The CLI documents max 50 per section; clamp here so MCP callers cannot
     // bypass the contract.
     let limit = clamp_limit(limit)?.min(50);
@@ -1080,22 +1181,41 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
         ))
     })?;
     let (caller_rows, callers_total) = direct_callers(conn, &[id], limit)?;
-    let callers: Vec<(String, i64, String)> = caller_rows
+    let callers: Vec<(String, i64, String, String, i64, String)> = caller_rows
         .into_iter()
-        .map(|row| (row.path, row.site_line, row.qualname))
+        .map(|row| {
+            (
+                row.path,
+                row.site_line,
+                row.qualname,
+                row.confidence,
+                row.src_id,
+                row.dst_name,
+            )
+        })
         .collect();
     let (callee_rows, callees_total) = direct_callees(conn, &[id], limit)?;
-    let callees: Vec<(String, i64, String, String)> = callee_rows
+    let callees: Vec<(String, i64, String, String, i64, i64, i64)> = callee_rows
         .into_iter()
-        .map(|row| (row.path, row.line, row.qualname, row.confidence))
+        .map(|row| {
+            (
+                row.path,
+                row.line,
+                row.qualname,
+                row.confidence,
+                row.edges,
+                row.first_site,
+                row.last_site,
+            )
+        })
         .collect();
     // Staleness over the displayed set (definition + shown callers/callees).
     let mut files: BTreeSet<&String> = BTreeSet::new();
     files.insert(&def_path);
-    for (p, _, _) in &callers {
+    for (p, _, _, _, _, _) in &callers {
         files.insert(p);
     }
-    for (p, _, _, _) in &callees {
+    for (p, _, _, _, _, _, _) in &callees {
         files.insert(p);
     }
     let n_files = files.len();
@@ -1109,23 +1229,39 @@ pub fn context(conn: &Connection, root: &Path, name: &str, limit: usize) -> Resu
     // Caller/callee lines carry the identity suffix added in R7.
     let caller_lines: Vec<String> = callers
         .iter()
-        .map(|(p, l, qn)| format!("{p}:{l} {qn}"))
+        .map(|(p, l, qn, conf, src, dst)| {
+            let mut line = format!("{p}:{l} {qn}");
+            if explain {
+                line.push_str(&explain_edge("calls", conf, *l, dst));
+                if let Some(receiver) = receiver_hint(conn, *src, *l) {
+                    line.push_str(&format!(" receiver={receiver}"));
+                }
+            }
+            line
+        })
         .collect();
     let callee_lines: Vec<String> = callees
         .iter()
-        .map(|(p, l, qn, conf)| {
+        .map(|(p, l, qn, conf, edges, first, last)| {
             let tag = if conf == "AMBIGUOUS" {
                 " [ambiguous]"
             } else {
                 ""
             };
-            format!("{p}:{l}{tag} {qn}")
+            let mut line = format!("{p}:{l}{tag} {qn}");
+            if explain {
+                line.push_str(&explain_callee(conf, *edges, *first, *last, qn));
+            }
+            line
         })
         .collect();
     let total = callers_total + callees_total;
     let shown = caller_lines.len() + callee_lines.len();
     crate::journal::record_result(shown, shown, total, stale, 0);
     let mut out = vec![CONTEXT_CAVEAT.to_string()];
+    if explain {
+        out.push(EXPLAIN_CAVEAT.to_string());
+    }
     if stale {
         out.push(format!(
             "aw: {changed} of {n_files} result files changed since build — run aw build"

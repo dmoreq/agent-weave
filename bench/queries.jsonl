@@ -1,0 +1,24 @@
+{"id":"py-callers-order-total","corpus":"python","command":"callers","args":["shop.models.Order.total"],"expect":[{"path":"shop/models.py","detail_contains":"shop.models.DiscountedOrder.discount"}],"exit":0}
+{"id":"py-callees-apply-discount","corpus":"python","command":"callees","args":["shop.service.apply_discount"],"expect":[{"path":"shop/models.py","detail_contains":"shop.models.Order.discount"}],"exit":0}
+{"id":"py-callers-create-order","corpus":"python","command":"callers","args":["shop.service.create_order"],"expect":[{"path":"shop/api.py","detail_contains":"shop.api.handle_request"},{"path":"tests/test_service.py","detail_contains":"tests.test_service.test_create_order"}],"exit":0}
+{"id":"py-context-create-order","corpus":"python","command":"context","args":["shop.service.create_order"],"expect":[{"path":"shop/service.py","detail_contains":"shop.service.create_order"},{"path":"shop/api.py","detail_contains":"shop.api.handle_request"},{"path":"shop/models.py","detail_contains":"shop.models.DiscountedOrder"}],"exit":0}
+{"id":"py-path-request-discount","corpus":"python","command":"path","args":["shop.api.handle_request","shop.models.Order.discount"],"expect_chain":["shop.api.handle_request","shop.service.apply_discount","shop.models.Order.discount"],"exit":0}
+{"id":"py-impact-models","corpus":"python","command":"impact","args":["shop/models.py"],"expect":[{"path":"shop/service.py"},{"path":"tests/test_service.py"}],"exit":0}
+{"id":"py-imports-service","corpus":"python","command":"imports","args":["shop/service.py"],"expect":[{"path":"shop/service.py","detail_contains":"shop.models.Order"}],"exit":0}
+{"id":"py-implementers-order","corpus":"python","command":"implementers","args":["shop.models.Order"],"expect":[{"path":"shop/models.py","detail_contains":"shop.models.DiscountedOrder"}],"exit":0}
+{"id":"py-tests-create-order","corpus":"python","command":"tests","args":["shop.service.create_order"],"expect":[{"path":"tests/test_service.py","detail_contains":"tests.test_service.test_create_order"}],"exit":0}
+{"id":"py-search-apply-discount","corpus":"python","command":"search","args":["apply discount"],"expect":[{"path":"shop/service.py","detail_contains":"shop.service.apply_discount"}],"exit":0}
+{"id":"py-callers-leaf","corpus":"python","command":"callers","args":["shop.models.DiscountedOrder.discount"],"expect":[],"exit":1}
+{"id":"ts-callers-cart-total","corpus":"typescript","command":"callers","args":["web.cart.Cart.total"],"expect":[{"path":"web/cart.ts","detail_contains":"web.cart.Cart.add"}],"exit":0}
+{"id":"ts-callees-checkout","corpus":"typescript","command":"callees","args":["web.checkout.checkout"],"expect":[{"path":"web/cart.ts","detail_contains":"web.cart.Cart.add"}],"exit":0}
+{"id":"ts-path-checkout-total","corpus":"typescript","command":"path","args":["web.checkout.checkout","web.cart.Cart.total"],"expect_chain":["web.checkout.checkout","web.cart.Cart.add","web.cart.Cart.total"],"exit":0}
+{"id":"ts-impact-cart","corpus":"typescript","command":"impact","args":["web/cart.ts"],"expect":[{"path":"web/checkout.ts"}],"exit":0}
+{"id":"ts-imports-checkout","corpus":"typescript","command":"imports","args":["web/checkout.ts"],"expect":[{"path":"web/checkout.ts","detail_contains":"web.cart.Cart"}],"exit":0}
+{"id":"ts-search-cart-total","corpus":"typescript","command":"search","args":["cart total"],"expect":[{"path":"web/cart.ts","detail_contains":"web.cart.Cart.total"}],"exit":0}
+{"id":"ts-callers-leaf","corpus":"typescript","command":"callers","args":["web.checkout.checkout"],"expect":[],"exit":1}
+{"id":"rust-callers-apply-discount","corpus":"rust","command":"callers","args":["pricing.apply_discount"],"expect":[{"path":"order.rs","detail_contains":"order.Order.checkout"}],"exit":0}
+{"id":"rust-callees-checkout","corpus":"rust","command":"callees","args":["order.Order.checkout"],"expect":[{"path":"pricing.rs","detail_contains":"pricing.apply_discount"}],"exit":0}
+{"id":"rust-path-checkout-discount","corpus":"rust","command":"path","args":["order.Order.checkout","pricing.apply_discount"],"expect_chain":["order.Order.checkout","pricing.apply_discount"],"exit":0}
+{"id":"rust-impact-pricing","corpus":"rust","command":"impact","args":["pricing.rs"],"expect":[{"path":"order.rs"}],"exit":0}
+{"id":"rust-search-apply-discount","corpus":"rust","command":"search","args":["apply discount"],"expect":[{"path":"pricing.rs","detail_contains":"pricing.apply_discount"}],"exit":0}
+{"id":"rust-callers-leaf","corpus":"rust","command":"callers","args":["order.Order.total"],"expect":[],"exit":1}

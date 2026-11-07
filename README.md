@@ -128,6 +128,7 @@ for setup, verification, and the difference between tool access and routing.
 
 - [Documentation index](docs/README.md): guides, reference, and technical design.
 - [Evaluation](docs/EVALUATION.md): reported benefits, costs, and evidence limits.
+- [Public benchmark](bench/README.md): reproducible pointer regression corpus.
 - [Support](SUPPORT.md): common errors and how to report a problem.
 - [Contributing](CONTRIBUTING.md): development setup, checks, and review rules.
 - [Changelog](CHANGELOG.md): changes and required user actions.

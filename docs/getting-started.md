@@ -112,5 +112,6 @@ This removes the entire `.aw/` directory, including the index, journals, and any
 ## Continue
 
 - [Usage guide](usage.md): select queries for editing and investigation.
+- [Concepts](concepts.md): symbols, edges, pointers, and static limits.
 - [CLI reference](cli-reference.md): options, result interpretation, exits, and journal controls.
 - [Documentation index](README.md): integrations, evaluation, and contribution guidance.

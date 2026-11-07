@@ -594,6 +594,122 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
 }
 
 #[test]
+fn g10_explain_parity() {
+    let repo = fixture("explain");
+    fs::write(
+        repo.join("models.py"),
+        "class Order:\n    def total(self):\n        return 1\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("service.py"),
+        "from models import Order\n\ndef use(order: Order):\n    return order.total()\n",
+    )
+    .unwrap();
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let cli_callers = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["callers", "Order.total", "--explain"])
+        .output()
+        .unwrap();
+    assert_eq!(cli_callers.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let callers = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "callers", "arguments": {"name": "Order.total", "explain": true}}),
+    );
+    assert_eq!(
+        result_text(&callers),
+        String::from_utf8_lossy(&cli_callers.stdout).into_owned(),
+        "callers explain byte parity"
+    );
+
+    let cli_context = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["context", "Order.total", "--explain"])
+        .output()
+        .unwrap();
+    assert_eq!(cli_context.status.code(), Some(0));
+    let context = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "context", "arguments": {"name": "Order.total", "explain": true}}),
+    );
+    assert_eq!(
+        result_text(&context),
+        String::from_utf8_lossy(&cli_context.stdout).into_owned(),
+        "context explain byte parity"
+    );
+
+    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    assert!(
+        log.contains("\"explain\":\"true\""),
+        "journal must record the explain argument: {log}"
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn g10_usage_quality_parity() {
+    let repo = fixture("usage-quality");
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let callers = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["callers", "normalize"])
+        .output()
+        .unwrap();
+    assert_eq!(callers.status.code(), Some(0));
+
+    let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["usage", "--quality"])
+        .output()
+        .unwrap();
+    assert_eq!(cli.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let via_mcp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "usage", "arguments": {"quality": true}}),
+    );
+    assert_eq!(
+        result_text(&via_mcp),
+        String::from_utf8_lossy(&cli.stdout).into_owned(),
+        "usage quality byte parity"
+    );
+
+    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    assert!(
+        log.contains("\"tool\":\"usage\"") && log.contains("\"quality\":\"true\""),
+        "journal must record the usage quality argument: {log}"
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn malformed_json_frame_returns_parse_error() {
     let repo = fixture("mcp-badjson");
     let build = Command::new(env!("CARGO_BIN_EXE_aw"))

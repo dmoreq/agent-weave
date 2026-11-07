@@ -152,6 +152,72 @@ fn cuj2_callers_with_cap_and_pointer_format() {
 }
 
 #[test]
+fn explain_appends_edge_metadata_without_changing_default_output() {
+    let repo = temp_repo("explain");
+    write(
+        &repo,
+        "models.py",
+        "class Order:\n    def total(self):\n        return 1\n",
+    );
+    write(
+        &repo,
+        "service.py",
+        "from models import Order\n\ndef use(order: Order):\n    return order.total()\n",
+    );
+    write(
+        &repo,
+        "diamond.py",
+        "class A:\n    def m(self):\n        return 1\n\n\
+         class B(A):\n    def m(self):\n        return 2\n\n\
+         class C(A):\n    def m(self):\n        return 3\n\n\
+         class D(B, C):\n    pass\n\n\
+         def go():\n    d = D()\n    return d.m()\n",
+    );
+    build(&repo);
+
+    let default = aw(&repo).args(["callers", "Order.total"]).output().unwrap();
+    assert_eq!(default.status.code(), Some(0));
+    let default_stdout = String::from_utf8_lossy(&default.stdout);
+    assert_eq!(default_stdout, "service.py:4 service.use\n");
+    assert!(!default_stdout.contains("edge=calls"));
+
+    let explained = aw(&repo)
+        .args(["callers", "Order.total", "--explain"])
+        .output()
+        .unwrap();
+    assert_eq!(explained.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&explained.stdout);
+    assert!(
+        stdout.starts_with(
+            "aw: explain — edge metadata from the index; resolution reason is not stored\n"
+        ),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "service.py:4 service.use [edge=calls confidence=EXTRACTED site=4 dst=models.Order.total] receiver=models.Order"
+        ),
+        "stdout: {stdout}"
+    );
+
+    let ambiguous = aw(&repo)
+        .args(["callees", "go", "--explain"])
+        .output()
+        .unwrap();
+    assert_eq!(ambiguous.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&ambiguous.stdout);
+    assert!(
+        stdout.contains("[ambiguous] diamond.D.m"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("confidence=AMBIGUOUS")
+            && stdout.contains("resolution=ambiguous (candidate set not stored)"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn cuj3_corrupt_index_exit3() {
     let repo = fixture("cuj3");
     build(&repo);
@@ -2251,6 +2317,30 @@ fn journal_written_and_usage_summarizes() {
     assert!(stdout.contains("aw usage: 2 journaled calls"), "{stdout}");
     assert!(stdout.contains("callers: 1 calls"), "{stdout}");
     assert!(stdout.contains("build: 1 calls"), "{stdout}");
+}
+
+#[test]
+fn usage_quality_adds_empty_split_and_keeps_default_summary() {
+    let repo = fixture("usage-quality");
+    aw(&repo).args(["build"]).output().unwrap();
+    aw(&repo).args(["callers", "normalize"]).output().unwrap();
+
+    let default = aw(&repo).args(["usage"]).output().unwrap();
+    assert_eq!(default.status.code(), Some(0));
+    let default_stdout = String::from_utf8_lossy(&default.stdout);
+    assert!(
+        default_stdout.contains("callers: 1 calls"),
+        "{default_stdout}"
+    );
+    assert!(!default_stdout.contains("empty_ok="), "{default_stdout}");
+
+    let quality = aw(&repo).args(["usage", "--quality"]).output().unwrap();
+    assert_eq!(quality.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&quality.stdout);
+    assert!(stdout.contains("empty_ok="), "{stdout}");
+    assert!(stdout.contains("empty_error="), "{stdout}");
+    assert!(stdout.contains("capped="), "{stdout}");
+    assert!(stdout.contains('%'), "{stdout}");
 }
 
 #[test]

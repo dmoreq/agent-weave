@@ -277,6 +277,8 @@ struct UsageFields {
     tool: String,
     exit_code: i64,
     result_count: i64,
+    shown: i64,
+    total: i64,
     stale: bool,
     ambiguous: i64,
     latency_us: Option<i64>,
@@ -288,6 +290,8 @@ fn parse_usage_line(line: &str) -> Option<UsageFields> {
         tool: v.get("tool")?.as_str()?.to_string(),
         exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
         result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
+        shown: v.get("shown").and_then(|x| x.as_i64()).unwrap_or(0),
+        total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
         stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
         ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
         latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
@@ -299,13 +303,18 @@ struct ToolAgg {
     calls: usize,
     errors: usize,
     empty: usize,
+    empty_ok: usize,
+    empty_error: usize,
     stale: usize,
     ambiguous: usize,
+    capped: usize,
     latencies: Vec<u64>,
 }
 
 /// Summarize `usage.log` (+ `.1`): per-tool calls, errors, p50/p95, rates.
-pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
+/// `quality` adds the empty-result split and the cap count without changing
+/// the journal schema or the default text.
+pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> {
     let mut lines = String::new();
     for gen in [".1", ""] {
         let path = usage_log_path(root);
@@ -337,6 +346,14 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
         }
         if fields.result_count == 0 {
             agg.empty += 1;
+            if fields.exit_code == 0 {
+                agg.empty_ok += 1;
+            } else {
+                agg.empty_error += 1;
+            }
+        }
+        if fields.total > fields.shown {
+            agg.capped += 1;
         }
         if fields.stale {
             agg.stale += 1;
@@ -348,6 +365,13 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
     }
     let total: usize = aggs.values().map(|a| a.calls).sum();
     let mut out = vec![format!("aw usage: {total} journaled calls")];
+    let pct = |n: usize, d: usize| -> String {
+        if d == 0 {
+            "-".to_string()
+        } else {
+            format!("{:.1}%", 100.0 * n as f64 / d as f64)
+        }
+    };
     let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
     rows.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
     for (tool, agg) in rows {
@@ -363,16 +387,32 @@ pub fn summary(root: &Path) -> crate::error::Result<Vec<String>> {
                 format!("{:.1}ms", lat[idx] as f64 / 1000.0)
             }
         };
-        out.push(format!(
-            "  {tool}: {} calls, errors={} empty={} stale={} ambiguous={} p50={} p95={}",
-            agg.calls,
-            agg.errors,
-            agg.empty,
-            agg.stale,
-            agg.ambiguous,
-            p(0.5),
-            p(0.95),
-        ));
+        if quality {
+            out.push(format!(
+                "  {tool}: {} calls, errors={} empty_ok={} ({}) empty_error={} stale={} ambiguous={} capped={} p50={} p95={}",
+                agg.calls,
+                agg.errors,
+                agg.empty_ok,
+                pct(agg.empty_ok, agg.calls),
+                agg.empty_error,
+                agg.stale,
+                agg.ambiguous,
+                agg.capped,
+                p(0.5),
+                p(0.95),
+            ));
+        } else {
+            out.push(format!(
+                "  {tool}: {} calls, errors={} empty={} stale={} ambiguous={} p50={} p95={}",
+                agg.calls,
+                agg.errors,
+                agg.empty,
+                agg.stale,
+                agg.ambiguous,
+                p(0.5),
+                p(0.95),
+            ));
+        }
     }
     Ok(out)
 }
@@ -431,6 +471,33 @@ mod tests {
         assert_eq!(f.latency_us, Some(1200));
         assert!(f.stale);
         assert_eq!(f.ambiguous, 3);
+    }
+
+    #[test]
+    fn summary_quality_splits_empty_and_cap() {
+        let root = std::env::temp_dir().join(format!("aw-journal-quality-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".aw")).unwrap();
+        let lines = [
+            r#"{"tool":"callers","result_count":2,"shown":2,"total":2,"exit_code":0,"latency_us":1000}"#,
+            r#"{"tool":"callers","result_count":0,"shown":0,"total":0,"exit_code":0,"latency_us":2000}"#,
+            r#"{"tool":"callers","result_count":0,"shown":0,"total":0,"exit_code":2,"latency_us":3000}"#,
+            r#"{"tool":"callers","result_count":50,"shown":50,"total":60,"exit_code":0,"latency_us":4000}"#,
+        ];
+        fs::write(usage_log_path(&root), lines.join("\n")).unwrap();
+
+        let default = summary(&root, false).unwrap().join("\n");
+        assert!(
+            default.contains("callers: 4 calls, errors=1 empty=2 stale=0 ambiguous=0"),
+            "{default}"
+        );
+        assert!(!default.contains("empty_ok"), "{default}");
+
+        let quality = summary(&root, true).unwrap().join("\n");
+        assert!(quality.contains("empty_ok=1 (25.0%)"), "{quality}");
+        assert!(quality.contains("empty_error=1"), "{quality}");
+        assert!(quality.contains("capped=1"), "{quality}");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -265,6 +265,12 @@ The commands below are **verification recipes, not results from this documentati
 | Search behavior | Same file, `search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes` | `cargo test --locked --test cli search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes` |
 | Untouched no-op index | Same file, `noop_build_leaves_the_index_untouched` | `cargo test --locked --test cli noop_build_leaves_the_index_untouched` |
 | CLI/MCP contracts | [tests/mcp.rs](../tests/mcp.rs) | `cargo test --locked --test mcp` |
+| Public navigation pointers | [bench/](../bench/README.md) | `cargo build --release && python3 -I bench/run.py target/release/aw` |
+
+The public pointer benchmark is a committed synthetic corpus with expected
+pointers per command. It is a regression gate for the public corpus; it does
+not reproduce the private agent experiments or measure token savings, tool-call
+reduction, or dynamic-dispatch coverage.
 
 For local synthetic measurements, inspect [make_synth_corpus.py](../tests/scripts/make_synth_corpus.py) and [timing_assert.sh](../tests/scripts/timing_assert.sh). The latter reports best-of-N wall time, accepts semantic exit codes 0/1/2, and does not calculate percentiles.
 

@@ -27,6 +27,8 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
       - run: python3 -I tests/scripts/test_recall_scorers.py
+      - run: python3 -I -B bench/test_run.py
+      - run: python3 -I bench/run.py target/release/aw
       - run: bash tests/scripts/allowlist_check.sh Cargo.lock
       - run: bash tests/scripts/write_path_check.sh
 
