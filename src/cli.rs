@@ -33,7 +33,7 @@ pub enum Cmd {
         #[arg(long)]
         force: bool,
         /// Abort when this fraction of files fails to parse (default 5%)
-        #[arg(long, default_value_t = 0.05)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_MAX_PARSE_ERROR_RATE)]
         max_parse_error_rate: f64,
     },
     /// Who calls this symbol
@@ -44,7 +44,7 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
         /// Transitive depth for the caller closure (default 1 = direct callers)
-        #[arg(long, default_value_t = 1)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_DEPTH)]
         depth: usize,
     },
     /// What does this symbol call
@@ -55,7 +55,7 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
         /// Transitive depth for the call closure (default 1 = direct callees)
-        #[arg(long, default_value_t = 1)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_DEPTH)]
         depth: usize,
     },
     /// One-call symbol context: definition + signature, direct callers, and
@@ -64,7 +64,7 @@ pub enum Cmd {
         /// Symbol name or dotted qualname
         name: String,
         /// Maximum callers and callees shown per section (default 10, max 50)
-        #[arg(long, default_value_t = 10)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_CONTEXT_LIMIT)]
         limit: usize,
     },
     /// What does this file import (outbound resolved imports)
@@ -84,7 +84,7 @@ pub enum Cmd {
         /// Symbol the path must reach (bare name or dotted qualname)
         to: String,
         /// Maximum hops to search (default 10, max 10)
-        #[arg(long, default_value_t = 10)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_PATH_DEPTH)]
         depth: usize,
     },
     /// Files that call into <file> (impact direction: callers of the file)
@@ -95,10 +95,10 @@ pub enum Cmd {
         #[arg(long)]
         sites: bool,
         /// Transitive depth (default 1; max 10)
-        #[arg(long, default_value_t = 1)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_DEPTH)]
         depth: usize,
         /// Edge kinds: calls,imports,inherits,all (default calls)
-        #[arg(long, default_value = "calls")]
+        #[arg(long, default_value = crate::query::DEFAULT_IMPACT_EDGES)]
         edges: String,
         /// Maximum results shown (default 50, max 10000)
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]

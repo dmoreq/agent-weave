@@ -44,7 +44,7 @@ fn record_plain_import(
             "dotted_name" => {
                 let path = text(child, src);
                 let root = path.split('.').next().unwrap_or(&path).to_string();
-                fx.aliases.push((
+                fx.bindings.aliases.push((
                     scope.to_string(),
                     root.clone(),
                     ImportTarget::ModuleRoot { path: root },
@@ -58,7 +58,7 @@ fn record_plain_import(
                     continue;
                 };
                 let target_path = text(target, src);
-                fx.aliases.push((
+                fx.bindings.aliases.push((
                     scope.to_string(),
                     text(alias, src),
                     ImportTarget::ModuleRoot {
@@ -87,8 +87,13 @@ fn record_from_import(
     if !m.is_empty() {
         fx.import_edges
             .push(ImportEdgeCandidate::module(line, m.clone()));
-        fx.from_import_parents.insert((line, m.clone()));
+        fx.bindings.from_import_parents.insert((line, m.clone()));
     }
+    let ctx = FromImportCtx {
+        scope,
+        module: &m,
+        line,
+    };
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if Some(child) == module_node {
@@ -96,13 +101,13 @@ fn record_from_import(
         }
         match child.kind() {
             "wildcard_import" => {
-                fx.stars.push((m.clone(), line));
+                fx.bindings.stars.push((m.clone(), line));
                 fx.import_edges
                     .push(ImportEdgeCandidate::module_root(line, m.clone()));
             }
             "dotted_name" => {
                 let name = text(child, src);
-                push_from_binding(fx, scope, &m, &name, None, line);
+                push_from_binding(fx, ctx, &name, None);
             }
             // `from m import n as y` wraps the binding in an
             // aliased_import node (import_statement uses "alias").
@@ -111,11 +116,20 @@ fn record_from_import(
                     continue;
                 };
                 let name = text(target, src);
-                push_from_binding(fx, scope, &m, &name, Some(text(alias, src)), line);
+                push_from_binding(fx, ctx, &name, Some(text(alias, src)));
             }
             _ => {}
         }
     }
+}
+
+/// Stable context for every binding of one `from <m> import ...` statement,
+/// mirroring the TS `ImportCtx` clump.
+#[derive(Clone, Copy)]
+struct FromImportCtx<'a> {
+    scope: &'a str,
+    module: &'a str,
+    line: usize,
 }
 
 /// One imported name: bind `bound` (the alias text, or the same name when
@@ -123,41 +137,39 @@ fn record_from_import(
 /// non-empty parent) the symbol edge.
 fn push_from_binding(
     fx: &mut FileExtraction,
-    scope: &str,
-    module: &str,
+    ctx: FromImportCtx<'_>,
     name: &str,
     bound: Option<String>,
-    line: usize,
 ) {
     // `from .. import X` at a first-level package has an empty parent: bind
     // the root child directly.
-    let alias = if module.is_empty() {
+    let alias = if ctx.module.is_empty() {
         ImportTarget::ModuleRoot {
             path: name.to_string(),
         }
     } else {
         ImportTarget::Symbol {
-            module: module.to_string(),
+            module: ctx.module.to_string(),
             name: name.to_string(),
         }
     };
-    fx.aliases.push((
-        scope.to_string(),
+    fx.bindings.aliases.push((
+        ctx.scope.to_string(),
         bound.unwrap_or_else(|| name.to_string()),
         alias,
     ));
     fx.import_edges.push(ImportEdgeCandidate::module(
-        line,
-        if module.is_empty() {
+        ctx.line,
+        if ctx.module.is_empty() {
             name.to_string()
         } else {
-            format!("{module}.{name}")
+            format!("{}.{}", ctx.module, name)
         },
     ));
-    if !module.is_empty() {
+    if !ctx.module.is_empty() {
         fx.import_edges.push(ImportEdgeCandidate::symbol(
-            line,
-            module.to_string(),
+            ctx.line,
+            ctx.module.to_string(),
             name.to_string(),
         ));
     }

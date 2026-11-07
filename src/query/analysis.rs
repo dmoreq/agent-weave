@@ -2,6 +2,7 @@
 //! files, unresolved sites, symbols, search, and duplicate candidates.
 
 use super::*;
+use crate::extract::EdgeSiteKind;
 
 /// Cap footer, journal line, and the stderr cap notice shared by the report
 /// queries. Returns the notice so callers route it through the stderr half of
@@ -37,22 +38,36 @@ fn scoped_query(
     Ok((limit, scope, params))
 }
 
+/// The scoped unresolved-set bundle the unresolved helpers share: connection,
+/// `WHERE` clause, and its bound parameters travel as one value (the
+/// ImpactCtx pattern) instead of a loose `(conn, scope, params)` triple.
+struct UnresolvedScope<'a> {
+    conn: &'a Connection,
+    clause: String,
+    params: Vec<rusqlite::types::Value>,
+}
+
 /// Unresolved edge names with locations (Amendment 19). Report shape: header,
 /// then one `path:line kind name` row per unresolved site.
 pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Result<LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
-    let (limit, scope, scope_params) = scoped_query(path, limit, "f", "path", 1)?;
-    let Some((total, files, unlocated)) = unresolved_counts(conn, &scope, &scope_params)? else {
+    let (limit, clause, params) = scoped_query(path, limit, "f", "path", 1)?;
+    let scope = UnresolvedScope {
+        conn,
+        clause,
+        params,
+    };
+    let Some((total, files, unlocated)) = unresolved_counts(&scope)? else {
         return Err(AwError::NoResults(
             "0 unresolved names (external/builtin calls are not counted)".to_string(),
         ));
     };
-    let rows = unresolved_rows(conn, &scope, &scope_params, limit)?;
+    let rows = unresolved_rows(&scope, limit)?;
     let shown = rows.len().min(limit);
     let displayed: BTreeSet<String> = rows
         .iter()
         .take(shown)
-        .map(|(p, _, _, _)| p.clone())
+        .map(|row| row.path.clone())
         .collect();
     let (header, stale) = staleness_header(ctx, &displayed);
     let mut out = vec![format!(
@@ -61,34 +76,39 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
     if let Some(header) = header {
         out.push(header);
     }
-    out.extend(
-        rows.into_iter()
-            .take(shown)
-            .map(|(path, line, kind, name)| format!("{path}:{line} {kind} {name}")),
-    );
+    out.extend(rows.into_iter().take(shown).map(|row| {
+        let UnresolvedRow {
+            path,
+            line,
+            kind,
+            name,
+        } = row;
+        format!("{path}:{line} {kind} {name}")
+    }));
     let cap = finish_capped(&mut out, shown, total as usize, stale, "rows");
     let cap = if unlocated > 0 {
         format!("[aw] {unlocated} unresolved row(s) have site_line=0 and are omitted\n{cap}")
     } else {
         cap
     };
-    Ok((out, cap))
+    Ok(LineQuery {
+        lines: out,
+        stderr: cap,
+        shown,
+    })
 }
 
 /// Total, distinct files, and unlocated rows. `None` when the scoped set is
 /// empty, so the caller can return the no-results error without two extra
 /// count queries.
-fn unresolved_counts(
-    conn: &Connection,
-    scope: &str,
-    scope_params: &[rusqlite::types::Value],
-) -> Result<Option<(i64, i64, i64)>> {
+fn unresolved_counts(scope: &UnresolvedScope<'_>) -> Result<Option<(i64, i64, i64)>> {
     let scalar = |expr: &str, extra: &str| -> Result<i64> {
-        Ok(conn.query_row(
+        Ok(scope.conn.query_row(
             &format!(
-                "SELECT {expr} FROM unresolved_calls u JOIN files f ON f.id = u.file_id WHERE 1=1 {extra} {scope}"
+                "SELECT {expr} FROM unresolved_calls u JOIN files f ON f.id = u.file_id WHERE 1=1 {extra} {}",
+                scope.clause
             ),
-            rusqlite::params_from_iter(scope_params.iter()),
+            rusqlite::params_from_iter(scope.params.iter()),
             |r| r.get::<_, i64>(0),
         )?)
     };
@@ -101,31 +121,50 @@ fn unresolved_counts(
     Ok(Some((total, files, unlocated)))
 }
 
-fn unresolved_rows(
-    conn: &Connection,
-    scope: &str,
-    scope_params: &[rusqlite::types::Value],
-    limit: usize,
-) -> Result<Vec<(String, i64, String, String)>> {
-    let mut stmt = conn.prepare(&format!(
+/// One unresolved-site row: file path, site line, site kind, and callee name.
+/// Named so the renderer and the SELECT cannot drift apart positionally.
+struct UnresolvedRow {
+    path: String,
+    line: i64,
+    kind: String,
+    name: String,
+}
+
+fn unresolved_rows(scope: &UnresolvedScope<'_>, limit: usize) -> Result<Vec<UnresolvedRow>> {
+    // The display limit is the trailing bind parameter after the scope params.
+    let limit_param = scope.params.len() + 1;
+    let mut params = scope.params.clone();
+    params.push(rusqlite::types::Value::from(limit as i64));
+    let mut stmt = scope.conn.prepare(&format!(
         "SELECT f.path, u.site_line, u.kind, u.dst_name
          FROM unresolved_calls u JOIN files f ON f.id = u.file_id
-         WHERE u.site_line > 0 {scope}
-         ORDER BY f.path, u.site_line, u.kind, u.dst_name LIMIT {limit}"
+         WHERE u.site_line > 0 {}
+         ORDER BY f.path, u.site_line, u.kind, u.dst_name LIMIT ?{limit_param}",
+        scope.clause
     ))?;
     let rows = stmt
-        .query_map(rusqlite::params_from_iter(scope_params.iter()), |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok(UnresolvedRow {
+                path: r.get(0)?,
+                line: r.get(1)?,
+                kind: r.get(2)?,
+                name: r.get(3)?,
+            })
         })?
-        .collect::<std::result::Result<_, _>>()?;
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
 /// Unresolved-callee report (Amendment 5): files with counts, descending.
 /// Report shape — cap, no staleness; header carries the index total.
 pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result<LineQuery> {
-    let (limit, scope, scope_params) = scoped_query(path, limit, "f", "path", 1)?;
-    let rows = unresolved_file_rows(conn, &scope, &scope_params)?;
+    let (limit, clause, params) = scoped_query(path, limit, "f", "path", 1)?;
+    let scope = UnresolvedScope {
+        conn,
+        clause,
+        params,
+    };
+    let rows = unresolved_file_rows(&scope)?;
     let total: i64 = rows.iter().map(|(_, n)| *n).sum();
     if total == 0 {
         return Err(AwError::NoResults(
@@ -134,7 +173,7 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
     }
     let n_files = rows.len();
     let shown = n_files.min(limit);
-    let (names, internal, distinct) = unresolved_name_view(conn, &scope, &scope_params)?;
+    let (names, internal, distinct) = unresolved_name_view(&scope)?;
     let mut out = vec![format!(
         "aw: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})"
     )];
@@ -154,21 +193,22 @@ pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result
             .map(|(path, n)| format!("{path} unresolved={n}")),
     );
     let cap = finish_capped(&mut out, shown, n_files, false, "");
-    Ok((out, cap))
+    Ok(LineQuery {
+        lines: out,
+        stderr: cap,
+        shown,
+    })
 }
 
 /// Files with unresolved callees, descending by count.
-fn unresolved_file_rows(
-    conn: &Connection,
-    scope: &str,
-    params: &[rusqlite::types::Value],
-) -> Result<Vec<(String, i64)>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT f.path, f.unresolved FROM files f WHERE f.unresolved > 0 {scope}
-         ORDER BY f.unresolved DESC, f.path"
+fn unresolved_file_rows(scope: &UnresolvedScope<'_>) -> Result<Vec<(String, i64)>> {
+    let mut stmt = scope.conn.prepare(&format!(
+        "SELECT f.path, f.unresolved FROM files f WHERE f.unresolved > 0 {}
+         ORDER BY f.unresolved DESC, f.path",
+        scope.clause
     ))?;
     let rows = stmt
-        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+        .query_map(rusqlite::params_from_iter(scope.params.iter()), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -179,26 +219,35 @@ fn unresolved_file_rows(
 /// totals.
 type UnresolvedNames = (Vec<(String, i64, bool)>, i64, i64);
 
+/// The `unresolved_calls` scan shape shared by all three name-view
+/// statements: the `files` JOIN plus the call-kind filter. Each statement
+/// appends its own tail (extra predicates, the scope clause) so the JOIN
+/// shape cannot drift between them.
+fn unresolved_from_where() -> String {
+    format!(
+        "FROM unresolved_calls uc JOIN files f ON f.id = uc.file_id
+         WHERE uc.kind = '{}'",
+        EdgeSiteKind::Call.as_str()
+    )
+}
+
 /// Name-level view (R7 L4): file counts alone say where resolution failed,
 /// not what it missed. `[internal]` marks names that exist in the index — an
 /// actionable resolver gap — versus external/builtin calls.
-fn unresolved_name_view(
-    conn: &Connection,
-    scope: &str,
-    params: &[rusqlite::types::Value],
-) -> Result<UnresolvedNames> {
-    let mut name_stmt = conn.prepare(&format!(
+fn unresolved_name_view(scope: &UnresolvedScope<'_>) -> Result<UnresolvedNames> {
+    let mut name_stmt = scope.conn.prepare(&format!(
         "SELECT uc.dst_name, COUNT(*) AS n,
                 EXISTS(SELECT 1 FROM symbols s
                        WHERE s.name = uc.dst_name OR s.qualname = uc.dst_name)
-         FROM unresolved_calls uc JOIN files f ON f.id = uc.file_id
-         WHERE uc.kind = 'call' {scope}
+         {} {}
          GROUP BY uc.dst_name
          ORDER BY n DESC, uc.dst_name
-         LIMIT 10"
+         LIMIT 10",
+        unresolved_from_where(),
+        scope.clause
     ))?;
     let names = name_stmt
-        .query_map(rusqlite::params_from_iter(params.iter()), |r| {
+        .query_map(rusqlite::params_from_iter(scope.params.iter()), |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, i64>(1)?,
@@ -206,25 +255,27 @@ fn unresolved_name_view(
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    let internal: i64 = conn.query_row(
+    let internal: i64 = scope.conn.query_row(
         &format!(
             "SELECT COUNT(*) FROM (
-            SELECT uc.dst_name FROM unresolved_calls uc JOIN files f ON f.id = uc.file_id
-            WHERE uc.kind = 'call'
+            SELECT uc.dst_name {}
               AND EXISTS(SELECT 1 FROM symbols s
                          WHERE s.name = uc.dst_name OR s.qualname = uc.dst_name)
-              {scope}
-            GROUP BY uc.dst_name)"
+              {}
+            GROUP BY uc.dst_name)",
+            unresolved_from_where(),
+            scope.clause
         ),
-        rusqlite::params_from_iter(params.iter()),
+        rusqlite::params_from_iter(scope.params.iter()),
         |r| r.get(0),
     )?;
-    let distinct: i64 = conn.query_row(
+    let distinct: i64 = scope.conn.query_row(
         &format!(
-            "SELECT COUNT(DISTINCT uc.dst_name) FROM unresolved_calls uc
-             JOIN files f ON f.id = uc.file_id WHERE uc.kind = 'call' {scope}"
+            "SELECT COUNT(DISTINCT uc.dst_name) {} {}",
+            unresolved_from_where(),
+            scope.clause
         ),
-        rusqlite::params_from_iter(params.iter()),
+        rusqlite::params_from_iter(scope.params.iter()),
         |r| r.get(0),
     )?;
     Ok((names, internal, distinct))
@@ -267,18 +318,33 @@ pub fn symbols(
         }
         return symbols_directory(ctx, &rel, limit, SymbolsOpts { outline });
     };
-    let rows = file_symbol_rows(conn, &rel, outline)?;
+    symbols_file(ctx, file, &rel, limit, outline)
+}
+
+/// The single-file branch of [`symbols`]: symbol rows with the optional
+/// outline signature, the staleness header, and the cap footer. `file` is the
+/// original query text, kept for the not-indexed error; `rel` is the indexed
+/// path `indexed_file_opt` resolved.
+fn symbols_file(
+    ctx: &QueryCtx<'_>,
+    file: &str,
+    rel: &str,
+    limit: usize,
+    outline: bool,
+) -> Result<LineQuery> {
+    let QueryCtx { conn, .. } = *ctx;
+    let rows = file_symbol_rows(conn, rel, outline)?;
     if rows.is_empty() {
         return Err(AwError::not_indexed(file));
     }
-    let files = BTreeSet::from([rel.clone()]);
+    let files = BTreeSet::from([rel.to_string()]);
     let (header, stale) = staleness_header(ctx, &files);
     let n_symbols = rows.len();
     let shown = n_symbols.min(limit);
     let data_lines: Vec<String> = rows
         .into_iter()
         .take(shown)
-        .map(|row| symbol_line(&rel, &row))
+        .map(|row| symbol_line(rel, &row))
         .collect();
     let mut out = Vec::new();
     if let Some(header) = header {
@@ -286,7 +352,11 @@ pub fn symbols(
     }
     out.extend(data_lines);
     let cap = finish_capped(&mut out, shown, n_symbols, stale, "");
-    Ok((out, cap))
+    Ok(LineQuery {
+        lines: out,
+        stderr: cap,
+        shown,
+    })
 }
 
 fn file_symbol_rows(conn: &Connection, rel: &str, outline: bool) -> Result<Vec<SymbolRow>> {
@@ -319,6 +389,31 @@ fn symbol_line(path: &str, row: &SymbolRow) -> String {
         text.push_str(&row.signature);
     }
     text
+}
+
+/// Group symbol rows under their file path and finish with the cap/journal
+/// tail — the per-file rendering shared by the `symbols` directory arm.
+fn dir_line_query(
+    mut out: Vec<String>,
+    rows: &[(String, SymbolRow)],
+    total: usize,
+    stale: bool,
+) -> LineQuery {
+    let mut last_path = "";
+    for (path, row) in rows {
+        if path != last_path {
+            out.push(path.clone());
+            last_path = path;
+        }
+        out.push(symbol_line(path, row));
+    }
+    let shown = rows.len();
+    let cap = finish_capped(&mut out, shown, total, stale, "");
+    LineQuery {
+        lines: out,
+        stderr: cap,
+        shown,
+    }
 }
 
 /// Directory mode for `aw symbols <dir>` (Amendment 19): indexed prefix only,
@@ -361,17 +456,7 @@ fn symbols_directory(
     out.push(format!(
         "aw: dir {display} — {n_files} files, {total} symbols"
     ));
-    let mut last_path = "";
-    for (path, row) in &rows {
-        if path != last_path {
-            out.push(path.clone());
-            last_path = path;
-        }
-        out.push(symbol_line(path, row));
-    }
-    let shown = rows.len();
-    let cap = finish_capped(&mut out, shown, total as usize, stale, "");
-    Ok((out, cap))
+    Ok(dir_line_query(out, &rows, total as usize, stale))
 }
 
 fn dir_symbol_rows(
@@ -380,15 +465,14 @@ fn dir_symbol_rows(
     outline: bool,
     limit: usize,
 ) -> Result<Vec<(String, SymbolRow)>> {
-    let sql = format!(
+    let mut stmt = conn.prepare(
         "SELECT f.path, s.kind, s.qualname, s.line_start, s.signature
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE substr(f.path, 1, length(?1)) = ?1
-         ORDER BY f.path, s.line_start, s.qualname LIMIT {limit}"
-    );
-    let mut stmt = conn.prepare(&sql)?;
+         ORDER BY f.path, s.line_start, s.qualname LIMIT ?2",
+    )?;
     let rows = stmt
-        .query_map([prefix], |r| {
+        .query_map(rusqlite::params![prefix, limit as i64], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 SymbolRow {
@@ -426,14 +510,18 @@ fn search_union_total(conn: &Connection, exact_name: &str, fts_expr: &str) -> Re
 const SEARCH_MAX_TERMS: usize = 32;
 
 /// Build the OR prefix expression and apply the qualified-identity fast path.
-fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String)> {
+/// Returns `(tokens, expr, terms_cap)`; `terms_cap` is `Some` when the input
+/// was truncated to `SEARCH_MAX_TERMS`, and the caller routes it through the
+/// stderr half of `LineQuery` (the single cap-notice channel).
+fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String, Option<String>)> {
     let mut toks: Vec<String> = crate::extract::split_ident(terms)
         .split_whitespace()
         .map(|t| t.to_string())
         .collect();
+    let mut terms_cap = None;
     if toks.len() > SEARCH_MAX_TERMS {
         toks.truncate(SEARCH_MAX_TERMS);
-        eprintln!("[aw] search terms capped at {SEARCH_MAX_TERMS}");
+        terms_cap = Some(format!("[aw] search terms capped at {SEARCH_MAX_TERMS}"));
     }
     let mut expr = toks
         .iter()
@@ -458,12 +546,19 @@ fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String)> 
             expr = phrase;
         }
     }
-    Ok((toks, expr))
+    Ok((toks, expr, terms_cap))
 }
 
 /// Columns of a search page row, in `search_pointer` order: file, line,
-/// kind, qualname, stored one-line signature, callers count.
-const SEARCH_PAGE_COLUMNS: &str = "f.path, s.line_start, s.kind, s.qualname, s.signature, (SELECT COUNT(*) FROM edges e WHERE e.dst_id = s.id AND e.kind = 'calls') AS callers";
+/// kind, qualname, stored one-line signature, callers count. The callers
+/// subquery is `db::CALLER_COUNT_SQL` so the "number of callers" definition
+/// has one home (search ranking and reuse calibration share it).
+fn search_page_columns() -> String {
+    format!(
+        "f.path, s.line_start, s.kind, s.qualname, s.signature, {} AS callers",
+        db::CALLER_COUNT_SQL
+    )
+}
 
 /// Map a search row to the interface card pointer shape:
 /// `path:line kind qualname [signature] [callers=N]`.
@@ -496,15 +591,16 @@ fn search_fts_page(conn: &Connection, expr: &str, limit: usize) -> Result<(Vec<P
     )? as usize;
     let fetch_limit = (limit * 2).clamp(50, 1000);
     let mut stmt = conn.prepare(&format!(
-        "SELECT {SEARCH_PAGE_COLUMNS}, bm25(symbols_fts) AS bm25_score
+        "SELECT {}, bm25(symbols_fts) AS bm25_score
          FROM symbols_fts ft
          JOIN symbols s ON s.id = ft.rowid
          JOIN files f ON f.id = s.file_id
          WHERE symbols_fts MATCH ?1
-         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT {fetch_limit}"
+         ORDER BY bm25(symbols_fts), s.qualname, f.path, s.line_start LIMIT ?2",
+        search_page_columns()
     ))?;
     let mut candidates = stmt
-        .query_map([expr], |r| {
+        .query_map(rusqlite::params![expr, fetch_limit as i64], |r| {
             let pointer = search_pointer(r)?;
             let bm25_score: f64 = r.get(6)?;
             let callers: i64 = r.get(5)?;
@@ -545,13 +641,15 @@ fn search_exact_page(
         return Ok((Vec::new(), 0));
     }
     let mut stmt = conn.prepare(&format!(
-        "SELECT {SEARCH_PAGE_COLUMNS}
+        "SELECT {}
          FROM symbols s JOIN files f ON f.id = s.file_id
          WHERE {EXACT_IDENTITY_PREDICATE}
-         ORDER BY (SELECT COUNT(*) FROM edges e WHERE e.dst_id = s.id AND e.kind = 'calls') DESC, f.path, s.line_start, s.qualname LIMIT {limit}"
+         ORDER BY {} DESC, f.path, s.line_start, s.qualname LIMIT ?2",
+        search_page_columns(),
+        db::CALLER_COUNT_SQL
     ))?;
     let ptrs = stmt
-        .query_map([exact_name], search_pointer)?
+        .query_map(rusqlite::params![exact_name, limit as i64], search_pointer)?
         .collect::<std::result::Result<_, _>>()?;
     Ok((ptrs, exact_total))
 }
@@ -580,7 +678,7 @@ fn merge_search_pointers(exact: Vec<Pointer>, fts: Vec<Pointer>) -> Vec<Pointer>
 pub fn search(ctx: &QueryCtx<'_>, terms: &str, limit: usize) -> Result<LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
     let limit = clamp_limit(limit)?;
-    let (toks, expr) = search_expr(conn, terms)?;
+    let (toks, expr, terms_cap) = search_expr(conn, terms)?;
     let (fts_ptrs, total) = search_fts_page(conn, &expr, limit)?;
     let (pointers, total) = if toks.len() == 1 {
         let exact_name = toks.join(" ");
@@ -598,12 +696,20 @@ pub fn search(ctx: &QueryCtx<'_>, terms: &str, limit: usize) -> Result<LineQuery
     } else {
         (fts_ptrs, total)
     };
+    if total == 0 {
+        return Err(AwError::NoResults(format!(
+            "0 symbols matched '{terms}' — try fewer or broader terms"
+        )));
+    }
     let out = collect_output(
         ctx,
         pointers.into_iter().map(Ok::<_, rusqlite::Error>),
         limit,
-        &format!("0 symbols matched '{terms}' — try fewer or broader terms"),
         total,
     )?;
-    search_lines(out)
+    let mut result = search_lines(out)?;
+    if let Some(notice) = terms_cap {
+        result.stderr = format!("{notice}\n{}", result.stderr);
+    }
+    Ok(result)
 }

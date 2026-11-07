@@ -89,6 +89,33 @@ pub(super) fn signature_of(node: Node<'_>, src: &[u8]) -> String {
     collapsed.chars().take(160).collect()
 }
 
+impl NewSymbol {
+    /// Shared node-backed constructor: the one-line signature comes from
+    /// `sig_node`, both 1-based line numbers from `line_node`, and the file
+    /// index plus source bytes from the walk state, so the `push_symbol`
+    /// emitters cannot drift apart field by field.
+    fn from_node(
+        w: &Walker<'_, '_, '_>,
+        kind: SymbolKind,
+        name: String,
+        qualname: String,
+        sig_node: Node<'_>,
+        line_node: Node<'_>,
+        is_test: bool,
+    ) -> Self {
+        Self {
+            kind,
+            name,
+            qualname,
+            file_idx: w.fx.file_idx,
+            signature: signature_of(sig_node, w.src),
+            line_start: line_node.start_position().row + 1,
+            line_end: line_node.end_position().row + 1,
+            is_test,
+        }
+    }
+}
+
 /// Lowercased token split of an identifier path for symbol search
 /// (Amendment 12b): camelCase humps, snake_case underscores, dots and other
 /// separators all become single spaces. `HierarchicalAddressParser.parse`
@@ -133,62 +160,69 @@ pub fn split_ident(s: &str) -> String {
 /// `self`, `super`) join the chain as plain segments.
 pub(super) fn dotted_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
     match node.kind() {
-        "identifier" | "this" | "super" | "crate" | "type_identifier" => {
-            Some(vec![text(node, src)])
-        }
+        // Leaf kinds. Rust receiver and field access: `self.foo()` / `x.foo()`;
+        // `self` is its own node kind in the Rust grammar, and
+        // `field_identifier` is the accessed member.
+        "identifier" | "this" | "super" | "crate" | "type_identifier" | "self"
+        | "field_identifier" => Some(vec![text(node, src)]),
         // Python `a.b` (field `attribute`), TS `a.b` (field `property`), and
         // Rust `a.b` (fields `value`/`field`) share the same chain rule.
-        "attribute" | "member_expression" | "field_expression" => {
-            let (obj_field, attr_field) = match node.kind() {
-                "field_expression" => ("value", "field"),
-                "attribute" => ("object", "attribute"),
-                _ => ("object", "property"),
-            };
-            let obj = node.child_by_field_name(obj_field)?;
-            let attr = node.child_by_field_name(attr_field)?;
-            let mut chain = dotted_chain(obj, src)?;
-            chain.push(text(attr, src));
-            Some(chain)
-        }
+        "attribute" | "member_expression" | "field_expression" => member_chain(node, src),
         // Rust scoped type paths in impl/trait positions: crate::Shape,
         // std::fmt::Display. Treat them like scoped_identifier so a qualified
         // impl target still produces an edge or unresolved row.
         "scoped_type_identifier" | "scoped_identifier" => scoped_chain(node, src),
-        "type" => {
-            let mut cursor = node.walk();
-            let inner = node.named_children(&mut cursor).next();
-            inner.and_then(|ch| dotted_chain(ch, src))
-        }
-        "type_annotation" => {
-            let inner = if let Some(ty) = node.child_by_field_name("type") {
-                Some(ty)
-            } else {
-                let mut cursor = node.walk();
-                let first = node.named_children(&mut cursor).next();
-                first
-            };
-            inner.and_then(|ch| dotted_chain(ch, src))
-        }
+        // Annotation wrappers unwrap to the inner type's chain.
+        "type" | "type_annotation" => unwrapped_chain(node, src),
         "generic_type" => generic_base(node, src),
-        // Rust receiver and field access: `self.foo()` / `x.foo()`. The
-        // field_expression carries `value` (receiver) and `field` (member);
-        // `self` is its own node kind in the Rust grammar.
-        "self" => Some(vec![text(node, src)]),
-        "field_identifier" => Some(vec![text(node, src)]),
         // Constructor-call receiver: `Base().m()` / `super().m()` /
         // `super(C, self).m()` (Amendment 18). Non-uppercase factory calls
         // are left unresolved to avoid manufacturing class edges.
-        "call" => {
-            let func = node.child_by_field_name("function")?;
-            let chain = dotted_chain(func, src)?;
-            let first = chain.first()?;
-            if first == "super" || first.chars().next().is_some_and(|c| c.is_uppercase()) {
-                Some(chain)
-            } else {
-                None
-            }
-        }
+        "call" => call_chain(node, src),
         _ => None,
+    }
+}
+
+/// The member-access arm: one chain from the receiver plus the attribute
+/// text. The two field names differ per grammar.
+fn member_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
+    let (obj_field, attr_field) = match node.kind() {
+        "field_expression" => ("value", "field"),
+        "attribute" => ("object", "attribute"),
+        _ => ("object", "property"),
+    };
+    let obj = node.child_by_field_name(obj_field)?;
+    let attr = node.child_by_field_name(attr_field)?;
+    let mut chain = dotted_chain(obj, src)?;
+    chain.push(text(attr, src));
+    Some(chain)
+}
+
+/// The annotation-wrapper arms: descend to the inner type. `type_annotation`
+/// names its child with the `type` field; a plain `type` node has no such
+/// field, so both fall back to the first named child.
+fn unwrapped_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
+    let inner = match node.child_by_field_name("type") {
+        Some(ty) => Some(ty),
+        None => {
+            let mut cursor = node.walk();
+            let first = node.named_children(&mut cursor).next();
+            first
+        }
+    };
+    inner.and_then(|ch| dotted_chain(ch, src))
+}
+
+/// The constructor-call arm: only `super`-led or uppercase-first receivers
+/// produce a chain.
+fn call_chain(node: Node<'_>, src: &[u8]) -> Option<Vec<String>> {
+    let func = node.child_by_field_name("function")?;
+    let chain = dotted_chain(func, src)?;
+    let first = chain.first()?;
+    if first == "super" || first.chars().next().is_some_and(|c| c.is_uppercase()) {
+        Some(chain)
+    } else {
+        None
     }
 }
 
@@ -237,10 +271,6 @@ enum Step<'a> {
     PopClass,
     PopMod,
     RestoreTest(bool),
-    /// impl_item post-work: mark methods defined inside a trait impl.
-    MarkTraitImpls {
-        method_start: usize,
-    },
 }
 
 /// Queue `node`'s children for visiting in source order (reversed push).
@@ -293,13 +323,6 @@ fn run_steps<'a>(work: &mut Vec<Step<'a>>, src: &[u8], fx: &mut FileExtraction, 
             Step::RestoreTest(was) => {
                 ctx.test_scope = was;
             }
-            Step::MarkTraitImpls { method_start } => {
-                for sym in &fx.symbols[method_start..] {
-                    if sym.kind == SymbolKind::Method {
-                        fx.trait_impl_methods.push(sym.qualname.clone());
-                    }
-                }
-            }
         }
     }
 }
@@ -322,11 +345,63 @@ fn visit_node<'a>(w: &mut Walker<'a, '_, '_>) {
     }
 }
 
+/// Define a class-shaped symbol and collect its heritage. Shared by the TS
+/// family (`class_declaration`, `interface_declaration`) and Rust
+/// (`struct_item`/`enum_item`/`trait_item`): `typescript::collect_heritage`
+/// walks both the TS clause kinds and the Rust `trait_bounds` kind.
+fn define_class_symbol<'a>(w: &mut Walker<'a, '_, '_>, kind: SymbolKind) {
+    let Some(name_node) = w.node.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, w.src);
+    let parent_qn = w
+        .ctx
+        .class_stack
+        .last()
+        .or_else(|| w.ctx.func_stack.last())
+        .or_else(|| w.ctx.mod_stack.last())
+        .cloned()
+        .unwrap_or_else(|| w.fx.module.clone());
+    let qualname = format!("{parent_qn}.{name}");
+    let sym_idx = w.fx.symbols.len();
+    w.fx.push_symbol(NewSymbol::from_node(
+        w,
+        kind,
+        name.clone(),
+        qualname.clone(),
+        w.node,
+        w.node,
+        is_test_item(w.fx, w.ctx, &name),
+    ));
+    // Heritage: extends X / implements Y / trait bounds.
+    collect_type_heritage(w.node, w.src, w.fx, sym_idx);
+    if let Some(body) = w.node.child_by_field_name("body") {
+        w.ctx.class_stack.push(qualname);
+        w.work.push(Step::PopClass);
+        push_children_rev(w.work, body);
+    }
+}
+
+fn collect_type_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, sym_idx: usize) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "class_heritage" | "implements_clause" | "extends_type_clause" => {
+                typescript::collect_heritage(child, src, fx, sym_idx);
+            }
+            _ => {}
+        }
+    }
+    if let Some(bounds) = node.child_by_field_name("bounds") {
+        typescript::collect_heritage(bounds, src, fx, sym_idx);
+    }
+}
+
 fn visit_rust_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
     match w.node.kind() {
         "function_item" | "function_signature_item" => visit_function_item(w),
-        "struct_item" | "enum_item" => typescript::define_class(w, SymbolKind::Class),
-        "trait_item" => typescript::define_class(w, SymbolKind::Trait),
+        "struct_item" | "enum_item" => define_class_symbol(w, SymbolKind::Class),
+        "trait_item" => define_class_symbol(w, SymbolKind::Trait),
         "mod_item" if w.node.child_by_field_name("body").is_some() => visit_inline_mod(w),
         "impl_item" => visit_impl_item(w),
         "mod_item" => visit_rust_mod_item(w),
@@ -367,7 +442,7 @@ fn visit_python_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
             python::record_import(w.node, w.src, w.fx, &w.ctx.scope_func());
         }
         "assignment" | "augmented_assignment" => {
-            record_assignment(w.node, w.src, w.fx, w.ctx);
+            record_assignment(w);
             push_children_rev(w.work, w.node);
         }
         _ => return false,
@@ -378,12 +453,12 @@ fn visit_python_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
 fn visit_ts_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
     match w.node.kind() {
         "class_declaration" | "abstract_class_declaration" => {
-            typescript::define_class(w, SymbolKind::Class);
+            define_class_symbol(w, SymbolKind::Class);
         }
         "function_declaration" | "generator_function_declaration" => {
             define_function(w, SymbolKind::Function);
         }
-        "interface_declaration" => typescript::define_class(w, SymbolKind::Interface),
+        "interface_declaration" => define_class_symbol(w, SymbolKind::Interface),
         "method_definition" => typescript::define_method_ts(w),
         "variable_declarator" => {
             if !typescript::record_ts_arrow_function(w) {
@@ -394,7 +469,9 @@ fn visit_ts_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
         "arrow_function" | "function_expression" => {
             let start = w.node.start_position().row + 1;
             let end = w.node.end_position().row + 1;
-            collect_arrow_params(w.node, w.src, w.fx, &w.ctx.scope_func(), Some((start, end)));
+            let node = w.node;
+            let scope = w.ctx.scope_func();
+            collect_arrow_params(w, node, &scope, Some((start, end)));
             push_children_rev(w.work, w.node);
         }
         "new_expression" => {
@@ -449,7 +526,7 @@ fn push_assignment(
     ctx: &WalkCtx,
     line: usize,
 ) {
-    fx.assignments.push(Assignment {
+    fx.bindings.assignments.push(Assignment {
         var,
         target_dotted,
         scope_func: ctx.scope_func(),
@@ -507,7 +584,7 @@ fn visit_rust_mod_item<'a>(w: &mut Walker<'a, '_, '_>) {
             } else {
                 format!("{scope}.{name}")
             };
-            w.fx.aliases.push((
+            w.fx.bindings.aliases.push((
                 String::new(),
                 name,
                 ImportTarget::ModuleRoot { path: path.clone() },
@@ -576,9 +653,7 @@ fn visit_impl_item<'a>(w: &mut Walker<'a, '_, '_>) {
             w.node.start_position().row + 1,
         ));
     }
-    let method_start = w.fx.symbols.len();
     w.ctx.class_stack.push(qualname);
-    w.work.push(Step::MarkTraitImpls { method_start });
     w.work.push(Step::PopClass);
     push_children_rev(w.work, w.node);
 }
@@ -640,19 +715,16 @@ fn visit_python_class<'a>(w: &mut Walker<'a, '_, '_>) {
     // the method.
     let parent_qn = innermost_scope(w.ctx, &w.fx.module);
     let qualname = format!("{parent_qn}.{name}");
-    let start = w.node.start_position().row + 1;
     let sym_idx = w.fx.symbols.len();
-    w.fx.push_symbol(NewSymbol {
-        kind: SymbolKind::Class,
-        name: name.clone(),
-        qualname: qualname.clone(),
-        file_idx: w.fx.file_idx,
-        signature: signature_of(w.node, w.src),
-        line_start: start,
-        line_end: w.node.end_position().row + 1,
-
-        is_test: is_test_item(w.fx, w.ctx, &name),
-    });
+    w.fx.push_symbol(NewSymbol::from_node(
+        w,
+        SymbolKind::Class,
+        name.clone(),
+        qualname.clone(),
+        w.node,
+        w.node,
+        is_test_item(w.fx, w.ctx, &name),
+    ));
     if let Some(bases) = w.node.child_by_field_name("superclasses") {
         let mut cursor = bases.walk();
         for b in bases.named_children(&mut cursor) {
@@ -712,7 +784,6 @@ pub(super) struct CallableSpec<'a> {
     pub kind: SymbolKind,
     pub name: &'a str,
     pub qualname: &'a str,
-    pub start: usize,
     pub is_test: bool,
     /// Python pushes the scope before the body check and pops it when there
     /// is no body; Rust/TS push it only when a body exists.
@@ -731,28 +802,21 @@ struct Walker<'a, 's, 'b> {
 impl<'a, 's> Walker<'a, 's, '_> {
     /// Push the symbol row.
     fn push_callable(&mut self, spec: &CallableSpec<'_>) {
-        self.fx.push_symbol(NewSymbol {
-            kind: spec.kind,
-            name: spec.name.to_string(),
-            qualname: spec.qualname.to_string(),
-            file_idx: self.fx.file_idx,
-            signature: signature_of(self.node, self.src),
-            line_start: spec.start,
-            line_end: self.node.end_position().row + 1,
-            is_test: spec.is_test,
-        });
+        self.fx.push_symbol(NewSymbol::from_node(
+            self,
+            spec.kind,
+            spec.name.to_string(),
+            spec.qualname.to_string(),
+            self.node,
+            self.node,
+            spec.is_test,
+        ));
     }
 
     /// Record parameter types, then queue the body with its scope pop.
     fn finish_callable(&mut self, spec: &CallableSpec<'_>) {
         if let Some(params) = self.node.child_by_field_name("parameters") {
-            collect_param_types(
-                params,
-                self.src,
-                self.fx,
-                spec.qualname,
-                spec.kind == SymbolKind::Method,
-            );
+            collect_param_types(self, params, spec.qualname, spec.kind == SymbolKind::Method);
         }
         if spec.always_push_scope || self.node.child_by_field_name("body").is_some() {
             self.ctx.func_stack.push(spec.qualname.to_string());
@@ -772,19 +836,21 @@ fn define_callable<'a>(w: &mut Walker<'a, '_, '_>, spec: &CallableSpec<'_>) {
     w.finish_callable(spec);
 }
 
+/// Parameter scan helpers take the walking [`Walker`] (source text plus
+/// extraction sink, never varying within one subtree) and only the arguments
+/// that actually vary: the scanned node, its scope, and a shape flag.
 fn collect_param_types(
+    w: &mut Walker<'_, '_, '_>,
     params: Node<'_>,
-    src: &[u8],
-    fx: &mut FileExtraction,
     scope: &str,
     is_method_receiver: bool,
 ) {
     let mut cursor = params.walk();
     for p in params.children(&mut cursor) {
-        push_param_local(p, src, fx, scope, is_method_receiver);
-        push_rust_param(p, src, fx, scope);
-        push_ts_param(p, src, fx, scope);
-        push_typed_param(p, src, fx, scope);
+        push_param_local(w, p, scope, is_method_receiver);
+        push_rust_param(w, p, scope);
+        push_ts_param(w, p, scope);
+        push_typed_param(w, p, scope);
     }
 }
 
@@ -792,24 +858,23 @@ fn collect_param_types(
 /// explicit self/cls/this parameter of a nested function shadows the class
 /// receiver.
 fn push_param_local(
+    w: &mut Walker<'_, '_, '_>,
     p: Node<'_>,
-    src: &[u8],
-    fx: &mut FileExtraction,
     scope: &str,
     is_method_receiver: bool,
 ) {
-    let Some(var) = param_binding(p, src) else {
+    let Some(var) = param_binding(p, w.src) else {
         return;
     };
     if (var == "self" || var == "cls" || var == "this") && is_method_receiver {
         return;
     }
-    fx.locals.push((scope.to_string(), var));
+    w.fx.bindings.locals.push((scope.to_string(), var));
 }
 
 /// Rust: `x: Foo`, `x: &Foo`, `x: &mut Foo`. `self`/`&self` parameters
 /// carry no type and are skipped.
-fn push_rust_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+fn push_rust_param(w: &mut Walker<'_, '_, '_>, p: Node<'_>, scope: &str) {
     if p.kind() != "parameter" {
         return;
     }
@@ -819,17 +884,17 @@ fn push_rust_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str
     ) else {
         return;
     };
-    let Some(var) = pattern_name(pattern, src) else {
+    let Some(var) = pattern_name(pattern, w.src) else {
         return;
     };
-    let Some(chain) = dotted_chain(unwrap_ref_type(ty), src) else {
+    let Some(chain) = dotted_chain(unwrap_ref_type(ty), w.src) else {
         return;
     };
-    push_param_type(fx, var, Some(chain), scope);
+    push_param_type(w.fx, var, Some(chain), scope);
 }
 
 /// TS: required_parameter / optional_parameter carry pattern + type.
-fn push_ts_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+fn push_ts_param(w: &mut Walker<'_, '_, '_>, p: Node<'_>, scope: &str) {
     if !matches!(p.kind(), "required_parameter" | "optional_parameter") {
         return;
     }
@@ -839,13 +904,13 @@ fn push_ts_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) 
     let Some(ident) = p.child_by_field_name("pattern") else {
         return;
     };
-    push_param_type(fx, text(ident, src), dotted_chain(ty, src), scope);
+    push_param_type(w.fx, text(ident, w.src), dotted_chain(ty, w.src), scope);
 }
 
 /// typed_parameter has NO 'name' field (positional identifier);
 /// typed_default_parameter does. The annotation lives in the 'type' field,
 /// wrapped in a 'type' node.
-fn push_typed_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &str) {
+fn push_typed_param(w: &mut Walker<'_, '_, '_>, p: Node<'_>, scope: &str) {
     if !matches!(p.kind(), "typed_parameter" | "typed_default_parameter") {
         return;
     }
@@ -858,13 +923,13 @@ fn push_typed_param(p: Node<'_>, src: &[u8], fx: &mut FileExtraction, scope: &st
     let (Some(ident), Some(ty)) = (ident, ty) else {
         return;
     };
-    push_param_type(fx, text(ident, src), dotted_chain(ty, src), scope);
+    push_param_type(w.fx, text(ident, w.src), dotted_chain(ty, w.src), scope);
 }
 
 /// Record one typed parameter when its annotation resolves to a dotted chain.
 fn push_param_type(fx: &mut FileExtraction, var: String, chain: Option<Vec<String>>, scope: &str) {
     if let Some(ann_dotted) = chain {
-        fx.params.push(ParamType {
+        fx.bindings.params.push(ParamType {
             var,
             ann_dotted,
             scope_func: scope.to_string(),
@@ -876,9 +941,8 @@ fn push_param_type(fx: &mut FileExtraction, var: String, chain: Option<Vec<Strin
 /// symbol scope (`range = None`); an anonymous nested callback is scoped by
 /// its source line range so it does not shadow calls outside the callback.
 fn collect_arrow_params(
+    w: &mut Walker<'_, '_, '_>,
     node: Node<'_>,
-    src: &[u8],
-    fx: &mut FileExtraction,
     scope: &str,
     range: Option<(usize, usize)>,
 ) {
@@ -886,17 +950,17 @@ fn collect_arrow_params(
         if range.is_some() {
             let mut cursor = params.walk();
             for p in params.children(&mut cursor) {
-                if let Some(var) = param_binding(p, src) {
-                    push_arrow_binding(fx, scope, var, range);
+                if let Some(var) = param_binding(p, w.src) {
+                    push_arrow_binding(w.fx, scope, var, range);
                 }
             }
         } else {
-            collect_param_types(params, src, fx, scope, false);
+            collect_param_types(w, params, scope, false);
         }
     }
     if let Some(param) = node.child_by_field_name("parameter") {
-        if let Some(var) = param_binding(param, src) {
-            push_arrow_binding(fx, scope, var, range);
+        if let Some(var) = param_binding(param, w.src) {
+            push_arrow_binding(w.fx, scope, var, range);
         }
     }
 }
@@ -908,13 +972,13 @@ fn push_arrow_binding(
     range: Option<(usize, usize)>,
 ) {
     match range {
-        Some((start_line, end_line)) => fx.arrow_params.push(ArrowParam {
+        Some((start_line, end_line)) => fx.bindings.arrow_params.push(ArrowParam {
             var,
             scope_func: scope.to_string(),
             start_line,
             end_line,
         }),
-        None => fx.locals.push((scope.to_string(), var)),
+        None => fx.bindings.locals.push((scope.to_string(), var)),
     }
 }
 
@@ -960,7 +1024,9 @@ fn unwrap_ref_type(mut node: Node<'_>) -> Node<'_> {
 /// nested calls like `obj = factory(A())` type NOTHING (the outer call's
 /// return type is unknowable). Handles `var = ...` (function-local) and
 /// `self.field = ...` (class-wide).
-fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &mut WalkCtx) {
+fn record_assignment(w: &mut Walker<'_, '_, '_>) {
+    let node = w.node;
+    let src = w.src;
     let Some(left) = node.child_by_field_name("left") else {
         return;
     };
@@ -968,7 +1034,7 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
         left.kind(),
         "pattern_list" | "tuple_pattern" | "list_pattern" | "expression_list" | "list"
     ) {
-        record_pattern_shadow(left, src, fx, ctx, node.start_position().row + 1);
+        record_pattern_shadow(left, src, w.fx, w.ctx, node.start_position().row + 1);
         return;
     }
     let Some(right) = node.child_by_field_name("right") else {
@@ -980,10 +1046,10 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
         // assignment in place.
         if left.kind() == "identifier" {
             push_assignment(
-                fx,
+                w.fx,
                 text(left, src),
                 Vec::new(),
-                ctx,
+                w.ctx,
                 node.start_position().row + 1,
             );
         }
@@ -991,13 +1057,13 @@ fn record_assignment(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, ctx: &
     };
     match left.kind() {
         "identifier" => push_assignment(
-            fx,
+            w.fx,
             text(left, src),
             target,
-            ctx,
+            w.ctx,
             node.start_position().row + 1,
         ),
-        "attribute" => record_self_field_assignment(left, target, ctx, fx, src),
+        "attribute" => record_self_field_assignment(left, target, w.ctx, w.fx, src),
         _ => {}
     }
 }
@@ -1020,7 +1086,7 @@ fn record_self_field_assignment(
     let Some(class_qn) = ctx.class_stack.last().cloned() else {
         return;
     };
-    fx.self_fields.push(SelfField {
+    fx.bindings.self_fields.push(SelfField {
         class_qn,
         field,
         target_dotted: target,
@@ -1166,8 +1232,8 @@ fn try_ts_module_import(node: Node<'_>, f: Node<'_>, src: &[u8], fx: &mut FileEx
 }
 
 impl Walker<'_, '_, '_> {
-    /// Shared CallableSpec constructor: start line and the
-    /// base is-test flag all come from the walked node.
+    /// Shared CallableSpec constructor: the base is-test flag comes
+    /// from the walked node.
     fn callable_spec<'a>(
         &self,
         kind: SymbolKind,
@@ -1178,7 +1244,6 @@ impl Walker<'_, '_, '_> {
             kind,
             name,
             qualname,
-            start: self.node.start_position().row + 1,
             is_test: is_test_item(self.fx, self.ctx, name),
             always_push_scope: false,
         }
@@ -1222,7 +1287,7 @@ fn bind_default_export<'a>(w: &mut Walker<'a, '_, '_>, name: &str) {
         return;
     }
     let module = w.fx.module.clone();
-    w.fx.aliases.push((
+    w.fx.bindings.aliases.push((
         String::new(),
         "default".to_string(),
         ImportTarget::Symbol {

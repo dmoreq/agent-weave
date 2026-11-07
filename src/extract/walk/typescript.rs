@@ -3,60 +3,6 @@
 
 use super::*;
 
-/// Define a class-shaped symbol and collect its heritage. Shared by the TS
-/// family (`class_declaration`, `interface_declaration`) and Rust
-/// (`struct_item`/`enum_item`/`trait_item`): `collect_heritage` walks both
-/// the TS clause kinds and the Rust `trait_bounds` kind.
-pub(super) fn define_class<'a>(w: &mut Walker<'a, '_, '_>, kind: SymbolKind) {
-    let Some(name_node) = w.node.child_by_field_name("name") else {
-        return;
-    };
-    let name = text(name_node, w.src);
-    let parent_qn = w
-        .ctx
-        .class_stack
-        .last()
-        .or_else(|| w.ctx.func_stack.last())
-        .or_else(|| w.ctx.mod_stack.last())
-        .cloned()
-        .unwrap_or_else(|| w.fx.module.clone());
-    let qualname = format!("{parent_qn}.{name}");
-    let start = w.node.start_position().row + 1;
-    let sym_idx = w.fx.symbols.len();
-    w.fx.push_symbol(NewSymbol {
-        kind,
-        name: name.clone(),
-        qualname: qualname.clone(),
-        file_idx: w.fx.file_idx,
-        signature: signature_of(w.node, w.src),
-        line_start: start,
-        line_end: w.node.end_position().row + 1,
-        is_test: is_test_item(w.fx, w.ctx, &name),
-    });
-    // Heritage: extends X / implements Y / trait bounds.
-    collect_type_heritage(w.node, w.src, w.fx, sym_idx);
-    if let Some(body) = w.node.child_by_field_name("body") {
-        w.ctx.class_stack.push(qualname);
-        w.work.push(Step::PopClass);
-        push_children_rev(w.work, body);
-    }
-}
-
-fn collect_type_heritage(node: Node<'_>, src: &[u8], fx: &mut FileExtraction, sym_idx: usize) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        match child.kind() {
-            "class_heritage" | "implements_clause" | "extends_type_clause" => {
-                collect_heritage(child, src, fx, sym_idx);
-            }
-            _ => {}
-        }
-    }
-    if let Some(bounds) = node.child_by_field_name("bounds") {
-        collect_heritage(bounds, src, fx, sym_idx);
-    }
-}
-
 pub(super) fn collect_heritage(
     node: Node<'_>,
     src: &[u8],
@@ -80,20 +26,8 @@ pub(super) fn collect_heritage(
             | "extends_type_clause"
             | "trait_bounds"
             | "bounds"
-            | "argument_list" => {
-                let mut c = n.walk();
-                for child in n.named_children(&mut c) {
-                    stack.push(child);
-                }
-            }
-            "call_expression" => {
-                if let Some(name) = mixin_bases(n, src, fx, class_idx) {
-                    if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
-                        fx.unresolved_inherits
-                            .push((name, n.start_position().row + 1));
-                    }
-                }
-            }
+            | "argument_list" => push_clause_children(n, &mut stack),
+            "call_expression" => record_mixin_base(n, src, fx, class_idx),
             "generic_type"
             | "type_identifier"
             | "identifier"
@@ -101,13 +35,35 @@ pub(super) fn collect_heritage(
             | "nested_type_identifier"
             | "scoped_type_identifier"
             | "attribute"
-            | "subscript" => {
-                if let Some(chain) = dotted_chain(n, src) {
-                    fx.inherits.push((class_idx, chain));
-                }
-            }
+            | "subscript" => record_leaf_base(n, src, fx, class_idx),
             _ => {}
         }
+    }
+}
+
+/// The clause arms: push every named child back onto the heritage stack.
+fn push_clause_children<'a>(n: Node<'a>, stack: &mut Vec<Node<'a>>) {
+    let mut c = n.walk();
+    for child in n.named_children(&mut c) {
+        stack.push(child);
+    }
+}
+
+/// The `call_expression` arm: `extends mixin(Base, Other)` records the mixin
+/// arguments as bases; a non-resolvable mixin name stays unresolved.
+fn record_mixin_base(n: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_idx: usize) {
+    if let Some(name) = mixin_bases(n, src, fx, class_idx) {
+        if matches!(fx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
+            fx.unresolved_inherits
+                .push((name, n.start_position().row + 1));
+        }
+    }
+}
+
+/// The leaf arms: the node IS a base name — resolve its dotted chain.
+fn record_leaf_base(n: Node<'_>, src: &[u8], fx: &mut FileExtraction, class_idx: usize) {
+    if let Some(chain) = dotted_chain(n, src) {
+        fx.inherits.push((class_idx, chain));
     }
 }
 
@@ -202,19 +158,17 @@ pub(super) fn record_ts_arrow_function<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
     }
     let name = text(name_node, w.src);
     let qualname = format!("{}.{}", w.fx.module, name);
-    let start = value.start_position().row + 1;
-    w.fx.push_symbol(NewSymbol {
-        kind: SymbolKind::Function,
-        name: name.clone(),
-        qualname: qualname.clone(),
-        file_idx: w.fx.file_idx,
-        signature: signature_of(w.node, w.src),
-        line_start: start,
-        line_end: value.end_position().row + 1,
-        is_test: is_test_item(w.fx, w.ctx, &name),
-    });
+    w.fx.push_symbol(NewSymbol::from_node(
+        w,
+        SymbolKind::Function,
+        name.clone(),
+        qualname.clone(),
+        w.node,
+        value,
+        is_test_item(w.fx, w.ctx, &name),
+    ));
     w.ctx.func_stack.push(qualname.clone());
-    collect_arrow_params(value, w.src, w.fx, &qualname, None);
+    collect_arrow_params(w, value, &qualname, None);
     w.work.push(Step::PopFunc);
     push_children_rev(w.work, value);
     true
@@ -320,7 +274,7 @@ fn import_clause_bindings(
 /// default import: import X from "..."
 fn default_import_binding(part: Node<'_>, src: &[u8], ctx: ImportCtx<'_>, fx: &mut FileExtraction) {
     let name = text(part, src);
-    fx.aliases.push((
+    fx.bindings.aliases.push((
         String::new(),
         name,
         ImportTarget::Symbol {
@@ -340,7 +294,7 @@ fn namespace_import_binding(
     let mut cursor = part.walk();
     for child in part.children(&mut cursor) {
         if child.kind() == "identifier" {
-            fx.aliases.push((
+            fx.bindings.aliases.push((
                 String::new(),
                 text(child, src),
                 ImportTarget::ModuleRoot {
@@ -365,7 +319,7 @@ fn named_import_bindings(part: Node<'_>, src: &[u8], ctx: ImportCtx<'_>, fx: &mu
             .child_by_field_name("alias")
             .map(|a| text(a, src))
             .unwrap_or_else(|| name.clone());
-        fx.aliases.push((
+        fx.bindings.aliases.push((
             String::new(),
             bound,
             ImportTarget::Symbol {
@@ -403,29 +357,27 @@ pub(super) fn resolve_ts_module(source: &str, dir: &str) -> String {
         .find_map(|ext| source.strip_suffix(ext))
         .unwrap_or(source);
     let mut parts: Vec<&str> = if stripped.starts_with("./") || stripped.starts_with("../") {
-        let mut base: Vec<&str> = if dir.is_empty() {
+        if dir.is_empty() {
             Vec::new()
         } else {
             dir.split('.').collect()
-        };
-        let mut segs: Vec<&str> = stripped.split('/').collect();
-        while segs.first() == Some(&"..") {
-            segs.remove(0);
-            base.pop();
         }
-        if segs.first() == Some(&".") {
-            segs.remove(0);
-        }
-        base
     } else {
         Vec::new()
     };
-    let segs: Vec<&str> = stripped.split('/').filter(|s| !s.is_empty()).collect();
-    for seg in segs {
-        if seg == "." || seg == ".." {
+    // One normalization pass: a `..` pops the directory base only while it
+    // still leads the segment stream (`..` after the first non-`..` segment
+    // is dropped without popping, and `.` is always dropped from the output).
+    let mut leading = true;
+    for seg in stripped.split('/').filter(|s| !s.is_empty()) {
+        if seg == ".." && leading {
+            parts.pop();
             continue;
         }
-        parts.push(seg);
+        leading = false;
+        if seg != "." {
+            parts.push(seg);
+        }
     }
     if parts.last() == Some(&"index") {
         parts.pop();

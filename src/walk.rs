@@ -115,6 +115,65 @@ fn finish_walk(mut files: Vec<WalkedFile>, skipped_large: usize) -> WalkStats {
     }
 }
 
+/// One candidate path's guard-chain verdict in [`walk_git_visible`]: index the
+/// file with this metadata, skip it, or skip it as over-cap (counted for the
+/// build report).
+enum WalkVerdict {
+    Index(std::fs::Metadata),
+    Skip,
+    OverCap,
+}
+
+/// The guard chain for one git-visible path: `.aw/` membership, extension
+/// allowlist, ancestor-symlink containment, symlink leaf, non-file, and size
+/// cap. The metadata is stat'ed exactly once, here.
+fn walk_verdict(
+    rel: &str,
+    root: &Path,
+    exts: &[&str],
+    root_canon: &Path,
+    parent_contained: &mut HashMap<PathBuf, bool>,
+) -> WalkVerdict {
+    if rel.split('/').any(|seg| seg == ".aw") {
+        return WalkVerdict::Skip;
+    }
+    let ext = Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !exts.contains(&ext) {
+        return WalkVerdict::Skip;
+    }
+    let path = root.join(rel);
+    // An ancestor component can be a symlink even when the leaf is a
+    // regular file. Check the canonical parent stays inside the canonical
+    // root before any metadata or read, so a tracked path cannot expose
+    // content outside the repository.
+    let parent = path.parent().unwrap_or(root);
+    let contained = *parent_contained
+        .entry(parent.to_path_buf())
+        .or_insert_with(|| {
+            std::fs::canonicalize(parent)
+                .map(|p| p.starts_with(root_canon))
+                .unwrap_or(false)
+        });
+    if !contained {
+        return WalkVerdict::Skip;
+    }
+    // symlink_metadata does not follow links, so a symlink to a source
+    // file is skipped rather than indexed under a second path.
+    let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+        return WalkVerdict::Skip;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return WalkVerdict::Skip;
+    }
+    if metadata.len() > MAX_FILE_SIZE {
+        return WalkVerdict::OverCap;
+    }
+    WalkVerdict::Index(metadata)
+}
+
 /// Stat each git-visible path once. Missing paths (staged deletions), symlinks,
 /// directories (submodules), `.aw/`, unsupported extensions, and files over
 /// `MAX_FILE_SIZE` are skipped; the size cap is counted for the build report.
@@ -124,52 +183,21 @@ fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
     let root_canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut parent_contained: HashMap<PathBuf, bool> = HashMap::new();
     for rel in rels {
-        if rel.split('/').any(|seg| seg == ".aw") {
-            continue;
-        }
-        let ext = Path::new(rel)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        if !exts.contains(&ext) {
-            continue;
-        }
-        let path = root.join(rel);
-        // An ancestor component can be a symlink even when the leaf is a
-        // regular file. Check the canonical parent stays inside the canonical
-        // root before any metadata or read, so a tracked path cannot expose
-        // content outside the repository.
-        let parent = path.parent().unwrap_or(root);
-        let contained = *parent_contained
-            .entry(parent.to_path_buf())
-            .or_insert_with(|| {
-                std::fs::canonicalize(parent)
-                    .map(|p| p.starts_with(&root_canon))
-                    .unwrap_or(false)
-            });
-        if !contained {
-            continue;
-        }
-        // symlink_metadata does not follow links, so a symlink to a source
-        // file is skipped rather than indexed under a second path.
-        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
-            continue;
+        let metadata = match walk_verdict(rel, root, exts, &root_canon, &mut parent_contained) {
+            WalkVerdict::Index(metadata) => metadata,
+            WalkVerdict::Skip => continue,
+            WalkVerdict::OverCap => {
+                skipped_large += 1;
+                continue;
+            }
         };
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            continue;
-        }
-        let size = metadata.len();
-        if size > MAX_FILE_SIZE {
-            skipped_large += 1;
-            continue;
-        }
         // The single nanosecond arithmetic lives in db::metadata_mtime; the
         // walk passes its already-stat'ed metadata so no path is stat'ed twice.
         let mtime = crate::db::metadata_mtime(&metadata).unwrap_or(0);
         files.push(WalkedFile {
-            abs: path,
+            abs: root.join(rel),
             rel: rel.clone(),
-            size,
+            size: metadata.len(),
             mtime,
         });
     }
@@ -279,8 +307,7 @@ mod tests {
 
     #[test]
     fn walk_skips_aw_dir_and_large_files_and_filters_ext() {
-        let dir = std::env::temp_dir().join(format!("aw-walk-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::db::temp_root("walk-test");
         write(&dir.join("a.py"), b"x = 1\n");
         write(&dir.join("sub/b.py"), b"y = 2\n");
         write(&dir.join("sub/c.txt"), b"not indexed\n");
@@ -299,8 +326,7 @@ mod tests {
 
     #[test]
     fn read_bounded_rejects_over_cap() {
-        let dir = std::env::temp_dir().join(format!("aw-walk-bounded-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::db::temp_root("walk-bounded");
         let path = dir.join("huge.py");
         write(&path, &[b'a'; MAX_FILE_SIZE as usize + 1]);
         let err = read_bounded(&path).unwrap_err();
@@ -313,11 +339,8 @@ mod tests {
     #[test]
     fn walk_git_visible_skips_ancestor_symlink() {
         use std::os::unix::fs::symlink;
-        let dir = std::env::temp_dir().join(format!("aw-walk-symlink-{}", std::process::id()));
-        let external =
-            std::env::temp_dir().join(format!("aw-walk-external-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&external);
+        let dir = crate::db::temp_root("walk-symlink");
+        let external = crate::db::temp_root("walk-external");
         write(&dir.join("pkg/a.py"), b"def inside(): pass\n");
         let status = std::process::Command::new("git")
             .args(["init", "--quiet"])

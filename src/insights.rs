@@ -68,8 +68,10 @@ fn global_totals(conn: &Connection) -> Result<StatsTotals> {
     })
 }
 
-/// Scoped totals: one range scan per counter. Edges attribute to the source
-/// symbol's file, matching `report`.
+/// Scoped totals: one range scan per table. Edges attribute to the source
+/// symbol's file, matching `report`; the three edge kinds come out of the
+/// same conditional-SUM scan as the build-time `meta_counts` (one query, not
+/// one per kind).
 fn scoped_totals(conn: &Connection, scope: &str) -> Result<StatsTotals> {
     let (clause, params) = crate::query::scoped_params("f", "path", Some(scope), 1);
     let scalar = |expr: &str, from: &str, extra: &str| -> Result<i64> {
@@ -83,26 +85,28 @@ fn scoped_totals(conn: &Connection, scope: &str) -> Result<StatsTotals> {
     if files == 0 {
         return Err(AwError::NoResults(format!("no indexed files in '{scope}'")));
     }
-    let edge_from = "edges e JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id";
+    let edge_from = format!("edges e {}", db::EDGE_SRC_FILE_JOIN);
+    let (edges, calls, imports, inherits) = conn.query_row(
+        &format!(
+            "SELECT COUNT(*),
+            COALESCE(SUM(e.kind = '{}'), 0),
+            COALESCE(SUM(e.kind = '{}'), 0),
+            COALESCE(SUM(e.kind = '{}'), 0)
+     FROM {edge_from} WHERE 1=1 {clause}",
+            EdgeKind::Calls.as_str(),
+            EdgeKind::Imports.as_str(),
+            EdgeKind::Inherits.as_str(),
+        ),
+        rusqlite::params_from_iter(params.iter()),
+        crate::db::ints4,
+    )?;
     Ok(StatsTotals {
         files,
         symbols: scalar("COUNT(*)", "symbols s JOIN files f ON f.id = s.file_id", "")?,
-        edges: scalar("COUNT(*)", edge_from, "")?,
-        calls: scalar(
-            "COUNT(*)",
-            edge_from,
-            &format!("AND e.kind = '{}'", EdgeKind::Calls.as_str()),
-        )?,
-        imports: scalar(
-            "COUNT(*)",
-            edge_from,
-            &format!("AND e.kind = '{}'", EdgeKind::Imports.as_str()),
-        )?,
-        inherits: scalar(
-            "COUNT(*)",
-            edge_from,
-            &format!("AND e.kind = '{}'", EdgeKind::Inherits.as_str()),
-        )?,
+        edges,
+        calls,
+        imports,
+        inherits,
         perr: scalar("COALESCE(SUM(f.parse_status != 'ok'), 0)", "files f", "")?,
         unresolved: scalar("COALESCE(SUM(f.unresolved), 0)", "files f", "")?,
     })

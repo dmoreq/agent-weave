@@ -15,6 +15,11 @@ use crate::error::{AwError, Result};
 pub const MEMORY_CAVEAT: &str =
     "aw: memory — agent-authored notes, candidates only, never proof of current behavior";
 
+/// Single source of the `mem write` secret-rejection usage text: key, body,
+/// and tags/refs validation all emit this exact message so the bytes cannot
+/// drift between the three validators (same discipline as CORRUPT_INDEX_MSG).
+const SUSPECTED_SECRET_MSG: &str = "mem write: content contains suspected secret token";
+
 /// Hard cap on resolver candidate rows pulled from the FTS match list.
 pub const CANDIDATE_CAP: usize = 256;
 /// Fusion weights (D4-A): lexical, ref/token-overlap, recency. Fixed until the
@@ -33,10 +38,66 @@ pub const MAX_TAG_BYTES: usize = 32;
 pub const MAX_REFS: usize = 16;
 pub const MAX_REF_BYTES: usize = 256;
 /// Closed `kind` taxonomy (OQ3 keeps the design default until the owner says
-/// otherwise); anything else is a usage error (exit 2).
-pub const MEM_KINDS: [&str; 4] = ["decision", "gotcha", "fact", "task"];
-pub const SCOPE_DURABLE: &str = "durable";
-pub const SCOPE_SESSION: &str = "session";
+/// otherwise); anything else is a usage error (exit 2). Stored rows spell the
+/// kind through `as_str()` at the bind boundary and validation parses the raw
+/// flag into a variant, so a misspelled kind is a compile error instead of a
+/// silent wrong row (same discipline as `EdgeKind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemKind {
+    Decision,
+    Gotcha,
+    Fact,
+    Task,
+}
+
+/// The taxonomy as a list, kept under the `MEM_KINDS` name as the single
+/// source the usage-error render and the parser both derive from.
+pub const MEM_KINDS: [MemKind; 4] = [
+    MemKind::Decision,
+    MemKind::Gotcha,
+    MemKind::Fact,
+    MemKind::Task,
+];
+
+impl MemKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            MemKind::Decision => "decision",
+            MemKind::Gotcha => "gotcha",
+            MemKind::Fact => "fact",
+            MemKind::Task => "task",
+        }
+    }
+
+    /// Parse one raw `--kind` flag value at the trust boundary.
+    pub fn parse(raw: &str) -> Option<MemKind> {
+        MEM_KINDS.iter().copied().find(|k| k.as_str() == raw)
+    }
+}
+
+/// Closed scope taxonomy: `durable` never expires, `session` expires at
+/// `now + ttl`. Parsed at the trust boundary like [`MemKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemScope {
+    Durable,
+    Session,
+}
+
+impl MemScope {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            MemScope::Durable => "durable",
+            MemScope::Session => "session",
+        }
+    }
+
+    /// Parse one raw `--scope` flag value at the trust boundary.
+    pub fn parse(raw: &str) -> Option<MemScope> {
+        [MemScope::Durable, MemScope::Session]
+            .into_iter()
+            .find(|s| s.as_str() == raw)
+    }
+}
 /// OQ2 (owner, 2026-11-05): a session note without an explicit `--ttl` lives
 /// for 7 days. Explicit `--ttl` always wins.
 pub const DEFAULT_SESSION_TTL_SECS: i64 = 604_800;
@@ -183,16 +244,18 @@ pub fn mem_ref_tag_tokens(refs: &str, tags: &str) -> std::collections::BTreeSet<
 
 /// Normalized note input after validation: tags lowercased, whitespace-collapsed;
 /// refs whitespace-collapsed (case preserved — qualnames are case-sensitive).
-/// `ttl_secs` is the relative lifetime: 0 for durable notes (never expires),
-/// the explicit `--ttl` or the 7-day OQ2 default for session notes. The write
-/// path stamps the absolute `expires_at = now + ttl_secs` (pure module: no clock).
+/// `kind` and `scope` are the parsed taxonomy variants; storage renders their
+/// spelling through `as_str()` at the bind boundary. `ttl_secs` is the relative
+/// lifetime: 0 for durable notes (never expires), the explicit `--ttl` or the
+/// 7-day OQ2 default for session notes. The write path stamps the absolute
+/// `expires_at = now + ttl_secs` (pure module: no clock).
 #[derive(Debug)]
 pub struct NormalizedNote {
     pub key: String,
-    pub kind: String,
+    pub kind: MemKind,
     pub tags: String,
     pub refs: String,
-    pub scope: String,
+    pub scope: MemScope,
     pub body: String,
     pub ttl_secs: i64,
 }
@@ -225,28 +288,31 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
         ttl,
     } = input;
     let key = validate_key(key)?;
-    if !MEM_KINDS.contains(&kind) {
-        return Err(AwError::Usage(format!(
+    let kind = MemKind::parse(kind).ok_or_else(|| {
+        AwError::Usage(format!(
             "mem write: kind must be one of {} (got '{kind}')",
-            MEM_KINDS.join("|")
-        )));
-    }
+            MEM_KINDS.map(MemKind::as_str).join("|")
+        ))
+    })?;
     validate_body(body)?;
     if contains_suspected_secret(tags.unwrap_or(""))
         || contains_suspected_secret(refs.unwrap_or(""))
     {
-        return Err(AwError::Usage(
-            "mem write: content contains suspected secret token".into(),
-        ));
+        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
+    // Keep the original validation order: tags, refs, then scope/ttl last, so
+    // a multi-field error reports the same field as before the enum split.
+    let tags = normalize_tags(tags.unwrap_or(""))?;
+    let refs = normalize_refs(refs.unwrap_or(""))?;
+    let (scope, ttl_secs) = normalize_ttl(scope, ttl)?;
     Ok(NormalizedNote {
         key: key.to_string(),
-        kind: kind.to_string(),
-        tags: normalize_tags(tags.unwrap_or(""))?,
-        refs: normalize_refs(refs.unwrap_or(""))?,
-        scope: scope.to_string(),
+        kind,
+        tags,
+        refs,
+        scope,
         body: body.to_string(),
-        ttl_secs: normalize_ttl(scope, ttl)?,
+        ttl_secs,
     })
 }
 
@@ -273,9 +339,7 @@ fn validate_key(key: &str) -> Result<&str> {
         ));
     }
     if contains_suspected_secret(key) {
-        return Err(AwError::Usage(
-            "mem write: content contains suspected secret token".into(),
-        ));
+        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     Ok(key)
 }
@@ -291,9 +355,7 @@ fn validate_body(body: &str) -> Result<()> {
         )));
     }
     if contains_suspected_secret(body) {
-        return Err(AwError::Usage(
-            "mem write: content contains suspected secret token".into(),
-        ));
+        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     Ok(())
 }
@@ -333,27 +395,38 @@ fn normalize_refs(raw: &str) -> Result<String> {
     Ok(refs.join(" "))
 }
 
-fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<i64> {
-    match scope {
-        SCOPE_DURABLE => {
+/// Validate the raw scope flag and resolve the relative lifetime together:
+/// `durable` never expires and rejects `--ttl`; `session` expires at
+/// `now + ttl`, defaulting to the 7-day OQ2 constant without one. Returns the
+/// parsed variant so the note carries the enum, not the string.
+fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
+    let scope = MemScope::parse(scope).ok_or_else(|| {
+        AwError::Usage(format!(
+            "mem write: scope must be '{}' or '{}' (got '{scope}')",
+            MemScope::Durable.as_str(),
+            MemScope::Session.as_str()
+        ))
+    })?;
+    let ttl_secs = match scope {
+        MemScope::Durable => {
             if ttl.is_some() {
                 return Err(AwError::Usage(
                     "mem write: --ttl is only valid with --scope session".to_string(),
                 ));
             }
-            Ok(0)
+            0
         }
-        SCOPE_SESSION => match ttl {
-            None => Ok(DEFAULT_SESSION_TTL_SECS),
-            Some(t) if t == 0 || t > MAX_SESSION_TTL_SECS => Err(AwError::Usage(format!(
-                "mem write: --ttl must be in 1..={MAX_SESSION_TTL_SECS} seconds"
-            ))),
-            Some(t) => Ok(t as i64),
+        MemScope::Session => match ttl {
+            None => DEFAULT_SESSION_TTL_SECS,
+            Some(t) if t == 0 || t > MAX_SESSION_TTL_SECS => {
+                return Err(AwError::Usage(format!(
+                    "mem write: --ttl must be in 1..={MAX_SESSION_TTL_SECS} seconds"
+                )));
+            }
+            Some(t) => t as i64,
         },
-        other => Err(AwError::Usage(format!(
-            "mem write: scope must be '{SCOPE_DURABLE}' or '{SCOPE_SESSION}' (got '{other}')"
-        ))),
-    }
+    };
+    Ok((scope, ttl_secs))
 }
 
 /// Content hash over the normalized (kind, body, tags, refs, scope) tuple with
@@ -454,11 +527,6 @@ pub fn render_row_tagged(row: &crate::db::MemRow, tag: &str) -> String {
         out.push_str(&format!("\n  {line}"));
     }
     out
-}
-
-/// `showing N of M` cap line (stdout, last line of a capped query).
-pub fn render_showing(shown: usize, total: usize) -> String {
-    crate::query::cap_line(shown, total, "").unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -643,8 +711,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            mem_content_hash(&a.kind, &a.body, &a.tags, &a.refs, &a.scope),
-            mem_content_hash(&b.kind, &b.body, &b.tags, &b.refs, &b.scope)
+            mem_content_hash(a.kind.as_str(), &a.body, &a.tags, &a.refs, a.scope.as_str()),
+            mem_content_hash(b.kind.as_str(), &b.body, &b.tags, &b.refs, b.scope.as_str())
         );
         let c = normalize_note(NoteInput {
             tags: Some("a b"),
@@ -653,8 +721,8 @@ mod tests {
         })
         .unwrap();
         assert_ne!(
-            mem_content_hash(&a.kind, &a.body, &a.tags, &a.refs, &a.scope),
-            mem_content_hash(&c.kind, &c.body, &c.tags, &c.refs, &c.scope),
+            mem_content_hash(a.kind.as_str(), &a.body, &a.tags, &a.refs, a.scope.as_str()),
+            mem_content_hash(c.kind.as_str(), &c.body, &c.tags, &c.refs, c.scope.as_str()),
             "body bytes are part of the identity"
         );
     }

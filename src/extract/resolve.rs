@@ -16,6 +16,23 @@ struct FileCtx {
     /// Crate-root dir segment for Rust files (e.g. "src") — maps crate:: paths.
     crate_root: Option<String>,
     module_sym_idx: usize,
+    bindings: ResolvedBindings,
+    unresolved_inherits: Vec<(String, usize)>,
+    calls: Vec<CallSite>,
+    import_edges: Vec<ImportEdgeCandidate>,
+    /// (src idx global, base chain)
+    inherits: Vec<(usize, Vec<String>)>,
+    /// (src idx global, base chain, impl line) — edge-only, no class_bases.
+    impl_inherits: Vec<(usize, Vec<String>, usize)>,
+}
+
+/// Resolution-time view of one file's [`FileBindings`] (extract.rs): the
+/// per-symbol binding records folded into the lookup keys resolution reads
+/// (`aliases`, `locals`, `assignments`, `params`, `self_fields`) plus the
+/// records it consumes as-is (`arrow_params`, `stars`, `from_import_parents`).
+/// Grouped with `FileBindings` so a new binding concept registers in one
+/// block per side instead of per-field across `FileCtx` and `merge_fresh`.
+struct ResolvedBindings {
     aliases: HashMap<String, Vec<(String, ImportTarget)>>,
     /// (scope_func, var) parameters/locals that shadow outer names.
     locals: HashSet<(String, String)>,
@@ -23,19 +40,12 @@ struct FileCtx {
     arrow_params: Vec<ArrowParam>,
     stars: Vec<(String, usize)>,
     from_import_parents: HashSet<(usize, String)>,
-    unresolved_inherits: Vec<(String, usize)>,
     /// (scope_func, var) -> ordered (site_line, constructor target chain).
     assignments: BindingEvents,
     /// (scope_func, var) -> annotation chain.
     params: HashMap<(String, String), Vec<String>>,
     /// (class qualname, field) -> constructor target chain.
     self_fields: HashMap<(String, String), Vec<String>>,
-    calls: Vec<CallSite>,
-    import_edges: Vec<ImportEdgeCandidate>,
-    /// (src idx global, base chain)
-    inherits: Vec<(usize, Vec<String>)>,
-    /// (src idx global, base chain, impl line) — edge-only, no class_bases.
-    impl_inherits: Vec<(usize, Vec<String>, usize)>,
 }
 
 struct Tables {
@@ -80,7 +90,7 @@ fn register_symbol(t: &mut Tables, sym: NewSymbol, module: &str, existing_id: Op
     t.symbols.push(sym);
     t.existing_ids.push(existing_id);
     t.by_qualname.entry(qualname.clone()).or_default().push(idx);
-    index_parent_module(t, idx, module, &name, &qualname, kind);
+    index_parent_module(t, idx, module);
     index_method_class(t, idx, &name, &qualname, kind);
 }
 
@@ -88,15 +98,11 @@ fn register_symbol(t: &mut Tables, sym: NewSymbol, module: &str, existing_id: Op
 /// Rust inline `mod` members are scoped as methods, but their parent is a
 /// module; they are importable/callable bare names. The parent is already
 /// in `by_qualname` (symbols are processed in order), so its kind is one
-/// lookup instead of a reverse scan.
-fn index_parent_module(
-    t: &mut Tables,
-    idx: usize,
-    module: &str,
-    name: &str,
-    qualname: &str,
-    kind: SymbolKind,
-) {
+/// lookup instead of a reverse scan. The symbol's own fields are read back
+/// from `t.symbols[idx]`, which the caller just pushed.
+fn index_parent_module(t: &mut Tables, idx: usize, module: &str) {
+    let sym = &t.symbols[idx];
+    let (name, qualname, kind) = (sym.name.as_str(), sym.qualname.as_str(), sym.kind);
     let direct_child = is_direct_child(module, name, qualname);
     let parent_qn_kind = qualname.rsplit_once('.').map(|(parent, _)| {
         let parent_kind = t
@@ -158,17 +164,24 @@ fn is_class_kind(kind: SymbolKind) -> bool {
     )
 }
 
+/// Borrowed emit context shared by the edge emitters: the resolver tables plus
+/// the unresolved-site sink travel as one value (the CallCtx pattern) instead
+/// of a loose `(&mut Tables, &mut Vec<UnresolvedSite>)` pair.
+struct EmitCtx<'a> {
+    t: &'a mut Tables,
+    unresolved_calls: &'a mut Vec<UnresolvedSite>,
+}
+
 /// Emit the AMBIGUOUS inherits edge (no single destination) together with its
 /// unresolved site. One function so the edge/site pair cannot drift apart.
 fn push_ambiguous_inherit(
-    t: &mut Tables,
-    unresolved_calls: &mut Vec<UnresolvedSite>,
+    ctx: &mut EmitCtx<'_>,
     src_idx: usize,
     class_file: usize,
     name: String,
     site_line: usize,
 ) {
-    t.edges.push(NewEdge {
+    ctx.t.edges.push(NewEdge {
         src_idx,
         dst_idx: None,
         dst_name: name.clone(),
@@ -176,7 +189,7 @@ fn push_ambiguous_inherit(
         confidence: Confidence::Ambiguous,
         site_line,
     });
-    unresolved_calls.push(UnresolvedSite {
+    ctx.unresolved_calls.push(UnresolvedSite {
         file_idx: class_file,
         name,
         kind: EdgeSiteKind::Inherit,
@@ -189,32 +202,31 @@ fn push_ambiguous_inherit(
 /// callers decide whether it joins the MRO table (`class_bases`: fresh
 /// declarations do, interface implements lists do not).
 fn emit_inherit_edge(
-    t: &mut Tables,
-    unresolved_calls: &mut Vec<UnresolvedSite>,
+    ctx: &mut EmitCtx<'_>,
     src_idx: usize,
     chain: &[String],
     site_line: usize,
 ) -> Option<String> {
-    let class_file = t.symbols[src_idx].file_idx;
-    let src_qn = t.symbols[src_idx].qualname.clone();
-    let base_qn = resolve_base_chain(t, class_file, chain, &src_qn);
+    let class_file = ctx.t.symbols[src_idx].file_idx;
+    let src_qn = ctx.t.symbols[src_idx].qualname.clone();
+    let base_qn = resolve_base_chain(ctx.t, class_file, chain, &src_qn);
     let dsts = base_qn
         .as_ref()
-        .and_then(|qn| t.by_qualname.get(qn))
+        .and_then(|qn| ctx.t.by_qualname.get(qn))
         .map(|v| v.as_slice())
         .unwrap_or(&[]);
     let class_dsts: Vec<usize> = dsts
         .iter()
         .copied()
-        .filter(|i| is_class_kind(t.symbols[*i].kind))
+        .filter(|i| is_class_kind(ctx.t.symbols[*i].kind))
         .collect();
     if class_dsts.len() > 1 {
         let name = base_qn.clone().unwrap_or_else(|| chain.join("."));
-        push_ambiguous_inherit(t, unresolved_calls, src_idx, class_file, name, site_line);
+        push_ambiguous_inherit(ctx, src_idx, class_file, name, site_line);
         None
     } else if let Some(&dst) = class_dsts.first() {
-        let qn = t.symbols[dst].qualname.clone();
-        t.edges.push(NewEdge {
+        let qn = ctx.t.symbols[dst].qualname.clone();
+        ctx.t.edges.push(NewEdge {
             src_idx,
             dst_idx: Some(dst),
             dst_name: qn.clone(),
@@ -224,7 +236,7 @@ fn emit_inherit_edge(
         });
         Some(qn)
     } else {
-        unresolved_calls.push(UnresolvedSite {
+        ctx.unresolved_calls.push(UnresolvedSite {
             file_idx: class_file,
             name: base_qn.unwrap_or_else(|| chain.join(".")),
             kind: EdgeSiteKind::Inherit,
@@ -254,15 +266,23 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
     merge_fresh(&mut t, &mut files);
     merge_carried(&mut t, carried);
     let mut unresolved_calls = seed_unresolved_inherits(&t);
-    emit_inherit_phase(&mut t, &mut unresolved_calls);
+    emit_inherit_phase(EmitCtx {
+        t: &mut t,
+        unresolved_calls: &mut unresolved_calls,
+    });
     let mut stats = ExtractStats::default();
     let mut unresolved_per_file = vec![0usize; t.file_ctx.len()];
-    emit_import_edges(&mut t, &mut unresolved_calls);
+    emit_import_edges(EmitCtx {
+        t: &mut t,
+        unresolved_calls: &mut unresolved_calls,
+    });
     dedup_import_edges(&mut t, &mut unresolved_calls);
     reconcile_python_imports(&mut t);
     resolve_call_sites(
-        &mut t,
-        &mut unresolved_calls,
+        EmitCtx {
+            t: &mut t,
+            unresolved_calls: &mut unresolved_calls,
+        },
         &mut unresolved_per_file,
         &mut stats,
     );
@@ -280,7 +300,6 @@ pub fn resolve(mut files: Vec<FileExtraction>, carried: CarriedIndex) -> Resolut
 /// resolution context in one pass.
 fn merge_fresh(t: &mut Tables, files: &mut Vec<FileExtraction>) {
     for mut fx in files.drain(..) {
-        let maps = fold_binding_maps(&mut fx);
         let base = t.symbols.len();
         let module = fx.module.clone();
         t.module_paths.insert(module.clone());
@@ -306,15 +325,8 @@ fn merge_fresh(t: &mut Tables, files: &mut Vec<FileExtraction>) {
             lang: fx.lang,
             crate_root: fx.crate_root,
             module_sym_idx: base,
-            aliases: maps.aliases,
-            locals: maps.locals,
-            arrow_params: fx.arrow_params,
-            stars: fx.stars,
-            from_import_parents: fx.from_import_parents,
+            bindings: fold_binding_maps(&mut fx.bindings),
             unresolved_inherits: fx.unresolved_inherits,
-            assignments: maps.assignments,
-            params: maps.params,
-            self_fields: maps.self_fields,
             calls: fx.calls,
             import_edges: fx.import_edges,
             inherits,
@@ -323,23 +335,18 @@ fn merge_fresh(t: &mut Tables, files: &mut Vec<FileExtraction>) {
     }
 }
 
-struct BindingMaps {
-    aliases: HashMap<String, Vec<(String, ImportTarget)>>,
-    locals: HashSet<(String, String)>,
-    assignments: BindingEvents,
-    params: HashMap<(String, String), Vec<String>>,
-    self_fields: HashMap<(String, String), Vec<String>>,
-}
-
 /// Fold the per-symbol binding records into the lookup keys resolution uses.
-fn fold_binding_maps(fx: &mut FileExtraction) -> BindingMaps {
+/// One block move out of [`FileBindings`]; the folded maps replace the raw
+/// vectors and the pass-through records keep their order.
+fn fold_binding_maps(fx: &mut FileBindings) -> ResolvedBindings {
+    let bindings = std::mem::take(fx);
     let mut aliases: HashMap<String, Vec<(String, ImportTarget)>> = HashMap::new();
-    for (scope, alias, target) in std::mem::take(&mut fx.aliases) {
+    for (scope, alias, target) in bindings.aliases {
         aliases.entry(alias).or_default().push((scope, target));
     }
-    let locals: HashSet<(String, String)> = std::mem::take(&mut fx.locals).into_iter().collect();
+    let locals: HashSet<(String, String)> = bindings.locals.into_iter().collect();
     let mut assignments: BindingEvents = HashMap::new();
-    for a in std::mem::take(&mut fx.assignments) {
+    for a in bindings.assignments {
         assignments
             .entry((a.scope_func, a.var))
             .or_default()
@@ -349,16 +356,19 @@ fn fold_binding_maps(fx: &mut FileExtraction) -> BindingMaps {
         events.sort_by_key(|(line, _)| *line);
     }
     let mut params = HashMap::new();
-    for p in std::mem::take(&mut fx.params) {
+    for p in bindings.params {
         params.insert((p.scope_func, p.var), p.ann_dotted);
     }
     let mut self_fields = HashMap::new();
-    for sf in std::mem::take(&mut fx.self_fields) {
+    for sf in bindings.self_fields {
         self_fields.insert((sf.class_qn, sf.field), sf.target_dotted);
     }
-    BindingMaps {
+    ResolvedBindings {
         aliases,
         locals,
+        arrow_params: bindings.arrow_params,
+        stars: bindings.stars,
+        from_import_parents: bindings.from_import_parents,
         assignments,
         params,
         self_fields,
@@ -374,6 +384,14 @@ fn merge_carried(t: &mut Tables, carried: CarriedIndex) {
     } = carried;
     for c in carried_syms {
         t.module_paths.insert(c.module.clone());
+        // Carried rows are never re-extracted, so they have no fresh file:
+        // usize::MAX marks them. The only read is the `file_idx != fi` skip
+        // in `rust_unknown_receiver_outcome`; it is never used as a `file_ctx`
+        // index, and the assert keeps it distinct from any real file index.
+        debug_assert!(
+            t.file_ctx.len() < usize::MAX,
+            "carried file_idx sentinel collided with a real file index"
+        );
         let sym = NewSymbol {
             kind: c.kind,
             name: c.name.clone(),
@@ -410,32 +428,32 @@ fn seed_unresolved_inherits(t: &Tables) -> Vec<UnresolvedSite> {
 
 /// Resolve fresh base chains and emit inherits edges (carried rows were
 /// carried as edges). Per-file order (inherits, then impl_inherits) is kept.
-fn emit_inherit_phase(t: &mut Tables, unresolved_calls: &mut Vec<UnresolvedSite>) {
+fn emit_inherit_phase(mut ctx: EmitCtx<'_>) {
     // Resolve fresh base chains now that alias tables exist; emit inherits
     // edges for fresh classes (carried inherits edges were carried as rows).
     // Take each file's lists so the emitter can own `&mut Tables` without a
     // whole-corpus snapshot; per-file order (inherits, then impl_inherits)
     // is preserved and nothing re-reads these fields afterwards.
-    for fi in 0..t.file_ctx.len() {
+    for fi in 0..ctx.t.file_ctx.len() {
         let (inherits, impls) = {
-            let f = &mut t.file_ctx[fi];
+            let f = &mut ctx.t.file_ctx[fi];
             (
                 std::mem::take(&mut f.inherits),
                 std::mem::take(&mut f.impl_inherits),
             )
         };
         for (src_idx, chain) in &inherits {
-            let site = t.symbols[*src_idx].line_start;
+            let site = ctx.t.symbols[*src_idx].line_start;
             // Fresh class declarations populate the MRO table.
-            if let Some(base_qn) = emit_inherit_edge(t, unresolved_calls, *src_idx, chain, site) {
-                let src_qn = t.symbols[*src_idx].qualname.clone();
-                t.class_bases.entry(src_qn).or_default().push(base_qn);
+            if let Some(base_qn) = emit_inherit_edge(&mut ctx, *src_idx, chain, site) {
+                let src_qn = ctx.t.symbols[*src_idx].qualname.clone();
+                ctx.t.class_bases.entry(src_qn).or_default().push(base_qn);
             }
         }
         for (src_idx, chain, line) in &impls {
             // Interface implements lists resolve edges but stay out of the MRO
             // table.
-            emit_inherit_edge(t, unresolved_calls, *src_idx, chain, *line);
+            emit_inherit_edge(&mut ctx, *src_idx, chain, *line);
         }
     }
 }
@@ -450,17 +468,17 @@ struct ImportEmitter<'a> {
     stars: Vec<(String, usize)>,
 }
 
-fn emit_import_edges(t: &mut Tables, unresolved_calls: &mut Vec<UnresolvedSite>) {
+fn emit_import_edges(ctx: EmitCtx<'_>) {
     // Take each file's import work one file at a time so the emitter can own
     // `&mut Tables` without a whole-corpus snapshot. `import_edges` is never
     // read again; `stars` is needed later by call resolution, so it is put
     // back after the file's edges are emitted.
-    for fi in 0..t.file_ctx.len() {
+    for fi in 0..ctx.t.file_ctx.len() {
         let (module_sym_idx, stars, edges) = {
-            let f = &mut t.file_ctx[fi];
+            let f = &mut ctx.t.file_ctx[fi];
             (
                 f.module_sym_idx,
-                std::mem::take(&mut f.stars),
+                std::mem::take(&mut f.bindings.stars),
                 std::mem::take(&mut f.import_edges)
                     .into_iter()
                     .map(|c| (c.target, c.line))
@@ -468,8 +486,8 @@ fn emit_import_edges(t: &mut Tables, unresolved_calls: &mut Vec<UnresolvedSite>)
             )
         };
         let mut emitter = ImportEmitter {
-            t: &mut *t,
-            unresolved_calls: &mut *unresolved_calls,
+            t: &mut *ctx.t,
+            unresolved_calls: &mut *ctx.unresolved_calls,
             fi,
             module_sym_idx,
             stars,
@@ -481,7 +499,7 @@ fn emit_import_edges(t: &mut Tables, unresolved_calls: &mut Vec<UnresolvedSite>)
                 ImportTarget::ModuleRoot { path } => emitter.module_root(path, line),
             }
         }
-        t.file_ctx[fi].stars = emitter.stars;
+        ctx.t.file_ctx[fi].bindings.stars = emitter.stars;
     }
 }
 
@@ -692,6 +710,7 @@ fn reconcile_python_imports(t: &mut Tables) {
         let fctx = &t.file_ctx[fi];
         let key = (fi, e.site_line, e.dst_name.to_string());
         let parent_candidate = fctx
+            .bindings
             .from_import_parents
             .contains(&(e.site_line, e.dst_name.to_string()));
         !parent_candidate || !module_children.contains(&key) || symbol_children.contains(&key)
@@ -718,44 +737,37 @@ fn python_type_ref(t: &Tables, fi: usize, site: &CallSite) -> Option<(String, us
 
 /// Resolve every recorded call site into an edge or an unresolved site.
 fn resolve_call_sites(
-    t: &mut Tables,
-    unresolved_calls: &mut Vec<UnresolvedSite>,
+    ctx: EmitCtx<'_>,
     unresolved_per_file: &mut [usize],
     stats: &mut ExtractStats,
 ) {
     // Call sites.
-    for (fi, fctx) in t.file_ctx.iter().enumerate() {
+    for (fi, fctx) in ctx.t.file_ctx.iter().enumerate() {
         for site in &fctx.calls {
-            let outcome = raw_resolve_call(t, fi, site);
-            let src_idx = source_symbol_idx(t, fctx, site);
+            let outcome = raw_resolve_call(ctx.t, fi, site);
+            let src_idx = source_symbol_idx(ctx.t, fctx, site);
             // Type-only reference (Python): a typed receiver `x.m()` depends
             // on the class of `x`, not just on the method the call resolves
             // to. Emit a `type_ref` edge to that class regardless of the call
             // outcome, so the incremental dirty closure re-extracts this file
             // when the class's branch changes — otherwise a new MRO hit (a
             // method added on an ancestor) stays hidden behind a carried edge.
-            if let Some(edge) = type_ref_edge(t, fi, site, src_idx) {
-                t.edges.push(edge);
+            if let Some(edge) = type_ref_edge(ctx.t, fi, site, src_idx) {
+                ctx.t.edges.push(edge);
             }
             match outcome {
                 Outcome::Extracted(dst) => {
-                    // R6d A6: keep the edge to the class itself so
-                    // `callers Class` and `dead` are correct, and add a
-                    // second edge to its constructor when unique.
-                    let (dst_name, ctor) = extracted_edges(t, dst);
-                    push_call_edge(&mut t.edges, src_idx, Some(dst), dst_name, site.line);
-                    if let Some((ctor_idx, ctor_name)) = ctor {
-                        push_call_edge(&mut t.edges, src_idx, Some(ctor_idx), ctor_name, site.line);
-                    }
+                    let (dst_name, ctor) = extracted_edges(ctx.t, dst);
+                    emit_extracted_call(&mut ctx.t.edges, src_idx, dst, dst_name, ctor, site.line);
                 }
                 Outcome::Ambiguous(name) => {
-                    t.edges.push(ambiguous_edge(src_idx, name, site.line));
+                    ctx.t.edges.push(ambiguous_edge(src_idx, name, site.line));
                 }
                 Outcome::Dropped => stats.builtin_dropped += 1,
                 Outcome::Unresolved => {
                     stats.unresolved_callees += 1;
                     unresolved_per_file[fi] += 1;
-                    unresolved_calls.push(UnresolvedSite {
+                    ctx.unresolved_calls.push(UnresolvedSite {
                         file_idx: fi,
                         name: unresolved_site_name(site),
                         kind: EdgeSiteKind::Call,
@@ -764,6 +776,25 @@ fn resolve_call_sites(
                 }
             }
         }
+    }
+}
+
+/// The `Outcome::Extracted` emit pair (R6d A6): keep the edge to the class
+/// itself so `callers Class` and `dead` are correct, and add a second edge to
+/// its constructor when unique. Like [`push_call_edge`], takes `edges`
+/// separately from `Tables` because the caller iterates `t.file_ctx` while
+/// pushing, which only borrows-split at field level.
+fn emit_extracted_call(
+    edges: &mut Vec<NewEdge>,
+    src_idx: usize,
+    dst: usize,
+    dst_name: String,
+    ctor: Option<(usize, String)>,
+    site_line: usize,
+) {
+    push_call_edge(edges, src_idx, Some(dst), dst_name, site_line);
+    if let Some((ctor_idx, ctor_name)) = ctor {
+        push_call_edge(edges, src_idx, Some(ctor_idx), ctor_name, site_line);
     }
 }
 
@@ -911,7 +942,7 @@ fn resolve_name_callee(ctx: &CallCtx<'_>, name: &str) -> Outcome {
         return out;
     }
     // Star imports: defer to each star module's top-level names.
-    for (m, _) in &ctx.fctx.stars {
+    for (m, _) in &ctx.fctx.bindings.stars {
         if let Some(out) =
             bare_candidates(ctx.t.by_mod_name.get(&(m.clone(), name.to_string())), name)
         {
@@ -957,8 +988,8 @@ fn alias_binding_lookup(ctx: &CallCtx<'_>, name: &str) -> Option<Outcome> {
 fn alias_target_outcome(t: &Tables, target: &ImportTarget, name: &str) -> Option<Outcome> {
     match target {
         ImportTarget::Symbol { module, name: n } => {
-            let mut seen: HashSet<(String, String)> = HashSet::new();
-            if let Some(out) = follow_binding(t, module, n, 0, &mut seen, name) {
+            let mut seen: HashSet<(&str, &str)> = HashSet::new();
+            if let Some(out) = follow_binding(t, (module, n), 0, &mut seen, name) {
                 return Some(out);
             }
             // Binding to a module that is not indexed at all = an
@@ -1088,6 +1119,7 @@ fn resolve_receiver_method(ctx: &CallCtx<'_>, chain: &[String], method: &str) ->
         if chain.len() == 3 && chain[0] == "self" {
             if let Some(field_chain) = ctx
                 .fctx
+                .bindings
                 .self_fields
                 .get(&(class_qn.clone(), chain[1].clone()))
             {
@@ -1300,7 +1332,7 @@ fn nearest_alias_scoped<'a>(
     scope: &str,
     name: &str,
 ) -> Option<(&'a str, &'a ImportTarget)> {
-    let entries = fctx.aliases.get(name)?;
+    let entries = fctx.bindings.aliases.get(name)?;
     let mut best: Option<&'a (String, ImportTarget)> = None;
     for entry in entries {
         let binding_scope = entry.0.as_str();
@@ -1315,7 +1347,8 @@ fn nearest_alias_scoped<'a>(
 }
 
 fn file_alias<'a>(fctx: &'a FileCtx, name: &str) -> Option<&'a ImportTarget> {
-    fctx.aliases
+    fctx.bindings
+        .aliases
         .get(name)?
         .iter()
         .rev()
@@ -1327,7 +1360,7 @@ fn file_alias<'a>(fctx: &'a FileCtx, name: &str) -> Option<&'a ImportTarget> {
 /// shadows module and file-level bindings. Python class scope is not lexical.
 fn is_local_binding(fctx: &FileCtx, site: &CallSite, name: &str) -> bool {
     // Anonymous callback parameters shadow only inside their line range.
-    if fctx.arrow_params.iter().any(|p| {
+    if fctx.bindings.arrow_params.iter().any(|p| {
         (p.scope_func == site.scope_func
             || site.scope_func.starts_with(&format!("{}.", p.scope_func)))
             && p.var == name
@@ -1339,12 +1372,12 @@ fn is_local_binding(fctx: &FileCtx, site: &CallSite, name: &str) -> bool {
     let mut scope = site.scope_func.as_str();
     while !scope.is_empty() && scope != fctx.module {
         let key = (scope.to_string(), name.to_string());
-        if fctx.locals.contains(&key) {
+        if fctx.bindings.locals.contains(&key) {
             return true;
         }
         // An assignment shadows only from its own line onward; a later
         // assignment must not erase an earlier valid bare call.
-        if let Some(events) = fctx.assignments.get(&key) {
+        if let Some(events) = fctx.bindings.assignments.get(&key) {
             if events.iter().any(|(line, _)| *line <= site.line) {
                 return true;
             }
@@ -1364,17 +1397,21 @@ fn local_alias_outcome(t: &Tables, target: &ImportTarget, name: &str) -> Outcome
     alias_target_outcome(t, target, name).unwrap_or(Outcome::Unresolved)
 }
 
+/// One `from m import n` binding under resolution: `(module, name)`. The same
+/// pair doubles as the `seen` cycle-guard key, so the two values travel as one.
+type Binding<'a> = (&'a str, &'a str);
+
 /// Follow `from m import n` bindings transitively through re-export chains
 /// (module m has no def of n but itself imports it from elsewhere), cycle-safe.
-fn follow_binding(
-    t: &Tables,
-    module: &str,
-    name: &str,
+fn follow_binding<'a>(
+    t: &'a Tables,
+    binding: Binding<'a>,
     depth: usize,
-    seen: &mut HashSet<(String, String)>,
+    seen: &mut HashSet<Binding<'a>>,
     display: &str,
 ) -> Option<Outcome> {
-    if !seen.insert((module.to_string(), name.to_string())) {
+    let (module, name) = binding;
+    if !seen.insert((module, name)) {
         return None;
     }
     if let Some(out) = bare_candidates(
@@ -1395,7 +1432,7 @@ fn follow_binding(
         Some(ImportTarget::Symbol {
             module: m2,
             name: n2,
-        }) => follow_binding(t, m2, n2, depth + 1, seen, display),
+        }) => follow_binding(t, (m2, n2), depth + 1, seen, display),
         _ => None,
     }
 }
@@ -1443,11 +1480,19 @@ fn latest_binding<'a>(
 ) -> Option<&'a Vec<String>> {
     let mut best: Option<(usize, &'a Vec<String>)> = None;
     if include_params {
-        if let Some(ann) = fctx.params.get(&(scope.to_string(), var.to_string())) {
+        if let Some(ann) = fctx
+            .bindings
+            .params
+            .get(&(scope.to_string(), var.to_string()))
+        {
             best = Some((0, ann));
         }
     }
-    if let Some(events) = fctx.assignments.get(&(scope.to_string(), var.to_string())) {
+    if let Some(events) = fctx
+        .bindings
+        .assignments
+        .get(&(scope.to_string(), var.to_string()))
+    {
         for (line, target) in events {
             if *line <= site_line && best.is_none_or(|(best_line, _)| *line >= best_line) {
                 best = Some((*line, target));
@@ -1587,8 +1632,8 @@ fn alias_class(t: &Tables, fctx: &FileCtx, chain: &[String], scope: &str) -> Opt
 /// Follow package re-export chains (`from pkg import Base` where pkg/__init__
 /// re-exports it) to the defining class qualname.
 fn follow_reexport(t: &Tables, module: &str, name: &str) -> Option<String> {
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    match follow_binding(t, module, name, 0, &mut seen, name) {
+    let mut seen: HashSet<(&str, &str)> = HashSet::new();
+    match follow_binding(t, (module, name), 0, &mut seen, name) {
         Some(Outcome::Extracted(idx)) if t.symbols[idx].kind == SymbolKind::Class => {
             Some(t.symbols[idx].qualname.to_string())
         }
@@ -1749,7 +1794,12 @@ mod gt_repro_tests {
             .collect();
         assert_eq!(calls.len(), 1, "calls recorded: {:?}", calls.len());
         assert!(matches!(calls[0].0, Callee::Attr(_)));
-        assert_eq!(fx.params.len(), 1, "params: {:?}", fx.params.len());
+        assert_eq!(
+            fx.bindings.params.len(),
+            1,
+            "params: {:?}",
+            fx.bindings.params.len()
+        );
     }
 
     #[test]
@@ -1799,18 +1849,24 @@ mod gt_repro_tests {
             ],
             "use-tree candidates"
         );
-        assert!(fx.aliases.iter().any(|(_, a, _)| a == "T"), "alias T");
-        assert!(fx.aliases.iter().any(|(_, a, _)| a == "u"), "alias u");
+        assert!(
+            fx.bindings.aliases.iter().any(|(_, a, _)| a == "T"),
+            "alias T"
+        );
+        assert!(
+            fx.bindings.aliases.iter().any(|(_, a, _)| a == "u"),
+            "alias u"
+        );
     }
 
     #[test]
     fn self_field_assignment_recorded() {
         let fx = extract_src("class C:\n    def __init__(self):\n        self.res = Resolver()\n");
         assert_eq!(
-            fx.self_fields.len(),
+            fx.bindings.self_fields.len(),
             1,
             "self_fields: {}",
-            fx.self_fields.len()
+            fx.bindings.self_fields.len()
         );
     }
 }
@@ -1826,11 +1882,12 @@ mod alias_repro {
         let parsed = parse_source(src.as_bytes(), Lang::Python).unwrap();
         let fx = extract_file(0, "vihap/validators/gso_loader.py", src.as_bytes(), &parsed);
         assert!(
-            fx.aliases
+            fx.bindings
+                .aliases
                 .iter()
                 .any(|(_, a, _)| a == "knowledge_artifacts_dir"),
             "aliases: {:?}",
-            fx.aliases
+            fx.bindings.aliases
         );
         assert_eq!(
             fx.import_edges.len(),

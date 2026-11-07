@@ -13,42 +13,14 @@ pub fn invalidate(root: &Path) -> Result<Vec<String>> {
     // holds, so an invalidate cannot start while a build is running.
     let lock = db::BuildLock::acquire(root)?;
     let dir = db::aw_dir(root);
-    if let Ok(meta) = std::fs::symlink_metadata(&dir) {
-        if meta.file_type().is_symlink() {
-            return Err(crate::error::AwError::Internal(format!(
-                "refusing symlinked .aw directory: {}",
-                dir.display()
-            )));
-        }
-    }
+    db::reject_symlink(&dir, ".aw directory")?;
     if dir.exists() {
         // Companion-design disposition (memory retrieval design, Risks):
         // memory.db is primary data, not a rebuildable index, so the reset
         // keeps every memory.db* file (the store plus any crash-recovery
         // sidecar — deleting a live -journal would corrupt the store) and
         // removes the derived index, journals, and orphans.
-        let mut kept_memory = false;
-        for entry in std::fs::read_dir(&dir)?.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("memory.db") {
-                kept_memory = true;
-                continue;
-            }
-            // Never unlink the lock this function holds while the directory
-            // survives: a concurrent build would open a fresh inode and
-            // acquire it immediately, defeating the serialization this guard
-            // exists to provide.
-            if name == "build.lock" {
-                continue;
-            }
-            let path = entry.path();
-            if path.is_dir() {
-                std::fs::remove_dir_all(&path)?;
-            } else {
-                std::fs::remove_file(&path)?;
-            }
-        }
-        if kept_memory {
+        if clear_aw_dir(&dir, |name| name.starts_with("memory.db"))? {
             return Ok(vec![format!(
                 "aw: reset {} (kept primary memory.db)",
                 dir.display()
@@ -67,6 +39,36 @@ pub fn invalidate(root: &Path) -> Result<Vec<String>> {
     Ok(vec![format!("aw: no {} present", dir.display())])
 }
 
+/// Remove every entry of `.aw/` the `keep` predicate does not protect, and
+/// report whether any entry was kept. `build.lock` is always skipped: never
+/// unlink the lock the caller holds while the directory survives, or a
+/// concurrent build would open a fresh inode and acquire it immediately,
+/// defeating the serialization the caller's guard exists to provide.
+fn clear_aw_dir(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<bool> {
+    let mut kept_any = false;
+    for entry in std::fs::read_dir(dir)?.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if keep(&name) {
+            kept_any = true;
+            continue;
+        }
+        // Never unlink the lock the caller holds while the directory
+        // survives: a concurrent build would open a fresh inode and acquire
+        // it immediately, defeating the serialization the caller's guard
+        // exists to provide.
+        if name == "build.lock" {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(kept_any)
+}
+
 pub fn report(root: &Path) -> Result<Vec<String>> {
     let conn = db::open_for_query(root)?;
     let mut out = vec![format!("aw: doctor report for {}", root.display())];
@@ -74,35 +76,8 @@ pub fn report(root: &Path) -> Result<Vec<String>> {
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     out.push(format!("  integrity: {integrity}"));
 
-    let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    out.push(format!("  schema version: {user_version}"));
-    for (key, label) in [
-        (db::meta_keys::AW_VERSION, "aw version"),
-        (db::meta_keys::GRAMMAR_VERSION, "grammar version"),
-        (db::meta_keys::BUILT_AT, "built at"),
-        (db::meta_keys::SOURCE_REV, "source rev"),
-    ] {
-        let v = db::meta_get(&conn, key);
-        out.push(format!(
-            "  {label}: {}",
-            v.unwrap_or_else(|| "<missing>".into())
-        ));
-    }
-
-    let (total, bad): (i64, i64) = conn.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(parse_status != 'ok'), 0) FROM files",
-        [],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
-    let rate = if total > 0 {
-        bad as f64 / total as f64
-    } else {
-        0.0
-    };
-    out.push(format!(
-        "  parse coverage: {bad}/{total} files with errors ({:.1}%)",
-        rate * 100.0
-    ));
+    push_meta_lines(&conn, &mut out)?;
+    push_parse_coverage(&conn, &mut out)?;
 
     let stale = stale_ratio(&conn, root)?;
     out.push(format!(
@@ -118,6 +93,45 @@ pub fn report(root: &Path) -> Result<Vec<String>> {
     out.push(memory_report_line(root));
 
     Ok(out)
+}
+
+/// The schema-version row and the four meta rows (`aw version`, grammar,
+/// built-at, source rev).
+fn push_meta_lines(conn: &Connection, out: &mut Vec<String>) -> Result<()> {
+    let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    out.push(format!("  schema version: {user_version}"));
+    for (key, label) in [
+        (db::meta_keys::AW_VERSION, "aw version"),
+        (db::meta_keys::GRAMMAR_VERSION, "grammar version"),
+        (db::meta_keys::BUILT_AT, "built at"),
+        (db::meta_keys::SOURCE_REV, "source rev"),
+    ] {
+        let v = db::meta_get(conn, key);
+        out.push(format!(
+            "  {label}: {}",
+            v.unwrap_or_else(|| "<missing>".into())
+        ));
+    }
+    Ok(())
+}
+
+/// The parse-error ratio over all indexed files.
+fn push_parse_coverage(conn: &Connection, out: &mut Vec<String>) -> Result<()> {
+    let (total, bad): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(parse_status != 'ok'), 0) FROM files",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let rate = if total > 0 {
+        bad as f64 / total as f64
+    } else {
+        0.0
+    };
+    out.push(format!(
+        "  parse coverage: {bad}/{total} files with errors ({:.1}%)",
+        rate * 100.0
+    ));
+    Ok(())
 }
 
 /// One read-only line about the project-memory store: presence, integrity,
@@ -202,8 +216,7 @@ mod tests {
 
     #[test]
     fn invalidate_keeps_the_lock_it_holds() {
-        let root = std::env::temp_dir().join(format!("aw-doctor-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let root = crate::db::temp_root("doctor");
         std::fs::create_dir_all(root.join(".aw")).unwrap();
         std::fs::write(root.join(".aw/index.db"), b"x").unwrap();
         std::fs::write(root.join(".aw/build.lock"), b"").unwrap();

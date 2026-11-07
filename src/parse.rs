@@ -129,15 +129,10 @@ impl ParserSlot {
     }
 }
 
-/// Parse without counting error nodes; `syntax_stats` supplies the count from
-/// the same walk that counts decisions and collects comments.
-pub fn parse_tree(src: &[u8], lang: Lang) -> Result<Tree> {
-    ParserSlot::new().parse(src, lang)
-}
-
+/// Test/fixture helper: parse and count error nodes in one call.
 #[allow(dead_code)]
 pub fn parse_source(src: &[u8], lang: Lang) -> Result<ParsedFile> {
-    let tree = parse_tree(src, lang)?;
+    let tree = ParserSlot::new().parse(src, lang)?;
     let stats = syntax_stats(tree.root_node());
     Ok(ParsedFile {
         tree,

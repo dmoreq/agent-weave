@@ -1,6 +1,7 @@
 //! Reverse-dependency impact queries and their traversal bookkeeping.
 
 use super::*;
+use crate::db::{EDGE_SRC_FILE_JOIN, EDGE_SRC_JOIN};
 
 use std::collections::BinaryHeap;
 
@@ -49,13 +50,6 @@ pub(crate) fn parse_edge_kinds(spec: &str) -> Result<Vec<EdgeKind>> {
 const IMPACT_DST_JOINS: &str = "JOIN symbols ds ON ds.id = e.dst_id
          JOIN files df ON df.id = ds.file_id";
 
-/// Source-symbol join: edge -> source symbol. Statements that also read or
-/// count source files append `IMPACT_SRC_FILE_JOIN`.
-const IMPACT_SRC_JOIN: &str = "JOIN symbols ss ON ss.id = e.src_id";
-
-/// Source-file join: source symbol -> its file.
-const IMPACT_SRC_FILE_JOIN: &str = "JOIN files sf ON sf.id = ss.file_id";
-
 fn impact_empty_detail(kinds: &[EdgeKind]) -> String {
     let has_imports = kinds.contains(&EdgeKind::Imports);
     let has_inherits = kinds.contains(&EdgeKind::Inherits);
@@ -82,10 +76,9 @@ fn importer_caveat_detail(conn: &Connection, rel: &str) -> Result<String> {
     let count_files = |kind: EdgeKind| -> Result<usize> {
         Ok(conn.query_row(
             &format!(
-                "SELECT COUNT(DISTINCT sf.path) FROM edges e
+                "SELECT COUNT(DISTINCT f.path) FROM edges e
                  {IMPACT_DST_JOINS}
-                 {IMPACT_SRC_JOIN}
-                 {IMPACT_SRC_FILE_JOIN}
+                 {EDGE_SRC_FILE_JOIN}
                  WHERE df.path = ?1 AND e.kind = ?2"
             ),
             rusqlite::params![rel, kind.as_str()],
@@ -99,7 +92,6 @@ fn importer_caveat_detail(conn: &Connection, rel: &str) -> Result<String> {
     ))
 }
 
-/// Impact query options: call-site vs grouped, traversal depth, the validated
 /// Impact query options: call-site vs grouped, traversal depth, and the validated
 /// edge kinds.
 pub struct ImpactOpts {
@@ -180,10 +172,9 @@ fn impact_with_caveat(mut out: QueryOutput, caveat: &str, extended: bool) -> Que
 fn impact_grouped_total(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<usize> {
     Ok(conn.query_row(
         &format!(
-            "SELECT COUNT(DISTINCT sf.path) FROM edges e
+            "SELECT COUNT(DISTINCT f.path) FROM edges e
              {IMPACT_DST_JOINS}
-             {IMPACT_SRC_JOIN}
-             {IMPACT_SRC_FILE_JOIN}
+             {EDGE_SRC_FILE_JOIN}
              WHERE df.path = ?1 AND e.kind IN ({})",
             ctx.kind_sql
         ),
@@ -195,19 +186,17 @@ fn impact_grouped_total(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<usize>
 /// Depth-1 grouped rows: one pointer per impacting file with its site count.
 fn impact_grouped_rows(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<Vec<Pointer>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT sf.path, MIN(e.site_line) AS line,
+        "SELECT f.path, MIN(e.site_line) AS line,
                 COUNT(DISTINCT {}) AS n
          FROM edges e
          {IMPACT_DST_JOINS}
-         {IMPACT_SRC_JOIN}
-         {IMPACT_SRC_FILE_JOIN}
+         {EDGE_SRC_FILE_JOIN}
          WHERE df.path = ?1 AND e.kind IN ({})
-         GROUP BY sf.path ORDER BY sf.path LIMIT {}",
+         GROUP BY f.path ORDER BY f.path LIMIT ?2",
         impact_site_key(),
-        ctx.kind_sql,
-        ctx.limit
+        ctx.kind_sql
     ))?;
-    let rows = stmt.query_map([ctx.rel], |r| {
+    let rows = stmt.query_map(rusqlite::params![ctx.rel, ctx.limit as i64], |r| {
         Ok(Pointer {
             file: r.get::<_, String>(0)?,
             line: r.get::<_, i64>(1)?,
@@ -234,13 +223,7 @@ fn impact_direct_grouped(qctx: &QueryCtx<'_>, ctx: &ImpactCtx<'_>) -> Result<Que
         });
     }
     let rows = impact_grouped_rows(conn, ctx)?;
-    let out = collect_output(
-        qctx,
-        rows.into_iter().map(Ok),
-        ctx.limit,
-        "0 impacting files found",
-        total_files,
-    )?;
+    let out = collect_output(qctx, rows.into_iter().map(Ok), ctx.limit, total_files)?;
     Ok(impact_with_caveat(out, ctx.caveat, ctx.extended))
 }
 
@@ -250,7 +233,7 @@ fn impact_site_total(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<usize> {
         &format!(
             "SELECT COUNT(DISTINCT {}) FROM edges e
              {IMPACT_DST_JOINS}
-             {IMPACT_SRC_JOIN}
+             {EDGE_SRC_JOIN}
              WHERE df.path = ?1 AND e.kind IN ({})",
             impact_site_key(),
             ctx.kind_sql
@@ -262,21 +245,19 @@ fn impact_site_total(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<usize> {
 
 fn impact_site_rows(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<Vec<Pointer>> {
     let sql = format!(
-        "SELECT MIN(e.site_line), MIN(e.confidence), MIN(sf.path),
-                MIN(ss.qualname), MIN(ss.kind), MIN(e.kind)
+        "SELECT MIN(e.site_line), MIN(e.confidence), MIN(f.path),
+                MIN(s.qualname), MIN(s.kind), MIN(e.kind)
          FROM edges e
          {IMPACT_DST_JOINS}
-         {IMPACT_SRC_JOIN}
-         {IMPACT_SRC_FILE_JOIN}
+         {EDGE_SRC_FILE_JOIN}
          WHERE df.path = ?1 AND e.kind IN ({})
          GROUP BY {}
-         ORDER BY 3, 1, 4 LIMIT {}",
+         ORDER BY 3, 1, 4 LIMIT ?2",
         ctx.kind_sql,
-        impact_site_key(),
-        ctx.limit
+        impact_site_key()
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([ctx.rel], |r| {
+    let rows = stmt.query_map(rusqlite::params![ctx.rel, ctx.limit as i64], |r| {
         let site: i64 = r.get(0)?;
         let conf: String = r.get(1)?;
         let path: String = r.get(2)?;
@@ -300,13 +281,7 @@ fn impact_direct_sites(qctx: &QueryCtx<'_>, ctx: &ImpactCtx<'_>) -> Result<Query
         return Err(AwError::NoResults("0 impacting files found".to_string()));
     }
     let rows = impact_site_rows(conn, ctx)?;
-    let out = collect_output(
-        qctx,
-        rows.into_iter().map(Ok),
-        ctx.limit,
-        "0 impacting files found",
-        total,
-    )?;
+    let out = collect_output(qctx, rows.into_iter().map(Ok), ctx.limit, total)?;
     Ok(impact_with_caveat(out, ctx.caveat, ctx.extended))
 }
 
@@ -381,13 +356,7 @@ fn impact_deep(qctx: &QueryCtx<'_>, ctx: &ImpactCtx<'_>) -> Result<QueryOutput> 
             detail: String::new(),
         })
         .collect();
-    let out = collect_output(
-        qctx,
-        pointers.into_iter().map(Ok),
-        ctx.limit,
-        "0 impacting files found",
-        total,
-    )?;
+    let out = collect_output(qctx, pointers.into_iter().map(Ok), ctx.limit, total)?;
     let mut out = impact_with_caveat(out, ctx.caveat, ctx.extended);
     if truncated {
         let header = out.header.get_or_insert_with(String::new);
@@ -430,8 +399,8 @@ fn impact_source_files(conn: &Connection, ctx: &ImpactCtx<'_>) -> Result<usize> 
     }
     Ok(conn.query_row(
         &format!(
-            "SELECT COUNT(DISTINCT ss.file_path) FROM edges e
-             JOIN symbols ss ON ss.id = e.src_id
+            "SELECT COUNT(DISTINCT s.file_path) FROM edges e
+             {EDGE_SRC_JOIN}
              WHERE e.kind IN ({kind_sql})"
         ),
         [],
@@ -446,12 +415,12 @@ fn direct_impact_records(
 ) -> Result<()> {
     let kind_sql = ctx.kind_sql;
     let sql = format!(
-        "SELECT MIN(e.site_line), MIN(e.kind), ss.file_path, MIN(ss.qualname), MIN(ss.kind)
+        "SELECT MIN(e.site_line), MIN(e.kind), s.file_path, MIN(s.qualname), MIN(s.kind)
          FROM edges e
          {IMPACT_DST_JOINS}
-         {IMPACT_SRC_JOIN}
+         {EDGE_SRC_JOIN}
          WHERE df.path = ?1 AND e.kind IN ({kind_sql})
-         GROUP BY ss.file_path"
+         GROUP BY s.file_path"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([ctx.rel], |r| {
@@ -496,8 +465,7 @@ fn direct_impact_frontier(
 /// order: the frontier source id, then the five `ImpactRecord` fields. One
 /// source for the column list and its binding keeps the two statements from
 /// drifting apart.
-const IMPACT_LEVEL_COLUMNS: &str =
-    "e.src_id, e.site_line, e.kind, ss.file_path, ss.qualname, ss.kind";
+const IMPACT_LEVEL_COLUMNS: &str = "e.src_id, e.site_line, e.kind, s.file_path, s.qualname, s.kind";
 
 /// Map one BFS-level row: the frontier source id plus its `ImpactRecord`.
 /// Column order must match `IMPACT_LEVEL_COLUMNS`.
@@ -535,7 +503,7 @@ fn level_impact(
         let sql = format!(
             "SELECT {IMPACT_LEVEL_COLUMNS}
              FROM edges e
-             {IMPACT_SRC_JOIN}
+             {EDGE_SRC_JOIN}
              WHERE e.dst_id IN ({placeholders}) AND e.kind IN ({kind_sql})"
         );
         let mut stmt = conn.prepare(&sql)?;

@@ -385,7 +385,7 @@ fn emit_use_wildcard(node: Node<'_>, ctx: UseTreeCtx<'_>, fx: &mut FileExtractio
         return;
     };
     let qn = full.join(".");
-    fx.stars.push((qn.clone(), ctx.line));
+    fx.bindings.stars.push((qn.clone(), ctx.line));
     fx.import_edges
         .push(ImportEdgeCandidate::module_root(ctx.line, qn));
 }
@@ -416,7 +416,7 @@ pub(super) fn emit_use_leaf(
         module.clone(),
         name.clone(),
     ));
-    fx.aliases.push((
+    fx.bindings.aliases.push((
         ctx.scope.to_string(),
         alias.unwrap_or_else(|| name.clone()),
         ImportTarget::Symbol {
@@ -455,13 +455,13 @@ fn emit_module_leaf(
     if let Some(binding) = binding {
         if let Some((name, parent)) = full.split_last() {
             if parent.is_empty() {
-                fx.aliases.push((
+                fx.bindings.aliases.push((
                     ctx.scope.to_string(),
                     binding,
                     ImportTarget::ModuleRoot { path: qn },
                 ));
             } else {
-                fx.aliases.push((
+                fx.bindings.aliases.push((
                     ctx.scope.to_string(),
                     binding,
                     ImportTarget::Symbol {

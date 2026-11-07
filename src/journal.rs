@@ -8,7 +8,6 @@ use std::cell::RefCell;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -59,9 +58,14 @@ pub fn disable() {
     DISABLED.with(|d| d.set(true));
 }
 
+/// Key/value arguments one journaled invocation carries: built by the
+/// `service` layer's `journal_args` helpers and rendered into the usage
+/// line's `args` object by `begin`.
+pub type JournalArgs = Vec<(&'static str, String)>;
+
 /// Arm the journal for this invocation. No-op when the env opt-out is set;
 /// the `--no-journal` flag is enforced by the caller skipping `begin`.
-pub fn begin(surface: &'static str, tool: &str, args: &[(&'static str, String)]) {
+pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
     if DISABLED.with(|d| d.get()) || std::env::var("AW_NO_JOURNAL").as_deref() == Ok("1") {
         return;
     }
@@ -141,10 +145,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(root) = root else {
         return;
     };
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let ts = crate::db::unix_now();
     let line = serde_json::json!({
         "ts": ts,
         "surface": pending.surface,
@@ -380,7 +381,7 @@ fn render_summary(
     };
 
     let (saved_tokens, reuse_hits) = calculate_telemetry_totals(aggs);
-    let dollars = (saved_tokens as f64) * 0.000003;
+    let dollars = (saved_tokens as f64) * PRICE_PER_TOKEN;
     let saved_tokens_formatted = format_number_with_commas(saved_tokens);
 
     out.push(format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"));
@@ -403,6 +404,75 @@ fn render_summary(
     out
 }
 
+/// Informational USD-per-token coefficient for the `~$` savings estimate: a
+/// rough blended average of mainstream frontier-model input/output list
+/// prices. Display-only — no journal row, exit code, or decision reads it.
+const PRICE_PER_TOKEN: f64 = 0.000003;
+
+/// Estimated tokens one rendered graph/context row replaces: a pointer the
+/// agent would otherwise re-derive by reading the callee/caller source.
+const GRAPH_ROW_TOKENS: usize = 350;
+/// Estimated tokens one rendered search/symbol row replaces.
+const SEARCH_ROW_TOKENS: usize = 300;
+/// Estimated tokens one reuse hit replaces (candidate row plus its trimmed
+/// code snippet).
+const REUSE_RESULT_TOKENS: usize = 800;
+/// Estimated tokens one reuse report replaces beyond its rows (the ranked
+/// comparison prose the agent would otherwise write itself).
+const REUSE_CALL_TOKENS: usize = 1200;
+/// Estimated tokens one rendered symbol row replaces.
+const SYMBOL_ROW_TOKENS: usize = 150;
+/// Estimated tokens one successful build report replaces (the incremental
+/// summary the agent would otherwise re-derive by re-running the build).
+const BUILD_CALL_TOKENS: usize = 500;
+/// Per-call overhead shared by every priced query arm: the result envelope,
+/// staleness header, and pointer identity suffixes.
+const QUERY_CALL_TOKENS: usize = 100;
+
+/// Journaled tool names deliberately priced at zero: diagnostics, inventory
+/// reports, and memory housekeeping replace no source-file read, so they
+/// contribute no token-savings estimate. A new journaled tool must either
+/// gain a pricing arm in `estimated_tokens_saved` or be listed here — pinned
+/// by `service::tests::estimated_tokens_saved_covers_every_journaled_tool`.
+pub const UNPRICED_TOOLS: &[&str] = &[
+    "doctor",
+    "unresolved",
+    "stats",
+    "usage",
+    "mem_write",
+    "mem_query",
+    "mem_get",
+    "mem_delete",
+    "mem_gc",
+    "mem_export",
+];
+
+/// Estimated tokens one tool call saves the agent versus reading the same
+/// result out of source files. The single coefficient table for BOTH telemetry
+/// surfaces: `aw usage` aggregates journaled calls with it, and the MCP KPI
+/// footer prices the single call it just rendered (subtracting that call's own
+/// payload) — so the two surfaces cannot report contradictory numbers.
+pub fn estimated_tokens_saved(
+    tool: &str,
+    shown: usize,
+    result_count: usize,
+    calls: usize,
+) -> usize {
+    match tool {
+        "context" | "callers" | "callees" | "path" | "impact" | "imports" => {
+            shown * GRAPH_ROW_TOKENS + calls * QUERY_CALL_TOKENS
+        }
+        "search" => shown * SEARCH_ROW_TOKENS + calls * QUERY_CALL_TOKENS,
+        "reuse" => result_count * REUSE_RESULT_TOKENS + calls * REUSE_CALL_TOKENS,
+        "symbols" => shown * SYMBOL_ROW_TOKENS,
+        "build" => calls * BUILD_CALL_TOKENS,
+        // Deliberately unpriced journaled tools (see UNPRICED_TOOLS).
+        t if UNPRICED_TOOLS.contains(&t) => 0,
+        // Legacy names from older journal generations, no longer dispatchable.
+        _ => 0,
+    }
+}
+
 fn calculate_telemetry_totals(
     aggs: &std::collections::BTreeMap<String, ToolAgg>,
 ) -> (usize, usize) {
@@ -411,24 +481,10 @@ fn calculate_telemetry_totals(
 
     for (tool, agg) in aggs {
         let successful_calls = agg.calls.saturating_sub(agg.errors);
-        match tool.as_str() {
-            "context" | "callers" | "callees" | "path" | "impact" | "imports" => {
-                saved_tokens += agg.total_shown * 350 + successful_calls * 100;
-            }
-            "search" => {
-                saved_tokens += agg.total_shown * 300 + successful_calls * 100;
-            }
-            "reuse" => {
-                reuse_hits += agg.total_results.max(agg.total_shown);
-                saved_tokens += agg.total_results * 800 + successful_calls * 1200;
-            }
-            "symbols" => {
-                saved_tokens += agg.total_shown * 150;
-            }
-            "build" => {
-                saved_tokens += successful_calls * 500;
-            }
-            _ => {}
+        saved_tokens +=
+            estimated_tokens_saved(tool, agg.total_shown, agg.total_results, successful_calls);
+        if tool == "reuse" {
+            reuse_hits += agg.total_results.max(agg.total_shown);
         }
     }
 
@@ -497,9 +553,7 @@ mod tests {
 
     #[test]
     fn rotate_moves_log_aside_past_threshold() {
-        let dir = std::env::temp_dir().join(format!("aw-journal-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::db::temp_root("journal");
         let path = dir.join("usage.log");
         fs::write(&path, b"1234567").unwrap();
         rotate_if_needed(&path, 5);
@@ -540,8 +594,7 @@ mod tests {
 
     #[test]
     fn summary_quality_splits_empty_and_cap() {
-        let root = std::env::temp_dir().join(format!("aw-journal-quality-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
+        let root = crate::db::temp_root("journal-quality");
         fs::create_dir_all(root.join(".aw")).unwrap();
         let lines = [
             r#"{"tool":"callers","result_count":2,"shown":2,"total":2,"exit_code":0,"latency_us":1000}"#,
@@ -579,9 +632,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn append_refuses_symlinked_log_and_directory() {
-        let dir = std::env::temp_dir().join(format!("aw-journal-link-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = crate::db::temp_root("journal-link");
         let target = dir.join("target.txt");
         fs::write(&target, b"keep").unwrap();
         let log = dir.join("usage.log");

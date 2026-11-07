@@ -558,6 +558,32 @@ impl ImportEdgeCandidate {
     }
 }
 
+/// Binding records one file's walk collects for resolution: constructor-typed
+/// assignments, parameter annotations, shadowing locals, aliases, `self.field`
+/// targets, anonymous-callback parameters, star imports, and `from pkg import`
+/// parent edges. Grouped so a new binding concept is declared here, initialized
+/// by `FileBindings::default`, moved by one field (`bindings`), and folded in
+/// `resolve::fold_binding_maps` — instead of per-field edits across `for_file`,
+/// `merge_fresh`, and `FileCtx` (the extraction -> resolution hand-off debt).
+#[derive(Default)]
+struct FileBindings {
+    assignments: Vec<Assignment>,
+    params: Vec<ParamType>,
+    /// (scope_func, var) for parameters and local bindings that shadow outer
+    /// names during bare-name resolution.
+    locals: Vec<(String, String)>,
+    /// Anonymous callback parameters, scoped by line range.
+    arrow_params: Vec<ArrowParam>,
+    self_fields: Vec<SelfField>,
+    /// (scope_func, bound name, target): function-local imports stay local.
+    aliases: Vec<(String, String, ImportTarget)>,
+    /// Modules appearing in `from m import *`.
+    /// Star-imported modules with the statement line (per-statement scope).
+    stars: Vec<(String, usize)>,
+    /// Python `from pkg import ...` parent module edges: (line, module).
+    from_import_parents: HashSet<(usize, String)>,
+}
+
 pub struct FileExtraction {
     pub file_idx: usize,
     pub module: String,
@@ -584,26 +610,11 @@ pub struct FileExtraction {
     /// Rust impls collected before symbol lookup:
     /// (target qualname, trait chain, impl line). Same-file only in v1.
     rust_impls: Vec<(String, Vec<String>, usize)>,
-    assignments: Vec<Assignment>,
-    params: Vec<ParamType>,
-    /// (scope_func, var) for parameters and local bindings that shadow outer
-    /// names during bare-name resolution.
-    locals: Vec<(String, String)>,
-    /// Anonymous callback parameters, scoped by line range.
-    arrow_params: Vec<ArrowParam>,
-    self_fields: Vec<SelfField>,
-    /// (scope_func, bound name, target): function-local imports stay local.
-    aliases: Vec<(String, String, ImportTarget)>,
-    /// Modules appearing in `from m import *`.
-    /// Star-imported modules with the statement line (per-statement scope).
-    stars: Vec<(String, usize)>,
-    /// Python `from pkg import ...` parent module edges: (line, module).
-    from_import_parents: HashSet<(usize, String)>,
+    /// Binding records folded into lookup maps during resolution (phase B);
+    /// see [`FileBindings`] for the grouping rationale.
+    bindings: FileBindings,
     /// Unresolvable inheritance sites: (base name, line).
     unresolved_inherits: Vec<(String, usize)>,
-    /// Methods declared inside a trait impl; trait impl methods are public
-    /// even without `pub`, while inherent methods follow `pub`.
-    trait_impl_methods: Vec<String>,
     calls: Vec<CallSite>,
     import_edges: Vec<ImportEdgeCandidate>,
 }
@@ -648,16 +659,8 @@ impl FileExtraction {
             inherits: Vec::new(),
             impl_inherits: Vec::new(),
             rust_impls: Vec::new(),
-            assignments: Vec::new(),
-            params: Vec::new(),
-            locals: Vec::new(),
-            arrow_params: Vec::new(),
-            self_fields: Vec::new(),
-            aliases: Vec::new(),
-            stars: Vec::new(),
-            from_import_parents: HashSet::new(),
+            bindings: FileBindings::default(),
             unresolved_inherits: Vec::new(),
-            trait_impl_methods: Vec::new(),
             calls: Vec::new(),
             import_edges: Vec::new(),
         }
@@ -755,8 +758,6 @@ pub struct FileInput<'a> {
     pub src: &'a [u8],
 }
 
-/// Lib API used by tests and fixtures; the bin uses
-/// `extract_file_with_code_lines` with the caller's syntax-stats mask.
 /// Lib API used by tests and fixtures.
 #[allow(dead_code)]
 pub fn extract_file(file_idx: usize, rel: &str, src: &[u8], parsed: &ParsedFile) -> FileExtraction {

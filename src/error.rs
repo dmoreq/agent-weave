@@ -23,6 +23,12 @@ pub(crate) fn is_sqlite_corruption(e: &rusqlite::Error) -> bool {
     )
 }
 
+/// One resolved name candidate: (path, line, qualname). Distinct from
+/// `memory::Candidate` (a fused search-signal row), so one name keeps one
+/// meaning per module. Lives here beside the `Ambiguous` payload it fills,
+/// so the error and the resolvers that construct it share one spelling.
+pub type NameCandidate = (String, i64, String);
+
 #[derive(Debug)]
 pub enum AwError {
     NoResults(String),
@@ -43,7 +49,7 @@ pub enum AwError {
         name: String,
         /// Candidates rendered to the caller, capped for bounded output
         /// (R6f: a common method name could print megabytes on stdout).
-        candidates: Vec<(String, i64, String)>,
+        candidates: Vec<NameCandidate>,
         /// Total matches before the render cap.
         total: usize,
         role: Option<&'static str>,

@@ -62,10 +62,6 @@ where
 }
 
 /// Row mappers for the fixed-width integer tuples used by counter queries.
-pub(crate) fn ints2(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64)> {
-    Ok((r.get(0)?, r.get(1)?))
-}
-
 pub(crate) fn ints3(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64, i64)> {
     Ok((r.get(0)?, r.get(1)?, r.get(2)?))
 }
@@ -78,7 +74,7 @@ pub fn aw_dir(root: &Path) -> PathBuf {
     root.join(".aw")
 }
 
-fn reject_symlink(path: &Path, label: &str) -> Result<()> {
+pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.file_type().is_symlink() {
             return Err(AwError::Internal(format!(
@@ -94,32 +90,43 @@ fn unsafe_lock(path: &Path) -> AwError {
     AwError::Internal(format!("refusing unsafe build lock: {}", path.display()))
 }
 
-/// Create or validate `.aw/`, refusing a symlinked directory. A symlink can
-/// redirect every later write outside the repository root.
-pub fn ensure_aw_dir(root: &Path) -> Result<PathBuf> {
-    let dir = aw_dir(root);
-    reject_symlink(&dir, ".aw directory")?;
-    match fs::symlink_metadata(&dir) {
-        Ok(meta) if !meta.is_dir() => {
-            return Err(AwError::Internal(format!(
-                ".aw exists but is not a directory: {}",
-                dir.display()
-            )));
-        }
-        Ok(_) => {}
+/// Create or validate a directory, refusing a symlinked path. A symlink can
+/// redirect every later write outside the intended root. `recursive` creates
+/// missing parents (the global store may nest under `$HOME/.aw`); the
+/// repo-local `.aw` must not. Creation race (two first-time writers, e.g.
+/// concurrent mem writes — memory takes no build lock): the loser's create
+/// reports AlreadyExists and re-validates the winner's directory. The single
+/// implementation shared by the local and global `.aw` sides.
+fn ensure_dir_validated(path: &Path, label: &str, recursive: bool) -> Result<()> {
+    reject_symlink(path, label)?;
+    match fs::symlink_metadata(path) {
+        Ok(meta) if !meta.is_dir() => Err(AwError::Internal(format!(
+            "{label} exists but is not a directory: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Creation race (two first-time writers, e.g. concurrent mem
-            // writes — memory takes no build lock): the loser's create_dir
-            // reports AlreadyExists and re-validates the winner's directory.
-            if let Err(create_err) = fs::create_dir(&dir) {
+            let created = if recursive {
+                fs::create_dir_all(path)
+            } else {
+                fs::create_dir(path)
+            };
+            if let Err(create_err) = created {
                 if create_err.kind() != std::io::ErrorKind::AlreadyExists {
                     return Err(create_err.into());
                 }
             }
-            reject_symlink(&dir, ".aw directory")?;
+            reject_symlink(path, label)?;
+            Ok(())
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => Err(e.into()),
     }
+}
+
+/// Create or validate `.aw/`, refusing a symlinked directory.
+pub fn ensure_aw_dir(root: &Path) -> Result<PathBuf> {
+    let dir = aw_dir(root);
+    ensure_dir_validated(&dir, ".aw directory", false)?;
     Ok(dir)
 }
 
@@ -414,7 +421,7 @@ pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
 }
 
 /// The read-only fast path needs the current version stamp, every required
-/// column, both indexes, and all four manifest versions.
+/// column, the FTS table, and the grammar/signature/metrics manifest versions.
 fn schema_compatible(old: &Connection) -> bool {
     let version: i32 = match old.query_row("PRAGMA user_version", [], |r| r.get(0)) {
         Ok(v) => v,
@@ -445,6 +452,9 @@ fn schema_compatible(old: &Connection) -> bool {
     if meta_get(old, meta_keys::SIGNATURE_VERSION).as_deref() != Some(SIGNATURE_VERSION) {
         return false;
     }
+    if meta_get(old, meta_keys::METRICS_VERSION).as_deref() != Some(METRICS_VERSION) {
+        return false;
+    }
     true
 }
 
@@ -469,23 +479,31 @@ fn column_present(conn: &Connection, table: &str, column: &str) -> rusqlite::Res
     Ok(present > 0)
 }
 
-/// (rel -> (mtime, size, content_hash)) of the previous index's files.
-pub fn old_files(old: &Connection) -> Result<HashMap<String, (i64, i64, i64)>> {
+/// Stat fingerprint of one previous-index file row: (mtime, size,
+/// content_hash). Named so a column reorder in the SELECT cannot silently
+/// swap a hash for an mtime on the fast path.
+pub struct FileStat {
+    pub mtime: i64,
+    pub size: i64,
+    pub content_hash: i64,
+}
+
+/// (rel -> stat fingerprint) of the previous index's files.
+pub fn old_files(old: &Connection) -> Result<HashMap<String, FileStat>> {
     let mut stmt = old.prepare("SELECT path, mtime, size, content_hash FROM files")?;
     let rows = stmt
         .query_map(rusqlite::params![], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
+                FileStat {
+                    mtime: r.get::<_, i64>(1)?,
+                    size: r.get::<_, i64>(2)?,
+                    content_hash: r.get::<_, i64>(3)?,
+                },
             ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    Ok(rows
-        .into_iter()
-        .map(|(p, m, s, h)| (p, (m, s, h)))
-        .collect())
+    Ok(rows.into_iter().collect())
 }
 
 /// Count parse-error files among the carried set (fast-path gate denominator).
@@ -521,22 +539,15 @@ pub fn dirty_closure(old: &Connection, changed: &[String]) -> Result<HashSet<Str
             let sql = format!(
                 "SELECT DISTINCT f.path
                  FROM edges e
-                 JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id
+                 {EDGE_SRC_FILE_JOIN}
                  JOIN symbols ds ON ds.id = e.dst_id JOIN files df ON df.id = ds.file_id
                  WHERE df.path IN ({placeholders})"
             );
-            let mut stmt = old.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
-                r.get::<_, String>(0)
-            })?;
-            for r in rows {
-                let p = r?;
-                if !dirty.contains(&p) {
-                    new_paths.insert(p);
-                }
-            }
-            Ok(())
+            collect_gap_paths(old, &sql, chunk, &mut new_paths)
         })?;
+        // Work-queue guard: already-dirty paths never re-enter the frontier,
+        // so the BFS terminates on dependency cycles too.
+        new_paths.retain(|p| !dirty.contains(p));
         let next: Vec<String> = new_paths.into_iter().collect();
         dirty.extend(next.iter().cloned());
         frontier = next;
@@ -581,14 +592,7 @@ pub fn qualnames_for_files(old: &Connection, files: &[String]) -> Result<HashSet
              FROM symbols s JOIN files f ON f.id = s.file_id
              WHERE f.path IN ({placeholders})"
         );
-        let mut stmt = old.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| {
-            r.get::<_, String>(0)
-        })?;
-        for r in rows {
-            out.insert(r?);
-        }
-        Ok(())
+        collect_gap_paths(old, &sql, chunk, &mut out)
     })?;
     Ok(out)
 }
@@ -695,9 +699,9 @@ pub fn gap_files_for_new_names(
     Ok(out)
 }
 
-/// Collect the `SELECT DISTINCT f.path` rows of one chunked gap query into
-/// `out`, so the filter stays inside SQLite instead of materializing every
-/// edge row into memory.
+/// Collect the first-column rows of one chunked gap query (`f.path` or
+/// `s.qualname`) into `out`, so the filter stays inside SQLite instead of
+/// materializing every matched row into memory.
 fn collect_gap_paths(
     conn: &Connection,
     sql: &str,
@@ -713,6 +717,22 @@ fn collect_gap_paths(
     }
     Ok(())
 }
+
+/// Source-symbol join `edges e -> symbols s`, for statements that read the
+/// source symbol without its file. Same alias set as [`EDGE_SRC_FILE_JOIN`],
+/// the one home for the source-side join vocabulary.
+pub(crate) const EDGE_SRC_JOIN: &str = "JOIN symbols s ON s.id = e.src_id";
+
+/// Source-side join `edges e -> symbols s -> files f`, the single rendering
+/// shared by the import-scoping, stats, and dirty-closure SQL so the join
+/// aliases have one home.
+pub(crate) const EDGE_SRC_FILE_JOIN: &str =
+    "JOIN symbols s ON s.id = e.src_id JOIN files f ON f.id = s.file_id";
+
+/// Resolved-caller subquery for the outer symbol `s` — the single definition
+/// of "number of callers", shared by search ranking and reuse calibration.
+pub(crate) const CALLER_COUNT_SQL: &str =
+    "(SELECT COUNT(*) FROM edges e WHERE e.dst_id = s.id AND e.kind = 'calls')";
 
 /// Quoted edge-kind SQL literals joined with commas — the one renderer for
 /// every `kind IN (...)` fragment built from the enum, so a new kind joins
@@ -781,13 +801,24 @@ pub fn load_carried(old: &Connection, rels: &HashSet<String>) -> Result<CarriedI
     })
 }
 
+/// One carried-symbol row: the symbol columns plus its file path. Named so a
+/// column reorder in the SELECT cannot silently swap the adjacent `String`
+/// columns (kind, name, qualname).
+struct CarriedSymbolRow {
+    row_id: i64,
+    kind: String,
+    name: String,
+    qualname: String,
+    path: String,
+}
+
 fn load_carried_symbols(old: &Connection, rel_params: &[&str]) -> Result<Vec<CarriedSymbol>> {
     let mut symbols = Vec::new();
     // Bound the read to the carried files instead of scanning every symbol.
     // Chunked placeholders match the inherits query below; the final sort by
     // symbol id restores the old index order across chunks (resolution tables
     // are order-sensitive for duplicate qualnames).
-    let mut rows: Vec<(i64, String, String, String, String)> = Vec::new();
+    let mut rows: Vec<CarriedSymbolRow> = Vec::new();
     for_each_chunk(old, rel_params, |old, placeholders, chunk| {
         let mut stmt = old.prepare(&format!(
             "SELECT s.id, s.kind, s.name, s.qualname, f.path
@@ -795,33 +826,33 @@ fn load_carried_symbols(old: &Connection, rel_params: &[&str]) -> Result<Vec<Car
              WHERE f.path IN ({placeholders})"
         ))?;
         let part = stmt.query_map(rusqlite::params_from_iter(chunk.iter().copied()), |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-            ))
+            Ok(CarriedSymbolRow {
+                row_id: r.get::<_, i64>(0)?,
+                kind: r.get::<_, String>(1)?,
+                name: r.get::<_, String>(2)?,
+                qualname: r.get::<_, String>(3)?,
+                path: r.get::<_, String>(4)?,
+            })
         })?;
         for row in part {
             rows.push(row?);
         }
         Ok(())
     })?;
-    rows.sort_by_key(|row| row.0);
-    for (id, kind, name, qualname, path) in rows {
+    rows.sort_by_key(|row| row.row_id);
+    for row in rows {
         // A carried trait/interface is a valid impl target on the fast path;
         // dropping it made incremental Rust impls permanently unresolved
         // (R12 Critical). Unknown spellings stay dropped, as before.
-        let Some(kind) = SymbolKind::parse(&kind) else {
+        let Some(kind) = SymbolKind::parse(&row.kind) else {
             continue;
         };
-        let (module, _) = crate::extract::module_path_for(&path);
+        let (module, _) = crate::extract::module_path_for(&row.path);
         symbols.push(CarriedSymbol {
-            row_id: id,
+            row_id: row.row_id,
             kind,
-            name,
-            qualname,
+            name: row.name,
+            qualname: row.qualname,
             module,
         });
     }
@@ -850,17 +881,26 @@ fn load_carried_inherits(old: &Connection, rel_params: &[&str]) -> Result<Vec<(S
     Ok(inherits)
 }
 
-/// Copy rows for files matching the fast-path keys. `unchanged` rows carry
-/// (rel, old_mtime, size, current_mtime): the SELECT identifies the old row by
-/// (path, old_mtime, size); hash-carried rows (Amendment 9) then get their
-/// stored mtime refreshed to the fresh checkout's stat so the staleness
-/// contract stays truthful. Attaches the old DB itself (SQLite ATTACH takes no
-/// bound parameters).
+/// One hash-carry row for `carry_forward_unchanged`: the SELECT locates the
+/// old row by (rel, old_mtime, size) and refreshes its stored mtime to
+/// `current_mtime` when the fresh checkout differs (Amendment 9).
+pub struct CarryRow {
+    pub rel: String,
+    pub old_mtime: i64,
+    pub size: i64,
+    pub current_mtime: i64,
+}
+
+/// Copy rows for files matching the fast-path keys: the SELECT identifies the
+/// old row by (path, old_mtime, size); hash-carried rows (Amendment 9) then
+/// get their stored mtime refreshed to the fresh checkout's stat so the
+/// staleness contract stays truthful. Attaches the old DB itself (SQLite
+/// ATTACH takes no bound parameters).
 /// Amendment 11b: the caller owns the build transaction — no BEGIN/COMMIT here.
 pub fn carry_forward_unchanged(
     new: &Connection,
     root: &Path,
-    unchanged: &[(String, i64, i64, i64)],
+    unchanged: &[CarryRow],
 ) -> Result<()> {
     let old_path = db_path(root);
     let quoted = old_path.to_string_lossy().replace('\'', "''");
@@ -872,10 +912,10 @@ pub fn carry_forward_unchanged(
              FROM olddb.files WHERE path = ?1 AND mtime = ?2 AND size = ?3",
         )?;
         let mut refresh_mtime = new.prepare("UPDATE files SET mtime = ?1 WHERE path = ?2")?;
-        for (rel, mtime, size, current_mtime) in unchanged {
-            let inserted = stmt.execute(rusqlite::params![rel, mtime, size])?;
-            if inserted > 0 && current_mtime != mtime {
-                refresh_mtime.execute(rusqlite::params![current_mtime, rel])?;
+        for row in unchanged {
+            let inserted = stmt.execute(rusqlite::params![row.rel, row.old_mtime, row.size])?;
+            if inserted > 0 && row.current_mtime != row.old_mtime {
+                refresh_mtime.execute(rusqlite::params![row.current_mtime, row.rel])?;
             }
         }
     }
@@ -1017,14 +1057,19 @@ pub fn populate_symbols_fts(conn: &Connection) -> Result<()> {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    let mut ins = conn.prepare("INSERT INTO symbols_fts(rowid, text) VALUES (?1, ?2)")?;
-    for (id, qualname, name, path, signature) in rows {
-        ins.execute(rusqlite::params![
-            id,
-            fts_text(&qualname, &name, &path, &signature)
-        ])?;
-    }
-    Ok(())
+    let refs: Vec<(i64, &str, &str, &str, &str)> = rows
+        .iter()
+        .map(|(id, qualname, name, path, signature)| {
+            (
+                *id,
+                qualname.as_str(),
+                name.as_str(),
+                path.as_str(),
+                signature.as_str(),
+            )
+        })
+        .collect();
+    populate_symbols_fts_rows(conn, &refs)
 }
 
 /// Populate FTS from in-memory rows (force path): one row is
@@ -1074,7 +1119,6 @@ pub(crate) mod meta_keys {
     pub const METRICS_VERSION: &str = "metrics_version";
     pub const BUILT_AT: &str = "built_at";
     pub const SOURCE_REV: &str = "source_rev";
-    pub const CALLABLE_COUNT: &str = "callable_count";
     pub const FILE_COUNT: &str = "file_count";
     pub const SYMBOL_COUNT: &str = "symbol_count";
     pub const EDGE_COUNT: &str = "edge_count";
@@ -1350,24 +1394,7 @@ pub fn global_aw_dir() -> Result<PathBuf> {
 }
 
 fn ensure_global_aw_dir(path: &Path) -> Result<()> {
-    reject_symlink(path, "global .aw directory")?;
-    match fs::symlink_metadata(path) {
-        Ok(meta) if !meta.is_dir() => Err(AwError::Internal(format!(
-            "global .aw exists but is not a directory: {}",
-            path.display()
-        ))),
-        Ok(_) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            if let Err(create_err) = fs::create_dir_all(path) {
-                if create_err.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(create_err.into());
-                }
-            }
-            reject_symlink(path, "global .aw directory")?;
-            Ok(())
-        }
-        Err(e) => Err(e.into()),
-    }
+    ensure_dir_validated(path, "global .aw directory", true)
 }
 
 pub fn global_memory_db_path() -> Result<PathBuf> {
@@ -1639,6 +1666,15 @@ enum WriteAttempt {
     Retry(rusqlite::Error),
 }
 
+/// The current memory revision row for a key: row id, revision number, and
+/// the revision's content hash. Named so the three i64 columns cannot be
+/// swapped positionally in `try_write_revision`.
+struct Revision {
+    id: i64,
+    rev: i64,
+    content_hash: i64,
+}
+
 fn try_write_revision(
     conn: &mut Connection,
     note: &MemNoteInput<'_>,
@@ -1652,14 +1688,16 @@ fn try_write_revision(
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(map_memory_err)?;
     let current = current_revision(&tx, note.key)?;
-    if let Some((_, rev, current_hash)) = current {
-        if current_hash == hash {
+    if let Some(row) = &current {
+        if row.content_hash == hash {
             // Idempotent replay: nothing written, nothing to commit.
             drop(tx);
-            return Ok(WriteAttempt::Written(MemWriteOutcome::Duplicate { rev }));
+            return Ok(WriteAttempt::Written(MemWriteOutcome::Duplicate {
+                rev: row.rev,
+            }));
         }
     }
-    let new_rev = current.as_ref().map_or(1, |(_, rev, _)| rev + 1);
+    let new_rev = current.as_ref().map_or(1, |row| row.rev + 1);
     if let Err(e) = insert_revision(&tx, note, now, hash, new_rev) {
         if is_unique_violation(&e) {
             return Ok(WriteAttempt::Retry(e));
@@ -1667,8 +1705,8 @@ fn try_write_revision(
         return Err(map_memory_err(e));
     }
     let new_id = tx.last_insert_rowid();
-    if let Some((old_id, _, _)) = current {
-        supersede_current(&tx, new_id, now, old_id)?;
+    if let Some(row) = &current {
+        supersede_current(&tx, new_id, now, row.id)?;
     }
     if let Some(target) = note.supersedes {
         supersede_cross_key(&tx, new_id, now, target)?;
@@ -1681,7 +1719,7 @@ fn try_write_revision(
     tx.commit().map_err(map_memory_err)?;
     Ok(WriteAttempt::Written(MemWriteOutcome::Written {
         rev: new_rev,
-        superseded_rev: current.map(|(_, rev, _)| rev),
+        superseded_rev: current.as_ref().map(|row| row.rev),
     }))
 }
 
@@ -1712,11 +1750,17 @@ fn insert_revision(
     )
 }
 
-fn current_revision(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<Option<(i64, i64, i64)>> {
+fn current_revision(tx: &rusqlite::Transaction<'_>, key: &str) -> Result<Option<Revision>> {
     tx.query_row(
         "SELECT id, rev, content_hash FROM memories WHERE key = ?1 ORDER BY rev DESC LIMIT 1",
         rusqlite::params![key],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        |r| {
+            Ok(Revision {
+                id: r.get(0)?,
+                rev: r.get(1)?,
+                content_hash: r.get(2)?,
+            })
+        },
     )
     .optional()
     .map_err(map_memory_err)
@@ -1888,6 +1932,38 @@ pub fn memory_rows_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<MemRow>>
         .map_err(map_memory_err)
 }
 
+/// The subset of `keys` that carry a current, unexpired row — the existence
+/// probe behind the merged-store shadowing check (one IN query replaces a
+/// per-key `memory_get`, at most CANDIDATE_CAP keys). Matches `memory_get`'s
+/// row visibility: current revision only, zero `expires_at` never expires.
+pub fn memory_current_keys(conn: &Connection, keys: &[String]) -> Result<Vec<String>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = sql_placeholders(keys.len());
+    let mut values: Vec<rusqlite::types::Value> = keys
+        .iter()
+        .map(|k| rusqlite::types::Value::Text(k.clone()))
+        .collect();
+    values.push(rusqlite::types::Value::Integer(unix_now()));
+    let now_param = values.len();
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT DISTINCT key FROM memories
+             WHERE key IN ({placeholders})
+               AND superseded_by IS NULL
+               AND (expires_at = 0 OR expires_at > ?{now_param})"
+        ))
+        .map_err(map_memory_err)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(values.iter()), |r| {
+            r.get::<_, String>(0)
+        })
+        .map_err(map_memory_err)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(map_memory_err)
+}
+
 /// Current row for one exact key plus its total revision count.
 pub fn memory_get(conn: &Connection, key: &str) -> Result<Option<(MemRow, i64)>> {
     let row = conn
@@ -2027,9 +2103,9 @@ fn delete_memory_ids(tx: &rusqlite::Transaction<'_>, ids: &[i64]) -> Result<()> 
 }
 
 /// Per-test temp project root (fresh directory, wiped from any previous run),
-/// shared by the db and memory test modules.
+/// shared by the unit-test modules (`aw-{name}` keeps the directories apart).
 #[cfg(test)]
-fn temp_root(name: &str) -> PathBuf {
+pub(crate) fn temp_root(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("aw-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -2190,11 +2266,9 @@ mod memory_tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    #[test]
-    fn memory_current_rows_matches_is_current_predicate() {
-        // The `--all` SQL filter and the ranked resolver's Rust predicate must
-        // stay row-by-row equal across every filter combination, or the two
-        // query modes drift on expiry/supersession semantics.
+    /// The predicate-matrix fixture: one store holding a durable note, an
+    /// expired note, a future-expiry note, and a superseded revision pair.
+    fn current_rows_fixture() -> (PathBuf, Connection, i64, Vec<MemRow>) {
         let root = temp_root("mem-current-predicate");
         let mut conn = open_memory_store(&root).unwrap();
         let now = unix_now();
@@ -2217,6 +2291,17 @@ mod memory_tests {
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .unwrap()
         };
+        (root, conn, now, all_rows)
+    }
+
+    #[test]
+    fn memory_current_rows_matches_is_current_predicate() {
+        // The `--all` SQL filter and the ranked resolver's Rust predicate must
+        // stay row-by-row equal across every filter combination, or the two
+        // query modes drift on expiry/supersession semantics.
+        let (root, conn, now, all_rows) = current_rows_fixture();
+        // The fixture must actually contain the superseded and expired rows
+        // the filter combinations below exist to distinguish.
         assert!(all_rows.iter().any(|r| r.superseded_by.is_some()));
         assert!(all_rows
             .iter()
@@ -2307,7 +2392,7 @@ mod memory_tests {
     }
 
     #[test]
-    fn memory_write_dedup_supersedes_and_gates_versions() {
+    fn memory_write_dedup_supersedes_versions() {
         let root = temp_root("mem-lifecycle");
         let mut conn = open_memory_store(&root).unwrap();
         let now = unix_now();
@@ -2333,11 +2418,25 @@ mod memory_tests {
         ));
         let (row, revs) = memory_get(&conn, "k").unwrap().unwrap();
         assert_eq!((row.rev, row.body.as_str(), revs), (2, "body two", 2));
+        drop(conn);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn memory_missing_key_reads_and_deletes_none() {
         // Missing key reads as None; deleting an unknown key deletes nothing.
+        let root = temp_root("mem-missing-key");
+        let mut conn = open_memory_store(&root).unwrap();
         assert!(memory_get(&conn, "missing").unwrap().is_none());
         assert!(memory_delete(&mut conn, "missing").unwrap().is_none());
         drop(conn);
+        let _ = fs::remove_dir_all(&root);
+    }
 
+    #[test]
+    fn memory_open_gates_reject_version_and_structure_skew() {
+        let root = temp_root("mem-gates");
+        drop(open_memory_store(&root).unwrap());
         // Newer than the binary -> exit 5 with the export-backup message.
         {
             let conn = Connection::open(memory_db_path(&root)).unwrap();

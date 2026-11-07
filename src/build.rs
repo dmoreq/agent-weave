@@ -36,13 +36,19 @@ fn take_fresh_batch(
     batch
 }
 
-/// Report the files skipped by the 1 MiB walk cap exactly once per build.
-fn announce_skipped(stats: &crate::walk::WalkStats) {
+/// Stderr notice for the files skipped by the 1 MiB walk cap, empty when
+/// none. It rides the stderr half `run_build` returns (the shared
+/// `ArmOut.stderr` channel) instead of `eprintln!`, so the MCP surface keeps
+/// the notice in its own output contract instead of leaking it into the
+/// server process's stderr.
+fn skipped_notice(stats: &crate::walk::WalkStats) -> String {
     if stats.skipped_large > 0 {
-        eprintln!(
-            "[aw] skipped {} file(s) over the 1MB size cap",
+        format!(
+            "[aw] skipped {} file(s) over the 1MB size cap\n",
             stats.skipped_large
-        );
+        )
+    } else {
+        String::new()
     }
 }
 
@@ -103,7 +109,7 @@ struct BuildPrep {
     by_rel: HashMap<String, usize>,
     root: PathBuf,
     old: Option<rusqlite::Connection>,
-    old_map: HashMap<String, (i64, i64, i64)>,
+    old_map: HashMap<String, crate::db::FileStat>,
     cls: Classified,
     /// Parse-error count over the carried set as of the end of prepare_build
     /// (after the dirty closure). `no_op_line` and `parse_gate` reuse it;
@@ -114,12 +120,15 @@ struct BuildPrep {
 }
 
 /// Resolve, load, and write one build. Each phase owns its slice of the
-/// pipeline; `run_build` keeps the lock and the final stats line.
+/// pipeline; `run_build` keeps the lock and the parse gate, and
+/// `finish_index` resolves, writes, and journals. Returns the stdout line,
+/// the stderr hints, and the indexed file count (the build's journaled
+/// `shown`).
 pub fn run_build(
     root_arg: Option<&Path>,
     force: bool,
     max_parse_error_rate: f64,
-) -> Result<(String, String)> {
+) -> Result<(String, String, usize)> {
     if !max_parse_error_rate.is_finite() || !(0.0..=1.0).contains(&max_parse_error_rate) {
         return Err(AwError::Usage(format!(
             "--max-parse-error-rate must be a finite value in [0, 1], got {max_parse_error_rate}"
@@ -130,13 +139,25 @@ pub fn run_build(
     let _lock = crate::db::BuildLock::acquire(&root)?;
     let mut prep = prepare_build(&root, force, max_parse_error_rate, started)?;
     if let Some(line) = no_op_line(&prep)? {
-        return Ok((line, String::new()));
+        return Ok((line, skipped_notice(&prep.stats), prep.stats.files.len()));
     }
     let t0 = Instant::now();
     let mut fe = extract_units(&prep.cls.fresh, 0)?;
     heal_gaps(&mut prep, &mut fe)?;
     let parse_secs = t0.elapsed().as_secs_f64();
     parse_gate(&prep, &fe)?;
+    finish_index(&prep, fe, parse_secs)
+}
+
+/// Resolve, write, and journal the fresh extraction — the second half of
+/// `run_build`, from `resolve_index` through the reuse hints. Consumes the
+/// fresh extract; returns the stdout line, the stderr hints, and the indexed
+/// file count (the build's journaled `shown`).
+fn finish_index(
+    prep: &BuildPrep,
+    fe: FreshExtract,
+    parse_secs: f64,
+) -> Result<(String, String, usize)> {
     let FreshExtract {
         mut rows,
         extractions,
@@ -149,7 +170,7 @@ pub fn run_build(
     }
 
     let is_incremental = prep.old.is_some() && !prep.opts.force;
-    let (totals, db_secs) = write_index(&prep, &rows, &resolution)?;
+    let (totals, db_secs) = write_index(prep, &rows, &resolution)?;
     let total_files = prep.stats.files.len();
     crate::journal::record_result(
         crate::journal::OutcomeCounts::uniform(total_files),
@@ -157,7 +178,7 @@ pub fn run_build(
         0,
     );
     let stdout_line = built_index_line(
-        &prep,
+        prep,
         &totals,
         PhaseSecs {
             parse: parse_secs,
@@ -165,8 +186,10 @@ pub fn run_build(
             db: db_secs,
         },
     );
-    let stderr_hints = incremental_reuse_hints(&prep, &resolution, is_incremental);
-    Ok((stdout_line, stderr_hints))
+    let stderr_hints = incremental_reuse_hints(prep, &resolution, is_incremental);
+    let mut stderr = skipped_notice(&prep.stats);
+    stderr.push_str(&stderr_hints);
+    Ok((stdout_line, stderr, total_files))
 }
 
 fn incremental_reuse_hints(
@@ -278,7 +301,7 @@ fn write_index(
 }
 fn classify(
     stats: &crate::walk::WalkStats,
-    old_map: &HashMap<String, (i64, i64, i64)>,
+    old_map: &HashMap<String, crate::db::FileStat>,
 ) -> Classified {
     let mut carried: HashSet<String> = HashSet::new();
     // Hash-carried rows (Amendment 9): carried on content match despite an
@@ -289,21 +312,19 @@ fn classify(
     for f in &stats.files {
         let mtime = f.mtime;
         match old_map.get(&f.rel) {
-            Some((om, osz, _oh)) if *om == mtime && *osz == f.size as i64 => {
+            Some(stat) if stat.mtime == mtime && stat.size == f.size as i64 => {
                 carried.insert(f.rel.clone());
             }
             // Dual-key (Amendment 9): (mtime, size) mismatch, but same size and
             // same content hash -> carry (the CI cache-restore case). One
             // read+hash instead of parse+extract.
-            Some((_om, osz, oh)) if *osz == f.size as i64 => {
-                match crate::walk::read_bounded(&f.abs) {
-                    Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == *oh => {
-                        carried.insert(f.rel.clone());
-                        mtime_updates.insert(f.rel.clone(), mtime);
-                    }
-                    _ => fresh.push(f.clone()),
+            Some(stat) if stat.size == f.size as i64 => match crate::walk::read_bounded(&f.abs) {
+                Ok(bytes) if crate::hash::fnv1a64(&bytes) as i64 == stat.content_hash => {
+                    carried.insert(f.rel.clone());
+                    mtime_updates.insert(f.rel.clone(), mtime);
                 }
-            }
+                _ => fresh.push(f.clone()),
+            },
             _ => fresh.push(f.clone()),
         }
     }
@@ -411,7 +432,7 @@ fn heal_gaps(prep: &mut BuildPrep, fe: &mut FreshExtract) -> Result<()> {
 /// Bounded by gap rows, not by corpus size.
 fn plan_gap_files(
     c: &rusqlite::Connection,
-    old_map: &HashMap<String, (i64, i64, i64)>,
+    old_map: &HashMap<String, crate::db::FileStat>,
     by_rel: &HashMap<String, usize>,
     cls: &Classified,
     fe: &FreshExtract,
@@ -487,7 +508,7 @@ fn collect_fresh_quals(
 
 fn changed_files(
     cls: &Classified,
-    old_map: &HashMap<String, (i64, i64, i64)>,
+    old_map: &HashMap<String, crate::db::FileStat>,
     by_rel: &HashMap<String, usize>,
 ) -> Vec<String> {
     cls.fresh
@@ -668,14 +689,19 @@ fn write_rows(
 
 fn carry_forward_rows(
     cls: &Classified,
-    old_map: &HashMap<String, (i64, i64, i64)>,
-) -> Vec<(String, i64, i64, i64)> {
+    old_map: &HashMap<String, crate::db::FileStat>,
+) -> Vec<crate::db::CarryRow> {
     cls.carried
         .iter()
         .filter_map(|rel| {
-            old_map.get(rel).map(|(m, s, _)| {
-                let current = cls.mtime_updates.get(rel).copied().unwrap_or(*m);
-                (rel.clone(), *m, *s, current)
+            old_map.get(rel).map(|stat| {
+                let current_mtime = cls.mtime_updates.get(rel).copied().unwrap_or(stat.mtime);
+                crate::db::CarryRow {
+                    rel: rel.clone(),
+                    old_mtime: stat.mtime,
+                    size: stat.size,
+                    current_mtime,
+                }
             })
         })
         .collect()
@@ -776,7 +802,6 @@ fn write_fts_indexes(
 /// Authoritative SQL totals for the meta manifest, one scan per table (A3).
 struct MetaCounts {
     sym_total: i64,
-    callable_total: i64,
     edge_total: i64,
     calls_total: i64,
     imports_total: i64,
@@ -794,7 +819,6 @@ fn write_meta_counts(conn: &rusqlite::Connection, root: &Path) -> Result<MetaTot
     write_meta_identity(conn, root)?;
     let c = meta_counts(conn)?;
     for (key, n) in [
-        (meta_keys::CALLABLE_COUNT, c.callable_total),
         (meta_keys::FILE_COUNT, c.file_total),
         (meta_keys::SYMBOL_COUNT, c.sym_total),
         (meta_keys::EDGE_COUNT, c.edge_total),
@@ -850,17 +874,7 @@ fn write_meta_identity(conn: &rusqlite::Connection, root: &Path) -> Result<()> {
 
 /// One scan per table instead of one query per count (A3).
 fn meta_counts(conn: &rusqlite::Connection) -> Result<MetaCounts> {
-    let callable = crate::extract::SymbolKind::Function.as_str();
-    let method = crate::extract::SymbolKind::Method.as_str();
-    let (sym_total, callable_total) = conn.query_row(
-        &format!(
-            "SELECT COUNT(*),
-            COALESCE(SUM(kind IN ('{callable}','{method}')), 0)
-     FROM symbols"
-        ),
-        [],
-        crate::db::ints2,
-    )?;
+    let sym_total: i64 = conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0))?;
     let (edge_total, calls_total, imports_total, inherits_total) = conn.query_row(
         &format!(
             "SELECT COUNT(*),
@@ -885,7 +899,6 @@ fn meta_counts(conn: &rusqlite::Connection) -> Result<MetaCounts> {
     )?;
     Ok(MetaCounts {
         sym_total,
-        callable_total,
         edge_total,
         calls_total,
         imports_total,
@@ -939,7 +952,6 @@ fn built_index_line(prep: &BuildPrep, totals: &MetaTotals, secs: PhaseSecs) -> S
     // binary reports wall + per-phase timings (std-only constraint).
     // Amendment 11c: parse= is the parallel phase's wall time and extract= the
     // summed per-worker extraction time — the two overlap on parallel builds.
-    announce_skipped(&prep.stats);
     format!(
         "aw: built index: files={total} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={carried} wall={wall:.2}s (walk={w:.2}s parse={p:.2}s extract={e:.2}s db={d:.2}s)",
         total = prep.stats.files.len(),
@@ -984,22 +996,9 @@ fn extract_units(files: &[crate::walk::WalkedFile], base_idx: usize) -> Result<F
         let mut handles = Vec::new();
         for (chunk_no, chunk) in files.chunks(chunk_len).enumerate() {
             let chunk = chunk.to_vec();
-            let handle = std::thread::Builder::new()
-                .spawn_scoped(
-                    scope,
-                    move || -> Result<(Vec<(crate::db::FilesRow, crate::extract::FileExtraction)>, f64)> {
-                        let mut units = Vec::with_capacity(chunk.len());
-                        let mut secs = 0f64;
-                        let mut parser = crate::parse::ParserSlot::new();
-                        for (local, f) in chunk.into_iter().enumerate() {
-                            let idx = base_idx + chunk_no * chunk_len + local;
-                            let (row, fx, one_secs) = extract_one(idx, f, &mut parser)?;
-                            secs += one_secs;
-                            units.push((row, fx));
-                        }
-                        Ok((units, secs))
-                    },
-                )?;
+            let handle = std::thread::Builder::new().spawn_scoped(scope, move || {
+                extract_chunk(chunk, base_idx, chunk_no, chunk_len)
+            })?;
             handles.push(handle);
         }
         for h in handles {
@@ -1017,6 +1016,31 @@ fn extract_units(files: &[crate::walk::WalkedFile], base_idx: usize) -> Result<F
         error_files,
         secs: extract_secs_sum,
     })
+}
+
+/// Parse + extract one contiguous chunk on a scoped worker. `chunk_no` and
+/// `chunk_len` place each file's extraction index at
+/// `base_idx + chunk_no * chunk_len + local`, keeping it aligned with the
+/// accumulated `fresh` vector (see `extract_units`).
+fn extract_chunk(
+    chunk: Vec<crate::walk::WalkedFile>,
+    base_idx: usize,
+    chunk_no: usize,
+    chunk_len: usize,
+) -> Result<(
+    Vec<(crate::db::FilesRow, crate::extract::FileExtraction)>,
+    f64,
+)> {
+    let mut units = Vec::with_capacity(chunk.len());
+    let mut secs = 0f64;
+    let mut parser = crate::parse::ParserSlot::new();
+    for (local, f) in chunk.into_iter().enumerate() {
+        let idx = base_idx + chunk_no * chunk_len + local;
+        let (row, fx, one_secs) = extract_one(idx, f, &mut parser)?;
+        secs += one_secs;
+        units.push((row, fx));
+    }
+    Ok((units, secs))
 }
 
 fn worker_count() -> usize {

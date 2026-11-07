@@ -13,6 +13,13 @@ use crate::extract::{Confidence, EdgeKind, SymbolKind};
 use crate::hash::fnv1a64;
 
 pub const DEFAULT_LIMIT: usize = 50;
+/// Shared CLI/MCP surface defaults, so `cli.rs` and `service.rs::from_tool_args`
+/// cannot drift apart on the same flag's default.
+pub const DEFAULT_DEPTH: usize = 1;
+pub const DEFAULT_CONTEXT_LIMIT: usize = 10;
+pub const DEFAULT_PATH_DEPTH: usize = 10;
+pub const DEFAULT_MAX_PARSE_ERROR_RATE: f64 = 0.05;
+pub const DEFAULT_IMPACT_EDGES: &str = "calls";
 /// Cap on rendered ambiguous-name candidates (R6f: common method names could
 /// print megabytes; the total count still travels in the error).
 pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
@@ -37,7 +44,7 @@ const IMPACT_CALLS_CAVEAT: &str =
 /// a symbol edge; every non-import edge remains an individual site.
 fn impact_site_key() -> String {
     format!(
-        "CASE WHEN e.kind = '{}' THEN 'i:' || ss.id || ':' || e.site_line ELSE 'e:' || e.id END",
+        "CASE WHEN e.kind = '{}' THEN 'i:' || s.id || ':' || e.site_line ELSE 'e:' || e.id END",
         EdgeKind::Imports.as_str()
     )
 }
@@ -46,7 +53,6 @@ fn impact_site_key() -> String {
 const IMPORTS_CAVEAT: &str =
     "aw: imports — resolved static imports only; external and unresolved imports are omitted";
 
-/// One resolved candidate: (path, line, qualname).
 mod scope;
 
 pub(crate) use scope::normalize_scope;
@@ -67,10 +73,10 @@ pub(crate) use impact::parse_edge_kinds;
 pub use impact::{impact, ImpactOpts};
 pub use reuse::run_reuse;
 
-/// One resolved name candidate: (path, line, qualname). Distinct from
-/// `memory::Candidate` (a fused search-signal row), so one name keeps one
-/// meaning per module.
-pub type NameCandidate = (String, i64, String);
+/// One resolved name candidate: (path, line, qualname). Defined in `error`
+/// beside the `Ambiguous` payload it fills; re-exported here so the query
+/// surface and its child modules keep one spelling.
+pub use crate::error::NameCandidate;
 
 /// One symbol row for the inventory renderers.
 struct SymbolRow {
@@ -157,8 +163,14 @@ pub fn cap_stderr(shown: usize, total: usize) -> String {
 }
 
 /// Line-rendered query result: stdout lines plus the stderr cap notice. The
-/// stderr half keeps cap notices on the single `ArmOut.stderr` channel.
-pub type LineQuery = (Vec<String>, String);
+/// stderr half keeps cap notices on the single `ArmOut.stderr` channel, and
+/// `shown` carries the displayed-item count structurally so the MCP KPI footer
+/// never re-parses the rendered lines.
+pub struct LineQuery {
+    pub lines: Vec<String>,
+    pub stderr: String,
+    pub shown: usize,
+}
 
 /// Prepend a caveat to any existing header without changing the default
 /// (non-caveat) output.
@@ -214,29 +226,37 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<NameCandid
     ))?;
     let rows = stmt.query_map(rusqlite::params![name], candidate_row)?;
     let mut all: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
-    // `Class.method` suffix form: the full qualname is `pkg.Class.method`, so
-    // an exact name/qualname match misses it. Fall back to a suffix scan and
-    // confirm the exact suffix in Rust (LIKE alone treats `_` and `%` as
-    // wildcards). Multiple matches stay ambiguous through the caller.
     if all.is_empty() && name.contains('.') {
-        let pattern = format!("%.{name}");
-        let mut stmt = conn.prepare(&format!(
-            "{CANDIDATE_SELECT}
-             WHERE s.qualname LIKE ?1
-             ORDER BY s.qualname, f.path",
-        ))?;
-        let rows = stmt.query_map([&pattern], candidate_row)?;
-        let suffix = format!(".{name}");
-        all = rows
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter(|r| r.1.ends_with(&suffix))
-            .collect();
+        all = suffix_candidates(conn, name)?;
     }
-    // A module shares the bare name of classes/functions (`button` vs
-    // `Button`); when a callable candidate exists, module symbols must not
-    // create a false ambiguity (R7 F1). Unknown kinds stay non-module, as
-    // before the enum.
+    Ok(disambiguate(all))
+}
+
+/// `Class.method` suffix form: the full qualname is `pkg.Class.method`, so
+/// an exact name/qualname match misses it. Fall back to a suffix scan and
+/// confirm the exact suffix in Rust (LIKE alone treats `_` and `%` as
+/// wildcards). Multiple matches stay ambiguous through the caller.
+fn suffix_candidates(conn: &Connection, name: &str) -> Result<Vec<CandidateRow>> {
+    let pattern = format!("%.{name}");
+    let mut stmt = conn.prepare(&format!(
+        "{CANDIDATE_SELECT}
+         WHERE s.qualname LIKE ?1
+         ORDER BY s.qualname, f.path",
+    ))?;
+    let rows = stmt.query_map([&pattern], candidate_row)?;
+    let suffix = format!(".{name}");
+    Ok(rows
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|r| r.1.ends_with(&suffix))
+        .collect())
+}
+
+/// Module-filter and dedupe phase: a module shares the bare name of
+/// classes/functions (`button` vs `Button`); when a callable candidate exists,
+/// module symbols must not create a false ambiguity (R7 F1). Unknown kinds
+/// stay non-module, as before the enum.
+fn disambiguate(all: Vec<CandidateRow>) -> (Vec<i64>, Vec<NameCandidate>) {
     let has_callable = all
         .iter()
         .any(|r| SymbolKind::parse(&r.4) != Some(SymbolKind::Module));
@@ -259,7 +279,7 @@ fn target_ids(conn: &Connection, name: &str) -> Result<(Vec<i64>, Vec<NameCandid
             }
         }
     }
-    Ok((ids, cands))
+    (ids, cands)
 }
 
 /// Journal one QueryOutput and return its stderr cap notice: the shared tail
@@ -283,10 +303,11 @@ pub(crate) fn journal_output(out: &QueryOutput, ambiguous: usize) -> String {
 /// notice rides the stderr channel, not `eprintln!`.
 fn search_lines(out: QueryOutput) -> Result<LineQuery> {
     let stderr = journal_output(&out, 0);
-    Ok((
-        render_output(&out).lines().map(str::to_string).collect(),
+    Ok(LineQuery {
+        lines: render_output(&out).lines().map(str::to_string).collect(),
         stderr,
-    ))
+        shown: out.shown,
+    })
 }
 
 /// Resolve a repo-relative file path and fail with the shared not-indexed
@@ -323,11 +344,15 @@ fn staleness_header(ctx: &QueryCtx<'_>, files: &BTreeSet<String>) -> (Option<Str
     (header, stale)
 }
 
+/// Shared tail of the pointer-listing query arms: bounded materialization,
+/// post-cap staleness, journaling-ready counts. Caller invariant: `known_total`
+/// must be > 0 — a caller that can produce an empty result returns its own
+/// empty-reason error before calling this, because a 0 total here would
+/// silently render an empty page.
 fn collect_output(
     ctx: &QueryCtx<'_>,
     rows: impl Iterator<Item = std::result::Result<Pointer, rusqlite::Error>>,
     limit: usize,
-    empty_reason: &str,
     known_total: usize,
 ) -> Result<QueryOutput> {
     // Bounded materialization (R6f Important 5): callers pass a SQL LIMIT
@@ -336,9 +361,6 @@ fn collect_output(
     let mut all: Vec<Pointer> = Vec::new();
     for r in rows {
         all.push(r?);
-    }
-    if known_total == 0 {
-        return Err(AwError::NoResults(empty_reason.to_string()));
     }
     let shown = all.len().min(limit);
     let displayed: Vec<Pointer> = all.into_iter().take(shown).collect();

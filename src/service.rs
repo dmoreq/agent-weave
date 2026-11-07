@@ -8,6 +8,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::error::{AwError, Result};
+use crate::journal::JournalArgs;
 
 /// Which surface is dispatching; journaled as `surface` in `.aw/usage.log`.
 #[derive(Clone, Copy)]
@@ -177,7 +178,7 @@ fn edge_kinds_csv(kinds: &[crate::extract::EdgeKind]) -> String {
 /// Shared journal fields for the graph queries; `depth` joins only for the
 /// two call-graph directions (callers/callees). Built in explicit branches so
 /// field order never depends on a positional `insert`.
-fn graph_args(name: &str, depth: Option<usize>, limit: usize) -> Vec<(&'static str, String)> {
+fn graph_args(name: &str, depth: Option<usize>, limit: usize) -> JournalArgs {
     match depth {
         Some(depth) => vec![
             ("name", name.to_string()),
@@ -191,11 +192,7 @@ fn graph_args(name: &str, depth: Option<usize>, limit: usize) -> Vec<(&'static s
 /// Shared trailing journal fields for the path-scoped analysis commands:
 /// `head` first, then the optional path (empty when absent) and the limit.
 /// Field order matches the historical journal line.
-fn path_limit_args(
-    head: &[(&'static str, String)],
-    path: Option<&String>,
-    limit: usize,
-) -> Vec<(&'static str, String)> {
+fn path_limit_args(head: &JournalArgs, path: Option<&String>, limit: usize) -> JournalArgs {
     let mut out = head.to_vec();
     out.push(("path", path.cloned().unwrap_or_default()));
     out.push(("limit", limit.to_string()));
@@ -292,60 +289,79 @@ impl CommandRequest {
             _ => unreachable!("from_cli_analysis called with a non-matching command"),
         })
     }
-    /// Memory subcommands.
+    /// Memory subcommands. `write`/`query` destructure through their own
+    /// request helpers (the same surface-boundary split `impact_request` uses).
     fn from_cli_memory(cmd: crate::cli::Cmd) -> Result<CommandRequest> {
-        Ok(match cmd {
-            crate::cli::Cmd::Mem { action } => match action {
-                crate::cli::MemAction::Write {
-                    key,
-                    body,
-                    kind,
-                    tags,
-                    refs,
-                    scope,
-                    ttl,
-                    supersedes,
-                    global,
-                } => CommandRequest::MemWrite {
-                    key,
-                    body,
-                    kind,
-                    tags,
-                    refs,
-                    scope,
-                    ttl,
-                    supersedes,
-                    global,
-                },
-                crate::cli::MemAction::Query {
-                    terms,
-                    all,
-                    kind,
-                    scope,
-                    limit,
-                    include_superseded,
-                    global,
-                } => CommandRequest::MemQuery {
-                    terms,
-                    all,
-                    kind,
-                    scope,
-                    limit,
-                    include_superseded,
-                    global,
-                },
-                crate::cli::MemAction::Get { key, global } => {
-                    CommandRequest::MemGet { key, global }
-                }
-                crate::cli::MemAction::Delete { key, global } => {
-                    CommandRequest::MemDelete { key, global }
-                }
-                crate::cli::MemAction::Export { limit, global } => {
-                    CommandRequest::MemExport { limit, global }
-                }
-                crate::cli::MemAction::Gc { global } => CommandRequest::MemGc { global },
-            },
-            _ => unreachable!("from_cli_memory called with a non-matching command"),
+        let crate::cli::Cmd::Mem { action } = cmd else {
+            unreachable!("from_cli_memory called with a non-matching command")
+        };
+        match action {
+            crate::cli::MemAction::Write { .. } => Self::mem_write_request(action),
+            crate::cli::MemAction::Query { .. } => Self::mem_query_request(action),
+            crate::cli::MemAction::Get { key, global } => {
+                Ok(CommandRequest::MemGet { key, global })
+            }
+            crate::cli::MemAction::Delete { key, global } => {
+                Ok(CommandRequest::MemDelete { key, global })
+            }
+            crate::cli::MemAction::Export { limit, global } => {
+                Ok(CommandRequest::MemExport { limit, global })
+            }
+            crate::cli::MemAction::Gc { global } => Ok(CommandRequest::MemGc { global }),
+        }
+    }
+
+    /// The `mem write` request shape, destructured from the CLI variant.
+    fn mem_write_request(action: crate::cli::MemAction) -> Result<CommandRequest> {
+        let crate::cli::MemAction::Write {
+            key,
+            body,
+            kind,
+            tags,
+            refs,
+            scope,
+            ttl,
+            supersedes,
+            global,
+        } = action
+        else {
+            unreachable!("mem_write_request called with a non-write action")
+        };
+        Ok(CommandRequest::MemWrite {
+            key,
+            body,
+            kind,
+            tags,
+            refs,
+            scope,
+            ttl,
+            supersedes,
+            global,
+        })
+    }
+
+    /// The `mem query` request shape, destructured from the CLI variant.
+    fn mem_query_request(action: crate::cli::MemAction) -> Result<CommandRequest> {
+        let crate::cli::MemAction::Query {
+            terms,
+            all,
+            kind,
+            scope,
+            limit,
+            include_superseded,
+            global,
+        } = action
+        else {
+            unreachable!("mem_query_request called with a non-query action")
+        };
+        Ok(CommandRequest::MemQuery {
+            terms,
+            all,
+            kind,
+            scope,
+            limit,
+            include_superseded,
+            global,
         })
     }
 
@@ -404,7 +420,7 @@ impl CommandRequest {
 
     /// Journal argument object, identical on both surfaces (one source of
     /// truth replaces the former per-surface argument tables).
-    pub fn journal_args(&self) -> Vec<(&'static str, String)> {
+    pub fn journal_args(&self) -> JournalArgs {
         match self.family() {
             Family::Diag => self.journal_args_diag(),
             Family::Graph => self.journal_args_graph(),
@@ -414,7 +430,7 @@ impl CommandRequest {
     }
 
     /// Journal fields for build, doctor, and usage.
-    fn journal_args_diag(&self) -> Vec<(&'static str, String)> {
+    fn journal_args_diag(&self) -> JournalArgs {
         match self {
             CommandRequest::Build {
                 force,
@@ -431,7 +447,7 @@ impl CommandRequest {
         }
     }
     /// Journal fields for the graph queries.
-    fn journal_args_graph(&self) -> Vec<(&'static str, String)> {
+    fn journal_args_graph(&self) -> JournalArgs {
         match self {
             CommandRequest::Callers { name, limit, depth }
             | CommandRequest::Callees { name, limit, depth } => {
@@ -463,10 +479,10 @@ impl CommandRequest {
         }
     }
     /// Journal fields for analysis and inventory.
-    fn journal_args_analysis(&self) -> Vec<(&'static str, String)> {
+    fn journal_args_analysis(&self) -> JournalArgs {
         match self {
             CommandRequest::Unresolved { names, path, limit } => {
-                path_limit_args(&[("names", names.to_string())], path.as_ref(), *limit)
+                path_limit_args(&vec![("names", names.to_string())], path.as_ref(), *limit)
             }
             CommandRequest::Symbols {
                 file,
@@ -490,43 +506,12 @@ impl CommandRequest {
         }
     }
     /// Journal fields for memory commands: key/kind/scope/terms/limit/body_len
-    /// — never the body text (journal privacy contract).
-    fn journal_args_memory(&self) -> Vec<(&'static str, String)> {
+    /// — never the body text (journal privacy contract). The two wide variants
+    /// destructure through their own helpers so each function stays small.
+    fn journal_args_memory(&self) -> JournalArgs {
         match self {
-            CommandRequest::MemWrite {
-                key,
-                body,
-                kind,
-                scope,
-                ttl,
-                supersedes,
-                global,
-                ..
-            } => vec![
-                ("key", key.clone()),
-                ("kind", kind.clone()),
-                ("scope", scope.clone()),
-                ("ttl", ttl.map_or_else(String::new, |t| t.to_string())),
-                ("supersedes", supersedes.clone().unwrap_or_default()),
-                ("body_len", body.len().to_string()),
-                ("global", global.to_string()),
-            ],
-            CommandRequest::MemQuery {
-                terms,
-                kind,
-                scope,
-                limit,
-                include_superseded,
-                global,
-                ..
-            } => vec![
-                ("terms", terms.join(" ")),
-                ("kind", kind.clone().unwrap_or_default()),
-                ("scope", scope.clone().unwrap_or_default()),
-                ("limit", limit.to_string()),
-                ("include_superseded", include_superseded.to_string()),
-                ("global", global.to_string()),
-            ],
+            CommandRequest::MemWrite { .. } => self.mem_write_args(),
+            CommandRequest::MemQuery { .. } => self.mem_query_args(),
             CommandRequest::MemGet { key, global } => {
                 vec![("key", key.clone()), ("global", global.to_string())]
             }
@@ -543,13 +528,67 @@ impl CommandRequest {
             _ => unreachable!("journal_args_memory called with a non-matching request"),
         }
     }
+
+    /// Journal fields for `mem write`.
+    fn mem_write_args(&self) -> JournalArgs {
+        let CommandRequest::MemWrite {
+            key,
+            body,
+            kind,
+            scope,
+            ttl,
+            supersedes,
+            global,
+            ..
+        } = self
+        else {
+            unreachable!("mem_write_args called with a non-write request")
+        };
+        vec![
+            ("key", key.clone()),
+            ("kind", kind.clone()),
+            ("scope", scope.clone()),
+            ("ttl", ttl.map_or_else(String::new, |t| t.to_string())),
+            ("supersedes", supersedes.clone().unwrap_or_default()),
+            ("body_len", body.len().to_string()),
+            ("global", global.to_string()),
+        ]
+    }
+
+    /// Journal fields for `mem query`.
+    fn mem_query_args(&self) -> JournalArgs {
+        let CommandRequest::MemQuery {
+            terms,
+            kind,
+            scope,
+            limit,
+            include_superseded,
+            global,
+            ..
+        } = self
+        else {
+            unreachable!("mem_query_args called with a non-query request")
+        };
+        vec![
+            ("terms", terms.join(" ")),
+            ("kind", kind.clone().unwrap_or_default()),
+            ("scope", scope.clone().unwrap_or_default()),
+            ("limit", limit.to_string()),
+            ("include_superseded", include_superseded.to_string()),
+            ("global", global.to_string()),
+        ]
+    }
 }
 
-/// Rendered command outcome: everything the caller prints, plus the exit code.
+/// Rendered command outcome: everything the caller prints, plus the exit code
+/// and the arm's displayed-item count (the MCP KPI footer's structural input).
 pub struct ExecutionResult {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+    /// Displayed result items the arm reported; `None` on the error path and
+    /// for arms without an item count.
+    pub shown: Option<usize>,
 }
 
 /// Journal one QueryOutput and render it exactly as the CLI prints it:
@@ -558,7 +597,11 @@ pub struct ExecutionResult {
 fn emit(out: crate::query::QueryOutput) -> Result<ArmOut> {
     let ambiguous = out.pointers.iter().filter(|p| !p.tag.is_empty()).count();
     let stderr = crate::query::journal_output(&out, ambiguous);
-    Ok((crate::query::render_output(&out), stderr))
+    Ok(ArmOut {
+        shown: Some(out.shown),
+        stdout: crate::query::render_output(&out),
+        stderr,
+    })
 }
 
 /// Join report lines into stdout bytes (one trailing newline per line).
@@ -587,14 +630,14 @@ pub fn execute(
     let outcome = run(req, root_arg, surface);
     let latency_us = started.elapsed().as_micros() as u64;
     let root = crate::walk::discover_root(root_arg).ok();
-    let (stdout, stderr, exit_code) = match outcome {
-        Ok((stdout, stderr)) => {
+    let (stdout, stderr, exit_code, shown) = match outcome {
+        Ok(arm) => {
             if journal {
                 // record_result for the query shapes ran inside the arm; the
                 // exit is 0 here.
                 crate::journal::finalize(root.as_deref(), 0, latency_us);
             }
-            (stdout, stderr, 0)
+            (arm.stdout, arm.stderr, 0, arm.shown)
         }
         Err(e) => {
             let mut stdout = String::new();
@@ -611,19 +654,48 @@ pub fn execute(
             if journal {
                 crate::journal::finalize(root.as_deref(), e.exit_code(), latency_us);
             }
-            (stdout, stderr, e.exit_code())
+            (stdout, stderr, e.exit_code(), None)
         }
     };
     ExecutionResult {
         stdout,
         stderr,
         exit_code,
+        shown,
     }
 }
 
 /// Arm output: stdout bytes plus any stderr note the arm itself produced
-/// (query cap notices are emitted here; diagnostics come from the error path).
-type ArmOut = (String, String);
+/// (query cap notices are emitted here; diagnostics come from the error path),
+/// and the displayed-item count the arm journaled. The MCP KPI footer reads
+/// `shown` structurally instead of re-parsing rendered stdout; arms without
+/// an item count (diagnostics, memory commands) carry `None`.
+pub struct ArmOut {
+    pub stdout: String,
+    pub stderr: String,
+    pub shown: Option<usize>,
+}
+
+impl ArmOut {
+    /// Arm output with no item count.
+    fn plain(stdout: String, stderr: String) -> ArmOut {
+        ArmOut {
+            stdout,
+            stderr,
+            shown: None,
+        }
+    }
+
+    /// Arm output from a line-rendered query: joined stdout lines, the
+    /// stderr cap notice, and the shown count.
+    fn from_line_query(out: crate::query::LineQuery) -> ArmOut {
+        ArmOut {
+            shown: Some(out.shown),
+            stdout: join_lines(out.lines),
+            stderr: out.stderr,
+        }
+    }
+}
 
 fn run(req: &CommandRequest, root_arg: Option<&Path>, surface: Surface) -> Result<ArmOut> {
     match req.family() {
@@ -640,8 +712,13 @@ fn run_diag(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
             force,
             max_parse_error_rate,
         } => {
-            let (line, stderr) = crate::build::run_build(root_arg, *force, *max_parse_error_rate)?;
-            Ok((format!("{line}\n"), stderr))
+            let (line, stderr, shown) =
+                crate::build::run_build(root_arg, *force, *max_parse_error_rate)?;
+            Ok(ArmOut {
+                stdout: format!("{line}\n"),
+                stderr,
+                shown: Some(shown),
+            })
         }
         CommandRequest::Doctor { invalidate } => run_doctor(root_arg, *invalidate),
         CommandRequest::Usage { quality } => run_usage(root_arg, *quality),
@@ -667,15 +744,13 @@ fn run_graph_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmO
     };
     match req {
         CommandRequest::Callers { .. } | CommandRequest::Callees { .. } => run_traversal(req, &ctx),
-        CommandRequest::Context { name, limit } => {
-            let lines = crate::query::context(&ctx, name, *limit)?;
-            Ok((join_lines(lines), String::new()))
-        }
+        CommandRequest::Context { name, limit } => Ok(ArmOut::from_line_query(
+            crate::query::context(&ctx, name, *limit)?,
+        )),
         CommandRequest::Imports { file, limit } => emit(crate::query::imports(&ctx, file, *limit)?),
-        CommandRequest::Path { from, to, depth } => {
-            let lines = crate::query::path(&ctx, from, to, *depth)?;
-            Ok((join_lines(lines), String::new()))
-        }
+        CommandRequest::Path { from, to, depth } => Ok(ArmOut::from_line_query(
+            crate::query::path(&ctx, from, to, *depth)?,
+        )),
         CommandRequest::Impact { .. } => run_impact(req, &ctx),
         _ => unreachable!("run_graph_query called with a non-graph request"),
     }
@@ -743,7 +818,11 @@ fn run_analysis_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<A
         CommandRequest::Stats { path } => {
             let line = crate::insights::stats(&ctx, path.as_deref())?;
             crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
-            Ok((format!("{line}\n"), String::new()))
+            Ok(ArmOut {
+                stdout: format!("{line}\n"),
+                stderr: String::new(),
+                shown: Some(1),
+            })
         }
         _ => unreachable!("run_analysis_query called with a non-analysis request"),
     }
@@ -753,7 +832,7 @@ fn run_analysis_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<A
 /// stderr half carries the queries' cap notices (the single cap-notice
 /// channel).
 fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Result<ArmOut> {
-    let (lines, stderr) = match req {
+    let out = match req {
         CommandRequest::Unresolved { names, path, limit } => {
             if *names {
                 crate::query::unresolved_names(ctx, path.as_deref(), *limit)?
@@ -775,7 +854,7 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
         CommandRequest::Search { terms, limit } => crate::query::search(ctx, terms, *limit)?,
         _ => unreachable!("run_line_query called with a non-line request"),
     };
-    Ok((join_lines(lines), stderr))
+    Ok(ArmOut::from_line_query(out))
 }
 
 /// Memory-store dispatcher. Each command owns its request shape in a small
@@ -796,14 +875,10 @@ fn run_mem_gc(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
     let CommandRequest::MemGc { global } = req else {
         unreachable!("run_mem_gc called with a non-gc request")
     };
-    let mut conn = if *global {
-        crate::db::open_global_memory_mutation()?
-    } else {
-        open_memory(root_arg, MemoryMode::Mutation)?.1
-    };
+    let mut conn = open_mem_conn(root_arg, *global, MemoryMode::Mutation)?;
     let (expired, superseded, durable) = crate::db::memory_gc(&mut conn, crate::db::unix_now())?;
     crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
-    Ok((
+    Ok(ArmOut::plain(
         format!(
             "{}\nexpired={expired} removed, superseded={superseded} removed, durable={durable} rows\n",
             crate::memory::MEMORY_CAVEAT
@@ -852,7 +927,7 @@ fn run_mem_write(
     let outcome = write_note(root_arg, &note, surface, supersedes.as_deref(), *global)?;
     crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
     let line = outcome_line(&outcome, &note.key);
-    Ok((
+    Ok(ArmOut::plain(
         format!("{}\n{line}\n", crate::memory::MEMORY_CAVEAT),
         String::new(),
     ))
@@ -865,21 +940,17 @@ fn write_note(
     supersedes: Option<&str>,
     global: bool,
 ) -> Result<crate::db::MemWriteOutcome> {
-    let mut conn = if global {
-        crate::db::open_global_memory_store()?
-    } else {
-        open_memory(root_arg, MemoryMode::Store)?.1
-    };
+    let mut conn = open_mem_conn(root_arg, global, MemoryMode::Store)?;
     let session = crate::journal::session_tag();
     let now = crate::db::unix_now();
     crate::db::memory_write(
         &mut conn,
         &crate::db::MemNoteInput {
             key: &note.key,
-            kind: &note.kind,
+            kind: note.kind.as_str(),
             tags: &note.tags,
             refs: &note.refs,
-            scope: &note.scope,
+            scope: note.scope.as_str(),
             session: &session,
             body: &note.body,
             source: surface.as_str(),
@@ -909,6 +980,52 @@ fn outcome_line(outcome: &crate::db::MemWriteOutcome, key: &str) -> String {
     }
 }
 
+/// The query-shaped fields of `MemQuery`, bundled once and passed to the
+/// single-store and merged-store listings (the Data Clump those functions used
+/// to receive as loose parameters; `include_superseded` rides in `filter`).
+struct MemQueryArgs<'a> {
+    terms: &'a [String],
+    all: bool,
+    limit: usize,
+    filter: crate::db::MemFilter<'a>,
+}
+
+/// The local and global memory stores a read command resolves once: `None`
+/// means the store is absent (open errors other than "no store" propagate).
+struct MemoryStores {
+    local: Option<rusqlite::Connection>,
+    global: Option<rusqlite::Connection>,
+}
+
+/// Open the memory stores both `mem query` and `mem get` read: the local store
+/// (only when root discovery and the open succeed) and the global one.
+fn resolve_memory_stores(root_arg: Option<&Path>) -> Result<MemoryStores> {
+    let local = match crate::walk::discover_root(root_arg) {
+        Ok(root) => match crate::db::open_memory_query(&root) {
+            Ok(conn) => Some(conn),
+            Err(AwError::NoMemory(_)) => None,
+            Err(e) => return Err(e),
+        },
+        Err(_) => None,
+    };
+    let global = match crate::db::open_global_memory_query() {
+        Ok(conn) => Some(conn),
+        Err(AwError::NoMemory(_)) => None,
+        Err(e) => return Err(e),
+    };
+    Ok(MemoryStores { local, global })
+}
+
+/// The shared "no memory store anywhere" error: name the local root when
+/// discovery worked, the generic write hint otherwise.
+fn no_memory_store_error(root_arg: Option<&Path>) -> AwError {
+    if let Ok(root) = crate::walk::discover_root(root_arg) {
+        crate::db::no_memory_error(&root)
+    } else {
+        AwError::NoMemory("no memory store found — write with aw mem write".to_string())
+    }
+}
+
 /// Ranked search or the explicit `--all` listing.
 fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
     let CommandRequest::MemQuery {
@@ -923,223 +1040,182 @@ fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut
     else {
         unreachable!("run_mem_query called with a non-query request")
     };
-    let limit = (*limit).clamp(1, crate::memory::MAX_MEM_LIMIT);
     validate_mem_query(terms, *all, *include_superseded)?;
-
-    let filter = crate::db::MemFilter {
-        kind: kind.as_deref(),
-        scope: scope.as_deref(),
-        now: crate::db::unix_now(),
-        include_superseded: *include_superseded,
+    let args = MemQueryArgs {
+        terms,
+        all: *all,
+        limit: (*limit).clamp(1, crate::memory::MAX_MEM_LIMIT),
+        filter: crate::db::MemFilter {
+            kind: kind.as_deref(),
+            scope: scope.as_deref(),
+            now: crate::db::unix_now(),
+            include_superseded: *include_superseded,
+        },
     };
 
     if *global {
         let conn = crate::db::open_global_memory_query()?;
-        return query_single_store(
-            &conn,
-            terms,
-            *all,
-            *include_superseded,
-            limit,
-            &filter,
-            true,
-        );
+        return query_single_store(&conn, &args, true);
     }
 
-    let local_res: Option<(std::path::PathBuf, rusqlite::Connection)> =
-        match crate::walk::discover_root(root_arg) {
-            Ok(root) => match crate::db::open_memory_query(&root) {
-                Ok(conn) => Some((root, conn)),
-                Err(AwError::NoMemory(_)) => None,
-                Err(e) => return Err(e),
-            },
-            Err(_) => None,
-        };
-
-    let global_res: Option<rusqlite::Connection> = match crate::db::open_global_memory_query() {
-        Ok(conn) => Some(conn),
-        Err(AwError::NoMemory(_)) => None,
-        Err(e) => return Err(e),
-    };
-
-    match (local_res, global_res) {
-        (None, None) => {
-            if let Ok(root) = crate::walk::discover_root(root_arg) {
-                Err(crate::db::no_memory_error(&root))
-            } else {
-                Err(AwError::NoMemory(
-                    "no memory store found — write with aw mem write".to_string(),
-                ))
-            }
-        }
-        (Some((_root, local_conn)), None) => query_single_store(
-            &local_conn,
-            terms,
-            *all,
-            *include_superseded,
-            limit,
-            &filter,
-            false,
-        ),
-        (None, Some(global_conn)) => query_single_store(
-            &global_conn,
-            terms,
-            *all,
-            *include_superseded,
-            limit,
-            &filter,
-            true,
-        ),
-        (Some((_root, local_conn)), Some(global_conn)) => query_merged_stores(
-            &local_conn,
-            &global_conn,
-            terms,
-            *all,
-            *include_superseded,
-            limit,
-            &filter,
-        ),
+    let stores = resolve_memory_stores(root_arg)?;
+    match (stores.local, stores.global) {
+        (None, None) => Err(no_memory_store_error(root_arg)),
+        (Some(local), None) => query_single_store(&local, &args, false),
+        (None, Some(global)) => query_single_store(&global, &args, true),
+        (Some(local), Some(global)) => query_merged_stores(&local, &global, &args),
     }
+}
+
+/// The `[superseded]`/`[global]` listing tag for one row, shared by the
+/// single-store and merged listings so the markers cannot drift. Ranked rows
+/// are always current, so the supersession half is empty there.
+fn mem_row_tag(row: &crate::db::MemRow, is_global: bool) -> String {
+    let mut tag = String::new();
+    if row.superseded_by.is_some() {
+        tag.push_str(" [superseded]");
+    }
+    if is_global {
+        tag.push_str(" [global]");
+    }
+    tag
+}
+
+/// The caveated empty error for the `--all` listing, keyed on whether the
+/// listing extended to superseded revisions.
+fn mem_all_empty(include_superseded: bool) -> AwError {
+    mem_empty(if include_superseded {
+        "memory store has no notes"
+    } else {
+        "memory store has no current notes"
+    })
+}
+
+/// The listing tail shared by the single-store and merged queries: the
+/// empty guard with the caller's caveated error, the cap, the per-store
+/// tag, and the journal. Each row carries its store marker (`true` = global).
+fn render_mem_rows(
+    rows: Vec<(crate::db::MemRow, bool)>,
+    args: &MemQueryArgs<'_>,
+    empty_error: impl FnOnce() -> AwError,
+) -> Result<ArmOut> {
+    if rows.is_empty() {
+        return Err(empty_error());
+    }
+    let total = rows.len();
+    let shown = total.min(args.limit);
+    let rendered: Vec<String> = rows
+        .iter()
+        .take(shown)
+        .map(|(row, is_global)| {
+            crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global))
+        })
+        .collect();
+    Ok(render_mem_list(&rendered, total, shown))
+}
+
+/// The ranked tail shared by the single-store and merged listings: fuse,
+/// cap, render with the per-candidate store tag, and journal.
+fn render_ranked(
+    candidates: Vec<crate::memory::Candidate>,
+    args: &MemQueryArgs<'_>,
+) -> Result<ArmOut> {
+    let fused = crate::memory::fuse(candidates);
+    render_mem_rows(
+        fused
+            .into_iter()
+            .map(|cand| (cand.row, cand.is_global))
+            .collect(),
+        args,
+        || mem_empty(&format!("no memory matches '{}'", args.terms.join(" "))),
+    )
+}
+
+/// The `--all` listing tail shared by the single-store and merged queries:
+/// the caveated empty error keyed on superseded revisions.
+fn render_all_rows(
+    rows: Vec<(crate::db::MemRow, bool)>,
+    args: &MemQueryArgs<'_>,
+) -> Result<ArmOut> {
+    render_mem_rows(rows, args, || mem_all_empty(args.filter.include_superseded))
 }
 
 fn query_single_store(
     conn: &rusqlite::Connection,
-    terms: &[String],
-    all: bool,
-    include_superseded: bool,
-    limit: usize,
-    filter: &crate::db::MemFilter<'_>,
+    args: &MemQueryArgs<'_>,
     is_global: bool,
 ) -> Result<ArmOut> {
-    let (rendered, total, shown): (Vec<String>, usize, usize) = if all {
-        let rows = crate::db::memory_current_rows(conn, filter)?;
-        if rows.is_empty() {
-            return Err(mem_empty(if include_superseded {
-                "memory store has no notes"
-            } else {
-                "memory store has no current notes"
-            }));
+    if args.all {
+        let rows = crate::db::memory_current_rows(conn, &args.filter)?;
+        return render_all_rows(rows.into_iter().map(|row| (row, is_global)).collect(), args);
+    }
+    let joined = args.terms.join(" ");
+    let candidates = mem_ranked(conn, &joined, &args.filter, is_global)?;
+    render_ranked(candidates, args)
+}
+
+/// Local-first `--all` merge of the two stores: local current rows, then
+/// global rows whose key the local store does not carry, newest first with
+/// the key as tie-breaker. Each row keeps its store marker.
+fn merge_all_rows(
+    local_conn: &rusqlite::Connection,
+    global_conn: &rusqlite::Connection,
+    filter: &crate::db::MemFilter<'_>,
+) -> Result<Vec<(crate::db::MemRow, bool)>> {
+    let local_rows = crate::db::memory_current_rows(local_conn, filter)?;
+    let global_rows = crate::db::memory_current_rows(global_conn, filter)?;
+    let mut seen_keys = std::collections::HashSet::new();
+    let mut combined = Vec::new();
+    for row in local_rows {
+        seen_keys.insert(row.key.clone());
+        combined.push((row, false));
+    }
+    for row in global_rows {
+        if !seen_keys.contains(&row.key) {
+            combined.push((row, true));
         }
-        let total = rows.len();
-        let shown = total.min(limit);
-        let rendered: Vec<String> = rows
-            .iter()
-            .take(shown)
-            .map(|row| {
-                let mut tag = String::new();
-                if row.superseded_by.is_some() {
-                    tag.push_str(" [superseded]");
-                }
-                if is_global {
-                    tag.push_str(" [global]");
-                }
-                crate::memory::render_row_tagged(row, &tag)
-            })
-            .collect();
-        (rendered, total, shown)
-    } else {
-        let joined = terms.join(" ");
-        let candidates = mem_ranked(conn, &joined, filter, is_global)?;
-        if candidates.is_empty() {
-            return Err(mem_empty(&format!("no memory matches '{joined}'")));
-        }
-        let fused = crate::memory::fuse(candidates);
-        let total = fused.len();
-        let shown = total.min(limit);
-        let tag = if is_global { " [global]" } else { "" };
-        let rendered: Vec<String> = fused
-            .iter()
-            .take(shown)
-            .map(|cand| crate::memory::render_row_tagged(&cand.row, tag))
-            .collect();
-        (rendered, total, shown)
-    };
-    Ok(render_mem_list(&rendered, total, shown))
+    }
+    combined.sort_by(|(a, _), (b, _)| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    Ok(combined)
 }
 
 fn query_merged_stores(
     local_conn: &rusqlite::Connection,
     global_conn: &rusqlite::Connection,
-    terms: &[String],
-    all: bool,
-    include_superseded: bool,
-    limit: usize,
-    filter: &crate::db::MemFilter<'_>,
+    args: &MemQueryArgs<'_>,
 ) -> Result<ArmOut> {
-    let (rendered, total, shown): (Vec<String>, usize, usize) = if all {
-        let local_rows = crate::db::memory_current_rows(local_conn, filter)?;
-        let global_rows = crate::db::memory_current_rows(global_conn, filter)?;
-        let mut seen_keys = std::collections::HashSet::new();
-        let mut combined = Vec::new();
-        for row in local_rows {
-            seen_keys.insert(row.key.clone());
-            combined.push((row, false));
-        }
-        for row in global_rows {
-            if !seen_keys.contains(&row.key) {
-                combined.push((row, true));
-            }
-        }
-        if combined.is_empty() {
-            return Err(mem_empty(if include_superseded {
-                "memory store has no notes"
-            } else {
-                "memory store has no current notes"
-            }));
-        }
-        combined.sort_by(|(a, _), (b, _)| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.key.cmp(&b.key))
-        });
-        let total = combined.len();
-        let shown = total.min(limit);
-        let rendered: Vec<String> = combined
-            .iter()
-            .take(shown)
-            .map(|(row, is_global)| {
-                let mut tag = String::new();
-                if row.superseded_by.is_some() {
-                    tag.push_str(" [superseded]");
-                }
-                if *is_global {
-                    tag.push_str(" [global]");
-                }
-                crate::memory::render_row_tagged(row, &tag)
-            })
+    if args.all {
+        let combined = merge_all_rows(local_conn, global_conn, &args.filter)?;
+        return render_all_rows(combined, args);
+    }
+    let joined = args.terms.join(" ");
+    let mut combined = mem_ranked(local_conn, &joined, &args.filter, false)?;
+    let seen_keys: std::collections::HashSet<String> =
+        combined.iter().map(|c| c.row.key.clone()).collect();
+    let global = mem_ranked(global_conn, &joined, &args.filter, true)?;
+    // One batched existence probe replaces the per-candidate `memory_get`
+    // (N+1 with a revision COUNT per key): only keys the local ranking has
+    // not already surfaced need the shadowing check.
+    let probe: Vec<String> = global
+        .iter()
+        .map(|c| c.row.key.clone())
+        .filter(|key| !seen_keys.contains(key))
+        .collect();
+    let local_keys: std::collections::HashSet<String> =
+        crate::db::memory_current_keys(local_conn, &probe)?
+            .into_iter()
             .collect();
-        (rendered, total, shown)
-    } else {
-        let joined = terms.join(" ");
-        let local_candidates = mem_ranked(local_conn, &joined, filter, false)?;
-        let global_candidates = mem_ranked(global_conn, &joined, filter, true)?;
-        let seen_keys: std::collections::HashSet<String> =
-            local_candidates.iter().map(|c| c.row.key.clone()).collect();
-        let mut combined = local_candidates;
-        for c in global_candidates {
-            let shadowed = seen_keys.contains(&c.row.key)
-                || crate::db::memory_get(local_conn, &c.row.key)?.is_some();
-            if !shadowed {
-                combined.push(c);
-            }
+    for c in global {
+        if seen_keys.contains(&c.row.key) || local_keys.contains(&c.row.key) {
+            continue;
         }
-        if combined.is_empty() {
-            return Err(mem_empty(&format!("no memory matches '{joined}'")));
-        }
-        let fused = crate::memory::fuse(combined);
-        let total = fused.len();
-        let shown = total.min(limit);
-        let rendered: Vec<String> = fused
-            .iter()
-            .take(shown)
-            .map(|cand| {
-                let tag = if cand.is_global { " [global]" } else { "" };
-                crate::memory::render_row_tagged(&cand.row, tag)
-            })
-            .collect();
-        (rendered, total, shown)
-    };
-    Ok(render_mem_list(&rendered, total, shown))
+        combined.push(c);
+    }
+    render_ranked(combined, args)
 }
 
 /// Reject the flag combinations the two query modes cannot serve.
@@ -1175,11 +1251,26 @@ fn render_mem_list(rendered: &[String], total: usize, shown: usize) -> ArmOut {
         stdout.push('\n');
     }
     if total > shown {
-        stdout.push_str(&crate::memory::render_showing(shown, total));
+        stdout.push_str(&crate::query::cap_line(shown, total, "").unwrap_or_default());
         stdout.push('\n');
     }
     crate::journal::record_result(crate::journal::OutcomeCounts::of(shown, total), false, 0);
-    (stdout, crate::query::cap_stderr(shown, total))
+    ArmOut::plain(stdout, crate::query::cap_stderr(shown, total))
+}
+
+/// One mem get hit: journal, the caveat, the tagged row, and the revision
+/// count (`tag` is the store marker, "" for local and " [global]" for global).
+fn render_mem_hit(row: &crate::db::MemRow, tag: &str, revs: i64) -> ArmOut {
+    crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
+    ArmOut::plain(
+        format!(
+            "{}\n{}\nrevs: {}\n",
+            crate::memory::MEMORY_CAVEAT,
+            crate::memory::render_row_tagged(row, tag),
+            revs
+        ),
+        String::new(),
+    )
 }
 
 /// Current row for one exact key plus its revision count.
@@ -1191,78 +1282,24 @@ fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> 
         let conn = crate::db::open_global_memory_query()?;
         return match crate::db::memory_get(&conn, key)? {
             None => Err(mem_unknown_key(key)),
-            Some((row, revs)) => {
-                crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
-                Ok((
-                    format!(
-                        "{}\n{}\nrevs: {}\n",
-                        crate::memory::MEMORY_CAVEAT,
-                        crate::memory::render_row_tagged(&row, " [global]"),
-                        revs
-                    ),
-                    String::new(),
-                ))
-            }
+            Some((row, revs)) => Ok(render_mem_hit(&row, " [global]", revs)),
         };
     }
 
-    let mut local_store_existed = false;
-    let local_res = match crate::walk::discover_root(root_arg) {
-        Ok(root) => match crate::db::open_memory_query(&root) {
-            Ok(conn) => {
-                local_store_existed = true;
-                crate::db::memory_get(&conn, key)?
-            }
-            Err(AwError::NoMemory(_)) => None,
-            Err(e) => return Err(e),
-        },
-        Err(_) => None,
-    };
-
-    if let Some((row, revs)) = local_res {
-        crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
-        return Ok((
-            format!(
-                "{}\n{}\nrevs: {}\n",
-                crate::memory::MEMORY_CAVEAT,
-                crate::memory::render_row_tagged(&row, ""),
-                revs
-            ),
-            String::new(),
-        ));
+    let stores = resolve_memory_stores(root_arg)?;
+    if let Some(local) = &stores.local {
+        if let Some((row, revs)) = crate::db::memory_get(local, key)? {
+            return Ok(render_mem_hit(&row, "", revs));
+        }
+    }
+    if let Some(global) = &stores.global {
+        if let Some((row, revs)) = crate::db::memory_get(global, key)? {
+            return Ok(render_mem_hit(&row, " [global]", revs));
+        }
     }
 
-    let mut global_store_existed = false;
-    let global_res = match crate::db::open_global_memory_query() {
-        Ok(conn) => {
-            global_store_existed = true;
-            crate::db::memory_get(&conn, key)?
-        }
-        Err(AwError::NoMemory(_)) => None,
-        Err(e) => return Err(e),
-    };
-
-    if let Some((row, revs)) = global_res {
-        crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
-        return Ok((
-            format!(
-                "{}\n{}\nrevs: {}\n",
-                crate::memory::MEMORY_CAVEAT,
-                crate::memory::render_row_tagged(&row, " [global]"),
-                revs
-            ),
-            String::new(),
-        ));
-    }
-
-    if !local_store_existed && !global_store_existed {
-        if let Ok(root) = crate::walk::discover_root(root_arg) {
-            return Err(crate::db::no_memory_error(&root));
-        } else {
-            return Err(AwError::NoMemory(
-                "no memory store found — write with aw mem write".to_string(),
-            ));
-        }
+    if stores.local.is_none() && stores.global.is_none() {
+        return Err(no_memory_store_error(root_arg));
     }
     Err(mem_unknown_key(key))
 }
@@ -1272,11 +1309,7 @@ fn run_mem_delete(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOu
     let CommandRequest::MemDelete { key, global } = req else {
         unreachable!("run_mem_delete called with a non-delete request")
     };
-    let mut conn = if *global {
-        crate::db::open_global_memory_mutation()?
-    } else {
-        open_memory(root_arg, MemoryMode::Mutation)?.1
-    };
+    let mut conn = open_mem_conn(root_arg, *global, MemoryMode::Mutation)?;
     match crate::db::memory_delete(&mut conn, key)? {
         None => Err(mem_unknown_key(key)),
         Some(revs) => {
@@ -1285,7 +1318,7 @@ fn run_mem_delete(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOu
                 false,
                 0,
             );
-            Ok((
+            Ok(ArmOut::plain(
                 format!(
                     "{}\ndeleted '{key}' revs={revs}\n",
                     crate::memory::MEMORY_CAVEAT
@@ -1301,11 +1334,7 @@ fn run_mem_export(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOu
     let CommandRequest::MemExport { limit, global } = req else {
         unreachable!("run_mem_export called with a non-export request")
     };
-    let conn = if *global {
-        crate::db::open_global_memory_query()?
-    } else {
-        open_memory(root_arg, MemoryMode::Query)?.1
-    };
+    let conn = open_mem_conn(root_arg, *global, MemoryMode::Query)?;
     let rows = crate::db::memory_export_rows(&conn, *limit)?;
     if rows.is_empty() {
         return Err(AwError::NoResults(
@@ -1333,7 +1362,10 @@ fn run_mem_export(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOu
         stdout.push_str(&line.to_string());
         stdout.push('\n');
     }
-    Ok((stdout, format!("{}\n", crate::memory::MEMORY_CAVEAT)))
+    Ok(ArmOut::plain(
+        stdout,
+        format!("{}\n", crate::memory::MEMORY_CAVEAT),
+    ))
 }
 
 fn run_doctor(root_arg: Option<&Path>, invalidate: bool) -> Result<ArmOut> {
@@ -1343,13 +1375,13 @@ fn run_doctor(root_arg: Option<&Path>, invalidate: bool) -> Result<ArmOut> {
     } else {
         crate::doctor::report(&root)?
     };
-    Ok((join_lines(lines), String::new()))
+    Ok(ArmOut::plain(join_lines(lines), String::new()))
 }
 
 fn run_usage(root_arg: Option<&Path>, quality: bool) -> Result<ArmOut> {
     let root = crate::walk::discover_root(root_arg)?;
     let lines = crate::journal::summary(&root, quality)?;
-    Ok((join_lines(lines), String::new()))
+    Ok(ArmOut::plain(join_lines(lines), String::new()))
 }
 
 /// Caveated empty-result error shared by the mem read commands (stdout keeps
@@ -1454,19 +1486,33 @@ enum MemoryMode {
     Store,
 }
 
-/// Resolve the repo root and open the memory store in `mode`, mirroring
-/// `open_query` for the mem commands.
-fn open_memory(
-    root_arg: Option<&Path>,
-    mode: MemoryMode,
-) -> Result<(std::path::PathBuf, rusqlite::Connection)> {
+/// Resolve the repo root and open the memory store in `mode` for the mem
+/// commands (the same root gate as `open_query`).
+fn open_memory(root_arg: Option<&Path>, mode: MemoryMode) -> Result<rusqlite::Connection> {
     let root = crate::walk::discover_root(root_arg)?;
-    let conn = match mode {
-        MemoryMode::Query => crate::db::open_memory_query(&root)?,
-        MemoryMode::Mutation => crate::db::open_memory_mutation(&root)?,
-        MemoryMode::Store => crate::db::open_memory_store(&root)?,
-    };
-    Ok((root, conn))
+    match mode {
+        MemoryMode::Query => crate::db::open_memory_query(&root),
+        MemoryMode::Mutation => crate::db::open_memory_mutation(&root),
+        MemoryMode::Store => crate::db::open_memory_store(&root),
+    }
+}
+
+/// The single mem-command connection gate: `global` routes to the home-dir
+/// store, otherwise the project store under `root_arg`, both in `mode`.
+fn open_mem_conn(
+    root_arg: Option<&Path>,
+    global: bool,
+    mode: MemoryMode,
+) -> Result<rusqlite::Connection> {
+    if global {
+        match mode {
+            MemoryMode::Query => crate::db::open_global_memory_query(),
+            MemoryMode::Mutation => crate::db::open_global_memory_mutation(),
+            MemoryMode::Store => crate::db::open_global_memory_store(),
+        }
+    } else {
+        open_memory(root_arg, mode)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1960,6 +2006,12 @@ impl ArgReader<'_> {
         Ok(x)
     }
 
+    /// Read a StrArray argument, executing the declared `maxItems` bound
+    /// (MAX_STR_ARRAY_ITEMS, the same constant the JSON Schema renderer
+    /// emits) here at the MCP boundary like every other declared bound:
+    /// arrays above the cap are truncated to it, the clamp policy `n_opt_spec`
+    /// applies to declared Int maxima. Every element is type-checked before
+    /// the cap truncates.
     fn str_array(&self, name: &str) -> Result<Vec<String>> {
         let Some(v) = self.0.get(name).filter(|v| !v.is_null()) else {
             return Ok(Vec::new());
@@ -1967,13 +2019,14 @@ impl ArgReader<'_> {
         let arr = v.as_array().ok_or_else(|| {
             AwError::Usage(format!("argument '{name}' must be an array of strings"))
         })?;
-        let mut out = Vec::with_capacity(arr.len());
+        let mut out = Vec::with_capacity(arr.len().min(MAX_STR_ARRAY_ITEMS));
         for item in arr {
             let s = item.as_str().ok_or_else(|| {
                 AwError::Usage(format!("argument '{name}' elements must be strings"))
             })?;
             out.push(s.to_string());
         }
+        out.truncate(MAX_STR_ARRAY_ITEMS);
         Ok(out)
     }
 }
@@ -2003,7 +2056,11 @@ fn from_tool_args_diag(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> 
     Ok(match tool {
         "build" => CommandRequest::Build {
             force: a.b("force"),
-            max_parse_error_rate: a.f_spec(tool, "max_parse_error_rate", 0.05)?,
+            max_parse_error_rate: a.f_spec(
+                tool,
+                "max_parse_error_rate",
+                crate::query::DEFAULT_MAX_PARSE_ERROR_RATE,
+            )?,
         },
         "usage" => CommandRequest::Usage {
             quality: a.0.get("quality").and_then(|v| v.as_bool()).unwrap_or(true),
@@ -2016,16 +2073,16 @@ fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest>
         "callers" => CommandRequest::Callers {
             name: a.req("name")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-            depth: a.n_spec(tool, "depth", 1)?,
+            depth: a.n_spec(tool, "depth", crate::query::DEFAULT_DEPTH)?,
         },
         "callees" => CommandRequest::Callees {
             name: a.req("name")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-            depth: a.n_spec(tool, "depth", 1)?,
+            depth: a.n_spec(tool, "depth", crate::query::DEFAULT_DEPTH)?,
         },
         "context" => CommandRequest::Context {
             name: a.req("name")?,
-            limit: a.n_spec(tool, "limit", 10)?,
+            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_CONTEXT_LIMIT)?,
         },
         "imports" => CommandRequest::Imports {
             file: a.req("file")?,
@@ -2034,14 +2091,15 @@ fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest>
         "path" => CommandRequest::Path {
             from: a.req("from")?,
             to: a.req("to")?,
-            depth: a.n_spec(tool, "depth", 10)?,
+            depth: a.n_spec(tool, "depth", crate::query::DEFAULT_PATH_DEPTH)?,
         },
         "impact" => CommandRequest::Impact {
             file: a.req("file")?,
             sites: a.b("sites"),
-            depth: a.n_spec(tool, "depth", 1)?,
+            depth: a.n_spec(tool, "depth", crate::query::DEFAULT_DEPTH)?,
             edges: crate::query::parse_edge_kinds(
-                &a.s("edges").unwrap_or_else(|| "calls".to_string()),
+                &a.s("edges")
+                    .unwrap_or_else(|| crate::query::DEFAULT_IMPACT_EDGES.to_string()),
             )?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
         },
@@ -2223,6 +2281,22 @@ mod tests {
             assert!(
                 TOOL_SPECS.iter().any(|t| t.name == name),
                 "no tool spec for '{name}'"
+            );
+        }
+    }
+
+    #[test]
+    fn estimated_tokens_saved_covers_every_journaled_tool() {
+        // Every journaled request shape must land in a priced arm or in the
+        // explicit UNPRICED_TOOLS list — never in the silent zero fallback.
+        for req in all_requests() {
+            let name = req.tool_name();
+            if crate::journal::UNPRICED_TOOLS.contains(&name) {
+                continue;
+            }
+            assert!(
+                crate::journal::estimated_tokens_saved(name, 1, 1, 1) > 0,
+                "journaled tool '{name}' is neither priced nor in UNPRICED_TOOLS"
             );
         }
     }
