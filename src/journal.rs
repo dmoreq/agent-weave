@@ -142,10 +142,13 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
     };
-    let Some(root) = root else {
-        return;
-    };
     let ts = crate::db::unix_now();
+    let repo_path = root.map(|r| r.to_string_lossy().into_owned());
+    let repo_name = root
+        .and_then(|r| r.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
+    let is_worktree = root.map(|r| r.join(".git").is_file()).unwrap_or(false);
+
     let line = serde_json::json!({
         "ts": ts,
         "surface": pending.surface,
@@ -161,8 +164,27 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "aw_version": env!("CARGO_PKG_VERSION"),
         "session": pending.session,
         "arm": pending.arm,
+        "repo": repo_path,
+        "repo_name": repo_name,
+        "worktree": is_worktree,
     });
-    append_line(&usage_log_path(root), &format!("{line}\n"));
+    let line_str = format!("{line}\n");
+
+    if let Some(root) = root {
+        append_line(&usage_log_path(root), &line_str);
+    }
+    if let Ok(global_log) = crate::db::global_usage_log_path() {
+        if let Some(parent) = global_log.parent() {
+            let should_append = if std::env::var("AW_GLOBAL_DIR").is_ok() {
+                parent.is_dir()
+            } else {
+                true
+            };
+            if should_append {
+                append_line(&global_log, &line_str);
+            }
+        }
+    }
 }
 
 fn append_line(path: &Path, line: &str) {
@@ -213,6 +235,11 @@ fn recreate_journal(path: &Path, aw_created_here: bool) {
     if !aw_created_here {
         return;
     }
+    if let Ok(global_dir) = crate::db::global_aw_dir() {
+        if path.starts_with(&global_dir) {
+            return;
+        }
+    }
     let Some(root) = path.parent().and_then(Path::parent) else {
         return;
     };
@@ -257,6 +284,10 @@ struct UsageFields {
     stale: bool,
     ambiguous: i64,
     latency_us: Option<i64>,
+    ts: Option<i64>,
+    repo: Option<String>,
+    repo_name: Option<String>,
+    worktree: bool,
 }
 
 fn parse_usage_line(line: &str) -> Option<UsageFields> {
@@ -270,7 +301,31 @@ fn parse_usage_line(line: &str) -> Option<UsageFields> {
         stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
         ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
         latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
+        ts: v.get("ts").and_then(|x| x.as_i64()),
+        repo: v
+            .get("repo")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        repo_name: v
+            .get("repo_name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        worktree: v.get("worktree").and_then(|x| x.as_bool()).unwrap_or(false),
     })
+}
+
+#[derive(Default)]
+struct RepoAgg {
+    calls: usize,
+    errors: usize,
+    worktree: bool,
+}
+
+struct ErrorRecord {
+    ts: Option<i64>,
+    tool: String,
+    repo_name: Option<String>,
+    exit_code: i64,
 }
 
 #[derive(Default)]
@@ -297,15 +352,26 @@ pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> 
     Ok(render_summary(&aggs, quality))
 }
 
-/// Read both journal generations, newest last (`""` is current, `.1` rotated).
-fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
+/// Summarize machine-wide global journal (~/.aw/usage.log): cross-repo calls,
+/// per-repository breakdown, error rate, token savings, and recent errors.
+pub fn global_summary(quality: bool) -> crate::error::Result<Vec<String>> {
+    let lines = load_global_usage_lines()?;
+    let (aggs, repo_aggs, recent_errors) = aggregate_global_usage(&lines);
+    Ok(render_global_summary(
+        &aggs,
+        &repo_aggs,
+        &recent_errors,
+        quality,
+    ))
+}
+
+fn load_usage_lines_from_path(base_log: &Path) -> crate::error::Result<String> {
     let mut lines = String::new();
     for gen in [".1", ""] {
-        let path = usage_log_path(root);
         let path = if gen.is_empty() {
-            path
+            base_log.to_path_buf()
         } else {
-            let mut p = path.into_os_string();
+            let mut p = base_log.to_path_buf().into_os_string();
             p.push(gen);
             PathBuf::from(p)
         };
@@ -319,6 +385,17 @@ fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
         ));
     }
     Ok(lines)
+}
+
+/// Read both journal generations, newest last (`""` is current, `.1` rotated).
+fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
+    load_usage_lines_from_path(&usage_log_path(root))
+}
+
+/// Read both global journal generations from ~/.aw/usage.log.
+fn load_global_usage_lines() -> crate::error::Result<String> {
+    let path = crate::db::global_usage_log_path()?;
+    load_usage_lines_from_path(&path)
 }
 
 /// Fold every parsed line into one `ToolAgg` per tool.
@@ -402,6 +479,173 @@ fn render_summary(
             .map(|(tool, agg)| tool_row(tool, agg, quality)),
     );
     out
+}
+
+fn aggregate_global_usage(
+    lines: &str,
+) -> (
+    std::collections::BTreeMap<String, ToolAgg>,
+    std::collections::BTreeMap<String, RepoAgg>,
+    Vec<ErrorRecord>,
+) {
+    let mut aggs: std::collections::BTreeMap<String, ToolAgg> = Default::default();
+    let mut repo_aggs: std::collections::BTreeMap<String, RepoAgg> = Default::default();
+    let mut errors: Vec<ErrorRecord> = Vec::new();
+
+    for line in lines.lines().filter(|l| !l.trim().is_empty()) {
+        let Some(fields) = parse_usage_line(line) else {
+            continue;
+        };
+        let agg = aggs.entry(fields.tool.clone()).or_default();
+        agg.calls += 1;
+        if fields.exit_code != 0 {
+            agg.errors += 1;
+        }
+        if fields.result_count == 0 {
+            agg.empty += 1;
+            if fields.exit_code == 0 {
+                agg.empty_ok += 1;
+            } else {
+                agg.empty_error += 1;
+            }
+        }
+        if fields.total > fields.shown {
+            agg.capped += 1;
+        }
+        if fields.stale {
+            agg.stale += 1;
+        }
+        agg.ambiguous += fields.ambiguous.max(0) as usize;
+        agg.total_shown += fields.shown.max(0) as usize;
+        agg.total_results += fields.result_count.max(0) as usize;
+        if let Some(us) = fields.latency_us {
+            agg.latencies.push(us.max(0) as u64);
+        }
+
+        let repo_key = fields
+            .repo_name
+            .clone()
+            .or_else(|| fields.repo.clone())
+            .unwrap_or_else(|| "global".to_string());
+        let r_agg = repo_aggs.entry(repo_key).or_default();
+        r_agg.calls += 1;
+        if fields.exit_code != 0 {
+            r_agg.errors += 1;
+            errors.push(ErrorRecord {
+                ts: fields.ts,
+                tool: fields.tool,
+                repo_name: fields.repo_name,
+                exit_code: fields.exit_code,
+            });
+        }
+        if fields.worktree {
+            r_agg.worktree = true;
+        }
+    }
+    errors.reverse();
+    (aggs, repo_aggs, errors)
+}
+
+fn render_global_summary(
+    aggs: &std::collections::BTreeMap<String, ToolAgg>,
+    repo_aggs: &std::collections::BTreeMap<String, RepoAgg>,
+    recent_errors: &[ErrorRecord],
+    quality: bool,
+) -> Vec<String> {
+    let total: usize = aggs.values().map(|a| a.calls).sum();
+    let repo_count = repo_aggs.len();
+    let mut out = vec![format!(
+        "aw global usage: {total} journaled calls across {repo_count} repositories"
+    )];
+
+    let mut all_lat: Vec<u64> = aggs
+        .values()
+        .flat_map(|a| a.latencies.iter().copied())
+        .collect();
+    all_lat.sort_unstable();
+    let p50 = percentile(&all_lat, 0.5);
+    let p95 = percentile(&all_lat, 0.95);
+
+    let total_errors: usize = aggs.values().map(|a| a.errors).sum();
+    let total_stale: usize = aggs.values().map(|a| a.stale).sum();
+    let reliability_pct = if total > 0 {
+        100.0 * (total.saturating_sub(total_errors) as f64) / (total as f64)
+    } else {
+        100.0
+    };
+
+    let (saved_tokens, reuse_hits) = calculate_telemetry_totals(aggs);
+    let dollars = (saved_tokens as f64) * PRICE_PER_TOKEN;
+    let saved_tokens_formatted = format_number_with_commas(saved_tokens);
+
+    out.push(format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"));
+    out.push(format!(
+        "  ├─ Reliability: {reliability_pct:.1}% ok ({total_errors} errors across all repos, {total_stale} stale reads)"
+    ));
+    out.push(format!(
+        "  ├─ Estimated Token Savings: ~{saved_tokens_formatted} tokens (~${dollars:.2})"
+    ));
+    out.push(format!(
+        "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
+    ));
+
+    if !repo_aggs.is_empty() {
+        out.push("  ├─ Active Repositories:".to_string());
+        let mut repos: Vec<(&String, &RepoAgg)> = repo_aggs.iter().collect();
+        repos.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
+        for (repo_name, r_agg) in repos {
+            let rel = if r_agg.calls > 0 {
+                100.0 * (r_agg.calls.saturating_sub(r_agg.errors) as f64) / (r_agg.calls as f64)
+            } else {
+                100.0
+            };
+            let wt_tag = if r_agg.worktree { " [worktree]" } else { "" };
+            out.push(format!(
+                "  │   ├─ {repo_name}{wt_tag}: {} calls ({rel:.1}% ok, {} errors)",
+                r_agg.calls, r_agg.errors
+            ));
+        }
+    }
+
+    out.push("  ├─ Tool Breakdown:".to_string());
+    let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
+    rows.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
+    out.extend(
+        rows.into_iter()
+            .map(|(tool, agg)| tool_row(tool, agg, quality)),
+    );
+
+    let now = crate::db::unix_now();
+    if recent_errors.is_empty() {
+        out.push("  └─ Recent Errors: None (100% clean)".to_string());
+    } else {
+        out.push("  └─ Recent Errors (latest first):".to_string());
+        for err in recent_errors.iter().take(5) {
+            let repo_label = err.repo_name.as_deref().unwrap_or("unknown");
+            let age_str = err
+                .ts
+                .map(|t| format_age_secs(now.saturating_sub(t)))
+                .unwrap_or_else(|| "-".to_string());
+            out.push(format!(
+                "      • [{age_str}] {} in {repo_label} -> exit {}",
+                err.tool, err.exit_code
+            ));
+        }
+    }
+
+    out
+}
+
+fn format_age_secs(diff: i64) -> String {
+    if diff < 60 {
+        format!("{diff}s ago")
+    } else if diff < 3600 {
+        format!("{}m ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h ago", diff / 3600)
+    } else {
+        format!("{}d ago", diff / 86400)
+    }
 }
 
 /// Informational USD-per-token coefficient for the `~$` savings estimate: a

@@ -5499,3 +5499,85 @@ fn global_memory_expired_local_does_not_shadow_global() {
     assert!(stdout.contains(" [global]"));
     assert!(stdout.contains("durable global knowledge"));
 }
+
+#[test]
+fn global_usage_dual_writes_and_summarizes_cross_repo() {
+    let repo1 = temp_repo("global-usage-repo1");
+    let repo2 = temp_repo("global-usage-repo2");
+    let global_dir = temp_repo("global-usage-store");
+
+    write(&repo1, "a.py", "def func_a(): pass\n");
+    write(&repo2, "b.py", "def func_b(): pass\n");
+
+    // Run build and search in repo1 with AW_GLOBAL_DIR
+    aw(&repo1)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .env_remove("AW_NO_JOURNAL")
+        .args(["build"])
+        .output()
+        .unwrap();
+    aw(&repo1)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .env_remove("AW_NO_JOURNAL")
+        .args(["search", "func_a"])
+        .output()
+        .unwrap();
+
+    // Run build in repo2 with AW_GLOBAL_DIR
+    aw(&repo2)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .env_remove("AW_NO_JOURNAL")
+        .args(["build"])
+        .output()
+        .unwrap();
+
+    // 1. Verify local journals exist and are isolated
+    assert!(repo1.join(".aw/usage.log").exists());
+    assert!(repo2.join(".aw/usage.log").exists());
+    let log1 = fs::read_to_string(repo1.join(".aw/usage.log")).unwrap();
+    assert_eq!(log1.lines().count(), 2);
+    let log2 = fs::read_to_string(repo2.join(".aw/usage.log")).unwrap();
+    assert_eq!(log2.lines().count(), 1);
+
+    // 2. Verify global journal in global_dir has all 3 entries with repo attribution
+    let global_log_path = global_dir.join("usage.log");
+    assert!(global_log_path.exists());
+    let g_log = fs::read_to_string(&global_log_path).unwrap();
+    assert_eq!(g_log.lines().count(), 3);
+    assert!(g_log.contains("\"repo_name\":"));
+    assert!(g_log.contains("\"worktree\":false"));
+
+    // 3. Local usage in repo1 only shows repo1
+    let out1 = aw(&repo1)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .args(["usage"])
+        .output()
+        .unwrap();
+    assert_eq!(out1.status.code(), Some(0));
+    let stdout1 = String::from_utf8_lossy(&out1.stdout);
+    assert!(stdout1.contains("aw usage: 2 journaled calls"));
+
+    // 4. Global usage aggregates across both repositories
+    let out_g = aw(&repo1)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .args(["usage", "--global"])
+        .output()
+        .unwrap();
+    assert_eq!(out_g.status.code(), Some(0));
+    let stdout_g = String::from_utf8_lossy(&out_g.stdout);
+    assert!(stdout_g.contains("aw global usage: 3 journaled calls across 2 repositories"));
+    assert!(stdout_g.contains("Active Repositories:"));
+    assert!(stdout_g.contains("Recent Errors: None (100% clean)"));
+
+    // 5. Global usage works from an empty external directory without git
+    let empty_dir = temp_repo("global-usage-empty-non-git");
+    let out_ext = std::process::Command::new(env!("CARGO_BIN_EXE_aw"))
+        .current_dir(&empty_dir)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .args(["usage", "--global"])
+        .output()
+        .unwrap();
+    assert_eq!(out_ext.status.code(), Some(0));
+    let stdout_ext = String::from_utf8_lossy(&out_ext.stdout);
+    assert!(stdout_ext.contains("aw global usage: 3 journaled calls across 2 repositories"));
+}

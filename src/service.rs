@@ -91,6 +91,7 @@ pub enum CommandRequest {
     },
     Usage {
         quality: bool,
+        global: bool,
     },
     MemWrite {
         key: String,
@@ -222,7 +223,7 @@ impl CommandRequest {
                 max_parse_error_rate,
             },
             crate::cli::Cmd::Doctor { invalidate } => CommandRequest::Doctor { invalidate },
-            crate::cli::Cmd::Usage { quality } => CommandRequest::Usage { quality },
+            crate::cli::Cmd::Usage { quality, global } => CommandRequest::Usage { quality, global },
             crate::cli::Cmd::Mcp { .. } => {
                 unreachable!("mcp is a protocol loop, handled before dispatch")
             }
@@ -442,7 +443,10 @@ impl CommandRequest {
             CommandRequest::Doctor { invalidate } => {
                 vec![("invalidate", invalidate.to_string())]
             }
-            CommandRequest::Usage { quality } => vec![("quality", quality.to_string())],
+            CommandRequest::Usage { quality, global } => vec![
+                ("quality", quality.to_string()),
+                ("global", global.to_string()),
+            ],
             _ => unreachable!("journal_args_diag called with a non-matching request"),
         }
     }
@@ -721,7 +725,7 @@ fn run_diag(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
             })
         }
         CommandRequest::Doctor { invalidate } => run_doctor(root_arg, *invalidate),
-        CommandRequest::Usage { quality } => run_usage(root_arg, *quality),
+        CommandRequest::Usage { quality, global } => run_usage(root_arg, *quality, *global),
         _ => unreachable!("run_diag called with a non-diagnostic request"),
     }
 }
@@ -1378,10 +1382,26 @@ fn run_doctor(root_arg: Option<&Path>, invalidate: bool) -> Result<ArmOut> {
     Ok(ArmOut::plain(join_lines(lines), String::new()))
 }
 
-fn run_usage(root_arg: Option<&Path>, quality: bool) -> Result<ArmOut> {
-    let root = crate::walk::discover_root(root_arg)?;
-    let lines = crate::journal::summary(&root, quality)?;
-    Ok(ArmOut::plain(join_lines(lines), String::new()))
+fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) -> Result<ArmOut> {
+    if global {
+        let lines = crate::journal::global_summary(quality)?;
+        return Ok(ArmOut::plain(join_lines(lines), String::new()));
+    }
+    let root = match crate::walk::discover_root(root_arg) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(AwError::NoResults(format!(
+                "{e}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+            )));
+        }
+    };
+    match crate::journal::summary(&root, quality) {
+        Ok(lines) => Ok(ArmOut::plain(join_lines(lines), String::new())),
+        Err(AwError::NoResults(msg)) => Err(AwError::NoResults(format!(
+            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+        ))),
+        Err(e) => Err(e),
+    }
 }
 
 /// Caveated empty-result error shared by the mem read commands (stdout keeps
@@ -1728,6 +1748,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 required: false,
                 description: "Include latency and error breakdown (default true)",
             },
+            ParamSpec {
+                name: "global",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Aggregate telemetry globally across all repositories (~/.aw/usage.log) (default false)",
+            },
         ],
         core: true,
     },
@@ -2064,6 +2090,7 @@ fn from_tool_args_diag(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> 
         },
         "usage" => CommandRequest::Usage {
             quality: a.0.get("quality").and_then(|v| v.as_bool()).unwrap_or(true),
+            global: a.0.get("global").and_then(|v| v.as_bool()).unwrap_or(false),
         },
         _ => return Err(unknown_tool(tool)),
     })
@@ -2228,7 +2255,10 @@ mod tests {
                 limit: 50,
             },
             CommandRequest::Stats { path: None },
-            CommandRequest::Usage { quality: false },
+            CommandRequest::Usage {
+                quality: false,
+                global: false,
+            },
             CommandRequest::MemWrite {
                 key: "k".into(),
                 body: "b".into(),

@@ -1283,3 +1283,48 @@ fn global_memory_mcp_protocol_parity() {
     let _ = fs::remove_dir_all(&repo);
     let _ = fs::remove_dir_all(&global_dir);
 }
+
+#[test]
+fn global_usage_mcp_returns_cross_repo_summary() {
+    let repo = fixture("mcp-global-usage");
+    let global_dir = mem_fixture("mcp-global-usage-aw");
+
+    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(&repo)
+        .env("AW_GLOBAL_DIR", &global_dir)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let mut srv = spawn_with_global(&repo, &global_dir);
+    init_and_list_tools(&mut srv);
+
+    // Call search tool to generate telemetry
+    let _ = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "search", "arguments": {"terms": "normalize"}}),
+    );
+
+    // Call usage tool with global: true via MCP
+    let usage = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "usage", "arguments": {"global": true}}),
+    );
+    assert_eq!(usage["result"]["isError"], false, "{usage}");
+    let text = result_text(&usage);
+    assert!(text.contains("aw global usage:"), "header: {text}");
+    assert!(text.contains("Speed: p50 ="), "speed: {text}");
+    assert!(
+        text.contains("Active Repositories:"),
+        "active repos: {text}"
+    );
+
+    let _ = fs::remove_dir_all(&repo);
+    let _ = fs::remove_dir_all(&global_dir);
+}

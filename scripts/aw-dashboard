@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Global Dashboard launcher for aw (agent-weave).
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+RENDER_PY="$SCRIPT_DIR/../tests/scripts/render_dashboard.py"
+
+if [ ! -f "$RENDER_PY" ]; then
+  echo "Error: render_dashboard.py not found at $RENDER_PY" >&2
+  exit 1
+fi
+
+exec python3 -I "$RENDER_PY" --global "$@"

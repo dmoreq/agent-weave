@@ -182,13 +182,19 @@ When comparing agent performance with and without `aw`, ensure fair measurement:
 
 ---
 
-## Local Journal & Telemetry Controls
+## Local & Global Telemetry Controls
 
-`aw` records anonymous invocation telemetry locally to `.aw/usage.log`.
+`aw` records anonymous invocation telemetry dual-written locally to `<repo>/.aw/usage.log` and globally across all repositories to `~/.aw/usage.log`.
 
 ```bash
-# View session telemetry and token savings summary
+# View local repository telemetry
 aw usage --quality
+
+# View machine-wide telemetry across all repositories and worktrees
+aw usage --global
+
+# Render and open interactive multi-repo HTML dashboard
+aw-dashboard --open
 
 # Disable journaling for a single command
 aw --no-journal callers run_build

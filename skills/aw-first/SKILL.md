@@ -26,7 +26,7 @@ For these questions, **query aw first** before running general grep searches or 
 | Discover canonical helper (Pre-Write) | `aw search '<terms>'` | Concise Interface Cards (`path:line kind qualname signature [callers=N]`). Prioritize functions with high caller count to prevent duplicate code. |
 | Detect duplicate functions (Post-Edit) | `aw reuse [paths...]` | Four calibrated detectors: callee footprint ($C_{dup} \ge 80\%$), interface similarity, client bypass, 1-caller wrappers. |
 | Session handoff & developer preferences | `aw mem query [terms]` | Retrieve prior decisions, handoffs, and developer preferences from `.aw/memory.db` and global `~/.aw/memory.db`. |
-| Session telemetry & token ROI | `aw usage [--quality]` | Review query counts, p50/p95 latency, error rates, and estimated tokens saved. |
+| Session & global telemetry | `aw usage [--global] [--quality]` | Review query counts, p50/p95 latency, error rates, token savings, and recent bug triage across repos. |
 
 Avoid repeating a complete lookup with grep when a current, unambiguous `aw` result already answers it. Use source reads or grep for focused verification, missing relationships, unsupported syntax, or conflicting evidence. Verification required for correctness, safety, or review takes precedence over avoiding duplicate navigation.
 

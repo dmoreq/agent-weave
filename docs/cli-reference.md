@@ -280,10 +280,21 @@ aw unresolved [--names] [--path <PATH>] [--limit <N>]
 Display local performance telemetry, query distribution, latency percentiles, and token savings.
 
 ```bash
-aw usage [--quality]
+aw usage [--global] [--quality]
 ```
 
+- `--global`: Aggregates telemetry across all repositories and worktrees on the machine (`~/.aw/usage.log`), listing active repositories and recent errors for triage.
 - `--quality`: Appends breakdown of empty results (`empty_ok` vs `empty_error`), capped queries, and p50/p95 latency percentiles.
+
+### Global Dashboard (`aw-dashboard`)
+Render and open an interactive HTML telemetry dashboard across all repositories.
+
+```bash
+aw-dashboard [--open] [--out <PATH>]
+```
+
+- `--open`: Automatically opens the generated dashboard (`~/.aw/dashboard.html`) in your default browser.
+- Includes repository filter dropdown, active repositories overview, tool breakdown charts, and an error triage inspection table.
 
 ---
 

@@ -164,6 +164,10 @@ pub enum Cmd {
         /// from existing journal fields
         #[arg(long)]
         quality: bool,
+
+        /// Aggregate telemetry globally across all repositories (~/.aw/usage.log)
+        #[arg(long)]
+        global: bool,
     },
     /// Project memory: agent-authored notes persisted in .aw/memory.db
     /// (write/query/get/delete/export/gc). Notes are candidates, never proof.

@@ -137,7 +137,8 @@ The 10 core command surfaces cover complete code navigation, anti-reinvention, a
 - `aw doctor [--invalidate]`: Verify index integrity, staleness, or reset derived data.
 - `aw stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
 - `aw unresolved [--names]`: Inspect where static resolution could not resolve call sites.
-- `aw usage [--quality]`: View latency distribution, token savings, and query success telemetry.
+- `aw usage [--global] [--quality]`: View latency distribution, token savings, and query success telemetry (local or machine-wide).
+- `aw-dashboard [--open]`: Render and open interactive multi-repo HTML telemetry dashboard.
 - `aw mcp`: Start the Model Context Protocol stdio server.
 
 See the complete [CLI Reference](docs/cli-reference.md) for flag details and exit codes.

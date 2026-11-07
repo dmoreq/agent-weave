@@ -1401,6 +1401,10 @@ pub fn global_memory_db_path() -> Result<PathBuf> {
     Ok(global_aw_dir()?.join("memory.db"))
 }
 
+pub fn global_usage_log_path() -> Result<PathBuf> {
+    Ok(global_aw_dir()?.join("usage.log"))
+}
+
 fn global_memory_store_path() -> Result<PathBuf> {
     let path = global_memory_db_path()?;
     reject_symlink(&path, "global memory.db")?;

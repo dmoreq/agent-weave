@@ -18,6 +18,13 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
+- **Global telemetry logging & multi-repo dashboard.** Dual-write telemetry to
+  `<repo>/.aw/usage.log` and global `~/.aw/usage.log` (configurable via
+  `AW_GLOBAL_DIR`), tracking repository attribution and Git worktree flags.
+  Added `aw usage --global` (CLI and MCP) for machine-wide performance,
+  active-repo breakdowns, and recent error triage. Enhanced `aw-dashboard`
+  (`render_dashboard.py --global`) with interactive repository filtering,
+  SVG distribution charts, and error/bug inspection table.
 - **Documentation standardization & 3 USPs overhaul.** Complete public GitHub
   showcase landing page in `README.md` with badges, 3 USPs deep-dive (sub-2ms
   deterministic navigation, real-time anti-reinvention engine based on RepoReuse
