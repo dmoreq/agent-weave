@@ -4323,13 +4323,17 @@ fn mem_empty_and_missing_store_are_exit1() {
         "aw: no-results: no memory matches 'zzz-unmatchable'",
         "{stderr}"
     );
-    // Usage errors: --all with terms, no input at all.
+    // Usage errors: --all with terms, whitespace-only terms.
     let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all", "terms"]);
     assert_eq!(code, 2, "{stderr}");
     assert!(stderr.contains("mutually exclusive"), "{stderr}");
-    let (code, _stdout, stderr) = mem_out(&repo, &["query"]);
+    let (code, _stdout, stderr) = mem_out(&repo, &["query", "   "]);
     assert_eq!(code, 2, "{stderr}");
     assert!(stderr.contains("provide terms or --all"), "{stderr}");
+    // Bare query without terms defaults to --all listing.
+    let (code, stdout, stderr) = mem_out(&repo, &["query"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("solo"), "{stdout}");
 }
 
 #[test]
@@ -5116,6 +5120,13 @@ fn reuse_detects_candidate_duplicates() {
         "{stdout}"
     );
     assert!(stdout.contains("parse_token"), "{stdout}");
+    // Verify telemetry recorded the duplication warning
+    let usage = aw(&repo).args(["usage", "--quality"]).output().unwrap();
+    let usage_stdout = String::from_utf8_lossy(&usage.stdout);
+    assert!(
+        usage_stdout.contains("Anti-Reinvention: 1 duplication warnings caught"),
+        "{usage_stdout}"
+    );
 }
 
 #[test]

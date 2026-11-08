@@ -1,18 +1,24 @@
 ---
 name: aw-first
-description: Routing policy for code agents with the aw code index available. Use when locating callers, callees, the impact of a change, the call route between two symbols, a symbol's surroundings, a file's imports, discovering existing helpers before writing new code, detecting duplicate functions, checking telemetry savings, or retrieving session decisions and developer preferences. Query aw first for those questions; use source reads and grep to verify results or investigate gaps, ambiguity, result caps, and staleness.
+description: >-
+  Routing policy for code agents with the aw code index available. Query aw
+  (CLI or MCP agent-weave) first for callers, callees, impact, call paths,
+  symbol surroundings, imports, helper search, duplicate detection, and memory.
 ---
 
-# aw-first routing policy
+# aw-first Routing Policy
 
 `aw` indexes supported source files' symbols and static relationships into `.aw/index.db`.
 Results describe the indexed, resolved subset, not every runtime relationship.
 See [Evaluation](../../docs/EVALUATION.md) for measurement scope and limitations,
 and [Agent integration](../../docs/agent-integration.md) for host setup.
 
-## Binding Routing
+## The Three Pillars of Agent Navigation & Hygiene
 
-For these questions, **query aw first** before running general grep searches or dumping full source files. Read the pointed-to source lines before making behavioral claims or edits; the index is not a substitute for source evidence.
+All coding agents on this system adhere to three mandatory lifecycle invariants:
+
+### Pillar 1: Graph Navigation First (Pre-Read)
+For structural code questions, **query `aw` first** before dumping entire source files or running codebase-wide greps. Read the pointed-to source lines before making behavioral claims or edits; the index is not a substitute for source evidence.
 
 | Question / Intent | Command / Tool | Purpose & Usage |
 |---|---|---|
@@ -23,12 +29,19 @@ For these questions, **query aw first** before running general grep searches or 
 | Symbol surroundings | `aw context <name>` | Definition range + signature + direct callers + direct callees in one call. |
 | Which files depend on a file | `aw impact <file>` | Files that call into target; add `--edges calls,imports,inherits --depth N` for extended closure. |
 | What does this file import | `aw imports <file>` | Outbound resolved imports for an indexed file. |
-| Discover canonical helper (Pre-Write) | `aw search '<terms>'` | Concise Interface Cards (`path:line kind qualname signature [callers=N]`). Prioritize functions with high caller count to prevent duplicate code. |
-| Detect duplicate functions (Post-Edit) | `aw reuse [paths...]` | Four calibrated detectors: callee footprint ($C_{dup} \ge 80\%$), interface similarity, client bypass, 1-caller wrappers. |
-| Session handoff & developer preferences | `aw mem query [terms]` | Retrieve prior decisions, handoffs, and developer preferences from `.aw/memory.db` and global `~/.aw/memory.db`. |
-| Session & global telemetry | `aw usage [--global] [--quality]` | Review query counts, p50/p95 latency, error rates, token savings, and recent bug triage across repos. |
+| Symbols & definitions | `aw symbols <file> [--outline]` | Deterministic definition inventory and signatures of one indexed file or directory. |
 
-Avoid repeating a complete lookup with grep when a current, unambiguous `aw` result already answers it. Use source reads or grep for focused verification, missing relationships, unsupported syntax, or conflicting evidence. Verification required for correctness, safety, or review takes precedence over avoiding duplicate navigation.
+### Pillar 2: Anti-Reinvention (Pre-Write Search & Post-Edit Reuse)
+- **Pre-Write Helper Discovery**: Run `aw search '<terms>'` before authoring new helpers or utility functions. Prioritize existing canonical functions with high caller counts (`[callers=N]`) to avoid reinventing existing logic.
+- **Post-Edit Duplicate Audit**: Run `aw reuse [paths...]` after creating or editing functions. `aw` runs four calibrated detectors (callee footprint $C_{dup} \ge 80\%$, interface token similarity, client bypass, 1-caller wrappers) to ensure no redundant copies were introduced.
+
+### Pillar 3: Project Memory Lifecycle (Pre-Task Recall & Post-Fix Capture)
+- **Pre-Task Recall**: Run `aw mem query` (or MCP `mem_query({})`) at the start of a session or when exploring an unfamiliar area. Without arguments, it seamlessly lists current project and global decisions, gotchas, and conventions.
+- **Post-Fix & Architecture Capture**: When you resolve a non-obvious bug or establish an architectural pattern, persist it before ending your turn:
+  `aw mem write <key> --kind gotcha|decision --body <prose> [--tags ...] [--refs ...] [--global]`
+  Use `--global` for cross-project preferences or machine-wide conventions.
+
+---
 
 ## Trust Contract
 
@@ -51,16 +64,20 @@ Verify with source or grep when:
 
 This contract covers navigation answers only. Source reads remain required for behavioral claims, edits, safety, and review.
 
+---
+
 ## Secondary & Maintenance Tools
 
 Reach for these when the routed commands do not answer the question:
 
 | Question | Command |
 |---|---|
-| File inventory & signatures | `aw symbols <file> [--outline]` — deterministic definition list of one indexed file |
 | Directory definitions | `aw symbols <dir> --outline` — definition inventory across directory prefix |
 | Where did resolution fail | `aw unresolved` — summaries; `aw unresolved --names` lists sites; `[internal]` indicates resolver gaps |
 | Repository totals | `aw stats [--path <dir>]` — build-time summary, not a freshness check |
+| Telemetry & Quality | `aw usage [--global] [--quality]` — query counts, latency distributions, token savings, and duplicate warnings |
+
+---
 
 ## Project Memory Operations
 
@@ -68,10 +85,12 @@ Reach for these when the routed commands do not answer the question:
 
 - **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...] [--global]`):
   Record when a decision is settled after real investigation, a gotcha cost debugging time, or a task ends with conclusions not yet in committed documentation. Use `--global` to persist cross-project conventions or developer profiles into `~/.aw/memory.db`.
-- **Query** (`aw mem query <terms>`; `--all` lists by recency; add `--global` to search only global store):
+- **Query** (`aw mem query [terms]`; without terms lists by recency; add `--global` to search only global store):
   Run at session start and before re-investigating an area worked on previously. Without `--global`, queries seamlessly search **both** local and global stores: global rows carry `[global]`, and local notes take precedence (shadowing colliding global keys).
 - **Maintain**:
   Rewrite under the same key to update a note revision; `--supersedes <key>` records a cross-key replacement; `--scope session` (default TTL 7 days, `--ttl` overrides) keeps transient scratch out of durable memory. Use `aw mem get <key> [--global]`, `aw mem delete <key> [--global]`, `aw mem export [--global]` (JSONL backup), and `aw mem gc [--global]` (purge expired session notes and >30-day superseded revisions).
+
+---
 
 ## Handling Contract Behaviors
 
@@ -80,6 +99,8 @@ Reach for these when the routed commands do not answer the question:
 3. **`aw path` outcomes**: Endpoints accept an exact bare name or full qualname; a unique dotted suffix such as `Class.method` also resolves. `symbol '<name>' not in index` indicates the input form was wrong or the symbol is absent. Recover with `aw search` or `aw symbols <file>`. Exit 2 names the failing endpoint.
 4. **Static-Surface Caveats**: Every `aw` result covers the indexed, resolved subset only. Successful cases do not establish complete repository coverage; a negative is not proof.
 
+---
+
 ## Staleness Discipline
 
 After you edit code, run `aw build` before further navigation queries.
@@ -87,11 +108,15 @@ If a query prints:
 `aw: K of N result files changed since build — run aw build`
 rebuild before trusting those pointers. Staleness checks cover displayed result files, not every file that could change the answer.
 
+---
+
 ## When aw is NOT the Tool
 
 - Semantic questions ("where is behavior X implemented") — `aw` resolves names and identifiers, not arbitrary behavioral natural language descriptions. Use search or grep.
 - Dynamic dispatch, untyped attribute calls, external library calls — static resolution can leave these unresolved. Inspect source or grep for dynamic behaviors.
 - Code in another repository — the index covers the current local repository only.
+
+---
 
 ## Context Hygiene
 

@@ -1044,10 +1044,11 @@ fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut
     else {
         unreachable!("run_mem_query called with a non-query request")
     };
-    validate_mem_query(terms, *all, *include_superseded)?;
+    let effective_all = *all || terms.is_empty();
+    validate_mem_query(terms, *all, effective_all, *include_superseded)?;
     let args = MemQueryArgs {
         terms,
-        all: *all,
+        all: effective_all,
         limit: (*limit).clamp(1, crate::memory::MAX_MEM_LIMIT),
         filter: crate::db::MemFilter {
             kind: kind.as_deref(),
@@ -1223,20 +1224,25 @@ fn query_merged_stores(
 }
 
 /// Reject the flag combinations the two query modes cannot serve.
-fn validate_mem_query(terms: &[String], all: bool, include_superseded: bool) -> Result<()> {
-    if all && !terms.is_empty() {
+fn validate_mem_query(
+    terms: &[String],
+    explicit_all: bool,
+    effective_all: bool,
+    include_superseded: bool,
+) -> Result<()> {
+    if explicit_all && !terms.is_empty() {
         return Err(AwError::Usage(
             "mem query: --all and terms are mutually exclusive".to_string(),
         ));
     }
-    if !all && terms.iter().all(|t| t.trim().is_empty()) {
+    if !terms.is_empty() && terms.iter().all(|t| t.trim().is_empty()) {
         return Err(AwError::Usage(
             "mem query: provide terms or --all".to_string(),
         ));
     }
     // Superseded rows participate in the explicit listing only; the
     // ranked resolver keeps supersession-at-result-time exclusion.
-    if include_superseded && !all {
+    if include_superseded && !effective_all {
         return Err(AwError::Usage(
             "mem query: --include-superseded requires --all".to_string(),
         ));

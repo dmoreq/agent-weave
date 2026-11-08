@@ -149,6 +149,9 @@ rule_text = (
     "  When locating callers, callees, the impact of a change, the call route between two symbols, "
     "a symbol's surroundings, a file's imports, or searching existing helpers, query `aw` (CLI or MCP `agent-weave`) "
     "first before reading entire source files or running broad greps. Verify pointed lines directly.\n"
+    "  - **Pre-Task**: Run `aw mem query` to inspect prior architectural decisions, gotchas, and conventions.\n"
+    "  - **Pre-Write / Post-Edit**: Run `aw search '<terms>'` before implementing helpers; run `aw reuse <paths>` to prevent duplicate functions.\n"
+    "  - **Post-Fix**: Run `aw mem write <key> --kind gotcha|decision --body ... --refs <paths>` to persist durable learnings before task completion.\n"
 )
 
 def update_json_file(path, updater_fn):
@@ -203,8 +206,8 @@ print("1. Antigravity:")
 gemini_config = os.path.expanduser("~/.gemini/config/mcp_config.json")
 def update_gemini(data):
     servers = data.setdefault("mcpServers", {})
-    if "agent-weave" not in servers or servers["agent-weave"].get("command") != aw_bin:
-        servers["agent-weave"] = {"command": aw_bin, "args": ["mcp"]}
+    if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
+        servers["agent-weave"] = {"command": aw_bin, "args": ["mcp", "--all-tools"]}
         return True
     return False
 if update_json_file(gemini_config, update_gemini):
@@ -223,7 +226,7 @@ anti_mcp_schemas = os.path.expanduser("~/.gemini/antigravity/mcp/agent-weave")
 try:
     import subprocess
     proc = subprocess.Popen(
-        [aw_bin, "mcp"],
+        [aw_bin, "mcp", "--all-tools"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -284,7 +287,7 @@ if os.path.exists(grok_dir):
             mcp_block = (
                 "\n[mcp_servers.agent-weave]\n"
                 f'command = "{aw_bin}"\n'
-                'args = ["mcp"]\n'
+                'args = ["mcp", "--all-tools"]\n'
                 "enabled = true\n"
             )
             with open(grok_toml, "a", encoding="utf-8") as f:
@@ -306,11 +309,11 @@ if os.path.exists(zcode_dir):
     def update_zcode(data):
         mcp = data.setdefault("mcp", {})
         servers = mcp.setdefault("servers", {})
-        if "agent-weave" not in servers or servers["agent-weave"].get("command") != aw_bin:
+        if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
             servers["agent-weave"] = {
                 "type": "process",
                 "command": aw_bin,
-                "args": ["mcp"]
+                "args": ["mcp", "--all-tools"]
             }
             return True
         return False
@@ -331,10 +334,10 @@ if os.path.exists(opencode_dir):
     def update_opencode(data):
         mcp = data.setdefault("mcp", {})
         servers = mcp.setdefault("servers", {})
-        if "agent-weave" not in servers:
+        if "agent-weave" not in servers or servers["agent-weave"].get("command") != [aw_bin, "mcp", "--all-tools"]:
             servers["agent-weave"] = {
                 "type": "local",
-                "command": [aw_bin, "mcp"]
+                "command": [aw_bin, "mcp", "--all-tools"]
             }
             return True
         return False
@@ -353,13 +356,12 @@ if os.path.exists(zed_dir):
     if os.path.exists(zed_settings):
         content = open(zed_settings, "r", encoding="utf-8").read()
         if '"agent-weave"' not in content:
-            # Simple insertion into context_servers block or end
             if '"context_servers": {' in content:
                 replacement = (
                     '"context_servers": {\n'
                     '    "agent-weave": {\n'
                     f'      "command": "{aw_bin}",\n'
-                    '      "args": ["mcp"],\n'
+                    '      "args": ["mcp", "--all-tools"],\n'
                     '    },'
                 )
                 content = content.replace('"context_servers": {', replacement, 1)
@@ -371,18 +373,61 @@ if os.path.exists(zed_dir):
         else:
             print("  └─ ~/.config/zed/settings.json already configured")
 
-# --- 6. Claude Desktop (Optional) ---
-claude_dir = os.path.expanduser("~/Library/Application Support/Claude")
-if os.path.exists(claude_dir):
-    claude_cfg = os.path.join(claude_dir, "claude_desktop_config.json")
-    def update_claude(data):
+# --- 6. Claude Code (CLI) & Claude Desktop ---
+claude_json = os.path.expanduser("~/.claude.json")
+if os.path.exists(claude_json):
+    print("6. Claude Code (CLI):")
+    def update_claude_cli(data):
         servers = data.setdefault("mcpServers", {})
-        if "agent-weave" not in servers:
-            servers["agent-weave"] = {"command": aw_bin, "args": ["mcp"]}
+        if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
+            servers["agent-weave"] = {"command": aw_bin, "args": ["mcp", "--all-tools"]}
             return True
         return False
-    update_json_file(claude_cfg, update_claude)
-    print("6. Claude Desktop: Configured in claude_desktop_config.json")
+    if update_json_file(claude_json, update_claude_cli):
+        print("  ├─ Configured agent-weave in ~/.claude.json")
+    else:
+        print("  ├─ ~/.claude.json already up-to-date")
+    claude_dir = os.path.expanduser("~/.claude")
+    deploy_skill(os.path.join(claude_dir, "skills", "aw-first"))
+    print("  ├─ Deployed aw-first skill to ~/.claude/skills/aw-first/")
+    inject_rule(os.path.join(claude_dir, "CLAUDE.md"))
+    print("  └─ Injected Code Navigation Invariant into ~/.claude/CLAUDE.md")
+
+claude_desktop_dir = os.path.expanduser("~/Library/Application Support/Claude")
+if os.path.exists(claude_desktop_dir):
+    claude_cfg = os.path.join(claude_desktop_dir, "claude_desktop_config.json")
+    def update_claude_desktop(data):
+        servers = data.setdefault("mcpServers", {})
+        if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
+            servers["agent-weave"] = {"command": aw_bin, "args": ["mcp", "--all-tools"]}
+            return True
+        return False
+    update_json_file(claude_cfg, update_claude_desktop)
+    print("  └─ Configured Claude Desktop in claude_desktop_config.json")
+
+# --- 7. OpenAI Codex ---
+codex_dir = os.path.expanduser("~/.codex")
+if os.path.exists(codex_dir):
+    print("7. OpenAI Codex:")
+    codex_toml = os.path.join(codex_dir, "config.toml")
+    if os.path.exists(codex_toml):
+        content = open(codex_toml, "r", encoding="utf-8").read()
+        if "[mcp_servers.agent-weave]" not in content:
+            mcp_block = (
+                "\n[mcp_servers.agent-weave]\n"
+                f'command = "{aw_bin}"\n'
+                'args = ["mcp", "--all-tools"]\n'
+                "enabled = true\n"
+            )
+            with open(codex_toml, "a", encoding="utf-8") as f:
+                f.write(mcp_block)
+            print("  ├─ Added agent-weave to ~/.codex/config.toml")
+        else:
+            print("  ├─ ~/.codex/config.toml already configured")
+    deploy_skill(os.path.join(codex_dir, "skills", "aw-first"))
+    print("  ├─ Deployed aw-first skill to ~/.codex/skills/aw-first/")
+    inject_rule(os.path.join(codex_dir, "AGENTS.md"))
+    print("  └─ Injected Code Navigation Invariant into ~/.codex/AGENTS.md")
 PYEOF
 
 # 4. Local Workspace Index

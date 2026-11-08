@@ -738,6 +738,16 @@ fn mem_core_tools_default_surface_and_byte_parity() {
     assert_eq!(query_call["result"]["isError"], false);
     assert_eq!(result_text(&query_call), cli_query, "mem_query byte parity");
 
+    // Bare mem_query with {} defaults to listing current notes (parity with query --all)
+    let bare_query_call = rpc(
+        &mut srv,
+        5,
+        "tools/call",
+        json!({"name": "mem_query", "arguments": {}}),
+    );
+    assert_eq!(bare_query_call["result"]["isError"], false);
+    assert!(result_text(&bare_query_call).contains("parity-note"));
+
     // Journal: MCP surface tag lands on mem tool rows.
     drop(srv);
     let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();

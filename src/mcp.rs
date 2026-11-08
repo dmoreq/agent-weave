@@ -519,7 +519,11 @@ fn missing_required_arg(tool: &str, args: &Value) -> Option<String> {
 /// followed by its stderr diagnostic — Amendment 8's error contract.
 fn call_tool(root: &Path, tool: &str, args: &Value) -> (String, bool, i32, Option<usize>) {
     let outcome = from_tool_args(tool, args).map(|req: CommandRequest| {
-        let exec = crate::service::execute(&req, Some(root), Surface::Mcp, true);
+        let journal = !matches!(
+            req,
+            CommandRequest::Usage { .. } | CommandRequest::Doctor { .. }
+        );
+        let exec = crate::service::execute(&req, Some(root), Surface::Mcp, journal);
         (exec.stdout, exec.stderr, exec.exit_code, exec.shown)
     });
     match outcome {

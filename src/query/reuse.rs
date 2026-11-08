@@ -181,7 +181,7 @@ pub fn detect_hints(conn: &Connection, new_names: &HashSet<String>) -> Result<Ve
     if new_names.is_empty() {
         return Ok(Vec::new());
     }
-    let candidates = analyze_corpus(conn, None, Some(new_names), 3)?;
+    let (candidates, _) = analyze_corpus(conn, None, Some(new_names), 3)?;
     let mut hints = Vec::new();
     for c in candidates.iter().take(3) {
         hints.push(format!("aw: reuse-hint: {}", c.hint_line()));
@@ -198,9 +198,10 @@ pub fn run_reuse(
     let QueryCtx { conn, .. } = *ctx;
     let limit = clamp_limit(limit)?;
     let path_filter = if paths.is_empty() { None } else { Some(paths) };
-    let candidates = analyze_corpus(conn, path_filter, None, limit)?;
+    let (candidates, total) = analyze_corpus(conn, path_filter, None, limit)?;
 
     if candidates.is_empty() {
+        crate::journal::record_result(crate::journal::OutcomeCounts::of(0, 0), false, 0);
         return Ok(crate::query::LineQuery {
             lines: vec!["0 reuse candidates found".to_string()],
             stderr: String::new(),
@@ -217,10 +218,12 @@ pub fn run_reuse(
             out.push(l.to_string());
         }
     }
+    let shown = candidates.len();
+    crate::journal::record_result(crate::journal::OutcomeCounts::of(shown, total), false, 0);
     Ok(crate::query::LineQuery {
         lines: out,
         stderr: String::new(),
-        shown: candidates.len(),
+        shown,
     })
 }
 
@@ -229,10 +232,10 @@ fn analyze_corpus(
     path_filter: Option<&[String]>,
     target_names: Option<&HashSet<String>>,
     limit: usize,
-) -> Result<Vec<ReuseCandidate>> {
+) -> Result<(Vec<ReuseCandidate>, usize)> {
     let mut symbols = load_symbols(conn)?;
     if symbols.len() < 2 {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), 0));
     }
 
     load_callees(conn, &mut symbols)?;
@@ -262,8 +265,9 @@ fn analyze_corpus(
             .then_with(|| b.canonical_callers.cmp(&a.canonical_callers))
             .then_with(|| a.symbol.cmp(&b.symbol))
     });
+    let total = candidates.len();
     candidates.truncate(limit);
-    Ok(candidates)
+    Ok((candidates, total))
 }
 
 /// One reuse detector: resolve a target against the corpus to a candidate.
