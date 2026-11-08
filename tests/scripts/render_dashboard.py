@@ -4,13 +4,14 @@
 Self-contained, zero-dependency script reading `.aw/usage.log` (local or global)
 and `.aw/index.db`, producing a responsive, single-file HTML dashboard with hero metrics,
 SVG tool distribution, multi-repo worktree breakdown, error & bug triage, and
-interactive filtering.
+interactive filtering. Supports live real-time SSE streaming via `--serve`.
 """
 
 from __future__ import annotations
 
 import argparse
 import html
+import http.server
 import json
 import math
 import os
@@ -292,7 +293,7 @@ def render_html_dashboard(
     scope_name: str,
     is_global: bool = False,
 ) -> str:
-    """Render single-file interactive HTML dashboard."""
+    """Render single-file interactive HTML dashboard with optional live SSE updates."""
     p50 = f"{metrics['p50_ms']:.1f}ms"
     p95 = f"{metrics['p95_ms']:.1f}ms"
     tokens_str = f"{metrics['saved_tokens']:,}"
@@ -337,7 +338,7 @@ def render_html_dashboard(
         ts = q.get("ts", 0)
         time_str = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "-"
         tool = html.escape(str(q.get("tool", "-")))
-        r_name = html.escape(str(q.get("repo_name") or "-"))
+        r_name = html.escape(str(q.get("repo_name") or "workspace"))
         shown = q.get("shown", q.get("result_count", 0))
         lat_us = q.get("latency_us", 0)
         lat_str = f"{lat_us / 1000.0:.1f}ms" if lat_us else "-"
@@ -360,9 +361,9 @@ def render_html_dashboard(
     error_rows = []
     for q in metrics.get("recent_errors", []):
         ts = q.get("ts", 0)
-        time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "-"
+        time_str = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "-"
         tool = html.escape(str(q.get("tool", "-")))
-        r_name = html.escape(str(q.get("repo_name") or "-"))
+        r_name = html.escape(str(q.get("repo_name") or "workspace"))
         code = q.get("exit_code", 1)
         lat_us = q.get("latency_us", 0)
         lat_str = f"{lat_us / 1000.0:.1f}ms" if lat_us else "-"
@@ -434,6 +435,7 @@ def render_html_dashboard(
     flex-wrap: wrap;
     gap: 1rem;
   }}
+  .header-left {{ display: flex; align-items: center; gap: 0.75rem; }}
   h1 {{ font-size: 1.6rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; }}
   .header-meta {{ color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }}
   
@@ -535,6 +537,20 @@ def render_html_dashboard(
   .badge-wt {{ background: rgba(245, 158, 11, 0.15); color: var(--warning); }}
   .status-ok {{ background: rgba(16, 185, 129, 0.15); color: var(--success); }}
   .status-err {{ background: rgba(239, 68, 68, 0.15); color: var(--danger); }}
+  .live-pulse {{
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    margin-right: 4px;
+    animation: pulse 1.5s infinite;
+  }}
+  @keyframes pulse {{
+    0% {{ opacity: 1; transform: scale(1); }}
+    50% {{ opacity: 0.4; transform: scale(1.2); }}
+    100% {{ opacity: 1; transform: scale(1); }}
+  }}
   .repo-tag {{ color: var(--primary-light); font-weight: 600; }}
   .text-muted {{ color: var(--text-muted); font-size: 0.8rem; }}
   .text-success {{ color: var(--success); font-weight: 600; }}
@@ -546,7 +562,10 @@ def render_html_dashboard(
 <div class="container">
   <header>
     <div>
-      <h1>{header_title}</h1>
+      <div class="header-left">
+        <h1>{header_title}</h1>
+        <span id="live-indicator" class="badge status-ok" style="display: none;"><span class="live-pulse"></span>LIVE</span>
+      </div>
       <div class="header-meta">{sub_title}</div>
     </div>
     <div class="header-meta">Generated: {gen_time}</div>
@@ -562,22 +581,22 @@ def render_html_dashboard(
   <div class="hero-grid">
     <div class="card">
       <div class="card-label">Total Queries</div>
-      <div class="card-value highlight">{metrics["total_calls"]}</div>
-      <div class="card-sub">{metrics["reliability_pct"]:.1f}% reliability ({metrics["error_count"]} errors)</div>
+      <div id="metric-total-calls" class="card-value highlight">{metrics["total_calls"]}</div>
+      <div id="metric-reliability" class="card-sub">{metrics["reliability_pct"]:.1f}% reliability ({metrics["error_count"]} errors)</div>
     </div>
     <div class="card">
       <div class="card-label">Median Latency (p50)</div>
-      <div class="card-value success">{p50}</div>
-      <div class="card-sub">p95 = {p95} &bull; avg = {metrics["avg_ms"]:.1f}ms</div>
+      <div id="metric-p50" class="card-value success">{p50}</div>
+      <div id="metric-lat-sub" class="card-sub">p95 = {p95} &bull; avg = {metrics["avg_ms"]:.1f}ms</div>
     </div>
     <div class="card">
       <div class="card-label">Est. Tokens Saved</div>
-      <div class="card-value">~{tokens_str}</div>
-      <div class="card-sub">~{dollars_str} avoided vs whole-file reads</div>
+      <div id="metric-tokens" class="card-value">~{tokens_str}</div>
+      <div id="metric-dollars" class="card-sub">~{dollars_str} avoided vs whole-file reads</div>
     </div>
     <div class="card">
       <div class="card-label">Anti-Reinvention</div>
-      <div class="card-value highlight">{metrics["reuse_hits"]}</div>
+      <div id="metric-reuse" class="card-value highlight">{metrics["reuse_hits"]}</div>
       <div class="card-sub">Duplication candidates caught</div>
     </div>
   </div>
@@ -646,6 +665,9 @@ def render_html_dashboard(
 </div>
 
 <script>
+let totalCalls = {metrics["total_calls"]};
+let totalErrors = {metrics["error_count"]};
+
 function filterDashboard(selectedRepo) {{
   const queryRows = document.querySelectorAll('#recent-tbody tr.query-row');
   queryRows.forEach(row => {{
@@ -665,10 +687,184 @@ function filterDashboard(selectedRepo) {{
     row.style.display = (selectedRepo === 'ALL' || repo === selectedRepo) ? '' : 'none';
   }});
 }}
+
+if (window.location.protocol.startsWith('http')) {{
+  const liveBadge = document.getElementById('live-indicator');
+  if (liveBadge) liveBadge.style.display = 'inline-block';
+  
+  const source = new EventSource('/events');
+  source.onmessage = function(e) {{
+    try {{
+      const q = JSON.parse(e.data);
+      handleLiveQuery(q);
+    }} catch(err) {{}}
+  }};
+}}
+
+function handleLiveQuery(q) {{
+  totalCalls++;
+  const exitCode = parseInt(q.exit_code || 0, 10);
+  if (exitCode !== 0) totalErrors++;
+  
+  const totalCallsEl = document.getElementById('metric-total-calls');
+  if (totalCallsEl) totalCallsEl.textContent = totalCalls;
+
+  const relEl = document.getElementById('metric-reliability');
+  if (relEl) {{
+    const rel = totalCalls > 0 ? (100.0 * (totalCalls - totalErrors) / totalCalls).toFixed(1) : "100.0";
+    relEl.textContent = rel + "% reliability (" + totalErrors + " errors)";
+  }}
+
+  const recentTbody = document.getElementById('recent-tbody');
+  if (recentTbody) {{
+    const tr = document.createElement('tr');
+    tr.className = 'query-row';
+    const rName = q.repo_name || 'workspace';
+    tr.setAttribute('data-repo', rName);
+
+    const ts = q.ts ? new Date(q.ts * 1000).toTimeString().split(' ')[0] : '-';
+    const latStr = q.latency_us ? (q.latency_us / 1000.0).toFixed(1) + 'ms' : '-';
+    const statusClass = exitCode === 0 ? 'status-ok' : 'status-err';
+    const statusText = exitCode === 0 ? 'ok' : 'err ' + exitCode;
+
+    tr.innerHTML = '<td>' + ts + '</td>' +
+      '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
+      '<td><code>' + escapeHtml(q.tool || '-') + '</code></td>' +
+      '<td>' + (q.shown || q.result_count || 0) + '</td>' +
+      '<td>' + latStr + '</td>' +
+      '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>';
+
+    const currentFilter = document.getElementById('repo-filter').value;
+    if (currentFilter !== 'ALL' && currentFilter !== rName) {{
+      tr.style.display = 'none';
+    }}
+
+    recentTbody.insertBefore(tr, recentTbody.firstChild);
+    while (recentTbody.children.length > 50) {{
+      recentTbody.removeChild(recentTbody.lastChild);
+    }}
+  }}
+
+  if (exitCode !== 0) {{
+    const errorsTbody = document.getElementById('errors-tbody');
+    if (errorsTbody) {{
+      const tr = document.createElement('tr');
+      tr.className = 'error-row';
+      const rName = q.repo_name || 'workspace';
+      tr.setAttribute('data-repo', rName);
+
+      const ts = q.ts ? new Date(q.ts * 1000).toTimeString().split(' ')[0] : '-';
+      const latStr = q.latency_us ? (q.latency_us / 1000.0).toFixed(1) + 'ms' : '-';
+      const argsRaw = JSON.stringify(q.args || {{}});
+      const argsShort = argsRaw.length > 100 ? argsRaw.substring(0, 100) + '...' : argsRaw;
+
+      tr.innerHTML = '<td>' + ts + '</td>' +
+        '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
+        '<td><code>' + escapeHtml(q.tool || '-') + '</code></td>' +
+        '<td><span class="badge status-err">exit ' + exitCode + '</span></td>' +
+        '<td>' + latStr + '</td>' +
+        '<td class="args-col" title="' + escapeHtml(argsRaw) + '"><code>' + escapeHtml(argsShort) + '</code></td>';
+
+      const currentFilter = document.getElementById('repo-filter').value;
+      if (currentFilter !== 'ALL' && currentFilter !== rName) {{
+        tr.style.display = 'none';
+      }}
+
+      errorsTbody.insertBefore(tr, errorsTbody.firstChild);
+    }}
+  }}
+}}
+
+function escapeHtml(str) {{
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}}
 </script>
 </body>
 </html>
 """
+
+
+def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -> None:
+    """Run lightweight HTTP + SSE server for real-time dashboard updates."""
+    log_file = aw_dir / "usage.log"
+
+    class SSEHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path in ("/", "/index.html", "/dashboard.html"):
+                entries = parse_usage_log_from_dir(aw_dir)
+                metrics = calculate_metrics(entries)
+                content = render_html_dashboard(metrics, inspect_index_db(None), "Global Multi-Repo", is_global=True)
+                encoded = content.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+            elif self.path == "/events":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+
+                last_pos = 0
+                if log_file.is_file():
+                    try:
+                        last_pos = log_file.stat().st_size
+                    except OSError:
+                        pass
+
+                while True:
+                    try:
+                        if log_file.is_file():
+                            current_size = log_file.stat().st_size
+                            if current_size < last_pos:
+                                last_pos = 0
+                            if current_size > last_pos:
+                                with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                                    f.seek(last_pos)
+                                    for line in f:
+                                        line = line.strip()
+                                        if line:
+                                            self.wfile.write(f"data: {line}\n\n".encode("utf-8"))
+                                            self.wfile.flush()
+                                    last_pos = f.tell()
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                        time.sleep(0.2)
+                    except (BrokenPipeError, ConnectionResetError):
+                        break
+                    except Exception:
+                        break
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), SSEHandler)
+    url = f"http://127.0.0.1:{port}/"
+    print(f"⚡ aw live dashboard running at {url}")
+    print("Press Ctrl+C to stop.")
+
+    if open_browser:
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        try:
+            subprocess.run([opener, url], check=False)
+        except OSError:
+            pass
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down live dashboard.")
+        server.server_close()
 
 
 def main() -> None:
@@ -698,10 +894,23 @@ def main() -> None:
         action="store_true",
         help="Automatically open generated HTML dashboard in default web browser",
     )
+    parser.add_argument(
+        "--serve",
+        nargs="?",
+        const=7890,
+        type=int,
+        default=None,
+        help="Start live HTTP + SSE server on specified port (default: 7890)",
+    )
     args = parser.parse_args()
 
+    aw_dir = resolve_global_aw_dir() if args.is_global else ((args.root or Path(".")).resolve() / ".aw")
+
+    if args.serve is not None:
+        run_live_server(aw_dir, port=args.serve, open_browser=args.open)
+        return
+
     if args.is_global:
-        aw_dir = resolve_global_aw_dir()
         out_path = args.out or (aw_dir / "dashboard.html")
         entries = parse_usage_log_from_dir(aw_dir)
         metrics = calculate_metrics(entries)

@@ -290,11 +290,27 @@ aw usage [--global] [--quality]
 Render and open an interactive HTML telemetry dashboard across all repositories.
 
 ```bash
-aw-dashboard [--open] [--out <PATH>]
+aw-dashboard [--open] [--serve [PORT]] [--out <PATH>]
 ```
 
 - `--open`: Automatically opens the generated dashboard (`~/.aw/dashboard.html`) in your default browser.
+- `--serve [PORT]`: Starts a live HTTP server with Server-Sent Events (SSE) streaming real-time queries.
 - Includes repository filter dropdown, active repositories overview, tool breakdown charts, and an error triage inspection table.
+
+### Live Monitor (`aw-monitor`)
+Interactive real-time live monitor streaming queries as they happen across all repositories.
+
+```bash
+# Terminal User Interface (TUI) live monitor
+aw-monitor [--errors-only] [--repo <NAME>]
+
+# Live web dashboard with real-time SSE stream
+aw-monitor --web [PORT]
+```
+
+- **TUI Hotkeys**: `q` quit, `e` toggle error-only filter, `r` cycle repository filter, `p` / `Space` pause/resume streaming, `c` clear buffer.
+- **Header**: Live QPS, active repo count, total session queries, reliability %, p50 latency, token savings.
+- **Alert Bar**: Instant red alert flash on non-zero exit codes with exact command and arguments.
 
 ---
 

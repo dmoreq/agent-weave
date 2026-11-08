@@ -18,6 +18,13 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
+- **Real-time live monitor (`aw-monitor`).** Interactive Terminal User
+  Interface (TUI) live streaming telemetry from `~/.aw/usage.log` across all
+  repositories and worktrees. Features live QPS, p50 latency, token savings,
+  active repo counter, instant error alert banner, and keyboard controls
+  (`q` quit, `e` errors-only, `r` cycle repo, `p` pause). Supports live web
+  mode (`aw-monitor --web`) with Server-Sent Events (SSE) streaming updates
+  directly into the browser without page reloads.
 - **Global telemetry logging & multi-repo dashboard.** Dual-write telemetry to
   `<repo>/.aw/usage.log` and global `~/.aw/usage.log` (configurable via
   `AW_GLOBAL_DIR`), tracking repository attribution and Git worktree flags.

@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""Real-Time Live Monitor for `aw` (`agent-weave`).
+
+Provides an interactive Terminal User Interface (TUI) live monitor and an
+optional Live Web Server (`--web`) streaming events via Server-Sent Events (SSE).
+"""
+
+from __future__ import annotations
+
+import argparse
+import curses
+import json
+import math
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+
+def resolve_global_aw_dir() -> Path:
+    """Resolve global ~/.aw directory, honoring AW_GLOBAL_DIR."""
+    val = os.environ.get("AW_GLOBAL_DIR")
+    if val and val.strip():
+        return Path(val.strip())
+    home = os.environ.get("HOME") or os.environ.get("USERPROFILE") or "."
+    return Path(home) / ".aw"
+
+
+def format_age_secs(diff: int) -> str:
+    """Format duration in human-readable compact form."""
+    if diff < 60:
+        return f"{diff}s ago"
+    elif diff < 3600:
+        return f"{diff // 60}m ago"
+    elif diff < 86400:
+        return f"{diff // 3600}h ago"
+    else:
+        return f"{diff // 86400}d ago"
+
+
+class LiveMonitorTUI:
+    """Curses-based real-time terminal dashboard for aw."""
+
+    def __init__(self, log_path: Path, errors_only: bool = False, repo_filter: str = "ALL"):
+        self.log_path = log_path
+        self.errors_only = errors_only
+        self.repo_filter = repo_filter
+        self.paused = False
+        self.events: List[Dict[str, Any]] = []
+        self.last_pos = 0
+        self.total_queries = 0
+        self.total_errors = 0
+        self.saved_tokens = 0
+        self.latencies: List[float] = []
+        self.repo_counts: Dict[str, int] = {}
+        self.last_error: Optional[Dict[str, Any]] = None
+
+    def load_initial_history(self, limit: int = 40):
+        """Pre-load recent history from usage.log."""
+        if not self.log_path.is_file():
+            return
+        try:
+            lines = []
+            with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        lines.append(line)
+                self.last_pos = f.tell()
+
+            for line in lines[-limit:]:
+                try:
+                    entry = json.loads(line)
+                    self.process_entry(entry)
+                except Exception:
+                    pass
+        except OSError:
+            pass
+
+    def process_entry(self, entry: Dict[str, Any]):
+        """Update metrics and event buffer with a new entry."""
+        self.total_queries += 1
+        exit_code = int(entry.get("exit_code", 0))
+        repo = str(entry.get("repo_name") or "workspace")
+        tool = str(entry.get("tool", "-"))
+        shown = int(entry.get("shown", entry.get("result_count", 0)))
+        lat_us = entry.get("latency_us")
+
+        self.repo_counts[repo] = self.repo_counts.get(repo, 0) + 1
+
+        if exit_code != 0:
+            self.total_errors += 1
+            self.last_error = entry
+
+        if lat_us is not None and lat_us >= 0:
+            self.latencies.append(lat_us / 1000.0)
+
+        # Estimate savings
+        if exit_code == 0:
+            if tool in ("context", "callers", "callees", "path", "impact", "imports"):
+                self.saved_tokens += shown * 350 + 100
+            elif tool == "search":
+                self.saved_tokens += shown * 300 + 100
+            elif tool == "reuse":
+                self.saved_tokens += shown * 800 + 1200
+            elif tool == "symbols":
+                self.saved_tokens += shown * 150
+            elif tool == "build":
+                self.saved_tokens += 500
+
+        self.events.append(entry)
+        if len(self.events) > 300:
+            self.events.pop(0)
+
+    def poll_new_lines(self):
+        """Read any new lines appended to the log file."""
+        if self.paused or not self.log_path.is_file():
+            return
+
+        try:
+            current_size = self.log_path.stat().st_size
+            if current_size < self.last_pos:
+                self.last_pos = 0  # Rotated file
+
+            if current_size > self.last_pos:
+                with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
+                    f.seek(self.last_pos)
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                entry = json.loads(line)
+                                self.process_entry(entry)
+                            except Exception:
+                                pass
+                    self.last_pos = f.tell()
+        except OSError:
+            pass
+
+    def run(self, stdscr):
+        """Main curses event loop."""
+        curses.curs_set(0)
+        stdscr.timeout(100)  # 100ms poll
+
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)     # Header
+        curses.init_pair(2, curses.COLOR_GREEN, -1)    # OK / Success
+        curses.init_pair(3, curses.COLOR_RED, -1)      # Error / Danger
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)   # Warning / Filter
+        curses.init_pair(5, curses.COLOR_MAGENTA, -1)  # Repo tag
+        curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLUE)  # Status bar
+
+        self.load_initial_history()
+
+        while True:
+            self.poll_new_lines()
+            self.render(stdscr)
+
+            try:
+                ch = stdscr.getch()
+                if ch in (ord('q'), ord('Q')):
+                    break
+                elif ch in (ord('e'), ord('E')):
+                    self.errors_only = not self.errors_only
+                elif ch in (ord('p'), ord('P'), ord(' ')):
+                    self.paused = not self.paused
+                elif ch in (ord('c'), ord('C')):
+                    self.events.clear()
+                elif ch in (ord('r'), ord('R')):
+                    # Cycle repo filter
+                    repos = ["ALL"] + sorted(self.repo_counts.keys())
+                    if self.repo_filter in repos:
+                        idx = (repos.index(self.repo_filter) + 1) % len(repos)
+                        self.repo_filter = repos[idx]
+                    else:
+                        self.repo_filter = "ALL"
+            except Exception:
+                pass
+
+    def render(self, stdscr):
+        """Draw the TUI frame."""
+        height, width = stdscr.getmaxyx()
+        stdscr.erase()
+
+        if height < 12 or width < 70:
+            stdscr.addstr(0, 0, f"Terminal too small ({width}x{height}). Resize to >= 80x15.")
+            stdscr.refresh()
+            return
+
+        # 1. Header
+        live_tag = "[PAUSED]" if self.paused else "[● LIVE]"
+        live_color = curses.color_pair(4) if self.paused else curses.color_pair(2)
+        title = "⚡ aw live monitor"
+        stdscr.addstr(0, 0, title, curses.color_pair(1) | curses.A_BOLD)
+        right_x = max(0, width - len(live_tag) - 1)
+        stdscr.addstr(0, right_x, live_tag, live_color | curses.A_BOLD)
+
+        # 2. Hero KPI Line
+        reliability = (
+            (100.0 * (self.total_queries - self.total_errors) / self.total_queries)
+            if self.total_queries > 0
+            else 100.0
+        )
+        p50 = (
+            sorted(self.latencies)[len(self.latencies) // 2]
+            if self.latencies
+            else 0.0
+        )
+        dollars = self.saved_tokens * 0.000003
+
+        kpi_text = (
+            f"Queries: {self.total_queries} | "
+            f"Reliability: {reliability:.1f}% ({self.total_errors} err) | "
+            f"p50: {p50:.1f}ms | "
+            f"Saved: ~{self.saved_tokens:,} tok (~${dollars:.2f})"
+        )
+        stdscr.addstr(1, 0, kpi_text[:width - 1], curses.A_NORMAL)
+
+        # 3. Active Repos / Filters Line
+        repo_summary = ", ".join(f"{k} ({v})" for k, v in sorted(self.repo_counts.items())[:4])
+        mode_str = "ERRORS ONLY" if self.errors_only else "ALL CALLS"
+        filter_text = f"Scope: [{self.repo_filter}] | Mode: [{mode_str}] | Repos: {repo_summary}"
+        stdscr.addstr(2, 0, filter_text[:width - 1], curses.color_pair(4))
+
+        # 4. Table Header
+        sep = "─" * (width - 1)
+        stdscr.addstr(3, 0, sep, curses.A_DIM)
+        col_hdr = f"{'TIME':<9} {'REPO':<14} {'TOOL':<12} {'LATENCY':<10} {'STATUS':<9} ARGUMENTS"
+        stdscr.addstr(4, 0, col_hdr[:width - 1], curses.A_BOLD)
+        stdscr.addstr(5, 0, sep, curses.A_DIM)
+
+        # 5. Event Rows
+        visible_rows = height - 9
+        filtered_events = [
+            e for e in self.events
+            if (not self.errors_only or e.get("exit_code", 0) != 0)
+            and (self.repo_filter == "ALL" or e.get("repo_name") == self.repo_filter)
+        ]
+        to_display = filtered_events[-visible_rows:]
+
+        curr_y = 6
+        for e in to_display:
+            if curr_y >= height - 3:
+                break
+
+            ts = e.get("ts", 0)
+            time_str = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "-"
+            r_name = str(e.get("repo_name") or "workspace")[:13]
+            tool = str(e.get("tool", "-"))[:11]
+            lat_us = e.get("latency_us")
+            lat_str = f"{lat_us / 1000.0:.1f}ms" if lat_us is not None else "-"
+            exit_code = int(e.get("exit_code", 0))
+
+            if exit_code == 0:
+                status_str = "OK"
+                status_color = curses.color_pair(2)
+            else:
+                status_str = f"ERR {exit_code}"
+                status_color = curses.color_pair(3) | curses.A_BOLD
+
+            args_raw = json.dumps(e.get("args", {}), ensure_ascii=False)
+            max_args_len = max(10, width - 60)
+            args_str = args_raw[:max_args_len]
+
+            row_prefix = f"{time_str:<9} {r_name:<14} {tool:<12} {lat_str:<10} "
+            stdscr.addstr(curr_y, 0, row_prefix)
+            stdscr.addstr(curr_y, len(row_prefix), f"{status_str:<9}", status_color)
+            stdscr.addstr(curr_y, len(row_prefix) + 9, f" {args_str}")
+            curr_y += 1
+
+        # 6. Recent Error Alert Banner (if error exists)
+        if self.last_error and self.total_errors > 0:
+            err_tool = self.last_error.get("tool")
+            err_repo = self.last_error.get("repo_name") or "unknown"
+            err_code = self.last_error.get("exit_code")
+            err_time = time.strftime("%H:%M:%S", time.localtime(self.last_error.get("ts", 0)))
+            alert_msg = f" ⚠ LAST ERROR [{err_time}] {err_tool} in {err_repo} -> exit {err_code} "
+            alert_x = max(0, width - len(alert_msg) - 1)
+            stdscr.addstr(height - 2, 0, " " * (width - 1), curses.A_NORMAL)
+            stdscr.addstr(height - 2, 0, alert_msg[:width - 1], curses.color_pair(3) | curses.A_BOLD)
+        else:
+            stdscr.addstr(height - 2, 0, " ✓ All operations healthy — zero recent errors", curses.color_pair(2))
+
+        # 7. Bottom Help Bar
+        help_bar = " [q] Quit  [e] Toggle Errors  [r] Cycle Repo  [p/Space] Pause  [c] Clear "
+        stdscr.addstr(height - 1, 0, help_bar.ljust(width - 1), curses.color_pair(6))
+
+        stdscr.refresh()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Real-time live monitor for aw (agent-weave) across repos and worktrees."
+    )
+    parser.add_argument(
+        "--web",
+        nargs="?",
+        const=7890,
+        type=int,
+        default=None,
+        help="Start live web dashboard (SSE streaming) on specified port (default: 7890)",
+    )
+    parser.add_argument(
+        "--errors-only",
+        action="store_true",
+        help="Launch TUI filtering for errors only",
+    )
+    parser.add_argument(
+        "--repo",
+        type=str,
+        default="ALL",
+        help="Filter live monitor to specific repository name",
+    )
+    args = parser.parse_args()
+
+    aw_dir = resolve_global_aw_dir()
+    log_path = aw_dir / "usage.log"
+
+    if args.web is not None:
+        # Delegate to live web server
+        script_dir = Path(__file__).resolve().parent
+        render_py = script_dir / "../tests/scripts/render_dashboard.py"
+        cmd = [
+            sys.executable,
+            "-I",
+            str(render_py),
+            "--global",
+            "--serve",
+            str(args.web),
+            "--open",
+        ]
+        try:
+            subprocess.run(cmd)
+        except KeyboardInterrupt:
+            pass
+        return
+
+    # Default: Interactive TUI
+    app = LiveMonitorTUI(log_path, errors_only=args.errors_only, repo_filter=args.repo)
+    try:
+        curses.wrapper(app.run)
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
