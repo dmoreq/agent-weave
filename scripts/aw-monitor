@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import sqlite3
 import subprocess
 import sys
@@ -87,6 +88,20 @@ def collect_memories_for_tui(aw_dir: Path, repo_paths: Dict[str, Path]) -> List[
                 refs = [r for r in str(row[8]).split() if r]
                 source = str(row[10])
                 created_at = int(row[11])
+
+                if kind == "gotcha":
+                    prev_role = "REGRESSION GUARD"
+                    prev_desc = "Prevents repeating root-cause bug or edge-case failure"
+                elif kind == "decision":
+                    prev_role = "ARCHITECTURE INVARIANT"
+                    prev_desc = "Enforces structural invariant or boundary constraint"
+                elif kind == "fact":
+                    prev_role = "EXPLORATION SHORTCUT"
+                    prev_desc = "Avoids multi-file grep scans with verified system fact"
+                else:
+                    prev_role = "HANDOFF CONTEXT"
+                    prev_desc = "Preserves active task state across sessions"
+
                 notes.append({
                     "store": store_name,
                     "id": row[0],
@@ -100,6 +115,8 @@ def collect_memories_for_tui(aw_dir: Path, repo_paths: Dict[str, Path]) -> List[
                     "refs": refs,
                     "source": source,
                     "created_at": created_at,
+                    "prev_role": prev_role,
+                    "prev_desc": prev_desc,
                 })
             conn.close()
         except (sqlite3.Error, OSError):
@@ -108,12 +125,117 @@ def collect_memories_for_tui(aw_dir: Path, repo_paths: Dict[str, Path]) -> List[
     return sorted(notes, key=lambda n: n["created_at"], reverse=True)
 
 
+def collect_reuse_for_tui(repo_paths: Dict[str, Path]) -> List[Dict[str, Any]]:
+    """Extract D1-D4 duplication candidates across indexed repositories."""
+    repos = dict(repo_paths)
+    cwd = Path.cwd().resolve()
+    if cwd.name not in repos and (cwd / ".aw" / "index.db").is_file():
+        repos[cwd.name] = cwd
+
+    candidates: List[Dict[str, Any]] = []
+    for r_name, r_root in sorted(repos.items()):
+        db_path = r_root / ".aw" / "index.db"
+        if not db_path.is_file():
+            continue
+
+        try:
+            cmd = ["aw", "--no-journal", "--root", str(r_root), "reuse", "--limit", "20"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=3.0)
+            output = res.stdout
+        except (subprocess.SubprocessError, OSError):
+            output = ""
+
+        conn = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            cur = conn.cursor()
+        except (sqlite3.Error, OSError):
+            cur = None
+
+        lines = output.strip().splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("symbol '"):
+                m = re.match(
+                    r"symbol '([^']+)' (shares (\d+)% (callee footprint|interface token overlap) with existing|bypasses canonical client|is a pass-through wrapper around existing) '([^']+)' \(\[callers=(\d+)\] in ([^:]+):(\d+)\)",
+                    line,
+                )
+                shared_line = ""
+                if i + 1 < len(lines) and lines[i + 1].startswith("  "):
+                    shared_line = lines[i + 1].strip()
+                    i += 1
+
+                if m:
+                    sym = m.group(1)
+                    canonical = m.group(5)
+                    callers = int(m.group(6))
+                    c_file = m.group(7)
+                    c_line = int(m.group(8))
+                    pct = int(m.group(3)) if m.group(3) else 100
+
+                    if "callee footprint" in line:
+                        det = "D1"
+                        det_title = "D1 Callee Footprint Overlap"
+                        guidance = f"Replace duplicate workflow '{sym}' with canonical '{canonical}' ([callers={callers}])."
+                    elif "interface token" in line:
+                        det = "D2"
+                        det_title = "D2 Interface Token Overlap"
+                        guidance = f"Unify parameter structure with canonical '{canonical}' ([callers={callers}]) to avoid twin implementations."
+                    elif "bypasses" in line:
+                        det = "D3"
+                        det_title = "D3 Raw Client Bypass"
+                        guidance = f"Route calls in '{sym}' through canonical managed client '{canonical}' ([callers={callers}])."
+                    else:
+                        det = "D4"
+                        det_title = "D4 Redundant Pass-Through Wrapper"
+                        guidance = f"Eliminate single-caller wrapper '{sym}' and invoke '{canonical}' ([callers={callers}]) directly."
+
+                    sym_loc = 10
+                    sym_file = ""
+                    if cur:
+                        try:
+                            cur.execute(
+                                "SELECT file_path, line_start, line_end FROM symbols WHERE qualname = ?1 OR qualname LIKE ?2 LIMIT 1",
+                                (sym, "%" + sym),
+                            )
+                            srow = cur.fetchone()
+                            if srow:
+                                sym_file = srow[0]
+                                sym_loc = max(1, srow[2] - srow[1] + 1)
+                        except sqlite3.Error:
+                            pass
+
+                    candidates.append({
+                        "repo": r_name,
+                        "detector": det,
+                        "detector_title": det_title,
+                        "symbol": sym,
+                        "canonical": canonical,
+                        "canonical_callers": callers,
+                        "canonical_file": c_file,
+                        "canonical_line": c_line,
+                        "overlap_pct": pct,
+                        "shared_evidence": shared_line,
+                        "sym_file": sym_file,
+                        "loc_saving": sym_loc,
+                        "guidance": guidance,
+                    })
+            i += 1
+
+        if conn:
+            conn.close()
+
+    return candidates
+
+
 class LiveMonitorTUI:
     """Curses-based real-time terminal dashboard for aw."""
 
     VIEW_STREAM = 0
-    VIEW_MEMORIES = 1
-    VIEW_BREAKDOWN = 2
+    VIEW_REUSE = 1
+    VIEW_MEMORIES = 2
+    VIEW_BREAKDOWN = 3
 
     def __init__(self, log_path: Path, errors_only: bool = False, repo_filter: str = "ALL"):
         self.log_path = log_path
@@ -137,65 +259,69 @@ class LiveMonitorTUI:
         self.tool_latencies: Dict[str, List[float]] = {}
         self.last_error: Optional[Dict[str, Any]] = None
 
-        # Selection state
+        # Cursor & filter state
         self.stream_cursor = 0
         self.memory_cursor = 0
+        self.reuse_cursor = 0
+
         self.memories: List[Dict[str, Any]] = []
         self.last_mem_refresh = 0.0
         self.mem_kind_filter = "ALL"
         self.mem_store_filter = "ALL"
 
+        self.reuse_candidates: List[Dict[str, Any]] = []
+        self.last_reuse_refresh = 0.0
+        self.reuse_detector_filter = "ALL"
+        self.reuse_repo_filter = "ALL"
+
     def load_initial_history(self, limit: int = 100):
         """Pre-load recent history from usage.log."""
         if not self.log_path.is_file():
             return
+
         try:
-            lines = []
             with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
+                lines = f.readlines()
+                for line in lines[-limit:]:
                     line = line.strip()
                     if line:
-                        lines.append(line)
+                        try:
+                            entry = json.loads(line)
+                            self.process_entry(entry)
+                        except Exception:
+                            pass
                 self.last_pos = f.tell()
-
-            for line in lines[-limit:]:
-                try:
-                    entry = json.loads(line)
-                    self.process_entry(entry)
-                except Exception:
-                    pass
         except OSError:
             pass
 
-        self.refresh_memories(force=True)
-
     def refresh_memories(self, force: bool = False):
-        """Poll SQLite memory databases periodically."""
+        """Periodically refresh active memory notes."""
         now = time.time()
-        if not force and (now - self.last_mem_refresh < 3.0):
-            return
-        self.last_mem_refresh = now
-        self.memories = collect_memories_for_tui(self.aw_dir, self.repo_paths)
+        if force or (now - self.last_mem_refresh > 4.0):
+            self.memories = collect_memories_for_tui(self.aw_dir, self.repo_paths)
+            self.last_mem_refresh = now
+
+    def refresh_reuse(self, force: bool = False):
+        """Periodically refresh anti-reinvention candidates."""
+        now = time.time()
+        if force or (now - self.last_reuse_refresh > 15.0):
+            self.reuse_candidates = collect_reuse_for_tui(self.repo_paths)
+            self.last_reuse_refresh = now
 
     def process_entry(self, entry: Dict[str, Any]):
-        """Update metrics and event buffer with a new entry."""
-        repo = str(entry.get("repo_name") or "workspace")
-        repo_root = entry.get("repo")
-        if repo_root:
-            self.repo_paths[repo] = Path(repo_root)
-
-        # Skip synthetic test fixture repos created during cargo test suites
-        if repo.startswith(("aw-it-", "aw-mcp-", "usage-quality", "journal-", "global-usage-")):
-            return
-
+        """Record live event metrics."""
         self.total_queries += 1
+        tool = str(entry.get("tool", "unknown"))
         exit_code = int(entry.get("exit_code", 0))
-        tool = str(entry.get("tool", "-"))
-        shown = int(entry.get("shown", entry.get("result_count", 0)))
+        repo_name = str(entry.get("repo_name") or "workspace")
+        repo_root = entry.get("repo")
         lat_us = entry.get("latency_us")
+        shown = int(entry.get("shown", entry.get("result_count", 0)))
 
-        self.repo_counts[repo] = self.repo_counts.get(repo, 0) + 1
         self.tool_counts[tool] = self.tool_counts.get(tool, 0) + 1
+        self.repo_counts[repo_name] = self.repo_counts.get(repo_name, 0) + 1
+        if repo_root and repo_name not in self.repo_paths:
+            self.repo_paths[repo_name] = Path(repo_root)
 
         if exit_code >= 3:
             self.total_errors += 1
@@ -208,7 +334,6 @@ class LiveMonitorTUI:
             self.latencies.append(lat_ms)
             self.tool_latencies.setdefault(tool, []).append(lat_ms)
 
-        # Estimate token savings
         if exit_code == 0:
             if tool in ("context", "callers", "callees", "path", "impact", "imports"):
                 self.saved_tokens += shown * 350 + 100
@@ -233,7 +358,7 @@ class LiveMonitorTUI:
         try:
             current_size = self.log_path.stat().st_size
             if current_size < self.last_pos:
-                self.last_pos = 0  # Rotated file
+                self.last_pos = 0
 
             if current_size > self.last_pos:
                 with open(self.log_path, "r", encoding="utf-8", errors="replace") as f:
@@ -253,7 +378,7 @@ class LiveMonitorTUI:
     def run(self, stdscr):
         """Main curses event loop."""
         curses.curs_set(0)
-        stdscr.timeout(100)  # 100ms poll
+        stdscr.timeout(100)
 
         curses.start_color()
         curses.use_default_colors()
@@ -270,6 +395,7 @@ class LiveMonitorTUI:
         while True:
             self.poll_new_lines()
             self.refresh_memories()
+            self.refresh_reuse()
             self.render(stdscr)
 
             try:
@@ -279,9 +405,12 @@ class LiveMonitorTUI:
                 elif ch == ord('1'):
                     self.current_view = self.VIEW_STREAM
                 elif ch == ord('2'):
+                    self.current_view = self.VIEW_REUSE
+                    self.refresh_reuse(force=True)
+                elif ch == ord('3'):
                     self.current_view = self.VIEW_MEMORIES
                     self.refresh_memories(force=True)
-                elif ch == ord('3'):
+                elif ch == ord('4'):
                     self.current_view = self.VIEW_BREAKDOWN
                 elif ch in (ord('p'), ord('P'), ord(' ')):
                     self.paused = not self.paused
@@ -291,37 +420,47 @@ class LiveMonitorTUI:
                     self.events.clear()
                     self.stream_cursor = 0
                 elif ch in (ord('r'), ord('R')):
-                    # Cycle repo filter in Stream view
-                    repos = ["ALL"] + sorted(self.repo_counts.keys())
-                    if self.repo_filter in repos:
-                        idx = (repos.index(self.repo_filter) + 1) % len(repos)
-                        self.repo_filter = repos[idx]
+                    # Cycle repo filter in Stream or Reuse view
+                    if self.current_view == self.VIEW_REUSE:
+                        repos = ["ALL"] + sorted({c["repo"] for c in self.reuse_candidates})
+                        idx = (repos.index(self.reuse_repo_filter) + 1) % len(repos) if self.reuse_repo_filter in repos else 0
+                        self.reuse_repo_filter = repos[idx]
+                        self.reuse_cursor = 0
                     else:
-                        self.repo_filter = "ALL"
-                    self.stream_cursor = 0
+                        repos = ["ALL"] + sorted(self.repo_counts.keys())
+                        idx = (repos.index(self.repo_filter) + 1) % len(repos) if self.repo_filter in repos else 0
+                        self.repo_filter = repos[idx]
+                        self.stream_cursor = 0
+                elif ch in (ord('d'), ord('D')):
+                    # Cycle detector filter in Reuse view
+                    dets = ["ALL", "D1", "D2", "D3", "D4"]
+                    idx = (dets.index(self.reuse_detector_filter) + 1) % len(dets) if self.reuse_detector_filter in dets else 0
+                    self.reuse_detector_filter = dets[idx]
+                    self.reuse_cursor = 0
                 elif ch in (ord('t'), ord('T')):
                     # Cycle kind filter in Memory view
                     kinds = ["ALL", "decision", "gotcha", "fact", "task"]
-                    idx = (kinds.index(self.mem_kind_filter) + 1) % len(kinds)
+                    idx = (kinds.index(self.mem_kind_filter) + 1) % len(kinds) if self.mem_kind_filter in kinds else 0
                     self.mem_kind_filter = kinds[idx]
                     self.memory_cursor = 0
                 elif ch in (ord('s'), ord('S')):
                     # Cycle store filter in Memory view
                     stores = ["ALL"] + sorted({m["store"] for m in self.memories})
-                    if self.mem_store_filter in stores:
-                        idx = (stores.index(self.mem_store_filter) + 1) % len(stores)
-                        self.mem_store_filter = stores[idx]
-                    else:
-                        self.mem_store_filter = "ALL"
+                    idx = (stores.index(self.mem_store_filter) + 1) % len(stores) if self.mem_store_filter in stores else 0
+                    self.mem_store_filter = stores[idx]
                     self.memory_cursor = 0
                 elif ch in (curses.KEY_UP, ord('k'), ord('K')):
                     if self.current_view == self.VIEW_STREAM:
                         self.stream_cursor = max(0, self.stream_cursor - 1)
+                    elif self.current_view == self.VIEW_REUSE:
+                        self.reuse_cursor = max(0, self.reuse_cursor - 1)
                     elif self.current_view == self.VIEW_MEMORIES:
                         self.memory_cursor = max(0, self.memory_cursor - 1)
                 elif ch in (curses.KEY_DOWN, ord('j'), ord('J')):
                     if self.current_view == self.VIEW_STREAM:
                         self.stream_cursor += 1
+                    elif self.current_view == self.VIEW_REUSE:
+                        self.reuse_cursor += 1
                     elif self.current_view == self.VIEW_MEMORIES:
                         self.memory_cursor += 1
             except Exception:
@@ -337,11 +476,12 @@ class LiveMonitorTUI:
             stdscr.refresh()
             return
 
-        # 1. Global Navigation Bar
+        # 1. Global Navigation Bar (4 Views)
         view_labels = [
             (" [1] Live Stream ", self.current_view == self.VIEW_STREAM),
-            (" [2] Memory Inspector ", self.current_view == self.VIEW_MEMORIES),
-            (" [3] Breakdown & Health ", self.current_view == self.VIEW_BREAKDOWN),
+            (f" [2] Anti-Reinvention ({len(self.reuse_candidates)}) ", self.current_view == self.VIEW_REUSE),
+            (f" [3] Memory Inspector ({len(self.memories)}) ", self.current_view == self.VIEW_MEMORIES),
+            (" [4] Breakdown & Health ", self.current_view == self.VIEW_BREAKDOWN),
         ]
         x_nav = 0
         for text, active in view_labels:
@@ -367,13 +507,15 @@ class LiveMonitorTUI:
         )
         dollars = self.saved_tokens * 0.000003
         mem_count = len(self.memories)
+        reuse_count = len(self.reuse_candidates)
 
         kpi_line = (
             f"Queries: {self.total_queries} | "
-            f"Success: {reliability:.1f}% ({self.total_errors} err, {self.total_warnings} warn) | "
+            f"Success: {reliability:.1f}% ({self.total_errors} err) | "
             f"p50: {p50:.1f}ms | "
-            f"Saved: ~{self.saved_tokens:,} tok (~${dollars:.2f}) | "
-            f"Memories: {mem_count}"
+            f"Duplicates: {reuse_count} | "
+            f"Memories: {mem_count} | "
+            f"Saved: ~${dollars:.2f}"
         )
         stdscr.addstr(1, 0, kpi_line[:width - 1], curses.A_NORMAL)
 
@@ -383,6 +525,8 @@ class LiveMonitorTUI:
         # Render specific view
         if self.current_view == self.VIEW_STREAM:
             self.render_stream_view(stdscr, height, width)
+        elif self.current_view == self.VIEW_REUSE:
+            self.render_reuse_view(stdscr, height, width)
         elif self.current_view == self.VIEW_MEMORIES:
             self.render_memories_view(stdscr, height, width)
         else:
@@ -394,7 +538,6 @@ class LiveMonitorTUI:
 
     def render_stream_view(self, stdscr, height: int, width: int):
         """Render Live Stream View with master query table and detail inspector."""
-        # Filter status line
         mode_str = "CRITICAL ERRORS ONLY" if self.errors_only else "ALL CALLS"
         filter_text = f"Filter: Repo=[{self.repo_filter}] | Mode=[{mode_str}] | [r] Cycle Repo  [e] Toggle Errors"
         stdscr.addstr(3, 0, filter_text[:width - 1], curses.color_pair(4))
@@ -409,21 +552,16 @@ class LiveMonitorTUI:
             and (self.repo_filter == "ALL" or e.get("repo_name") == self.repo_filter)
         ]
 
-        # Allocate space: top table gets half, bottom inspector gets half
         table_rows = max(4, (height - 11) // 2)
-        inspector_rows = height - 7 - table_rows
-
         if not filtered:
             stdscr.addstr(6, 0, "No query events matching current filter criteria.", curses.color_pair(4))
             return
 
-        # Keep cursor in bounds
         if self.stream_cursor >= len(filtered):
             self.stream_cursor = len(filtered) - 1
         if self.stream_cursor < 0:
             self.stream_cursor = 0
 
-        # Calculate visible window
         start_idx = max(0, min(self.stream_cursor - table_rows // 2, len(filtered) - table_rows))
         window_events = filtered[start_idx : start_idx + table_rows]
 
@@ -473,31 +611,92 @@ class LiveMonitorTUI:
         hdr_info = f"EVENT INSPECTOR [{self.stream_cursor + 1}/{len(filtered)}]: {sel_entry.get('tool')} in {sel_entry.get('repo_name') or 'workspace'}"
         stdscr.addstr(split_y + 1, 0, hdr_info[:width - 1], curses.color_pair(1) | curses.A_BOLD)
 
-        # Inspector rows
         shown = sel_entry.get("shown", sel_entry.get("result_count", 0))
         lat = sel_entry.get("latency_us")
         lat_text = f"{lat / 1000.0:.2f} ms ({lat} µs)" if lat else "N/A"
-        diag = (
-            f"Timestamp: {sel_entry.get('iso_ts', '-')} | "
-            f"Exit: {sel_entry.get('exit_code', 0)} | "
-            f"Latency: {lat_text} | "
-            f"Results: {shown}"
-        )
-        stdscr.addstr(split_y + 2, 0, diag[:width - 1], curses.A_NORMAL)
+        diag = f"Exit: {sel_entry.get('exit_code')} | Items: {shown} | Latency: {lat_text} | Worktree: {sel_entry.get('worktree', False)}"
+        stdscr.addstr(split_y + 2, 0, diag[:width - 1], curses.A_DIM)
 
-        raw_args = json.dumps(sel_entry.get("args", {}), indent=2, ensure_ascii=False)
-        args_lines = raw_args.splitlines()
-        max_inspect_lines = height - split_y - 4
-        for idx, line in enumerate(args_lines[:max_inspect_lines]):
-            stdscr.addstr(split_y + 3 + idx, 0, f"  {line}"[:width - 1], curses.color_pair(5))
+        stdscr.addstr(split_y + 3, 0, "Full Command Arguments:", curses.A_UNDERLINE)
+        args_pretty = json.dumps(sel_entry.get("args", {}), indent=2, ensure_ascii=False)
+        for idx, line in enumerate(args_pretty.splitlines()[: height - split_y - 5]):
+            stdscr.addstr(split_y + 4 + idx, 2, line[:width - 3])
+
+    def render_reuse_view(self, stdscr, height: int, width: int):
+        """Render Dedicated Anti-Reinvention Inspector View."""
+        filter_text = f"Filter: Repo=[{self.reuse_repo_filter}] | Detector=[{self.reuse_detector_filter}] | [d] Cycle Detector  [r] Cycle Repo  [j/k] Navigate"
+        stdscr.addstr(3, 0, filter_text[:width - 1], curses.color_pair(4))
+
+        col_hdr = f"{'REPO':<12} {'DET':<5} {'OVERLAP':<9} {'SYMBOL -> CANONICAL TARGET':<46} {'CALLERS':<9} SAVING"
+        stdscr.addstr(4, 0, col_hdr[:width - 1], curses.A_BOLD)
+        stdscr.addstr(5, 0, "─" * (width - 1), curses.A_DIM)
+
+        filtered = [
+            c for c in self.reuse_candidates
+            if (self.reuse_repo_filter == "ALL" or c["repo"] == self.reuse_repo_filter)
+            and (self.reuse_detector_filter == "ALL" or c["detector"] == self.reuse_detector_filter)
+        ]
+
+        table_rows = max(4, (height - 12) // 2)
+        if not filtered:
+            stdscr.addstr(6, 0, "Zero duplication candidates match criteria. Codebase clean of duplicate helpers.", curses.color_pair(2))
+            return
+
+        if self.reuse_cursor >= len(filtered):
+            self.reuse_cursor = len(filtered) - 1
+        if self.reuse_cursor < 0:
+            self.reuse_cursor = 0
+
+        start_idx = max(0, min(self.reuse_cursor - table_rows // 2, len(filtered) - table_rows))
+        window = filtered[start_idx : start_idx + table_rows]
+
+        for i, c in enumerate(window):
+            row_idx = start_idx + i
+            y = 6 + i
+            is_selected = (row_idx == self.reuse_cursor)
+
+            r_name = c["repo"][:11]
+            det = c["detector"][:4]
+            pct_str = f"{c['overlap_pct']}%"
+            pair_str = f"{c['symbol']} -> {c['canonical']}"[:45]
+            callers_str = f"[c={c['canonical_callers']}]"
+            saving_str = f"-{c['loc_saving']} LOC"
+
+            det_color = curses.color_pair(4) if det in ("D1", "D2") else curses.color_pair(1)
+
+            if is_selected:
+                row_str = f"{r_name:<12} {det:<5} {pct_str:<9} {pair_str:<46} {callers_str:<9} {saving_str}".ljust(width - 1)
+                stdscr.addstr(y, 0, row_str[:width - 1], curses.color_pair(7) | curses.A_BOLD)
+            else:
+                stdscr.addstr(y, 0, f"{r_name:<12} ")
+                stdscr.addstr(y, 13, f"{det:<5}", det_color | curses.A_BOLD)
+                stdscr.addstr(y, 19, f"{pct_str:<9} {pair_str:<46} ")
+                stdscr.addstr(y, 75, f"{callers_str:<9}", curses.color_pair(2))
+                stdscr.addstr(y, 85, f"{saving_str}")
+
+        # Bottom Pane: Prevention & Consolidation Dossier
+        split_y = 6 + table_rows
+        stdscr.addstr(split_y, 0, "─" * (width - 1), curses.A_DIM)
+        sel = filtered[self.reuse_cursor]
+
+        dossier_hdr = f"ANTI-REINVENTION DOSSIER [{self.reuse_cursor + 1}/{len(filtered)}]: {sel['detector_title']} in {sel['repo']}"
+        stdscr.addstr(split_y + 1, 0, dossier_hdr[:width - 1], curses.color_pair(1) | curses.A_BOLD)
+
+        meta_line = f"Duplicate: {sel['symbol']}  -->  Canonical: {sel['canonical']} ([callers={sel['canonical_callers']}] in {sel['canonical_file']}:{sel['canonical_line']})"
+        stdscr.addstr(split_y + 2, 0, meta_line[:width - 1], curses.color_pair(4))
+
+        if sel.get("shared_evidence"):
+            stdscr.addstr(split_y + 3, 0, f"Evidence: {sel['shared_evidence']}"[:width - 1], curses.A_DIM)
+
+        stdscr.addstr(split_y + 4, 0, "Consolidation Guidance & Savings:", curses.A_UNDERLINE)
+        guidance_text = f"{sel['guidance']} Saves ~{sel['loc_saving']} lines of redundant code."
+        wrapped_guidance = textwrap.wrap(guidance_text, width=max(40, width - 4))
+        for idx, gline in enumerate(wrapped_guidance[: height - split_y - 6]):
+            stdscr.addstr(split_y + 5 + idx, 2, gline[:width - 3])
 
     def render_memories_view(self, stdscr, height: int, width: int):
-        """Render Agent Memory Inspector tab with master list and dossier inspector."""
-        filter_text = (
-            f"Store: [{self.mem_store_filter}] (press 's') | "
-            f"Kind: [{self.mem_kind_filter.upper()}] (press 't') | "
-            f"Total: {len(self.memories)} memories"
-        )
+        """Render Memory Inspector View with master table and detail dossier."""
+        filter_text = f"Filter: Store=[{self.mem_store_filter}] | Kind=[{self.mem_kind_filter}] | [s] Cycle Store  [t] Cycle Kind  [j/k] Navigate"
         stdscr.addstr(3, 0, filter_text[:width - 1], curses.color_pair(4))
 
         col_hdr = f"{'STORE':<12} {'KIND':<10} {'KEY':<24} {'REV':<5} {'TAGS':<20} AGE"
@@ -507,13 +706,12 @@ class LiveMonitorTUI:
         filtered = [
             m for m in self.memories
             if (self.mem_store_filter == "ALL" or m["store"] == self.mem_store_filter)
-            and (self.mem_kind_filter == "ALL" or m["kind"].lower() == self.mem_kind_filter.lower())
+            and (self.mem_kind_filter == "ALL" or m["kind"] == self.mem_kind_filter)
         ]
 
-        table_rows = max(4, (height - 13) // 2)
-
+        table_rows = max(4, (height - 12) // 2)
         if not filtered:
-            stdscr.addstr(6, 0, "No memory records found matching filter criteria.", curses.color_pair(4))
+            stdscr.addstr(6, 0, "No memory notes matching current filter criteria.", curses.color_pair(4))
             return
 
         if self.memory_cursor >= len(filtered):
@@ -565,16 +763,14 @@ class LiveMonitorTUI:
         dossier_title = f"MEMORY DOSSIER [{self.memory_cursor + 1}/{len(filtered)}]: {sel['key']} (rev {sel['rev']}) [{sel['kind'].upper()}]"
         stdscr.addstr(split_y + 1, 0, dossier_title[:width - 1], curses.color_pair(1) | curses.A_BOLD)
 
-        # Meta attributes
-        created_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sel["created_at"]))
-        meta_str = f"Store: {sel['store']} | Scope: {sel['scope']} | Source: {sel['source']} | Created: {created_str}"
-        stdscr.addstr(split_y + 2, 0, meta_str[:width - 1], curses.A_DIM)
+        meta_str = f"Store: {sel['store']} | Scope: {sel['scope']} | Role: [{sel.get('prev_role', 'GUARD')}]"
+        stdscr.addstr(split_y + 2, 0, meta_str[:width - 1], curses.color_pair(2))
 
         tags_display = " ".join(f"#{t}" for t in sel["tags"]) if sel["tags"] else "none"
         refs_display = ", ".join(sel["refs"]) if sel["refs"] else "none"
         stdscr.addstr(split_y + 3, 0, f"Tags: {tags_display}  |  Code Refs: {refs_display}"[:width - 1], curses.color_pair(4))
 
-        stdscr.addstr(split_y + 4, 0, "Content Body:", curses.A_UNDERLINE)
+        stdscr.addstr(split_y + 4, 0, "Memory Body & Prevention Role:", curses.A_UNDERLINE)
         body_lines = textwrap.wrap(sel["body"], width=max(40, width - 4))
         max_body_lines = height - split_y - 6
         for idx, line in enumerate(body_lines[:max_body_lines]):
@@ -634,11 +830,13 @@ class LiveMonitorTUI:
     def render_footer(self, stdscr, height: int, width: int):
         """Render sticky bottom status bar."""
         if self.current_view == self.VIEW_STREAM:
-            shortcuts = " [1-3] Views  [j/k] Navigate  [r] Repo  [e] Errors  [p] Pause  [c] Clear  [q] Quit "
+            shortcuts = " [1-4] Views  [j/k] Navigate  [r] Repo  [e] Errors  [p] Pause  [c] Clear  [q] Quit "
+        elif self.current_view == self.VIEW_REUSE:
+            shortcuts = " [1-4] Views  [j/k] Navigate  [d] Detector  [r] Repo  [p] Pause  [q] Quit "
         elif self.current_view == self.VIEW_MEMORIES:
-            shortcuts = " [1-3] Views  [j/k] Navigate  [s] Store  [t] Kind  [q] Quit "
+            shortcuts = " [1-4] Views  [j/k] Navigate  [s] Store  [t] Kind  [q] Quit "
         else:
-            shortcuts = " [1-3] Views  [p] Pause  [q] Quit "
+            shortcuts = " [1-4] Views  [p] Pause  [q] Quit "
 
         stdscr.addstr(height - 1, 0, shortcuts.ljust(width - 1)[:width - 1], curses.color_pair(6))
 
@@ -677,7 +875,6 @@ def main():
     log_path = aw_dir / "usage.log"
 
     if args.web is not None:
-        # Delegate to live web server
         script_dir = Path(__file__).resolve().parent
         render_py = script_dir / "../tests/scripts/render_dashboard.py"
         cmd = [

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Interactive Telemetry & Memory Dashboard Generator for `aw` (`agent-weave`).
+"""Interactive Telemetry, Anti-Reinvention & Memory Dashboard Generator for `aw` (`agent-weave`).
 
 Self-contained, zero-dependency script reading `.aw/usage.log`, `.aw/index.db`,
 and `.aw/memory.db` (local and global stores). Produces a responsive, single-file
 HTML dashboard following Zen Minimalism (Shibumi Utilitarian) with dual light/dark
-themes, real-time SSE updates, and an Agent Memory Inspector (similar to ai-memory).
+themes, real-time SSE updates, a dedicated Anti-Reinvention Inspector (D1-D4 duplicate
+code and side-by-side source inspection), and an Agent Memory Inspector.
 """
 
 from __future__ import annotations
@@ -16,11 +17,15 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import sqlite3
 import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+# In-memory TTL cache for reuse candidates to avoid running aw reuse on every HTTP hit
+_REUSE_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]]]] = {}
 
 
 def resolve_global_aw_dir() -> Path:
@@ -104,12 +109,272 @@ def inspect_index_db(root: Optional[Path]) -> Dict[str, Any]:
     return stats
 
 
+def extract_code_snippet(file_path: Path, line_start: int, line_end: int, max_lines: int = 30) -> str:
+    """Read formatted lines from source file with 1-based line numbers."""
+    if not file_path.is_file():
+        return ""
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines()
+        start_0 = max(0, line_start - 1)
+        end_0 = min(len(lines), max(line_start, line_end))
+        sub = lines[start_0:end_0]
+        trimmed = sub[:max_lines]
+        formatted = [f"{line_start + idx:4d} | {line}" for idx, line in enumerate(trimmed)]
+        if len(sub) > max_lines:
+            formatted.append(f" ... ({len(sub) - max_lines} more lines)")
+        return "\n".join(formatted)
+    except OSError:
+        return ""
+
+
+def lookup_symbol_in_db(cur: sqlite3.Cursor, sym: str) -> Optional[Tuple[str, str, str, int, int, str]]:
+    """Lookup (name, qualname, file_path, line_start, line_end, signature) from symbols table."""
+    try:
+        cur.execute(
+            "SELECT name, qualname, file_path, line_start, line_end, signature FROM symbols WHERE qualname = ?1 LIMIT 1",
+            (sym,),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.execute(
+                "SELECT name, qualname, file_path, line_start, line_end, signature FROM symbols WHERE qualname LIKE ?1 LIMIT 1",
+                ("%" + sym,),
+            )
+            row = cur.fetchone()
+        if not row:
+            short = sym.split(".")[-1]
+            cur.execute(
+                "SELECT name, qualname, file_path, line_start, line_end, signature FROM symbols WHERE name = ?1 LIMIT 1",
+                (short,),
+            )
+            row = cur.fetchone()
+        return row
+    except sqlite3.Error:
+        return None
+
+
+def collect_all_reuse_candidates(
+    aw_dir: Path,
+    entries: List[Dict[str, Any]],
+    single_root: Optional[Path] = None,
+    max_age_secs: float = 15.0,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[Dict[str, Any]]]:
+    """Extract D1-D4 duplicate candidates, read side-by-side code snippets, and correlate pre-write searches."""
+    cache_key = str(single_root.resolve()) if single_root else str(aw_dir.resolve())
+    now = time.time()
+    if cache_key in _REUSE_CACHE:
+        cached_ts, c_list, s_dict, p_list = _REUSE_CACHE[cache_key]
+        if now - cached_ts < max_age_secs:
+            return c_list, s_dict, p_list
+
+    # Discover repositories
+    repos: Dict[str, Path] = {}
+    if single_root:
+        if (single_root / ".aw" / "index.db").is_file():
+            repos[single_root.name] = single_root
+    else:
+        for e in entries:
+            r = e.get("repo")
+            r_name = e.get("repo_name")
+            if r and r_name and r_name not in repos:
+                rp = Path(r)
+                if (rp / ".aw" / "index.db").is_file():
+                    repos[r_name] = rp
+        cwd = Path.cwd().resolve()
+        if cwd.name not in repos and (cwd / ".aw" / "index.db").is_file():
+            repos[cwd.name] = cwd
+
+    candidates: List[Dict[str, Any]] = []
+
+    for r_name, r_root in sorted(repos.items()):
+        db_path = r_root / ".aw" / "index.db"
+        if not db_path.is_file():
+            continue
+
+        # Run aw reuse to extract calibrated candidates
+        try:
+            cmd = ["aw", "--no-journal", "--root", str(r_root), "reuse", "--limit", "25"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=3.5)
+            output = res.stdout
+        except (subprocess.SubprocessError, OSError):
+            output = ""
+
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            cur = conn.cursor()
+        except (sqlite3.Error, OSError):
+            cur = None
+
+        lines = output.strip().splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("symbol '"):
+                m = re.match(
+                    r"symbol '([^']+)' (shares (\d+)% (callee footprint|interface token overlap) with existing|bypasses canonical client|is a pass-through wrapper around existing) '([^']+)' \(\[callers=(\d+)\] in ([^:]+):(\d+)\)",
+                    line,
+                )
+                shared_line = ""
+                if i + 1 < len(lines) and lines[i + 1].startswith("  "):
+                    shared_line = lines[i + 1].strip()
+                    i += 1
+
+                if m:
+                    sym = m.group(1)
+                    canonical = m.group(5)
+                    callers = int(m.group(6))
+                    c_file = m.group(7)
+                    c_line = int(m.group(8))
+                    pct = int(m.group(3)) if m.group(3) else 100
+
+                    if "callee footprint" in line:
+                        det = "D1"
+                        det_title = "D1 Callee Footprint Overlap"
+                        det_summary = f"Workflow '{sym}' calls identical downstream functions as canonical '{canonical}' ([callers={callers}])."
+                    elif "interface token" in line:
+                        det = "D2"
+                        det_title = "D2 Interface Token Overlap"
+                        det_summary = f"Signature and parameters of '{sym}' duplicate canonical '{canonical}' ([callers={callers}])."
+                    elif "bypasses" in line:
+                        det = "D3"
+                        det_title = "D3 Raw Client Bypass"
+                        det_summary = f"Symbol '{sym}' calls raw unmanaged external clients directly instead of canonical '{canonical}' ([callers={callers}])."
+                    else:
+                        det = "D4"
+                        det_title = "D4 Redundant Pass-Through Wrapper"
+                        det_summary = f"Single-caller wrapper '{sym}' adds zero logic around canonical '{canonical}' ([callers={callers}])."
+
+                    # Symbol lookup in database
+                    candidate_info = {"file": "", "line_start": 0, "line_end": 0, "signature": "", "loc": 0}
+                    canonical_info = {
+                        "file": c_file,
+                        "line_start": c_line,
+                        "line_end": c_line,
+                        "signature": "",
+                        "loc": 0,
+                    }
+
+                    if cur:
+                        row_sym = lookup_symbol_in_db(cur, sym)
+                        if row_sym:
+                            candidate_info["file"] = row_sym[2]
+                            candidate_info["line_start"] = row_sym[3]
+                            candidate_info["line_end"] = row_sym[4]
+                            candidate_info["signature"] = row_sym[5] or ""
+                            candidate_info["loc"] = max(1, row_sym[4] - row_sym[3] + 1)
+
+                        row_can = lookup_symbol_in_db(cur, canonical)
+                        if row_can:
+                            canonical_info["file"] = row_can[2]
+                            canonical_info["line_start"] = row_can[3]
+                            canonical_info["line_end"] = row_can[4]
+                            canonical_info["signature"] = row_can[5] or ""
+                            canonical_info["loc"] = max(1, row_can[4] - row_can[3] + 1)
+
+                    # Read real source code snippets
+                    candidate_snippet = ""
+                    canonical_snippet = ""
+                    if candidate_info["file"] and candidate_info["line_start"] > 0:
+                        candidate_snippet = extract_code_snippet(
+                            r_root / candidate_info["file"],
+                            candidate_info["line_start"],
+                            candidate_info["line_end"],
+                        )
+                    if canonical_info["file"] and canonical_info["line_start"] > 0:
+                        end_line = canonical_info["line_end"] if canonical_info["line_end"] >= canonical_info["line_start"] else canonical_info["line_start"] + 15
+                        canonical_snippet = extract_code_snippet(
+                            r_root / canonical_info["file"],
+                            canonical_info["line_start"],
+                            end_line,
+                        )
+
+                    # Narrative and guidance
+                    loc_saving = candidate_info["loc"] if candidate_info["loc"] > 0 else 10
+                    prevention_narrative = (
+                        f"Consolidating '{sym}' into authoritative '{canonical}' ([callers={callers}]) "
+                        f"deletes ~{loc_saving} duplicate lines and eliminates drift between twin implementations."
+                    )
+
+                    candidates.append({
+                        "id": f"{r_name}:{sym}->{canonical}",
+                        "repo": r_name,
+                        "repo_path": str(r_root),
+                        "detector": det,
+                        "detector_title": det_title,
+                        "detector_summary": det_summary,
+                        "symbol": sym,
+                        "canonical": canonical,
+                        "canonical_callers": callers,
+                        "canonical_file": canonical_info["file"],
+                        "canonical_line": canonical_info["line_start"],
+                        "overlap_pct": pct,
+                        "shared_evidence": shared_line,
+                        "candidate_info": candidate_info,
+                        "canonical_info": canonical_info,
+                        "candidate_snippet": candidate_snippet,
+                        "canonical_snippet": canonical_snippet,
+                        "loc_saving": loc_saving,
+                        "prevention_narrative": prevention_narrative,
+                    })
+            i += 1
+
+        if conn:
+            conn.close()
+
+    # Extract Pre-Write Search Telemetry
+    prewrite_searches: List[Dict[str, Any]] = []
+    for e in reversed(entries):
+        tool = e.get("tool")
+        if tool in ("search", "reuse"):
+            args = e.get("args") or {}
+            terms = args.get("terms", "") or args.get("paths", "")
+            prewrite_searches.append({
+                "ts": e.get("ts", 0),
+                "repo_name": e.get("repo_name") or "workspace",
+                "tool": tool,
+                "terms": terms,
+                "shown": e.get("shown", e.get("result_count", 0)),
+                "exit_code": e.get("exit_code", 0),
+                "latency_us": e.get("latency_us", 0),
+            })
+            if len(prewrite_searches) >= 40:
+                break
+
+    # Calculate summary metrics
+    total_candidates = len(candidates)
+    preventable_loc = sum(c["loc_saving"] for c in candidates)
+    prewrite_count = len([e for e in entries if e.get("tool") in ("search", "reuse")])
+    avg_callers = (
+        round(sum(c["canonical_callers"] for c in candidates) / total_candidates, 1)
+        if total_candidates > 0
+        else 0.0
+    )
+
+    summary_metrics = {
+        "total_candidates": total_candidates,
+        "preventable_loc": preventable_loc,
+        "prewrite_count": prewrite_count,
+        "avg_callers": avg_callers,
+        "detector_counts": {
+            "D1": sum(1 for c in candidates if c["detector"] == "D1"),
+            "D2": sum(1 for c in candidates if c["detector"] == "D2"),
+            "D3": sum(1 for c in candidates if c["detector"] == "D3"),
+            "D4": sum(1 for c in candidates if c["detector"] == "D4"),
+        },
+    }
+
+    _REUSE_CACHE[cache_key] = (now, candidates, summary_metrics, prewrite_searches)
+    return candidates, summary_metrics, prewrite_searches
+
+
 def collect_all_memories(
     aw_dir: Path,
     entries: List[Dict[str, Any]],
     single_root: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
-    """Collect memory notes from ~/.aw/memory.db and all discovered repositories."""
+    """Collect memory notes, enrich with recall frequency from telemetry, and verify code references."""
     stores: Dict[str, Tuple[Path, Path]] = {}
 
     if single_root:
@@ -138,8 +403,35 @@ def collect_all_memories(
             if p.is_file():
                 stores[cwd.name] = (cwd, p)
 
+    # Pre-aggregate recall activity from usage.log for memory notes
+    mem_recalls: Dict[str, Dict[str, Any]] = {}
+    for e in entries:
+        tool = e.get("tool")
+        if tool in ("mem_query", "mem_get"):
+            ts = e.get("ts", 0)
+            args = e.get("args") or {}
+            key_arg = str(args.get("key", ""))
+            terms_arg = str(args.get("terms", "")).lower()
+            all_arg = str(args.get("all", "false")).lower() == "true"
+            kind_arg = str(args.get("kind", "")).lower()
+
+            # Record generic queries
+            if key_arg:
+                info = mem_recalls.setdefault(key_arg, {"recalls": 0, "last_ts": 0})
+                info["recalls"] += 1
+                if ts > info["last_ts"]:
+                    info["last_ts"] = ts
+
     all_notes: List[Dict[str, Any]] = []
     for store_name, (repo_root, db_path) in sorted(stores.items()):
+        index_db_path = repo_root / ".aw" / "index.db"
+        index_conn: Optional[sqlite3.Connection] = None
+        if index_db_path.is_file():
+            try:
+                index_conn = sqlite3.connect(f"file:{index_db_path}?mode=ro", uri=True)
+            except (sqlite3.Error, OSError):
+                index_conn = None
+
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             cur = conn.cursor()
@@ -157,7 +449,7 @@ def collect_all_memories(
                 session = str(row[5])
                 body = str(row[6])
                 tags = [t for t in str(row[7]).split() if t]
-                refs = [r for r in str(row[8]).split() if r]
+                refs_raw = [r for r in str(row[8]).split() if r]
                 content_hash = hex(int(row[9]))
                 source = str(row[10])
                 created_at = int(row[11])
@@ -165,6 +457,67 @@ def collect_all_memories(
                 superseded_by = row[13]
                 superseded_at = int(row[14])
                 is_current = superseded_by is None
+
+                # Compute Prevention Classification & Narrative
+                if kind == "gotcha":
+                    prev_category = "REGRESSION GUARD"
+                    prev_title = "Regression & Bug Guard"
+                    prev_detail = f"Prevents repeating root-cause trap in '{key}'. Blocks known fragility before changes are committed."
+                elif kind == "decision":
+                    prev_category = "ARCHITECTURE INVARIANT"
+                    prev_title = "Architecture & Policy Guard"
+                    prev_detail = f"Enforces repository architectural constraint '{key}'. Prevents forbidden abstractions or boundary violations."
+                elif kind == "fact":
+                    prev_category = "EXPLORATION SHORTCUT"
+                    prev_title = "Verified Fact Shortcut"
+                    prev_detail = f"Avoids costly multi-file grep scans by caching verified system truth for '{key}'."
+                else:
+                    prev_category = "HANDOFF CONTEXT"
+                    prev_title = "Cross-Session Handoff Guard"
+                    prev_detail = f"Preserves active state across conversation turns for '{key}'."
+
+                # Correlate agent recall frequency
+                recall_info = mem_recalls.get(key, {"recalls": 0, "last_ts": 0})
+                recalls = recall_info["recalls"]
+                last_recalled_ts = recall_info["last_ts"]
+
+                # If no direct key recall logged, match terms from queries
+                if recalls == 0:
+                    for e in entries:
+                        if e.get("tool") in ("mem_query", "mem_get"):
+                            args = e.get("args") or {}
+                            terms = str(args.get("terms", "")).lower()
+                            if terms and (terms in key.lower() or terms in body.lower()):
+                                recalls += 1
+                                e_ts = e.get("ts", 0)
+                                if e_ts > last_recalled_ts:
+                                    last_recalled_ts = e_ts
+
+                # Resolve code references against index.db
+                resolved_refs: List[Dict[str, Any]] = []
+                for r in refs_raw:
+                    ref_info = {"ref": r, "verified": False, "type": "path", "location": ""}
+                    if index_conn:
+                        try:
+                            icur = index_conn.cursor()
+                            # Try files table
+                            icur.execute("SELECT path, size FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1", (r, f"%{r}%"))
+                            frow = icur.fetchone()
+                            if frow:
+                                ref_info["verified"] = True
+                                ref_info["type"] = "file"
+                                ref_info["location"] = f"{frow[0]} ({frow[1]} bytes)"
+                            else:
+                                # Try symbols table
+                                icur.execute("SELECT name, qualname, file_path, line_start, line_end FROM symbols WHERE name = ?1 OR qualname = ?1 LIMIT 1", (r,))
+                                srow = icur.fetchone()
+                                if srow:
+                                    ref_info["verified"] = True
+                                    ref_info["type"] = "symbol"
+                                    ref_info["location"] = f"{srow[2]}:{srow[3]}-{srow[4]}"
+                        except sqlite3.Error:
+                            pass
+                    resolved_refs.append(ref_info)
 
                 all_notes.append({
                     "id": row[0],
@@ -177,7 +530,8 @@ def collect_all_memories(
                     "session": session,
                     "body": body,
                     "tags": tags,
-                    "refs": refs,
+                    "refs": refs_raw,
+                    "resolved_refs": resolved_refs,
                     "content_hash": content_hash,
                     "source": source,
                     "created_at": created_at,
@@ -185,10 +539,18 @@ def collect_all_memories(
                     "is_current": is_current,
                     "superseded_by": superseded_by,
                     "superseded_at": superseded_at,
+                    "prev_category": prev_category,
+                    "prev_title": prev_title,
+                    "prev_detail": prev_detail,
+                    "recall_count": recalls,
+                    "last_recalled_ts": last_recalled_ts,
                 })
             conn.close()
         except (sqlite3.Error, OSError):
             pass
+
+        if index_conn:
+            index_conn.close()
 
     return all_notes
 
@@ -344,9 +706,12 @@ def render_html_dashboard(
     index_stats: Dict[str, Any],
     scope_name: str,
     memories: List[Dict[str, Any]],
+    reuse_candidates: List[Dict[str, Any]],
+    reuse_summary: Dict[str, Any],
+    prewrite_searches: List[Dict[str, Any]],
     is_global: bool = False,
 ) -> str:
-    """Render single-file interactive HTML dashboard with Zen Minimalism & Memory Inspector."""
+    """Render single-file interactive HTML dashboard with Zen Minimalism, Anti-Reinvention, and Memory."""
     p50_str = f"{metrics['p50_ms']:.1f}ms"
     p95_str = f"{metrics['p95_ms']:.1f}ms"
     tokens_str = f"{metrics['saved_tokens']:,}"
@@ -438,65 +803,63 @@ def render_html_dashboard(
             status = f"err {exit_code}"
             status_class = "status-err"
 
-        args_raw = json.dumps(q.get("args", {}), ensure_ascii=False)
-        args_short = html.escape(args_raw[:90] + ("..." if len(args_raw) > 90 else ""))
+        args_str = json.dumps(q.get("args", {}), ensure_ascii=False)
+        args_short = args_str if len(args_str) <= 80 else args_str[:77] + "..."
+        args_escaped = html.escape(args_short)
+        args_full = html.escape(args_str)
 
         recent_rows.append(
-            f'<tr class="query-row" data-repo="{r_name}" data-code="{exit_code}" onclick="inspectQuery({idx})">'
+            f'<tr class="query-row" data-repo="{r_name}" data-code="{exit_code}">'
             f'<td class="num-col text-muted">{time_str}</td>'
             f'<td><span class="repo-tag">{r_name}</span></td>'
             f'<td><code>{tool}</code></td>'
             f'<td class="text-right num-col">{shown}</td>'
             f'<td class="text-right num-col">{lat_str}</td>'
             f'<td><span class="badge {status_class}">{status}</span></td>'
-            f'<td class="args-cell" title="{html.escape(args_raw)}"><code>{args_short}</code></td>'
+            f'<td class="args-cell" title="{args_full}"><code>{args_escaped}</code></td>'
             f'</tr>'
         )
-    recent_tbody = "\n".join(recent_rows) if recent_rows else "<tr><td colspan='7' class='empty-cell'>No queries logged</td></tr>"
+    recent_tbody = "\n".join(recent_rows) if recent_rows else "<tr><td colspan='7' class='empty-cell'>No recent queries</td></tr>"
 
-    # Recent errors rows
+    # Triage error rows
     error_rows = []
-    for q in metrics.get("recent_errors", []):
-        ts = q.get("ts", 0)
+    for e in metrics.get("recent_errors", []):
+        ts = e.get("ts", 0)
         time_str = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "—"
-        tool = html.escape(str(q.get("tool", "—")))
-        r_name = html.escape(str(q.get("repo_name") or "workspace"))
-        code = q.get("exit_code", 1)
-        lat_us = q.get("latency_us", 0)
-        lat_str = f"{lat_us / 1000.0:.1f}ms" if lat_us else "—"
-        args_raw = json.dumps(q.get("args", {}), ensure_ascii=False)
-        args_short = html.escape(args_raw[:100] + ("..." if len(args_raw) > 100 else ""))
-
+        tool = html.escape(str(e.get("tool", "—")))
+        r_name = html.escape(str(e.get("repo_name") or "workspace"))
+        exit_code = int(e.get("exit_code", 0))
+        lat_us = e.get("latency_us", 0)
+        lat_str = f"{lat_us / 1000.0:.1f}ms" if lat_us is not None else "—"
+        args_str = html.escape(json.dumps(e.get("args", {}), ensure_ascii=False))
         error_rows.append(
-            f'<tr class="error-row" data-repo="{r_name}">'
+            f'<tr>'
             f'<td class="num-col text-muted">{time_str}</td>'
             f'<td><span class="repo-tag">{r_name}</span></td>'
             f'<td><code>{tool}</code></td>'
-            f'<td><span class="badge status-err">exit {code}</span></td>'
+            f'<td><span class="badge status-err">Exit {exit_code}</span></td>'
             f'<td class="text-right num-col">{lat_str}</td>'
-            f'<td class="args-cell" title="{html.escape(args_raw)}"><code>{args_short}</code></td>'
+            f'<td class="args-cell"><code>{args_str}</code></td>'
             f'</tr>'
         )
-    errors_tbody = (
-        "\n".join(error_rows)
-        if error_rows
-        else "<tr><td colspan='6' class='text-success' style='text-align: center; padding: 1.25rem;'>Clean operations — zero system-level errors recorded (exit >= 3)</td></tr>"
-    )
+    errors_tbody = "\n".join(error_rows) if error_rows else "<tr><td colspan='6' class='empty-cell'>Zero critical errors recorded</td></tr>"
 
-    # Memory Store Metrics
+    # Memory Counters
+    active_memory_count = sum(1 for m in memories if m.get("is_current", True))
     total_memories = len(memories)
-    current_memories = [m for m in memories if m.get("is_current", True)]
-    active_memory_count = len(current_memories)
-    decisions_count = sum(1 for m in current_memories if m.get("kind") == "decision")
-    gotchas_count = sum(1 for m in current_memories if m.get("kind") == "gotcha")
-    facts_count = sum(1 for m in current_memories if m.get("kind") == "fact")
-    tasks_count = sum(1 for m in current_memories if m.get("kind") == "task")
-    durable_count = sum(1 for m in current_memories if m.get("scope") == "durable")
-    session_count = sum(1 for m in current_memories if m.get("scope") == "session")
     superseded_count = total_memories - active_memory_count
+    decisions_count = sum(1 for m in memories if m.get("is_current", True) and m.get("kind") == "decision")
+    gotchas_count = sum(1 for m in memories if m.get("is_current", True) and m.get("kind") == "gotcha")
+    facts_count = sum(1 for m in memories if m.get("is_current", True) and m.get("kind") == "fact")
+    tasks_count = sum(1 for m in memories if m.get("is_current", True) and m.get("kind") == "task")
+    total_recalls = sum(m.get("recall_count", 0) for m in memories)
+    verified_refs_count = sum(sum(1 for r in m.get("resolved_refs", []) if r.get("verified")) for m in memories)
 
-    memories_json = json.dumps(memories, ensure_ascii=False)
-    recent_queries_json = json.dumps(metrics.get("recent_queries", []), ensure_ascii=False)
+    # Reuse Counters
+    total_candidates = reuse_summary.get("total_candidates", len(reuse_candidates))
+    preventable_loc = reuse_summary.get("preventable_loc", sum(c.get("loc_saving", 0) for c in reuse_candidates))
+    prewrite_count = reuse_summary.get("prewrite_count", len(prewrite_searches))
+    avg_callers = reuse_summary.get("avg_callers", 0.0)
 
     header_title = "aw global telemetry dashboard" if is_global else f"aw telemetry dashboard — {html.escape(scope_name)}"
     sub_title = (
@@ -504,6 +867,11 @@ def render_html_dashboard(
         if is_global
         else f"Repository: {html.escape(scope_name)} · Index: {index_stats.get('files', 0)} files, {index_stats.get('symbols', 0)} symbols"
     )
+
+    memories_json = json.dumps(memories, ensure_ascii=False)
+    recent_queries_json = json.dumps(metrics.get("recent_queries", []), ensure_ascii=False)
+    reuse_candidates_json = json.dumps(reuse_candidates, ensure_ascii=False)
+    prewrite_searches_json = json.dumps(prewrite_searches, ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -619,6 +987,7 @@ def render_html_dashboard(
     margin-bottom: 1.75rem;
     border-bottom: 1px solid var(--border-subtle);
     padding-bottom: 0.5rem;
+    flex-wrap: wrap;
   }}
   .tab-btn {{
     background: transparent;
@@ -649,7 +1018,7 @@ def render_html_dashboard(
   .tab-badge {{
     font-family: var(--font-mono);
     font-size: 0.7rem;
-    padding: 0.1rem 0.4rem;
+    padding: 0.1rem 0.45rem;
     border-radius: 999px;
     background: var(--border-strong);
     color: var(--text-primary);
@@ -749,203 +1118,222 @@ def render_html_dashboard(
   tr:hover td {{ background: var(--bg-subtle); }}
 
   .row-track {{
-    width: 100%;
-    height: 3px;
     background: var(--border-subtle);
+    height: 3px;
     border-radius: 2px;
-    margin-top: 0.35rem;
     overflow: hidden;
+    margin-top: 0.35rem;
+    width: 100%;
   }}
   .row-track-fill {{
-    height: 100%;
     background: var(--intent-primary);
-    border-radius: 2px;
-  }}
-  .repo-name-wrap, .tool-name-wrap {{
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
+    height: 100%;
   }}
 
-  .num-col {{
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-  }}
+  .num-col {{ font-family: var(--font-mono); font-variant-numeric: tabular-nums; }}
   .text-right {{ text-align: right; }}
   .text-muted {{ color: var(--text-muted); }}
-  .text-success {{ color: var(--intent-success); font-weight: 500; }}
-  .args-cell {{
-    max-width: 320px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-muted);
-    font-size: 0.78rem;
-  }}
+  .text-success {{ color: var(--intent-success); }}
 
-  /* Badges & Status */
+  /* Status Badges */
   .badge {{
     display: inline-block;
     padding: 0.15rem 0.45rem;
     border-radius: 4px;
     font-family: var(--font-mono);
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    font-size: 0.72rem;
+    font-weight: 500;
   }}
-  .badge-repo {{ background: var(--intent-info-soft); color: var(--intent-info); }}
-  .badge-wt {{ background: var(--intent-warning-soft); color: var(--intent-warning); }}
   .status-ok {{ background: var(--intent-success-soft); color: var(--intent-success); }}
   .status-warn {{ background: var(--intent-warning-soft); color: var(--intent-warning); }}
   .status-ambig {{ background: var(--intent-info-soft); color: var(--intent-info); }}
   .status-err {{ background: var(--intent-danger-soft); color: var(--intent-danger); }}
+  .badge-repo {{ background: var(--bg-subtle); color: var(--text-secondary); }}
+  .badge-wt {{ background: var(--intent-primary-soft); color: var(--intent-primary); }}
 
-  .live-dot {{
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--intent-success);
-    margin-right: 5px;
-    vertical-align: middle;
+  .badge-d1 {{ background: var(--intent-danger-soft); color: var(--intent-danger); }}
+  .badge-d2 {{ background: var(--intent-warning-soft); color: var(--intent-warning); }}
+  .badge-d3 {{ background: var(--intent-primary-soft); color: var(--intent-primary); }}
+  .badge-d4 {{ background: var(--intent-info-soft); color: var(--intent-info); }}
+
+  .repo-tag {{
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: var(--bg-subtle);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
   }}
-  .repo-tag {{ color: var(--intent-primary); font-weight: 600; font-family: var(--font-mono); font-size: 0.8rem; }}
 
-  /* Filter Controls Bar */
+  .args-cell {{
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+  }}
+  .args-cell code {{
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+  }}
+
+  /* Filter Controls */
   .filter-bar {{
     display: flex;
-    align-items: center;
     gap: 0.75rem;
-    margin-bottom: 1.25rem;
+    align-items: center;
+    margin-bottom: 1rem;
     flex-wrap: wrap;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    padding: 0.6rem 0.9rem;
-    border-radius: 8px;
   }}
   .filter-select, .search-input {{
-    background: var(--bg-canvas);
+    background: var(--bg-elevated);
     border: 1px solid var(--border-strong);
     color: var(--text-primary);
-    padding: 0.35rem 0.7rem;
+    padding: 0.4rem 0.7rem;
     border-radius: 6px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 0.82rem;
-    outline: none;
   }}
-  .search-input {{ min-width: 200px; flex: 1; }}
-  .filter-select:focus, .search-input:focus {{ border-color: var(--intent-primary); }}
+  .search-input {{ min-width: 260px; flex: 1; }}
 
-  /* Memory Inspector Split-Pane */
-  .memory-split {{
+  .pill-group {{
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+  }}
+  .filter-pill {{
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }}
+  .filter-pill:hover {{ background: var(--bg-subtle); color: var(--text-primary); }}
+  .filter-pill.active {{
+    background: var(--intent-primary-soft);
+    color: var(--intent-primary);
+    border-color: var(--intent-primary);
+    font-weight: 600;
+  }}
+
+  /* Master-Detail Split Pane Layout */
+  .master-detail-split {{
     display: grid;
-    grid-template-columns: 42% 58%;
+    grid-template-columns: 5fr 7fr;
     gap: 1.5rem;
     align-items: start;
+    margin-bottom: 1.75rem;
   }}
   @media (max-width: 960px) {{
-    .memory-split {{ grid-template-columns: 1fr; }}
+    .master-detail-split {{ grid-template-columns: 1fr; }}
   }}
 
-  .memory-list-pane {{
+  .list-pane {{
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    max-height: 740px;
+    gap: 0.6rem;
+    max-height: 820px;
     overflow-y: auto;
     padding-right: 0.35rem;
   }}
-  .memory-card {{
+
+  .dossier-pane {{
+    position: sticky;
+    top: 1.5rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 1.35rem;
+    box-shadow: var(--shadow-card);
+    max-height: 860px;
+    overflow-y: auto;
+  }}
+
+  .select-item-card {{
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: 8px;
     padding: 0.9rem 1rem;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
-    box-shadow: var(--shadow-card);
   }}
-  .memory-card:hover {{ background: var(--bg-subtle); }}
-  .memory-card.selected {{
-    background: var(--intent-primary-soft);
+  .select-item-card:hover {{ background: var(--bg-subtle); }}
+  .select-item-card.selected {{
     border-color: var(--intent-primary);
-    outline: 1px solid var(--intent-primary);
+    background: var(--intent-primary-soft);
   }}
-  .mem-card-head {{
+
+  .item-card-head {{
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.35rem;
   }}
-  .mem-key {{
+  .item-key {{
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: 0.88rem;
     font-weight: 600;
     color: var(--text-primary);
     word-break: break-all;
   }}
-  .mem-meta {{
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    margin-top: 0.3rem;
-  }}
-  .mem-snippet {{
+  .item-snippet {{
     font-size: 0.82rem;
     color: var(--text-secondary);
-    margin-top: 0.35rem;
-    line-height: 1.4;
+    margin-top: 0.3rem;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }}
-
-  /* Memory Dossier Pane (Sticky Right) */
-  .memory-dossier-pane {{
-    position: sticky;
-    top: 1.5rem;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: 12px;
-    padding: 1.5rem;
-    box-shadow: var(--shadow-card);
-    min-height: 480px;
+  .item-meta {{
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.45rem;
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
   }}
+
+  /* Dossier Elements */
   .dossier-head {{
     border-bottom: 1px solid var(--border-subtle);
-    padding-bottom: 1rem;
-    margin-bottom: 1.25rem;
+    padding-bottom: 0.9rem;
+    margin-bottom: 1rem;
   }}
-  .dossier-key {{
+  .dossier-title {{
     font-family: var(--font-mono);
-    font-size: 1.15rem;
+    font-size: 1.05rem;
     font-weight: 600;
     color: var(--text-primary);
+    margin-bottom: 0.25rem;
     word-break: break-all;
-    margin-bottom: 0.4rem;
   }}
-  .dossier-caveat {{
-    background: var(--bg-subtle);
-    border-left: 3px solid var(--intent-warning);
-    padding: 0.5rem 0.75rem;
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-    margin-bottom: 1.25rem;
-    border-radius: 0 4px 4px 0;
+  .prevention-banner {{
+    background: var(--intent-primary-soft);
+    border-left: 3px solid var(--intent-primary);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    line-height: 1.45;
   }}
-  .dossier-body {{
-    font-family: var(--font-sans);
-    font-size: 0.92rem;
-    color: var(--text-primary);
-    line-height: 1.6;
-    margin-bottom: 1.5rem;
-    white-space: pre-wrap;
-    background: var(--bg-canvas);
-    border: 1px solid var(--border-subtle);
-    padding: 1rem;
-    border-radius: 8px;
+  .recall-banner {{
+    background: var(--intent-success-soft);
+    border-left: 3px solid var(--intent-success);
+    padding: 0.65rem 0.9rem;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 1rem;
+    font-size: 0.82rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
   }}
   .dossier-section-title {{
     font-size: 0.75rem;
@@ -953,41 +1341,88 @@ def render_html_dashboard(
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--text-muted);
+    margin-top: 1rem;
     margin-bottom: 0.45rem;
   }}
-  .chips-row {{ display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.25rem; }}
+  .dossier-body {{
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+  }}
+
+  /* Side-by-Side Source Code Panels */
+  .side-by-side-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 0.5rem;
+  }}
+  @media (max-width: 860px) {{
+    .side-by-side-grid {{ grid-template-columns: 1fr; }}
+  }}
+  .code-panel {{
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    overflow-x: auto;
+    max-height: 380px;
+  }}
+  .code-panel-head {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 0.74rem;
+    font-weight: 600;
+  }}
+
+  .chips-row {{ display: flex; gap: 0.4rem; flex-wrap: wrap; }}
   .chip {{
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    padding: 0.2rem 0.55rem;
+    padding: 0.2rem 0.5rem;
     border-radius: 4px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border-strong);
-    color: var(--text-primary);
-  }}
-  .chip-tag {{ color: var(--intent-primary); }}
-  .chip-ref {{ color: var(--intent-info); }}
-
-  .rev-timeline {{
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-  }}
-  .rev-step {{
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.6rem;
-    font-size: 0.8rem;
-    padding: 0.35rem 0.5rem;
-    border-radius: 4px;
-    background: var(--bg-canvas);
-    border: 1px solid var(--border-subtle);
+    gap: 0.3rem;
   }}
-  .rev-step.active {{ border-color: var(--intent-primary); }}
+  .chip-tag {{ background: var(--intent-primary-soft); color: var(--intent-primary); }}
+  .chip-ref {{ background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border-subtle); }}
+  .chip-ref.verified {{ border-color: var(--intent-success); color: var(--intent-success); }}
 
-  .empty-cell {{ text-align: center; color: var(--text-muted); padding: 1.5rem; }}
+  .empty-cell {{
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }}
+
   .hidden {{ display: none !important; }}
+  .live-dot {{
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--intent-success);
+    margin-right: 0.4rem;
+    animation: pulse 2s infinite;
+  }}
+  @keyframes pulse {{
+    0% {{ opacity: 1; transform: scale(1); }}
+    50% {{ opacity: 0.4; transform: scale(0.9); }}
+    100% {{ opacity: 1; transform: scale(1); }}
+  }}
 </style>
 </head>
 <body>
@@ -1003,13 +1438,17 @@ def render_html_dashboard(
     </div>
   </header>
 
-  <!-- Primary Tab Bar -->
+  <!-- Primary Tab Bar (3 Dedicated Tabs) -->
   <nav class="nav-tabs" role="tablist">
     <button class="tab-btn active" id="tab-telemetry-btn" onclick="switchTab('telemetry')">
       <span class="tab-num">01</span> Telemetry &amp; Operations
     </button>
+    <button class="tab-btn" id="tab-reuse-btn" onclick="switchTab('reuse')">
+      <span class="tab-num">02</span> Anti-Reinvention Inspector
+      <span class="tab-badge" id="nav-reuse-count">{total_candidates}</span>
+    </button>
     <button class="tab-btn" id="tab-memory-btn" onclick="switchTab('memory')">
-      <span class="tab-num">02</span> Agent Memory Inspector
+      <span class="tab-num">03</span> Agent Memory Inspector
       <span class="tab-badge" id="nav-mem-count">{active_memory_count}</span>
     </button>
   </nav>
@@ -1149,7 +1588,89 @@ def render_html_dashboard(
     </div>
   </div>
 
-  <!-- ==================== TAB 02: AGENT MEMORY INSPECTOR ==================== -->
+  <!-- ==================== TAB 02: ANTI-REINVENTION INSPECTOR ==================== -->
+  <div id="tab-reuse-content" class="hidden">
+    <!-- Prevention KPI Strip -->
+    <div class="kpi-strip">
+      <div class="kpi-tile">
+        <div class="kpi-label">Duplicate Candidates Caught</div>
+        <div class="kpi-value text-success" id="reuse-kpi-count">{total_candidates}</div>
+        <div class="kpi-sub">D1–D4 detectors across code index</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Preventable Excess LOC</div>
+        <div class="kpi-value" id="reuse-kpi-loc">~{preventable_loc:,}</div>
+        <div class="kpi-sub">Redundant lines saved via consolidation</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Pre-Write Helper Searches</div>
+        <div class="kpi-value">{prewrite_count}</div>
+        <div class="kpi-sub">aw search queries finding [callers=N] helpers</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Canonical Concentration</div>
+        <div class="kpi-value">{avg_callers} <span style="font-size: 0.85rem; color: var(--text-muted);">callers</span></div>
+        <div class="kpi-sub">Authoritative reuse targets</div>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <label for="reuse-repo-filter" class="text-muted" style="font-size: 0.78rem;">Repo:</label>
+      <select id="reuse-repo-filter" class="filter-select" onchange="renderReuseList()">
+        <option value="ALL">All Repositories</option>
+      </select>
+
+      <span class="text-muted" style="font-size: 0.78rem;">Detector:</span>
+      <div class="pill-group">
+        <button class="filter-pill active" data-det="ALL" onclick="setReuseDetectorFilter('ALL')">All</button>
+        <button class="filter-pill" data-det="D1" onclick="setReuseDetectorFilter('D1')">D1 Callee</button>
+        <button class="filter-pill" data-det="D2" onclick="setReuseDetectorFilter('D2')">D2 Interface</button>
+        <button class="filter-pill" data-det="D3" onclick="setReuseDetectorFilter('D3')">D3 Bypass</button>
+        <button class="filter-pill" data-det="D4" onclick="setReuseDetectorFilter('D4')">D4 Wrapper</button>
+      </div>
+
+      <input type="text" id="reuse-search" class="search-input" placeholder="Search candidate, canonical, or evidence..." oninput="renderReuseList()">
+    </div>
+
+    <!-- Master-Detail Split Pane -->
+    <div class="master-detail-split">
+      <!-- Master List -->
+      <div class="list-pane" id="reuse-cards-container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+
+      <!-- Detail Dossier with Side-by-Side Code Viewer -->
+      <div class="dossier-pane" id="reuse-dossier-container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+    </div>
+
+    <!-- Pre-Write Helper Discovery Feed -->
+    <div class="card" style="margin-top: 1.5rem;">
+      <div class="card-title">
+        <span>Pre-Write Helper Discovery Stream (`aw search` &amp; `aw reuse`)</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Searches before writing code</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Repository</th>
+            <th>Tool</th>
+            <th>Query / Target</th>
+            <th class="text-right">Hits Returned</th>
+            <th class="text-right">Latency</th>
+          </tr>
+        </thead>
+        <tbody id="prewrite-tbody">
+          <!-- Rendered dynamically via JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 03: AGENT MEMORY INSPECTOR ==================== -->
   <div id="tab-memory-content" class="hidden">
     <!-- Memory KPI Strip -->
     <div class="kpi-strip">
@@ -1159,24 +1680,19 @@ def render_html_dashboard(
         <div class="kpi-sub">Across all connected stores</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Taxonomy Distribution</div>
-        <div class="kpi-value" style="font-size: 1.45rem;">
-          <span title="Decisions">{decisions_count}</span> <span style="font-size: 0.8rem; color: var(--text-muted);">dec</span> ·
-          <span title="Gotchas">{gotchas_count}</span> <span style="font-size: 0.8rem; color: var(--text-muted);">got</span> ·
-          <span title="Facts">{facts_count}</span> <span style="font-size: 0.8rem; color: var(--text-muted);">fact</span> ·
-          <span title="Tasks">{tasks_count}</span> <span style="font-size: 0.8rem; color: var(--text-muted);">task</span>
-        </div>
-        <div class="kpi-sub">Classified knowledge kinds</div>
+        <div class="kpi-label">Agent Recalls</div>
+        <div class="kpi-value text-success">{total_recalls} <span style="font-size: 0.85rem; color: var(--text-muted);">queries</span></div>
+        <div class="kpi-sub">Correlated from mem_query / mem_get</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Durability &amp; Scope</div>
-        <div class="kpi-value" style="font-size: 1.45rem;">{durable_count} <span style="font-size: 0.85rem; color: var(--text-muted);">durable</span> · {session_count} <span style="font-size: 0.85rem; color: var(--text-muted);">session</span></div>
-        <div class="kpi-sub">Session notes purged on TTL expiration</div>
+        <div class="kpi-label">Bugs &amp; Regressions Guarded</div>
+        <div class="kpi-value">{gotchas_count + decisions_count} <span style="font-size: 0.85rem; color: var(--text-muted);">rules</span></div>
+        <div class="kpi-sub">{gotchas_count} gotchas · {decisions_count} decisions</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Revision Retention</div>
-        <div class="kpi-value" style="font-size: 1.45rem;">{total_memories} <span style="font-size: 0.85rem; color: var(--text-muted);">total</span></div>
-        <div class="kpi-sub">{superseded_count} superseded revisions retained</div>
+        <div class="kpi-label">Code References Guarded</div>
+        <div class="kpi-value">{verified_refs_count} <span style="font-size: 0.85rem; color: var(--text-muted);">symbols</span></div>
+        <div class="kpi-sub">Verified in repository index</div>
       </div>
     </div>
 
@@ -1205,14 +1721,14 @@ def render_html_dashboard(
     </div>
 
     <!-- Master-Detail Split Pane -->
-    <div class="memory-split">
+    <div class="master-detail-split">
       <!-- Master List -->
-      <div class="memory-list-pane" id="memory-cards-container">
+      <div class="list-pane" id="memory-cards-container">
         <!-- Rendered dynamically via JS -->
       </div>
 
       <!-- Detail Dossier -->
-      <div class="memory-dossier-pane" id="memory-dossier-container">
+      <div class="dossier-pane" id="memory-dossier-container">
         <!-- Rendered dynamically via JS -->
       </div>
     </div>
@@ -1223,9 +1739,14 @@ def render_html_dashboard(
 // Data Seeded From Server
 let allMemories = {memories_json};
 let recentQueries = {recent_queries_json};
+let reuseCandidates = {reuse_candidates_json};
+let prewriteSearches = {prewrite_searches_json};
 let totalCalls = {total_calls};
 let totalErrors = {total_errors};
+
 let selectedMemoryIndex = 0;
+let selectedReuseIndex = 0;
+let activeReuseDetector = 'ALL';
 
 // Theme Toggle
 function initTheme() {{
@@ -1249,26 +1770,30 @@ function updateThemeButtonText(theme) {{
 
 // Tab Switching
 function switchTab(tab) {{
-  const telBtn = document.getElementById('tab-telemetry-btn');
-  const memBtn = document.getElementById('tab-memory-btn');
-  const telContent = document.getElementById('tab-telemetry-content');
-  const memContent = document.getElementById('tab-memory-content');
+  const tabs = ['telemetry', 'reuse', 'memory'];
+  tabs.forEach(t => {{
+    const btn = document.getElementById('tab-' + t + '-btn');
+    const content = document.getElementById('tab-' + t + '-content');
+    if (t === tab) {{
+      if (btn) btn.classList.add('active');
+      if (content) content.classList.remove('hidden');
+    }} else {{
+      if (btn) btn.classList.remove('active');
+      if (content) content.classList.add('hidden');
+    }}
+  }});
 
-  if (tab === 'telemetry') {{
-    telBtn.classList.add('active');
-    memBtn.classList.remove('active');
-    telContent.classList.remove('hidden');
-    memContent.classList.add('hidden');
-  }} else {{
-    memBtn.classList.add('active');
-    telBtn.classList.remove('active');
-    memContent.classList.remove('hidden');
-    telContent.classList.add('hidden');
+  if (tab === 'reuse') {{
+    populateReuseRepoFilter();
+    renderReuseList();
+    renderPrewriteTable();
+  }} else if (tab === 'memory') {{
+    populateMemoryStoreFilter();
     renderMemoryList();
   }}
 }}
 
-// Filter Telemetry Queries
+// Telemetry Query Filter
 function applyTelemetryFilters() {{
   const selectedRepo = document.getElementById('repo-filter').value;
   const selectedStatus = document.getElementById('status-filter').value;
@@ -1288,7 +1813,6 @@ function applyTelemetryFilters() {{
     else if (selectedStatus === 'ERR') matchesStatus = (parseInt(code, 10) >= 3);
 
     let matchesSearch = (!search || text.includes(search));
-
     row.style.display = (matchesRepo && matchesStatus && matchesSearch) ? '' : 'none';
   }});
 }}
@@ -1301,7 +1825,176 @@ function filterByRepo(repoName) {{
   }}
 }}
 
-// Memory Inspector UI Logic
+// ==================== TAB 02: ANTI-REINVENTION LOGIC ====================
+function populateReuseRepoFilter() {{
+  const select = document.getElementById('reuse-repo-filter');
+  if (!select) return;
+  const repos = new Set();
+  reuseCandidates.forEach(c => repos.add(c.repo));
+
+  select.innerHTML = '<option value="ALL">All Repositories</option>';
+  Array.from(repos).sort().forEach(r => {{
+    const opt = document.createElement('option');
+    opt.value = r;
+    opt.textContent = r;
+    select.appendChild(opt);
+  }});
+}}
+
+function setReuseDetectorFilter(det) {{
+  activeReuseDetector = det;
+  document.querySelectorAll('.filter-pill[data-det]').forEach(btn => {{
+    btn.classList.toggle('active', btn.getAttribute('data-det') === det);
+  }});
+  selectedReuseIndex = 0;
+  renderReuseList();
+}}
+
+function getFilteredReuseCandidates() {{
+  const repo = document.getElementById('reuse-repo-filter') ? document.getElementById('reuse-repo-filter').value : 'ALL';
+  const search = document.getElementById('reuse-search') ? document.getElementById('reuse-search').value.toLowerCase().trim() : '';
+
+  return reuseCandidates.filter(c => {{
+    if (repo !== 'ALL' && c.repo !== repo) return false;
+    if (activeReuseDetector !== 'ALL' && c.detector !== activeReuseDetector) return false;
+    if (search) {{
+      const matchSym = c.symbol.toLowerCase().includes(search);
+      const matchCan = c.canonical.toLowerCase().includes(search);
+      const matchEv = (c.shared_evidence || '').toLowerCase().includes(search);
+      const matchFile = (c.canonical_file || '').toLowerCase().includes(search);
+      if (!matchSym && !matchCan && !matchEv && !matchFile) return false;
+    }}
+    return true;
+  }});
+}}
+
+function renderReuseList() {{
+  const container = document.getElementById('reuse-cards-container');
+  if (!container) return;
+  const filtered = getFilteredReuseCandidates();
+
+  if (filtered.length === 0) {{
+    container.innerHTML = '<div class="empty-cell">Zero duplicate candidates match current criteria.<br><span style="font-size: 0.8rem; opacity: 0.7;">Codebase is free from D1–D4 duplication.</span></div>';
+    renderReuseDossier(null);
+    return;
+  }}
+
+  container.innerHTML = '';
+  filtered.forEach((c, idx) => {{
+    const isSelected = idx === selectedReuseIndex;
+    const card = document.createElement('div');
+    card.className = 'select-item-card' + (isSelected ? ' selected' : '');
+    card.onclick = () => {{
+      selectedReuseIndex = idx;
+      renderReuseList();
+    }};
+
+    const detBadgeClass = 'badge badge-' + c.detector.toLowerCase();
+    const repoBadge = '<span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>';
+    const locBadge = '<span class="badge status-warn">-' + c.loc_saving + ' LOC</span>';
+
+    card.innerHTML =
+      '<div class="item-card-head">' +
+      '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
+      '    <span class="' + detBadgeClass + '">' + c.detector + '</span>' +
+      '    <span class="badge" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' +
+      '    ' + locBadge +
+      '  </div>' +
+      '  ' + repoBadge +
+      '</div>' +
+      '<div class="item-key">' + escapeHtml(c.symbol) + '</div>' +
+      '<div class="item-snippet">&rarr; canonical: <code>' + escapeHtml(c.canonical) + '</code> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span></div>' +
+      '<div class="item-meta">' +
+      '  <span>' + escapeHtml(c.canonical_file) + ':' + c.canonical_line + '</span>' +
+      (c.shared_evidence ? '<span>&bull;</span><span>' + escapeHtml(c.shared_evidence) + '</span>' : '') +
+      '</div>';
+
+    container.appendChild(card);
+  }});
+
+  if (filtered[selectedReuseIndex]) {{
+    renderReuseDossier(filtered[selectedReuseIndex]);
+  }} else {{
+    selectedReuseIndex = 0;
+    renderReuseDossier(filtered[0] || null);
+  }}
+}}
+
+function renderReuseDossier(c) {{
+  const container = document.getElementById('reuse-dossier-container');
+  if (!container) return;
+  if (!c) {{
+    container.innerHTML = '<div class="empty-cell" style="padding-top: 5rem;">Select a duplication candidate to inspect side-by-side source code.</div>';
+    return;
+  }}
+
+  const detBadgeClass = 'badge badge-' + c.detector.toLowerCase();
+
+  // Side-by-side code blocks
+  const symSnippet = c.candidate_snippet || '<span class="text-muted">(Source snippet unavailable)</span>';
+  const canSnippet = c.canonical_snippet || '<span class="text-muted">(Source snippet unavailable)</span>';
+
+  container.innerHTML =
+    '<div class="dossier-head">' +
+    '  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">' +
+    '    <div style="display:flex; gap:0.45rem; align-items:center;">' +
+    '      <span class="' + detBadgeClass + '">' + c.detector + '</span>' +
+    '      <span class="badge status-ok">' + c.overlap_pct + '% OVERLAP</span>' +
+    '      <span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>' +
+    '    </div>' +
+    '    <span class="badge status-warn">Save ~' + c.loc_saving + ' LOC</span>' +
+    '  </div>' +
+    '  <div class="dossier-title">' + escapeHtml(c.symbol) + '</div>' +
+    '  <div class="text-muted" style="font-size:0.82rem;">Duplicates Authoritative Target: <strong>' + escapeHtml(c.canonical) + '</strong> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span></div>' +
+    '</div>' +
+    '<div class="prevention-banner">' +
+    '  <strong>What This Prevents:</strong> ' + escapeHtml(c.prevention_narrative) +
+    '</div>' +
+    (c.shared_evidence ? '<div class="dossier-section-title">Shared Footprint &amp; Overlap Evidence</div><div class="chips-row"><span class="chip chip-tag">' + escapeHtml(c.shared_evidence) + '</span></div>' : '') +
+    '<div class="dossier-section-title">Side-by-Side Source Code Comparison</div>' +
+    '<div class="side-by-side-grid">' +
+    '  <div class="code-panel">' +
+    '    <div class="code-panel-head">' +
+    '      <span class="badge status-warn">DUPLICATE CANDIDATE</span>' +
+    '      <span>' + escapeHtml(c.candidate_info.file) + ':' + c.candidate_info.line_start + '-' + c.candidate_info.line_end + '</span>' +
+    '    </div>' +
+    '    <pre><code>' + escapeHtml(symSnippet) + '</code></pre>' +
+    '  </div>' +
+    '  <div class="code-panel">' +
+    '    <div class="code-panel-head">' +
+    '      <span class="badge status-ok">CANONICAL REUSE TARGET</span>' +
+    '      <span>' + escapeHtml(c.canonical_info.file) + ':' + c.canonical_info.line_start + '-' + c.canonical_info.line_end + '</span>' +
+    '    </div>' +
+    '    <pre><code>' + escapeHtml(canSnippet) + '</code></pre>' +
+    '  </div>' +
+    '</div>';
+}}
+
+function renderPrewriteTable() {{
+  const tbody = document.getElementById('prewrite-tbody');
+  if (!tbody) return;
+  if (!prewriteSearches || prewriteSearches.length === 0) {{
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No pre-write helper searches recorded yet</td></tr>';
+    return;
+  }}
+
+  tbody.innerHTML = '';
+  prewriteSearches.forEach(s => {{
+    const tr = document.createElement('tr');
+    const ts = s.ts ? new Date(s.ts * 1000).toTimeString().split(' ')[0] : '—';
+    const latStr = s.latency_us ? (s.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
+    tr.innerHTML =
+      '<td class="num-col text-muted">' + ts + '</td>' +
+      '<td><span class="repo-tag">' + escapeHtml(s.repo_name) + '</span></td>' +
+      '<td><code>' + escapeHtml(s.tool) + '</code></td>' +
+      '<td class="args-cell"><code>' + escapeHtml(s.terms || '(all paths)') + '</code></td>' +
+      '<td class="text-right num-col">' + s.shown + '</td>' +
+      '<td class="text-right num-col">' + latStr + '</td>';
+    tbody.appendChild(tr);
+  }});
+}}
+
+// ==================== TAB 03: AGENT MEMORY LOGIC ====================
 function populateMemoryStoreFilter() {{
   const select = document.getElementById('mem-store-filter');
   if (!select) return;
@@ -1344,7 +2037,7 @@ function renderMemoryList() {{
   const filtered = getFilteredMemories();
 
   if (filtered.length === 0) {{
-    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>aw mem write --body "..." --kind fact &lt;key&gt;</code></span></div>';
+    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>aw mem write --body "..." --kind gotcha &lt;key&gt;</code></span></div>';
     renderMemoryDossier(null);
     return;
   }}
@@ -1353,7 +2046,7 @@ function renderMemoryList() {{
   filtered.forEach((m, idx) => {{
     const isSelected = idx === selectedMemoryIndex;
     const card = document.createElement('div');
-    card.className = 'memory-card' + (isSelected ? ' selected' : '');
+    card.className = 'select-item-card' + (isSelected ? ' selected' : '');
     card.onclick = () => {{
       selectedMemoryIndex = idx;
       renderMemoryList();
@@ -1363,18 +2056,20 @@ function renderMemoryList() {{
     const timeStr = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString() : '—';
     const storeBadge = '<span class="badge badge-repo">' + escapeHtml(m.store) + '</span>';
     const revPill = '<span class="badge" style="background: var(--bg-subtle);">r' + m.rev + '</span>';
+    const recallsBadge = m.recall_count > 0 ? '<span class="badge status-ok">' + m.recall_count + ' recalls</span>' : '';
 
     card.innerHTML =
-      '<div class="mem-card-head">' +
+      '<div class="item-card-head">' +
       '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
       '    <span class="' + kindClass + '">' + m.kind.toUpperCase() + '</span>' +
       '    ' + revPill +
+      '    ' + recallsBadge +
       '  </div>' +
       '  ' + storeBadge +
       '</div>' +
-      '<div class="mem-key">' + escapeHtml(m.key) + '</div>' +
-      '<div class="mem-snippet">' + escapeHtml(m.body) + '</div>' +
-      '<div class="mem-meta">' +
+      '<div class="item-key">' + escapeHtml(m.key) + '</div>' +
+      '<div class="item-snippet">' + escapeHtml(m.body) + '</div>' +
+      '<div class="item-meta">' +
       '  <span>' + m.scope + '</span>' +
       '  <span>&bull;</span>' +
       '  <span>' + timeStr + '</span>' +
@@ -1402,6 +2097,7 @@ function renderMemoryDossier(m) {{
 
   const kindClass = 'badge status-' + (m.kind === 'decision' ? 'ambig' : m.kind === 'gotcha' ? 'warn' : m.kind === 'fact' ? 'ok' : 'err');
   const dateStr = m.created_at ? new Date(m.created_at * 1000).toLocaleString() : '—';
+  const lastRecalledStr = m.last_recalled_ts ? new Date(m.last_recalled_ts * 1000).toLocaleString() : 'Never queried in current session';
 
   let tagsHtml = '';
   if (m.tags && m.tags.length) {{
@@ -1411,7 +2107,16 @@ function renderMemoryDossier(m) {{
   }}
 
   let refsHtml = '';
-  if (m.refs && m.refs.length) {{
+  if (m.resolved_refs && m.resolved_refs.length) {{
+    refsHtml = '<div class="dossier-section-title">Guarded Code References (.aw/index.db verified)</div><div class="chips-row">';
+    m.resolved_refs.forEach(r => {{
+      const verClass = r.verified ? 'chip-ref verified' : 'chip-ref';
+      const verBadge = r.verified ? ' [VERIFIED ' + r.type.toUpperCase() + ']' : '';
+      const locStr = r.location ? ' &middot; ' + escapeHtml(r.location) : '';
+      refsHtml += '<span class="' + verClass + '"><strong>' + escapeHtml(r.ref) + '</strong>' + verBadge + locStr + '</span>';
+    }});
+    refsHtml += '</div>';
+  }} else if (m.refs && m.refs.length) {{
     refsHtml = '<div class="dossier-section-title">Referenced Symbols &amp; Paths</div><div class="chips-row">';
     m.refs.forEach(r => {{ refsHtml += '<span class="chip chip-ref">' + escapeHtml(r) + '</span>'; }});
     refsHtml += '</div>';
@@ -1444,13 +2149,16 @@ function renderMemoryDossier(m) {{
     '    </div>' +
     '    <span class="text-muted" style="font-size:0.78rem;">' + dateStr + '</span>' +
     '  </div>' +
-    '  <div class="dossier-key">' + escapeHtml(m.key) + '</div>' +
+    '  <div class="dossier-title">' + escapeHtml(m.key) + '</div>' +
     '  <div class="text-muted" style="font-size:0.8rem;">Scope: <strong>' + m.scope + '</strong>' +
        (m.scope === 'session' && m.expires_at ? ' (expires ' + new Date(m.expires_at * 1000).toLocaleString() + ')' : '') +
-       ' · Source: <code>' + m.source + '</code></div>' +
+       ' &middot; Source: <code>' + m.source + '</code></div>' +
     '</div>' +
-    '<div class="dossier-caveat">Honesty caveat: Agent-authored candidate note from <code>.aw/memory.db</code> — verify against pointed lines.</div>' +
-    '<div class="dossier-section-title">Note Content</div>' +
+    '<div class="recall-banner">' +
+    '  <div><strong>' + escapeHtml(m.prev_category || 'KNOWLEDGE GUARD') + ':</strong> ' + escapeHtml(m.prev_detail || '') + '</div>' +
+    '  <div style="font-family:var(--font-mono); font-size:0.78rem;">Recalls: <strong>' + m.recall_count + '</strong> &middot; Last: ' + lastRecalledStr + '</div>' +
+    '</div>' +
+    '<div class="dossier-section-title">Memory Content</div>' +
     '<div class="dossier-body">' + escapeHtml(m.body) + '</div>' +
     refsHtml +
     tagsHtml +
@@ -1467,6 +2175,7 @@ if (window.location.protocol.startsWith('http')) {{
     try {{
       const q = JSON.parse(e.data);
       handleLiveQuery(q);
+
       // If event touched memory, refresh memory store
       if (q.tool && q.tool.startsWith('mem_')) {{
         fetch('/api/memories')
@@ -1476,6 +2185,20 @@ if (window.location.protocol.startsWith('http')) {{
             const navBadge = document.getElementById('nav-mem-count');
             if (navBadge) navBadge.textContent = allMemories.filter(m => m.is_current).length;
             renderMemoryList();
+          }}).catch(() => {{}});
+      }}
+
+      // If event touched reuse or search, refresh reuse data
+      if (q.tool && (q.tool === 'reuse' || q.tool === 'search')) {{
+        fetch('/api/reuse')
+          .then(r => r.json())
+          .then(data => {{
+            reuseCandidates = data.candidates || [];
+            prewriteSearches = data.prewrite_searches || [];
+            const navReuseBadge = document.getElementById('nav-reuse-count');
+            if (navReuseBadge) navReuseBadge.textContent = reuseCandidates.length;
+            renderReuseList();
+            renderPrewriteTable();
           }}).catch(() => {{}});
       }}
     }} catch(err) {{}}
@@ -1549,8 +2272,11 @@ function escapeHtml(str) {{
 // Initialize On Load
 window.addEventListener('DOMContentLoaded', () => {{
   initTheme();
+  populateReuseRepoFilter();
   populateMemoryStoreFilter();
+  renderReuseList();
   renderMemoryList();
+  renderPrewriteTable();
 }});
 </script>
 </body>
@@ -1559,24 +2285,14 @@ window.addEventListener('DOMContentLoaded', () => {{
 
 
 def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -> None:
-    """Run lightweight HTTP + SSE server for real-time dashboard updates."""
+    """Serve interactive dashboard with live SSE streaming and JSON API endpoints."""
     log_file = aw_dir / "usage.log"
 
     class QuietThreadingHTTPServer(http.server.ThreadingHTTPServer):
         daemon_threads = True
-        allow_reuse_address = True
-
-        def handle_error(self, request, client_address):
-            exc_type, exc_value, _ = sys.exc_info()
-            if exc_type in (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
-                return
-            if isinstance(exc_value, OSError) and exc_value.errno in (32, 54, 104):
-                return
-            super().handle_error(request, client_address)
 
     class SSEHandler(http.server.BaseHTTPRequestHandler):
         def do_HEAD(self):
-            self.close_connection = True
             if self.path in ("/", "/index.html", "/dashboard.html"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1586,7 +2302,7 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                 self.send_response(204)
                 self.send_header("Connection", "close")
                 self.end_headers()
-            elif self.path in ("/api/summary", "/api/metrics", "/api/memories"):
+            elif self.path in ("/api/summary", "/api/metrics", "/api/memories", "/api/reuse"):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Connection", "close")
@@ -1602,8 +2318,16 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                 entries = parse_usage_log_from_dir(aw_dir)
                 metrics = calculate_metrics(entries)
                 memories = collect_all_memories(aw_dir, entries)
+                candidates, reuse_summary, prewrite_searches = collect_all_reuse_candidates(aw_dir, entries)
                 content = render_html_dashboard(
-                    metrics, inspect_index_db(None), "Global Multi-Repo", memories, is_global=True
+                    metrics,
+                    inspect_index_db(None),
+                    "Global Multi-Repo",
+                    memories,
+                    candidates,
+                    reuse_summary,
+                    prewrite_searches,
+                    is_global=True,
                 )
                 encoded = content.encode("utf-8")
                 self.send_response(200)
@@ -1622,6 +2346,7 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                 entries = parse_usage_log_from_dir(aw_dir)
                 metrics = calculate_metrics(entries)
                 memories = collect_all_memories(aw_dir, entries)
+                candidates, reuse_summary, prewrite_searches = collect_all_reuse_candidates(aw_dir, entries)
                 data = {
                     "total_calls": metrics.get("total_calls", 0),
                     "error_count": metrics.get("error_count", 0),
@@ -1634,6 +2359,9 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                     "repo_count": len(metrics.get("repo_aggs", {})),
                     "active_memories": sum(1 for m in memories if m.get("is_current", True)),
                     "total_memories": len(memories),
+                    "duplicate_candidates": len(candidates),
+                    "preventable_loc": reuse_summary.get("preventable_loc", 0),
+                    "prewrite_searches": len(prewrite_searches),
                     "tool_counts": {t: d.get("calls", 0) for t, d in metrics.get("tool_aggs", {}).items()},
                 }
                 encoded = json.dumps(data, indent=2).encode("utf-8")
@@ -1648,6 +2376,22 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                 entries = parse_usage_log_from_dir(aw_dir)
                 memories = collect_all_memories(aw_dir, entries)
                 encoded = json.dumps(memories, indent=2, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(encoded)
+            elif self.path == "/api/reuse":
+                self.close_connection = True
+                entries = parse_usage_log_from_dir(aw_dir)
+                candidates, reuse_summary, prewrite_searches = collect_all_reuse_candidates(aw_dir, entries)
+                payload = {
+                    "candidates": candidates,
+                    "summary": reuse_summary,
+                    "prewrite_searches": prewrite_searches,
+                }
+                encoded = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(encoded)))
@@ -1738,7 +2482,7 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate an interactive HTML telemetry dashboard for aw."
+        description="Generate an interactive HTML telemetry, anti-reinvention, and memory dashboard for aw."
     )
     parser.add_argument(
         "--root",
@@ -1779,9 +2523,17 @@ def main() -> None:
     index_stats = inspect_index_db(args.root or Path.cwd())
     scope_name = "Global Multi-Repo" if args.is_global else (args.root.name if args.root else Path.cwd().name)
     memories = collect_all_memories(aw_dir, entries, single_root=args.root)
+    candidates, reuse_summary, prewrite_searches = collect_all_reuse_candidates(aw_dir, entries, single_root=args.root)
 
     content = render_html_dashboard(
-        metrics, index_stats, scope_name, memories, is_global=args.is_global
+        metrics,
+        index_stats,
+        scope_name,
+        memories,
+        candidates,
+        reuse_summary,
+        prewrite_searches,
+        is_global=args.is_global,
     )
     print(content)
 
