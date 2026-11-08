@@ -31,6 +31,7 @@ fn spawn_with(repo: &Path, all_tools: bool) -> Server {
     let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
         .arg("--root")
         .arg(repo)
+        .env("AW_GLOBAL_DIR", repo.join(".test_global"))
         .arg("mcp")
         .args(all_tools.then_some("--all-tools"))
         .stdin(Stdio::piped())

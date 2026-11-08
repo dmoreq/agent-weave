@@ -127,6 +127,7 @@ def calculate_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         }
 
     errors = 0
+    warnings = 0
     stale_reads = 0
     reuse_hits = 0
     saved_tokens = 0
@@ -146,10 +147,15 @@ def calculate_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         repo_name = str(e.get("repo_name") or "workspace")
         is_worktree = bool(e.get("worktree", False))
 
+        # Skip synthetic test fixture repos created during cargo test suites
+        if repo_name.startswith(("aw-it-", "aw-mcp-", "usage-quality", "journal-", "global-usage-")):
+            continue
+
         if tool not in tool_aggs:
             tool_aggs[tool] = {
                 "calls": 0,
                 "errors": 0,
+                "warnings": 0,
                 "shown": 0,
                 "latencies": [],
             }
@@ -161,6 +167,7 @@ def calculate_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
             repo_aggs[repo_name] = {
                 "calls": 0,
                 "errors": 0,
+                "warnings": 0,
                 "worktree": is_worktree,
                 "last_ts": ts,
             }
@@ -169,11 +176,16 @@ def calculate_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
         if ts and (repo_aggs[repo_name]["last_ts"] is None or ts > repo_aggs[repo_name]["last_ts"]):
             repo_aggs[repo_name]["last_ts"] = ts
 
-        if exit_code != 0:
+        # Exit code classification: code >= 3 are system errors; code 1 (empty) & 2 (ambiguous) are query notices
+        if exit_code >= 3:
             errors += 1
             tool_aggs[tool]["errors"] += 1
             repo_aggs[repo_name]["errors"] += 1
             all_errors.append(e)
+        elif exit_code in (1, 2):
+            warnings += 1
+            tool_aggs[tool]["warnings"] += 1
+            repo_aggs[repo_name]["warnings"] += 1
 
         if stale:
             stale_reads += 1
@@ -223,6 +235,7 @@ def calculate_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "total_calls": total_calls,
         "error_count": errors,
+        "warning_count": warnings,
         "stale_reads": stale_reads,
         "reliability_pct": reliability,
         "p50_ms": p50,
@@ -342,8 +355,19 @@ def render_html_dashboard(
         shown = q.get("shown", q.get("result_count", 0))
         lat_us = q.get("latency_us", 0)
         lat_str = f"{lat_us / 1000.0:.1f}ms" if lat_us else "-"
-        status = "ok" if q.get("exit_code", 0) == 0 else f"err {q.get('exit_code')}"
-        status_class = "status-ok" if q.get("exit_code", 0) == 0 else "status-err"
+        exit_code = int(q.get("exit_code", 0))
+        if exit_code == 0:
+            status = "ok"
+            status_class = "status-ok"
+        elif exit_code == 1:
+            status = "empty"
+            status_class = "status-warn"
+        elif exit_code == 2:
+            status = "ambig"
+            status_class = "status-ambig"
+        else:
+            status = f"err {exit_code}"
+            status_class = "status-err"
 
         recent_rows.append(
             f'<tr class="query-row" data-repo="{r_name}">'
@@ -536,6 +560,8 @@ def render_html_dashboard(
   .badge-repo {{ background: rgba(99, 102, 241, 0.15); color: var(--primary-light); }}
   .badge-wt {{ background: rgba(245, 158, 11, 0.15); color: var(--warning); }}
   .status-ok {{ background: rgba(16, 185, 129, 0.15); color: var(--success); }}
+  .status-warn {{ background: rgba(245, 158, 11, 0.15); color: var(--warning); }}
+  .status-ambig {{ background: rgba(6, 182, 212, 0.15); color: #06b6d4; }}
   .status-err {{ background: rgba(239, 68, 68, 0.15); color: var(--danger); }}
   .live-pulse {{
     display: inline-block;
@@ -704,7 +730,7 @@ if (window.location.protocol.startsWith('http')) {{
 function handleLiveQuery(q) {{
   totalCalls++;
   const exitCode = parseInt(q.exit_code || 0, 10);
-  if (exitCode !== 0) totalErrors++;
+  if (exitCode >= 3) totalErrors++;
   
   const totalCallsEl = document.getElementById('metric-total-calls');
   if (totalCallsEl) totalCallsEl.textContent = totalCalls;
@@ -724,8 +750,18 @@ function handleLiveQuery(q) {{
 
     const ts = q.ts ? new Date(q.ts * 1000).toTimeString().split(' ')[0] : '-';
     const latStr = q.latency_us ? (q.latency_us / 1000.0).toFixed(1) + 'ms' : '-';
-    const statusClass = exitCode === 0 ? 'status-ok' : 'status-err';
-    const statusText = exitCode === 0 ? 'ok' : 'err ' + exitCode;
+    let statusClass = 'status-ok';
+    let statusText = 'ok';
+    if (exitCode === 1) {{
+      statusClass = 'status-warn';
+      statusText = 'empty';
+    }} else if (exitCode === 2) {{
+      statusClass = 'status-ambig';
+      statusText = 'ambig';
+    }} else if (exitCode >= 3) {{
+      statusClass = 'status-err';
+      statusText = 'err ' + exitCode;
+    }}
 
     tr.innerHTML = '<td>' + ts + '</td>' +
       '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
@@ -745,7 +781,7 @@ function handleLiveQuery(q) {{
     }}
   }}
 
-  if (exitCode !== 0) {{
+  if (exitCode >= 3) {{
     const errorsTbody = document.getElementById('errors-tbody');
     if (errorsTbody) {{
       const tr = document.createElement('tr');

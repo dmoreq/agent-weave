@@ -52,6 +52,7 @@ class LiveMonitorTUI:
         self.last_pos = 0
         self.total_queries = 0
         self.total_errors = 0
+        self.total_warnings = 0
         self.saved_tokens = 0
         self.latencies: List[float] = []
         self.repo_counts: Dict[str, int] = {}
@@ -84,15 +85,21 @@ class LiveMonitorTUI:
         self.total_queries += 1
         exit_code = int(entry.get("exit_code", 0))
         repo = str(entry.get("repo_name") or "workspace")
+
+        # Skip synthetic test fixture repos created during cargo test suites
+        if repo.startswith(("aw-it-", "aw-mcp-", "usage-quality", "journal-", "global-usage-")):
+            return
         tool = str(entry.get("tool", "-"))
         shown = int(entry.get("shown", entry.get("result_count", 0)))
         lat_us = entry.get("latency_us")
 
         self.repo_counts[repo] = self.repo_counts.get(repo, 0) + 1
 
-        if exit_code != 0:
+        if exit_code >= 3:
             self.total_errors += 1
             self.last_error = entry
+        elif exit_code in (1, 2):
+            self.total_warnings += 1
 
         if lat_us is not None and lat_us >= 0:
             self.latencies.append(lat_us / 1000.0)
@@ -213,7 +220,7 @@ class LiveMonitorTUI:
 
         kpi_text = (
             f"Queries: {self.total_queries} | "
-            f"Reliability: {reliability:.1f}% ({self.total_errors} err) | "
+            f"Reliability: {reliability:.1f}% ({self.total_errors} err, {self.total_warnings} notices) | "
             f"p50: {p50:.1f}ms | "
             f"Saved: ~{self.saved_tokens:,} tok (~${dollars:.2f})"
         )
@@ -221,7 +228,7 @@ class LiveMonitorTUI:
 
         # 3. Active Repos / Filters Line
         repo_summary = ", ".join(f"{k} ({v})" for k, v in sorted(self.repo_counts.items())[:4])
-        mode_str = "ERRORS ONLY" if self.errors_only else "ALL CALLS"
+        mode_str = "CRITICAL ERRORS ONLY" if self.errors_only else "ALL CALLS"
         filter_text = f"Scope: [{self.repo_filter}] | Mode: [{mode_str}] | Repos: {repo_summary}"
         stdscr.addstr(2, 0, filter_text[:width - 1], curses.color_pair(4))
 
@@ -236,7 +243,7 @@ class LiveMonitorTUI:
         visible_rows = height - 9
         filtered_events = [
             e for e in self.events
-            if (not self.errors_only or e.get("exit_code", 0) != 0)
+            if (not self.errors_only or int(e.get("exit_code", 0)) >= 3)
             and (self.repo_filter == "ALL" or e.get("repo_name") == self.repo_filter)
         ]
         to_display = filtered_events[-visible_rows:]
@@ -257,6 +264,12 @@ class LiveMonitorTUI:
             if exit_code == 0:
                 status_str = "OK"
                 status_color = curses.color_pair(2)
+            elif exit_code == 1:
+                status_str = "EMPTY"
+                status_color = curses.color_pair(4)
+            elif exit_code == 2:
+                status_str = "AMBIG"
+                status_color = curses.color_pair(5)
             else:
                 status_str = f"ERR {exit_code}"
                 status_color = curses.color_pair(3) | curses.A_BOLD
@@ -277,12 +290,12 @@ class LiveMonitorTUI:
             err_repo = self.last_error.get("repo_name") or "unknown"
             err_code = self.last_error.get("exit_code")
             err_time = time.strftime("%H:%M:%S", time.localtime(self.last_error.get("ts", 0)))
-            alert_msg = f" ⚠ LAST ERROR [{err_time}] {err_tool} in {err_repo} -> exit {err_code} "
+            alert_msg = f" ⚠ LAST CRITICAL ERROR [{err_time}] {err_tool} in {err_repo} -> exit {err_code} "
             alert_x = max(0, width - len(alert_msg) - 1)
             stdscr.addstr(height - 2, 0, " " * (width - 1), curses.A_NORMAL)
             stdscr.addstr(height - 2, 0, alert_msg[:width - 1], curses.color_pair(3) | curses.A_BOLD)
         else:
-            stdscr.addstr(height - 2, 0, " ✓ All operations healthy — zero recent errors", curses.color_pair(2))
+            stdscr.addstr(height - 2, 0, " ✓ All operations healthy — zero critical system errors", curses.color_pair(2))
 
         # 7. Bottom Help Bar
         help_bar = " [q] Quit  [e] Toggle Errors  [r] Cycle Repo  [p/Space] Pause  [c] Clear "

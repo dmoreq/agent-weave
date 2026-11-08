@@ -25,6 +25,7 @@ fn write(repo: &Path, rel: &str, content: &str) {
 fn aw(repo: &Path) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_aw"));
     c.arg("--root").arg(repo);
+    c.env("AW_GLOBAL_DIR", repo.join(".test_global"));
     c
 }
 
