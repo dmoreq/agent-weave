@@ -19,10 +19,7 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
     };
     let effective_all = *all || terms.is_empty();
     validate_mem_query(terms, *all, effective_all, *include_superseded)?;
-    let index_conn = root_arg
-        .and_then(|r| crate::walk::discover_root(Some(r)).ok())
-        .or_else(|| crate::walk::discover_root(None).ok())
-        .and_then(|root| crate::db::open_for_query(&root).ok());
+    let index_conn = stale_ref_conn(root_arg);
     let args = MemQueryArgs {
         terms,
         all: effective_all,

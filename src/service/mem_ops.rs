@@ -1,5 +1,5 @@
-//! Memory and doctor/usage operations: get, delete, export, garbage
-//! collection entry, and connection openers for both stores.
+//! Memory operations: get, delete, export, garbage-collection entry, and
+//! connection openers for both stores.
 
 use super::*;
 
@@ -8,10 +8,7 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
     let CommandRequest::MemGet { key, global } = req else {
         unreachable!("run_mem_get called with a non-get request")
     };
-    let index_conn = root_arg
-        .and_then(|r| crate::walk::discover_root(Some(r)).ok())
-        .or_else(|| crate::walk::discover_root(None).ok())
-        .and_then(|root| crate::db::open_for_query(&root).ok());
+    let index_conn = stale_ref_conn(root_arg);
 
     if *global {
         let conn = crate::db::open_global_memory_query()?;
@@ -108,36 +105,14 @@ pub(super) fn run_mem_export(req: &CommandRequest, root_arg: Option<&Path>) -> R
     ))
 }
 
-pub(super) fn run_doctor(root_arg: Option<&Path>, invalidate: bool) -> Result<ArmOut> {
-    let root = crate::walk::discover_root(root_arg)?;
-    let lines = if invalidate {
-        crate::doctor::invalidate(&root)?
-    } else {
-        crate::doctor::report(&root)?
-    };
-    Ok(ArmOut::plain(join_lines(lines), String::new()))
-}
-
-pub(super) fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) -> Result<ArmOut> {
-    if global {
-        let lines = crate::journal::global_summary(quality)?;
-        return Ok(ArmOut::plain(join_lines(lines), String::new()));
-    }
-    let root = match crate::walk::discover_root(root_arg) {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(AwError::NoResults(format!(
-                "{e}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
-            )));
-        }
-    };
-    match crate::journal::summary(&root, quality) {
-        Ok(lines) => Ok(ArmOut::plain(join_lines(lines), String::new())),
-        Err(AwError::NoResults(msg)) => Err(AwError::NoResults(format!(
-            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
-        ))),
-        Err(e) => Err(e),
-    }
+/// Best-effort index connection for stale-ref verification: resolved from
+/// the explicit root, else the discovered one; absence degrades reads to
+/// unverified (never stale) refs. Shared by the mem query and get paths.
+pub(super) fn stale_ref_conn(root_arg: Option<&Path>) -> Option<rusqlite::Connection> {
+    root_arg
+        .and_then(|r| crate::walk::discover_root(Some(r)).ok())
+        .or_else(|| crate::walk::discover_root(None).ok())
+        .and_then(|root| crate::db::open_for_query(&root).ok())
 }
 
 /// Caveated empty-result error shared by the mem read commands (stdout keeps

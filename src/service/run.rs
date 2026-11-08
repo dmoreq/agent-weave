@@ -36,6 +36,38 @@ fn run_diag(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
     }
 }
 
+pub(super) fn run_doctor(root_arg: Option<&Path>, invalidate: bool) -> Result<ArmOut> {
+    let root = crate::walk::discover_root(root_arg)?;
+    let lines = if invalidate {
+        crate::doctor::invalidate(&root)?
+    } else {
+        crate::doctor::report(&root)?
+    };
+    Ok(ArmOut::plain(join_lines(lines), String::new()))
+}
+
+pub(super) fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) -> Result<ArmOut> {
+    if global {
+        let lines = crate::journal::global_summary(quality)?;
+        return Ok(ArmOut::plain(join_lines(lines), String::new()));
+    }
+    let root = match crate::walk::discover_root(root_arg) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(AwError::NoResults(format!(
+                "{e}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+            )));
+        }
+    };
+    match crate::journal::summary(&root, quality) {
+        Ok(lines) => Ok(ArmOut::plain(join_lines(lines), String::new())),
+        Err(AwError::NoResults(msg)) => Err(AwError::NoResults(format!(
+            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+        ))),
+        Err(e) => Err(e),
+    }
+}
+
 /// Index-only query arms: graph traversal, analysis, and inventory.
 fn run_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
     match req.family() {
@@ -147,7 +179,7 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
             if *names {
                 crate::query::unresolved_names(ctx, path.as_deref(), *limit)?
             } else {
-                crate::query::unresolved(ctx.conn, path.as_deref(), *limit)?
+                crate::query::unresolved(ctx, path.as_deref(), *limit)?
             }
         }
         CommandRequest::Symbols {

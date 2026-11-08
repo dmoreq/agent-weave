@@ -16,10 +16,10 @@ struct UnresolvedScope<'a> {
 /// Unresolved edge names with locations (Amendment 19). Report shape: header,
 /// then one `path:line kind name` row per unresolved site.
 pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Result<LineQuery> {
-    let QueryCtx { conn, .. } = *ctx;
+    let QueryCtx { conn: _, .. } = *ctx;
     let (limit, clause, params) = scoped_query(path, limit, "f", "path", 1)?;
     let scope = UnresolvedScope {
-        conn,
+        conn: ctx.conn,
         clause,
         params,
     };
@@ -123,10 +123,10 @@ fn unresolved_rows(scope: &UnresolvedScope<'_>, limit: usize) -> Result<Vec<Unre
 
 /// Unresolved-callee report (Amendment 5): files with counts, descending.
 /// Report shape — cap, no staleness; header carries the index total.
-pub fn unresolved(conn: &Connection, path: Option<&str>, limit: usize) -> Result<LineQuery> {
+pub fn unresolved(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Result<LineQuery> {
     let (limit, clause, params) = scoped_query(path, limit, "f", "path", 1)?;
     let scope = UnresolvedScope {
-        conn,
+        conn: ctx.conn,
         clause,
         params,
     };
