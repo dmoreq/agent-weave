@@ -14,6 +14,7 @@ Binding repository conventions for `aw`, a local static code index for Python, T
   - Zero `unsafe` code anywhere in `src/` or `tests/`.
   - Keep the synchronous dependency footprint (`clap`, `tree-sitter*`, `rusqlite` bundled, `ignore`, `serde_json`). Do not add async runtimes, HTTP clients, or unapproved crates.
   - Keep [`tests/scripts/allowlist.txt`](tests/scripts/allowlist.txt) synchronized with `Cargo.lock` (`bash tests/scripts/allowlist_check.sh Cargo.lock`).
+  - **Module Size & File Discipline**: Keep each source and test file ideally within 200–500 LOC. Any file exceeding 500 LOC is a code smell (God Module / Monolithic Harness) and must be refactored and decomposed into cohesive submodules or focused test suites.
 
 ## 2. Codebase Map
 
