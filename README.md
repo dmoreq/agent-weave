@@ -72,11 +72,16 @@ External memory MCP servers introduce an expensive "Memory Tax" through prompt-i
 ## 60-Second Quickstart
 
 ### Installation
-Build from source using Rust 1.90 or later:
+Build from source and configure all active AI agents automatically:
 
 ```bash
 git clone https://github.com/dmoreq/agent-weave.git
 cd agent-weave
+./install.sh
+```
+
+Or install binary only via Cargo:
+```bash
 cargo install --path . --locked
 ```
 

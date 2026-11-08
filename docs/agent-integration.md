@@ -23,9 +23,19 @@ This document provides setup instructions for integrating `agent-weave` (`aw`) w
 
 ---
 
-## 1-Click Host Configuration
+## 1-Click Automated Setup
 
-Add `aw` to your agent host's configuration file.
+Running `./install.sh` from the repository root automatically discovers and configures all supported active agents on your system (Antigravity, Grok Build, Zcode, OpenCode, Zed, Claude Desktop, and Cursor), installs the `aw-first` skill, and injects routing rules:
+
+```bash
+./install.sh
+```
+
+---
+
+## Manual Host Configuration
+
+If you prefer to configure agents manually, add `aw` to your agent host's configuration file.
 
 ### 1. Claude Desktop
 Add to `claude_desktop_config.json` (located at `~/Library/Application Support/Claude/` on macOS or `%APPDATA%\Claude\` on Windows):
