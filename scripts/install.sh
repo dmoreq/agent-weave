@@ -212,6 +212,40 @@ if os.path.exists(os.path.dirname(anti_mcp)):
     update_json_file(anti_mcp, update_gemini)
     print("  ├─ Synced ~/.gemini/antigravity/mcp_config.json")
 
+# Generate Antigravity lazy-loaded MCP schemas in ~/.gemini/antigravity/mcp/agent-weave
+anti_mcp_schemas = os.path.expanduser("~/.gemini/antigravity/mcp/agent-weave")
+try:
+    import subprocess
+    proc = subprocess.Popen(
+        [aw_bin, "mcp"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    init_req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "setup", "version": "1.0"}}}) + "\n"
+    list_req = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}) + "\n"
+    proc.stdin.write(init_req)
+    proc.stdin.write(list_req)
+    proc.stdin.flush()
+    proc.stdout.readline()
+    list_line = proc.stdout.readline()
+    proc.terminate()
+    tools_data = json.loads(list_line).get("result", {}).get("tools", [])
+    if tools_data:
+        os.makedirs(anti_mcp_schemas, exist_ok=True)
+        for t in tools_data:
+            params = t.get("inputSchema", {})
+            if "$schema" not in params:
+                params["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+            with open(os.path.join(anti_mcp_schemas, f"{t['name']}.json"), "w", encoding="utf-8") as f:
+                json.dump({"name": t["name"], "description": t.get("description", ""), "parameters": params}, f, indent=2)
+        with open(os.path.join(anti_mcp_schemas, "instructions.md"), "w", encoding="utf-8") as f:
+            f.write("# agent-weave (aw) Best Practices\n\nQuery aw for code graph navigation before reading files or grepping.\n")
+        print(f"  ├─ Generated {len(tools_data)} MCP tool schemas in ~/.gemini/antigravity/mcp/agent-weave/")
+except Exception as e:
+    print(f"  [warn] Could not generate Antigravity MCP schemas: {e}")
+
 if deploy_skill(os.path.expanduser("~/.gemini/config/skills/aw-first")):
     print("  ├─ Deployed aw-first skill to ~/.gemini/config/skills/aw-first/")
 
