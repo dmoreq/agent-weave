@@ -94,6 +94,12 @@ When adding, removing, or modifying any subcommand, flag, MCP tool, output forma
   cargo test --locked
   bash tests/scripts/allowlist_check.sh Cargo.lock
   bash tests/scripts/write_path_check.sh
+  bash tests/scripts/hygiene_check.sh
+  ```
+- **Pre-Commit Hook Installation & Targeted Runs**:
+  ```sh
+  pre-commit install --hook-type pre-commit --hook-type pre-push
+  pre-commit run --files <changed_files>
   ```
 - **Documentation-Only Gate** (skip Rust test rebuilds):
   - Validate every documented `aw ...` command/flag against [`src/cli.rs`](src/cli.rs) / `aw <subcommand> --help`.

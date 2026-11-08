@@ -1,0 +1,91 @@
+# .pre-commit-config.yaml
+# agent-weave (aw) pre-commit and pre-push hooks
+# Enforces formatting, code-smells, security invariants, and test coverage
+
+minimum_pre_commit_version: "3.2.0"
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+default_stages:
+  - pre-commit
+
+repos:
+  # 1. Standard Git & File Hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: trailing-whitespace
+        exclude: ^tests/fixtures/
+      - id: end-of-file-fixer
+        exclude: ^tests/fixtures/
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-toml
+
+  # 2. Fast Spellchecking
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.29.4
+    hooks:
+      - id: typos
+        name: typos
+        exclude: ^(docs/baselines/|docs/reports/|tests/fixtures/|tests/scripts/.*recall\.py$)
+
+  # 3. Invariant Gates & Rust Anti-Smell Tooling
+  - repo: local
+    hooks:
+      # Git whitespace error check
+      - id: git-diff-check
+        name: git diff whitespace check
+        entry: git diff --cached --check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      # Zero personal leakage, emoji discipline & Rust code-smells gate (LOC > 500, unsafe, dbg!)
+      - id: hygiene-check
+        name: hygiene, leakage, emoji & code-smells gate
+        entry: bash tests/scripts/hygiene_check.sh
+        language: system
+        types: [text]
+
+      # Enforce runtime write/delete confinement strictly to .aw/
+      - id: write-path-check
+        name: .aw/ write-path confinement check
+        entry: bash tests/scripts/write_path_check.sh
+        language: system
+        files: ^(src/.*\.rs|tests/scripts/write_path_check\.sh)$
+        pass_filenames: false
+
+      # Ensure Cargo.lock dependencies are vetted in allowlist.txt
+      - id: allowlist-check
+        name: Cargo.lock dependency allowlist check
+        entry: bash tests/scripts/allowlist_check.sh Cargo.lock
+        language: system
+        files: ^(Cargo\.(toml|lock)|tests/scripts/allowlist(_check\.sh|\.txt))$
+        pass_filenames: false
+
+      # Rust Code Formatting
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      # Rust Linter & Complexity Gate
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        files: \.(rs|sql|toml)$
+        pass_filenames: false
+
+      # Pre-push Integration Test Suite Gate
+      - id: cargo-test
+        name: cargo test (pre-push)
+        entry: cargo test --locked
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true

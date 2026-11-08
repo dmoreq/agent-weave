@@ -1,0 +1,11 @@
+# clippy.toml
+# Rust Anti-Smell & Complexity Thresholds for agent-weave (aw)
+
+# Maximum effective lines per function/method
+too-many-lines-threshold = 80
+
+# Cognitive complexity threshold per function
+cognitive-complexity-threshold = 20
+
+# Maximum arguments per function (default 7; flags 8+)
+too-many-arguments-threshold = 7
