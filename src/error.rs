@@ -82,6 +82,29 @@ pub enum AwError {
     Internal(String),
 }
 
+/// The journal-facing classification of a raw process exit code (the 0-7
+/// contract; [`AwError::code_class`] is the error-to-code direction). One
+/// home for the thresholds so telemetry surfaces bucket outcomes identically:
+/// 0 ok, 1 empty result, 2 ambiguous usage, 3+ operational errors.
+pub enum ExitClass {
+    Ok,
+    Empty,
+    Ambiguous,
+    Error,
+}
+
+impl ExitClass {
+    /// Bucket a journaled exit code.
+    pub fn of(code: i64) -> Self {
+        match code {
+            0 => ExitClass::Ok,
+            1 => ExitClass::Empty,
+            2 => ExitClass::Ambiguous,
+            _ => ExitClass::Error,
+        }
+    }
+}
+
 impl AwError {
     fn code_class(&self) -> (i32, &'static str) {
         match self {

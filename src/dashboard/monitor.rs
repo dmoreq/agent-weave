@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::db;
+use crate::error::ExitClass;
 use crate::error::Result;
 
 pub fn stream_monitor(
@@ -120,34 +121,37 @@ fn render_event_line(val: &Value, repo_filter: Option<&str>, errors_only: bool) 
         .map(|us| format!("{:.1}ms", us / 1000.0))
         .unwrap_or_else(|| "-".to_string());
 
-    let (status_str, status_color) = if exit_code == 0 {
-        ("OK", "\x1b[32m") // Green
-    } else if exit_code == 1 {
-        ("EMPTY", "\x1b[33m") // Yellow
-    } else if exit_code == 2 {
-        ("AMBIG", "\x1b[35m") // Magenta
-    } else {
-        ("ERR", "\x1b[31;1m") // Bold Red
+    let (status_str, status_color) = match ExitClass::of(exit_code) {
+        ExitClass::Ok => ("OK", "\x1b[32m"),           // Green
+        ExitClass::Empty => ("EMPTY", "\x1b[33m"),     // Yellow
+        ExitClass::Ambiguous => ("AMBIG", "\x1b[35m"), // Magenta
+        ExitClass::Error => ("ERR", "\x1b[31;1m"),     // Bold Red
     };
 
     let args_val = val.get("args").cloned().unwrap_or(Value::Null);
     let args_str = serde_json::to_string(&args_val).unwrap_or_default();
     let max_args_len = 36;
     let short_args = if args_str.len() > max_args_len {
-        format!("{}...", &args_str[..max_args_len - 3])
+        format!("{}...", truncate_chars(&args_str, max_args_len - 3))
     } else {
         args_str
     };
 
-    let r_truncated = if repo_name.len() > 13 {
-        &repo_name[..13]
-    } else {
-        repo_name
-    };
-    let t_truncated = if tool.len() > 11 { &tool[..11] } else { tool };
+    let r_truncated = truncate_chars(repo_name, 13);
+    let t_truncated = truncate_chars(tool, 11);
 
     println!(
         "{:<8} {:<14} \x1b[36m{:<12}\x1b[0m {:<10} {}{:<9}\x1b[0m {}",
         time_str, r_truncated, t_truncated, lat_str, status_color, status_str, short_args
     );
+}
+
+/// Truncate to at most `max_chars` characters, always on a char boundary:
+/// journal fields embed user text, so byte slicing could panic mid-codepoint
+/// inside the live monitor loop.
+fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
 }

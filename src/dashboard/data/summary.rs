@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::{json, Value};
 
+use crate::error::ExitClass;
+
 pub fn compute_summary(entries: &[Value]) -> Value {
     let total_calls = entries.len();
     if total_calls == 0 {
@@ -63,13 +65,17 @@ pub fn compute_summary(entries: &[Value]) -> Value {
             r_entry.last_ts = ts;
         }
 
-        if exit_code >= 3 {
-            errors += 1;
-            t_entry.errors += 1;
-            r_entry.errors += 1;
-            recent_errors.push(e.clone());
-        } else if exit_code == 1 || exit_code == 2 {
-            warnings += 1;
+        match ExitClass::of(exit_code) {
+            ExitClass::Error => {
+                errors += 1;
+                t_entry.errors += 1;
+                r_entry.errors += 1;
+                recent_errors.push(e.clone());
+            }
+            ExitClass::Empty | ExitClass::Ambiguous => {
+                warnings += 1;
+            }
+            ExitClass::Ok => {}
         }
 
         if let Some(us) = lat_us {
