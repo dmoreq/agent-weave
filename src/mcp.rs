@@ -7,7 +7,7 @@
 //! surface cannot drift from the CLI.
 
 use std::io::{BufRead, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde_json::{json, Value};
@@ -77,7 +77,7 @@ pub fn serve(
     no_journal: bool,
     all_tools: bool,
 ) -> crate::error::Result<()> {
-    let root = crate::walk::discover_root(root_arg)?;
+    let mut current_root = crate::walk::discover_root(root_arg).ok();
     if no_journal {
         // Amendment 6 opt-out must hold on the MCP surface too (R6d A7).
         crate::journal::disable();
@@ -91,7 +91,7 @@ pub fn serve(
         match read_frame(&mut reader, &mut out, &mut buf)? {
             Frame::Eof => return Ok(()),
             Frame::Skip => continue,
-            Frame::Message(msg) => handle_message(msg, &root, all_tools, &mut out)?,
+            Frame::Message(msg) => handle_message(msg, &mut current_root, all_tools, &mut out)?,
         }
     }
 }
@@ -205,7 +205,7 @@ fn validate_envelope(
 /// `validate_envelope` and already wrote any error reply.
 fn handle_message(
     msg: Value,
-    root: &Path,
+    root: &mut Option<PathBuf>,
     all_tools: bool,
     out: &mut impl Write,
 ) -> std::io::Result<()> {
@@ -214,6 +214,28 @@ fn handle_message(
     };
     match method.as_str() {
         "initialize" => {
+            if root.is_none() {
+                if let Some(params) = msg.get("params") {
+                    let root_candidate = params
+                        .get("rootUri")
+                        .and_then(|u| u.as_str())
+                        .or_else(|| params.get("rootPath").and_then(|u| u.as_str()))
+                        .or_else(|| {
+                            params
+                                .get("workspaceFolders")
+                                .and_then(|wf| wf.as_array())
+                                .and_then(|arr| arr.first())
+                                .and_then(|f| f.get("uri"))
+                                .and_then(|u| u.as_str())
+                        });
+                    if let Some(uri) = root_candidate {
+                        let path_str = uri.strip_prefix("file://").unwrap_or(uri);
+                        if let Ok(r) = crate::walk::discover_root(Some(Path::new(path_str))) {
+                            *root = Some(r);
+                        }
+                    }
+                }
+            }
             let requested = msg
                 .get("params")
                 .and_then(|p| p.get("protocolVersion"))
@@ -227,7 +249,7 @@ fn handle_message(
             });
             write_result(out, id, result)?;
         }
-        "notifications/initialized" => {}
+        "initialized" | "notifications/initialized" => {}
         "ping" => {
             write_result(out, id, json!({}))?;
         }
@@ -249,7 +271,7 @@ fn handle_message(
 /// behind a panic boundary, and write the result.
 fn handle_tools_call(
     params: &Value,
-    root: &Path,
+    root: &mut Option<PathBuf>,
     all_tools: bool,
     id: Option<Value>,
     out: &mut impl Write,
@@ -274,7 +296,39 @@ fn handle_tools_call(
     if let Some(reason) = missing_required_arg(&tool_name, &arguments) {
         return write_error(out, id, -32602, &reason);
     }
-    let (text, is_error, latency_ms, shown) = run_tool_journaled(root, &tool_name, &arguments);
+    if root.is_none() {
+        if let Some(file_val) = arguments
+            .get("file")
+            .or_else(|| arguments.get("path"))
+            .and_then(|v| v.as_str())
+        {
+            let p = Path::new(file_val);
+            let dir = if p.is_dir() {
+                p
+            } else {
+                p.parent().unwrap_or(p)
+            };
+            if let Ok(r) = crate::walk::discover_root(Some(dir)) {
+                *root = Some(r);
+            }
+        } else if let Ok(cwd) = std::env::current_dir() {
+            if let Ok(r) = crate::walk::discover_root(Some(&cwd)) {
+                *root = Some(r);
+            }
+        }
+    }
+    let Some(active_root) = root.as_deref() else {
+        return write_result(
+            out,
+            id,
+            json!({
+                "content": [{"type": "text", "text": "aw: usage: no git root ancestor found — initialize MCP with rootUri or run inside a git repository\n"}],
+                "isError": true
+            }),
+        );
+    };
+    let (text, is_error, latency_ms, shown) =
+        run_tool_journaled(active_root, &tool_name, &arguments);
     let text = format_mcp_output(&tool_name, text, is_error, shown, latency_ms);
     write_result(
         out,

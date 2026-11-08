@@ -243,6 +243,21 @@ try:
         with open(os.path.join(anti_mcp_schemas, "instructions.md"), "w", encoding="utf-8") as f:
             f.write("# agent-weave (aw) Best Practices\n\nQuery aw for code graph navigation before reading files or grepping.\n")
         print(f"  ├─ Generated {len(tools_data)} MCP tool schemas in ~/.gemini/antigravity/mcp/agent-weave/")
+
+        # Grant Antigravity MCP execution permissions in ~/.gemini/config/config.json
+        anti_config_json = os.path.expanduser("~/.gemini/config/config.json")
+        if os.path.exists(anti_config_json):
+            def update_grants(data):
+                grants = data.setdefault("userSettings", {}).setdefault("globalPermissionGrants", {}).setdefault("allow", [])
+                needed = ["mcp(agent-weave/*)"] + [f"mcp(agent-weave/{t['name']})" for t in tools_data]
+                mod = False
+                for g in needed:
+                    if g not in grants:
+                        grants.append(g)
+                        mod = True
+                return mod
+            if update_json_file(anti_config_json, update_grants):
+                print("  ├─ Granted MCP execution permissions in ~/.gemini/config/config.json")
 except Exception as e:
     print(f"  [warn] Could not generate Antigravity MCP schemas: {e}")
 

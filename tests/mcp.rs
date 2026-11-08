@@ -1271,3 +1271,66 @@ fn global_usage_mcp_returns_cross_repo_summary() {
     let _ = fs::remove_dir_all(&repo);
     let _ = fs::remove_dir_all(&global_dir);
 }
+
+#[test]
+fn mcp_dynamic_root_initialization_from_non_git_cwd() {
+    let repo = fixture("dynamic-root");
+    aw_cmd(&repo).arg("build").output().unwrap();
+
+    let empty_dir = std::env::temp_dir().join(format!("aw-mcp-empty-{}", std::process::id()));
+    let _ = fs::create_dir_all(&empty_dir);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .current_dir(&empty_dir)
+        .env("AW_GLOBAL_DIR", repo.join(".test_global"))
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+
+    // 1. Initialize with rootUri
+    let init_req = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "rootUri": format!("file://{}", repo.display()),
+            "capabilities": {}
+        }
+    });
+    writeln!(stdin, "{init_req}").unwrap();
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let init_resp: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(init_resp["id"], 1);
+    assert_eq!(init_resp["result"]["serverInfo"]["name"], "agent-weave");
+
+    // 2. Call search tool on the dynamically bound repo
+    let call_req = json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "search",
+            "arguments": {"terms": "normalize"}
+        }
+    });
+    writeln!(stdin, "{call_req}").unwrap();
+    stdin.flush().unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let call_resp: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(call_resp["id"], 2);
+    assert_eq!(call_resp["result"]["isError"], false);
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(&empty_dir);
+}
