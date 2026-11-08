@@ -28,8 +28,8 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
         all: effective_all,
         limit: (*limit).clamp(1, crate::memory::MAX_MEM_LIMIT),
         filter: crate::db::MemFilter {
-            kind: kind.as_deref(),
-            scope: scope.as_deref(),
+            kind: *kind,
+            scope: *scope,
             now: crate::db::unix_now(),
             include_superseded: *include_superseded,
         },
@@ -195,7 +195,7 @@ fn query_single_store(
 fn merge_all_rows(
     local_conn: &rusqlite::Connection,
     global_conn: &rusqlite::Connection,
-    filter: &crate::db::MemFilter<'_>,
+    filter: &crate::db::MemFilter,
 ) -> Result<Vec<(crate::db::MemRow, bool)>> {
     let local_rows = crate::db::memory_current_rows(local_conn, filter)?;
     let global_rows = crate::db::memory_current_rows(global_conn, filter)?;

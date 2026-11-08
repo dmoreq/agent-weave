@@ -111,8 +111,18 @@ fn memory_current_rows_matches_is_current_predicate() {
         .iter()
         .any(|r| r.expires_at != 0 && r.expires_at <= now));
     for include_superseded in [false, true] {
-        for kind in [None, Some("fact"), Some("decision")] {
-            for scope in [None, Some("durable"), Some("project")] {
+        for kind in [
+            None,
+            Some(crate::memory::MemKind::Fact),
+            Some(crate::memory::MemKind::Decision),
+        ] {
+            // Session plays the old "project" role: a scope with no rows in
+            // this fixture, so the all-empty column still gets exercised.
+            for scope in [
+                None,
+                Some(crate::memory::MemScope::Durable),
+                Some(crate::memory::MemScope::Session),
+            ] {
                 let filter = MemFilter {
                     kind,
                     scope,

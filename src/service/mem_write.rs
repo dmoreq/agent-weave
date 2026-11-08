@@ -103,7 +103,7 @@ pub(super) struct MemQueryArgs<'a> {
     pub(super) terms: &'a [String],
     pub(super) all: bool,
     pub(super) limit: usize,
-    pub(super) filter: crate::db::MemFilter<'a>,
+    pub(super) filter: crate::db::MemFilter,
     pub(super) index_conn: Option<&'a rusqlite::Connection>,
 }
 

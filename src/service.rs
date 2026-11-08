@@ -107,8 +107,8 @@ pub enum CommandRequest {
     MemQuery {
         terms: Vec<String>,
         all: bool,
-        kind: Option<String>,
-        scope: Option<String>,
+        kind: Option<crate::memory::MemKind>,
+        scope: Option<crate::memory::MemScope>,
         limit: usize,
         include_superseded: bool,
         global: bool,

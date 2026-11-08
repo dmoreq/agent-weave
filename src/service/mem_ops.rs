@@ -164,7 +164,7 @@ fn mem_unknown_key(key: &str) -> AwError {
 pub(super) fn mem_ranked(
     conn: &rusqlite::Connection,
     joined_terms: &str,
-    filter: &crate::db::MemFilter<'_>,
+    filter: &crate::db::MemFilter,
     is_global: bool,
 ) -> Result<Vec<crate::memory::Candidate>> {
     let query = crate::memory::mem_query_terms(joined_terms);
@@ -219,7 +219,7 @@ fn mem_candidate(
     row: &crate::db::MemRow,
     lex_raw: f64,
     query_tokens: &std::collections::BTreeSet<String>,
-    filter: &crate::db::MemFilter<'_>,
+    filter: &crate::db::MemFilter,
     is_global: bool,
 ) -> Option<crate::memory::Candidate> {
     // Defense in depth: `memory_write` removes the FTS row on supersession,

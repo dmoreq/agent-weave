@@ -233,8 +233,8 @@ impl CommandRequest {
         Ok(CommandRequest::MemQuery {
             terms,
             all,
-            kind,
-            scope,
+            kind: crate::memory::parse_kind_filter("mem query", kind.as_deref())?,
+            scope: crate::memory::parse_scope_filter("mem query", scope.as_deref())?,
             limit,
             include_superseded,
             global,
@@ -450,8 +450,14 @@ impl CommandRequest {
         };
         vec![
             ("terms", terms.join(" ")),
-            ("kind", kind.clone().unwrap_or_default()),
-            ("scope", scope.clone().unwrap_or_default()),
+            (
+                "kind",
+                kind.map_or_else(String::new, |k| k.as_str().to_string()),
+            ),
+            (
+                "scope",
+                scope.map_or_else(String::new, |s| s.as_str().to_string()),
+            ),
             ("limit", limit.to_string()),
             ("include_superseded", include_superseded.to_string()),
             ("global", global.to_string()),

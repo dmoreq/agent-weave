@@ -237,8 +237,8 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
                 .map(|t| t.split_whitespace().map(str::to_string).collect())
                 .unwrap_or_default(),
             all: a.b("all"),
-            kind: a.s("kind"),
-            scope: a.s("scope"),
+            kind: crate::memory::parse_kind_filter(tool, a.s("kind").as_deref())?,
+            scope: crate::memory::parse_scope_filter(tool, a.s("scope").as_deref())?,
             limit: a.n_spec(tool, "limit", crate::memory::DEFAULT_MEM_LIMIT)?,
             include_superseded: a.b("include_superseded"),
             global: a.b("global"),

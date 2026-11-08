@@ -206,6 +206,34 @@ fn mem_revision_supersession_and_delete() {
     assert!(!empty.join(".aw/memory.db").exists());
 }
 
+/// A misspelled `--kind`/`--scope` filter on `mem query` is a usage error
+/// (exit 2), not a silently empty result: both surfaces parse the taxonomy
+/// at the boundary into `MemKind`/`MemScope`.
+#[test]
+fn mem_query_rejects_unknown_kind_and_scope_exit2() {
+    let repo = temp_repo("mem-query-usage");
+    for flag in ["--kind", "--scope"] {
+        let (code, _stdout, stderr) = aw(&repo)
+            .args(["mem", "query", "x", flag, "mood"])
+            .output()
+            .map(|o| {
+                (
+                    o.status.code().unwrap_or(-1),
+                    String::new(),
+                    String::from_utf8_lossy(&o.stderr).to_string(),
+                )
+            })
+            .unwrap();
+        assert_eq!(code, 2, "flag {flag}: {stderr}");
+        let expected = if flag == "--kind" {
+            "kind must be one of decision|gotcha|fact|task"
+        } else {
+            "scope must be one of durable|session"
+        };
+        assert!(stderr.contains(expected), "flag {flag}: {stderr}");
+    }
+}
+
 #[test]
 fn mem_write_usage_rejections_are_exit2() {
     let repo = temp_repo("mem-usage");

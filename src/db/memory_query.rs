@@ -8,9 +8,9 @@ use rusqlite::OptionalExtension;
 /// restrictions, the `now` clock, and whether the listing extends to
 /// superseded revisions. One struct keeps the four call sites from re-ordering
 /// or re-spelling the argument list.
-pub struct MemFilter<'a> {
-    pub kind: Option<&'a str>,
-    pub scope: Option<&'a str>,
+pub struct MemFilter {
+    pub kind: Option<crate::memory::MemKind>,
+    pub scope: Option<crate::memory::MemScope>,
     pub now: i64,
     pub include_superseded: bool,
 }
@@ -21,7 +21,7 @@ pub struct MemFilter<'a> {
 /// into the `--all` SQL WHERE clause (kind/scope empty-string filters mirror
 /// the `None` arms); `service.rs::mem_ranked` applies this predicate to the
 /// ranked fetch, so the two modes cannot drift apart.
-pub(crate) fn memory_row_is_current(row: &MemRow, filter: &MemFilter<'_>) -> bool {
+pub(crate) fn memory_row_is_current(row: &MemRow, filter: &MemFilter) -> bool {
     if row.superseded_by.is_some() && !filter.include_superseded {
         return false;
     }
@@ -29,12 +29,12 @@ pub(crate) fn memory_row_is_current(row: &MemRow, filter: &MemFilter<'_>) -> boo
         return false;
     }
     if let Some(k) = filter.kind {
-        if row.kind != k {
+        if row.kind != k.as_str() {
             return false;
         }
     }
     if let Some(s) = filter.scope {
-        if row.scope != s {
+        if row.scope != s.as_str() {
             return false;
         }
     }
@@ -48,7 +48,7 @@ pub(crate) fn memory_row_is_current(row: &MemRow, filter: &MemFilter<'_>) -> boo
 /// parameters, never string interpolation. The WHERE clause mirrors
 /// `memory_row_is_current` (same rule set, SQL spelling; a unit test holds
 /// the two row-by-row equal).
-pub fn memory_current_rows(conn: &Connection, filter: &MemFilter<'_>) -> Result<Vec<MemRow>> {
+pub fn memory_current_rows(conn: &Connection, filter: &MemFilter) -> Result<Vec<MemRow>> {
     // include_superseded=0 keeps only current rows; =1 lists everything
     // (superseded rows included, tagged at render time).
     let superseded_clause = "AND (superseded_by IS NULL OR ?4 = 1)";
@@ -66,8 +66,14 @@ pub fn memory_current_rows(conn: &Connection, filter: &MemFilter<'_>) -> Result<
         .query_map(
             rusqlite::params![
                 filter.now,
-                filter.kind.unwrap_or(""),
-                filter.scope.unwrap_or(""),
+                filter
+                    .kind
+                    .map(crate::memory::MemKind::as_str)
+                    .unwrap_or(""),
+                filter
+                    .scope
+                    .map(crate::memory::MemScope::as_str)
+                    .unwrap_or(""),
                 i64::from(filter.include_superseded),
             ],
             mem_row,

@@ -98,6 +98,34 @@ impl MemScope {
             .find(|s| s.as_str() == raw)
     }
 }
+
+/// Parse an optional `--kind` filter at the trust boundary: a misspelling is
+/// a usage error naming the allowed set (the read-path counterpart of the
+/// `mem write` validation text, prefixed with the issuing command).
+pub fn parse_kind_filter(command: &str, raw: Option<&str>) -> Result<Option<MemKind>> {
+    raw.map(|k| {
+        MemKind::parse(k).ok_or_else(|| {
+            AwError::Usage(format!(
+                "{command}: kind must be one of {} (got '{k}')",
+                MEM_KINDS.map(MemKind::as_str).join("|")
+            ))
+        })
+    })
+    .transpose()
+}
+
+/// Parse an optional `--scope` filter at the trust boundary; see
+/// [`parse_kind_filter`] for the error contract.
+pub fn parse_scope_filter(command: &str, raw: Option<&str>) -> Result<Option<MemScope>> {
+    raw.map(|s| {
+        MemScope::parse(s).ok_or_else(|| {
+            AwError::Usage(format!(
+                "{command}: scope must be one of durable|session (got '{s}')"
+            ))
+        })
+    })
+    .transpose()
+}
 /// OQ2 (owner, 2026-11-05): a session note without an explicit `--ttl` lives
 /// for 7 days. Explicit `--ttl` always wins.
 pub const DEFAULT_SESSION_TTL_SECS: i64 = 604_800;
