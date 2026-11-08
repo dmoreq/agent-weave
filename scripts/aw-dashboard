@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Global Dashboard launcher for aw (agent-weave).
+# Native Rust Dashboard launcher for aw (agent-weave).
+# Zero Python requirement.
 set -euo pipefail
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -9,11 +10,10 @@ while [ -h "$SOURCE" ]; do
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-RENDER_PY="$SCRIPT_DIR/../tests/scripts/render_dashboard.py"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ ! -f "$RENDER_PY" ]; then
-  echo "Error: render_dashboard.py not found at $RENDER_PY" >&2
-  exit 1
+if command -v aw >/dev/null 2>&1; then
+  exec aw dashboard --global "$@"
+else
+  exec cargo run --manifest-path "$REPO_ROOT/Cargo.toml" --quiet -- dashboard --global "$@"
 fi
-
-exec python3 -I "$RENDER_PY" --global "$@"

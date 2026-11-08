@@ -18,20 +18,32 @@ changes bump the minor while 0.x is unstable.
 
 ### Added
 
-- **Real-time live monitor (`aw-monitor`).** Interactive Terminal User
-  Interface (TUI) live streaming telemetry from `~/.aw/usage.log` across all
-  repositories and worktrees. Features live QPS, p50 latency, token savings,
-  active repo counter, instant error alert banner, and keyboard controls
-  (`q` quit, `e` errors-only, `r` cycle repo, `p` pause). Supports live web
-  mode (`aw-monitor --web`) with Server-Sent Events (SSE) streaming updates
-  directly into the browser without page reloads.
+- **Native Rust web dashboard: `aw dashboard`.** Pure Rust HTTP 1.1 +
+  Server-Sent Events (SSE) server implemented with `std::net`, requiring zero
+  Python and zero external web/async crates. Serves embedded static assets
+  (`assets/index.html`, `style.css`, `app.js`) with a responsive 3-tab layout:
+  1. *Telemetry & Operations*: QPS, p50/p95 latency, token savings, active repo
+     breakdowns, and live-streaming error triage.
+  2. *Anti-Reinvention Inspector*: Direct engine-driven D1–D4 duplicate
+     detection with side-by-side source code preview panels.
+  3. *Agent Memory Inspector*: Interactive layered local/global memory notes
+     with real-time recall counts and verified index references.
+  Accessible via `aw dashboard [--port 7890] [--global] [--open]`.
+- **Native Rust terminal streaming monitor: `aw monitor`.** Real-time ANSI query
+  event streaming monitor tailing `usage.log` with zero external dependencies.
+  Supports repository filtering (`--repo <NAME>`) and error triage (`--errors-only`).
 - **Global telemetry logging & multi-repo dashboard.** Dual-write telemetry to
   `<repo>/.aw/usage.log` and global `~/.aw/usage.log` (configurable via
   `AW_GLOBAL_DIR`), tracking repository attribution and Git worktree flags.
   Added `aw usage --global` (CLI and MCP) for machine-wide performance,
-  active-repo breakdowns, and recent error triage. Enhanced `aw-dashboard`
-  (`render_dashboard.py --global`) with interactive repository filtering,
-  SVG distribution charts, and error/bug inspection table.
+  active-repo breakdowns, and recent error triage. Updated `scripts/aw-dashboard`
+  wrapper to invoke `exec aw dashboard --global "$@"`.
+
+### Removed
+
+- **Deprecated Python scripts.** Removed `scripts/aw-monitor` and
+  `tests/scripts/render_dashboard.py`, fully standardizing on native Rust
+  `aw dashboard` and `aw monitor`.
 - **Documentation standardization & 3 USPs overhaul.** Complete public GitHub
   showcase landing page in `README.md` with badges, 3 USPs deep-dive (sub-2ms
   deterministic navigation, real-time anti-reinvention engine based on RepoReuse

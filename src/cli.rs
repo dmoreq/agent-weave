@@ -181,6 +181,30 @@ pub enum Cmd {
         #[arg(long)]
         all_tools: bool,
     },
+    /// Serve local interactive telemetry, anti-reinvention, and memory dashboard
+    Dashboard {
+        /// Port to bind the local dashboard web server (default: 7890)
+        #[arg(long, default_value_t = 7890)]
+        port: u16,
+        /// Host address to bind (default: 127.0.0.1)
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Open dashboard in default web browser automatically
+        #[arg(long)]
+        open: bool,
+        /// Read telemetry and memories exclusively from global ~/.aw/
+        #[arg(long)]
+        global: bool,
+    },
+    /// Stream live telemetry and query events in terminal (ANSI stream)
+    Monitor {
+        /// Filter live query events to specific repository name
+        #[arg(long)]
+        repo: Option<String>,
+        /// Filter for critical errors only (exit code >= 3)
+        #[arg(long)]
+        errors_only: bool,
+    },
 }
 
 #[derive(Subcommand)]

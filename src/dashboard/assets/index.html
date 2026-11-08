@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aw telemetry, anti-reinvention &amp; memory dashboard</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="header-left">
+      <h1 id="header-title">aw local telemetry dashboard</h1>
+      <span class="header-meta" id="header-meta">Local SQLite Code Index · Zero External Network Access</span>
+    </div>
+    <div class="header-right">
+      <span id="live-indicator" class="badge status-ok" style="display: none;"><span class="live-dot"></span>LIVE</span>
+      <button class="theme-btn" id="theme-toggle-btn" onclick="toggleTheme()">Theme: Light</button>
+    </div>
+  </header>
+
+  <!-- Primary Tab Bar (3 Dedicated Tabs) -->
+  <nav class="nav-tabs" role="tablist">
+    <button class="tab-btn active" id="tab-telemetry-btn" onclick="switchTab('telemetry')">
+      <span class="tab-num">01</span> Telemetry &amp; Operations
+    </button>
+    <button class="tab-btn" id="tab-reuse-btn" onclick="switchTab('reuse')">
+      <span class="tab-num">02</span> Anti-Reinvention Inspector
+      <span class="tab-badge" id="nav-reuse-count">0</span>
+    </button>
+    <button class="tab-btn" id="tab-memory-btn" onclick="switchTab('memory')">
+      <span class="tab-num">03</span> Agent Memory Inspector
+      <span class="tab-badge" id="nav-mem-count">0</span>
+    </button>
+  </nav>
+
+  <!-- ==================== TAB 01: TELEMETRY & OPERATIONS ==================== -->
+  <div id="tab-telemetry-content">
+    <div class="kpi-strip">
+      <div class="kpi-tile">
+        <div class="kpi-label">Total Queries</div>
+        <div id="metric-total-calls" class="kpi-value">0</div>
+        <div id="metric-reliability" class="kpi-sub">100.0% clean (0 errs)</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Median Latency (p50)</div>
+        <div id="metric-p50" class="kpi-value text-success">0.0ms</div>
+        <div id="metric-latency-sub" class="kpi-sub">p95 = 0.0ms · avg = 0.0ms</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Est. Tokens Saved</div>
+        <div id="metric-tokens" class="kpi-value">~0</div>
+        <div id="metric-dollars" class="kpi-sub">~$0.00 avoided vs full reads</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Anti-Reinvention &amp; Memory</div>
+        <div class="kpi-value"><span id="metric-reuse-hits">0</span> <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: normal;">hits</span></div>
+        <div class="kpi-sub"><span id="metric-active-memories">0</span> memories across stores</div>
+      </div>
+    </div>
+
+    <div class="panel-grid">
+      <!-- Repositories & Worktrees Breakdown -->
+      <div class="card">
+        <div class="card-title">
+          <span>Active Repositories &amp; Worktrees</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Click row to filter</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Repository / Branch</th>
+              <th class="text-right">Queries</th>
+              <th>Status</th>
+              <th class="text-right">Last Active</th>
+            </tr>
+          </thead>
+          <tbody id="repos-tbody">
+            <tr><td colspan="4" class="empty-cell">Loading repositories...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Tool Distribution -->
+      <div class="card">
+        <div class="card-title">
+          <span>Tool Distribution &amp; Latency</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Volume &amp; p50</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Tool Command</th>
+              <th class="text-right">Calls</th>
+              <th class="text-right">p50 Latency</th>
+            </tr>
+          </thead>
+          <tbody id="tools-tbody">
+            <tr><td colspan="3" class="empty-cell">Loading tools...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Live Query Stream -->
+    <div class="card">
+      <div class="card-title">
+        <span>Recent Query Activity</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Streaming via native SSE</span>
+      </div>
+
+      <div class="filter-bar">
+        <label for="repo-filter" class="text-muted" style="font-size: 0.78rem;">Scope:</label>
+        <select id="repo-filter" class="filter-select" onchange="applyTelemetryFilters()">
+          <option value="ALL">All Repositories</option>
+        </select>
+
+        <label for="status-filter" class="text-muted" style="font-size: 0.78rem;">Status:</label>
+        <select id="status-filter" class="filter-select" onchange="applyTelemetryFilters()">
+          <option value="ALL">All Statuses</option>
+          <option value="0">OK (Exit 0)</option>
+          <option value="1">Empty (Exit 1)</option>
+          <option value="2">Ambiguous (Exit 2)</option>
+          <option value="ERR">Errors (Exit >= 3)</option>
+        </select>
+
+        <input type="text" id="query-search" class="search-input" placeholder="Search tool or argument..." oninput="applyTelemetryFilters()">
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Repository</th>
+            <th>Tool</th>
+            <th class="text-right">Items</th>
+            <th class="text-right">Latency</th>
+            <th>Status</th>
+            <th>Arguments</th>
+          </tr>
+        </thead>
+        <tbody id="recent-tbody">
+          <tr><td colspan="7" class="empty-cell">No queries recorded</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Triage Log -->
+    <div class="card">
+      <div class="card-title">
+        <span>Critical Error &amp; Bug Triage</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Exit Code >= 3</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Repository</th>
+            <th>Tool</th>
+            <th>Exit Code</th>
+            <th class="text-right">Latency</th>
+            <th>Arguments</th>
+          </tr>
+        </thead>
+        <tbody id="errors-tbody">
+          <tr><td colspan="6" class="empty-cell">Zero critical errors recorded</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 02: ANTI-REINVENTION INSPECTOR ==================== -->
+  <div id="tab-reuse-content" class="hidden">
+    <!-- Prevention KPI Strip -->
+    <div class="kpi-strip">
+      <div class="kpi-tile">
+        <div class="kpi-label">Duplicate Candidates Caught</div>
+        <div class="kpi-value text-success" id="reuse-kpi-count">0</div>
+        <div class="kpi-sub">D1–D4 detectors across code index</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Preventable Excess LOC</div>
+        <div class="kpi-value" id="reuse-kpi-loc">~0</div>
+        <div class="kpi-sub">Redundant lines saved via consolidation</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Pre-Write Helper Searches</div>
+        <div class="kpi-value" id="reuse-kpi-prewrite">0</div>
+        <div class="kpi-sub">aw search queries finding [callers=N] helpers</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Canonical Concentration</div>
+        <div class="kpi-value"><span id="reuse-kpi-callers">0.0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">callers</span></div>
+        <div class="kpi-sub">Authoritative reuse targets</div>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <label for="reuse-repo-filter" class="text-muted" style="font-size: 0.78rem;">Repo:</label>
+      <select id="reuse-repo-filter" class="filter-select" onchange="renderReuseList()">
+        <option value="ALL">All Repositories</option>
+      </select>
+
+      <span class="text-muted" style="font-size: 0.78rem;">Detector:</span>
+      <div class="pill-group">
+        <button class="filter-pill active" data-det="ALL" onclick="setReuseDetectorFilter('ALL')">All</button>
+        <button class="filter-pill" data-det="D1" onclick="setReuseDetectorFilter('D1')">D1 Callee</button>
+        <button class="filter-pill" data-det="D2" onclick="setReuseDetectorFilter('D2')">D2 Interface</button>
+        <button class="filter-pill" data-det="D3" onclick="setReuseDetectorFilter('D3')">D3 Bypass</button>
+        <button class="filter-pill" data-det="D4" onclick="setReuseDetectorFilter('D4')">D4 Wrapper</button>
+      </div>
+
+      <input type="text" id="reuse-search" class="search-input" placeholder="Search candidate, canonical, or evidence..." oninput="renderReuseList()">
+    </div>
+
+    <!-- Master-Detail Split Pane -->
+    <div class="master-detail-split">
+      <div class="list-pane" id="reuse-cards-container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+      <div class="dossier-pane" id="reuse-dossier-container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+    </div>
+
+    <!-- Pre-Write Helper Discovery Feed -->
+    <div class="card" style="margin-top: 1.5rem;">
+      <div class="card-title">
+        <span>Pre-Write Helper Discovery Stream (`aw search` &amp; `aw reuse`)</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Searches before writing code</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Repository</th>
+            <th>Tool</th>
+            <th>Query / Target</th>
+            <th class="text-right">Hits Returned</th>
+            <th class="text-right">Latency</th>
+          </tr>
+        </thead>
+        <tbody id="prewrite-tbody">
+          <!-- Rendered dynamically via JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 03: AGENT MEMORY INSPECTOR ==================== -->
+  <div id="tab-memory-content" class="hidden">
+    <!-- Memory KPI Strip -->
+    <div class="kpi-strip">
+      <div class="kpi-tile">
+        <div class="kpi-label">Active Memories</div>
+        <div class="kpi-value text-success" id="mem-kpi-active">0</div>
+        <div class="kpi-sub">Across all connected stores</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Agent Recalls</div>
+        <div class="kpi-value text-success"><span id="mem-kpi-recalls">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">queries</span></div>
+        <div class="kpi-sub">Correlated from mem_query / mem_get</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Bugs &amp; Regressions Guarded</div>
+        <div class="kpi-value"><span id="mem-kpi-guarded">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">rules</span></div>
+        <div class="kpi-sub" id="mem-kpi-guarded-sub">0 gotchas · 0 decisions</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Code References Guarded</div>
+        <div class="kpi-value"><span id="mem-kpi-refs">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">symbols</span></div>
+        <div class="kpi-sub">Verified in repository index</div>
+      </div>
+    </div>
+
+    <!-- Memory Filter Bar -->
+    <div class="filter-bar">
+      <label for="mem-store-filter" class="text-muted" style="font-size: 0.78rem;">Store:</label>
+      <select id="mem-store-filter" class="filter-select" onchange="renderMemoryList()">
+        <option value="ALL">All Stores</option>
+      </select>
+
+      <label for="mem-kind-filter" class="text-muted" style="font-size: 0.78rem;">Kind:</label>
+      <select id="mem-kind-filter" class="filter-select" onchange="renderMemoryList()">
+        <option value="ALL">All Kinds</option>
+        <option value="decision">Decision</option>
+        <option value="gotcha">Gotcha</option>
+        <option value="fact">Fact</option>
+        <option value="task">Task</option>
+      </select>
+
+      <input type="text" id="mem-search" class="search-input" placeholder="Search key, prose body, #tag or ref..." oninput="renderMemoryList()">
+
+      <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+        <input type="checkbox" id="mem-show-superseded" onchange="renderMemoryList()">
+        <span class="text-muted">Show superseded revs</span>
+      </label>
+    </div>
+
+    <!-- Master-Detail Split Pane -->
+    <div class="master-detail-split">
+      <div class="list-pane" id="memory-cards-container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+      <div class="dossier-pane" id="memory-dossier-container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 
 pub mod build;
 pub mod cli;
+pub mod dashboard;
 pub mod db;
 pub mod doctor;
 pub mod error;

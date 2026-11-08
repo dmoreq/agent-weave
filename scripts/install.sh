@@ -92,14 +92,9 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 ln -sf "$HOME/.cargo/bin/aw" "$HOME/.local/bin/aw"
 
-# Symlink monitor and dashboard utilities
-MONITOR_SRC="$REPO_ROOT/scripts/aw-monitor"
+# Symlink dashboard utility (native Rust launcher)
 DASHBOARD_SRC="$REPO_ROOT/scripts/aw-dashboard"
-
-if [[ -f "$MONITOR_SRC" ]]; then
-  chmod +x "$MONITOR_SRC"
-  ln -sf "$MONITOR_SRC" "$HOME/.local/bin/aw-monitor"
-fi
+rm -f "$HOME/.local/bin/aw-monitor"
 
 if [[ -f "$DASHBOARD_SRC" ]]; then
   chmod +x "$DASHBOARD_SRC"
@@ -112,7 +107,6 @@ mkdir -p "$HOME/.aw"
 log_ok "Binaries and scripts installed:"
 echo "  ├─ ~/.cargo/bin/aw"
 echo "  ├─ ~/.local/bin/aw -> ~/.cargo/bin/aw"
-echo "  ├─ ~/.local/bin/aw-monitor -> $MONITOR_SRC"
 echo "  └─ ~/.local/bin/aw-dashboard -> $DASHBOARD_SRC"
 
 # Check PATH
@@ -443,7 +437,7 @@ log_info "Verifying global telemetry (~/.aw/usage.log)..."
 echo ""
 log_ok "Installation and agent configuration completed successfully!"
 echo -e "${BOLD}Operational Commands:${RESET}"
-echo "  • aw-monitor           Launch interactive real-time TUI terminal monitor"
-echo "  • aw-monitor --web     Launch live streaming Web SSE dashboard (http://localhost:7890)"
-echo "  • aw-dashboard         Open multi-repo HTML dashboard in browser"
+echo "  • aw dashboard         Launch native live streaming Web SSE dashboard (http://localhost:7890)"
+echo "  • aw monitor           Stream live query events in terminal (ANSI stream)"
+echo "  • aw-dashboard         Shortcut to launch native web dashboard"
 echo "  • aw usage --global    Print machine-wide telemetry & token savings summary"

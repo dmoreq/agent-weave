@@ -143,8 +143,9 @@ The 10 core command surfaces cover complete code navigation, anti-reinvention, a
 - `aw stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
 - `aw unresolved [--names]`: Inspect where static resolution could not resolve call sites.
 - `aw usage [--global] [--quality]`: View latency distribution, token savings, and query success telemetry (local or machine-wide).
-- `aw-dashboard [--open]`: Render and open interactive multi-repo HTML telemetry dashboard.
-- `aw-monitor [--web]`: Real-time live monitor (interactive TUI or live web SSE stream).
+- `aw dashboard [--port 7890] [--open]`: Native live streaming Web SSE dashboard (Telemetry, Anti-Reinvention, Memory).
+- `aw monitor [--repo <NAME>] [--errors-only]`: Real-time terminal ANSI query event stream.
+- `aw-dashboard`: Convenience launcher for native web dashboard.
 - `aw mcp`: Start the Model Context Protocol stdio server.
 
 See the complete [CLI Reference](docs/cli-reference.md) for flag details and exit codes.

@@ -13,7 +13,7 @@ Get up and running with `agent-weave` in under 5 minutes. Learn how to index a r
 - **C Compiler**: `cc` or `clang` for bundled SQLite and tree-sitter parsers
 
 ### 1-Click Automated Setup (Binary + All Agents)
-Run the automated installer to compile `aw`, install binaries/scripts (`aw`, `aw-monitor`, `aw-dashboard`), and configure detected coding agents (Antigravity, Grok, Zcode, OpenCode, Zed, Claude, Cursor):
+Run the automated installer to compile `aw`, install binaries (`aw`, `aw-dashboard`), and configure detected coding agents (Antigravity, Grok, Zcode, OpenCode, Zed, Claude, Cursor):
 
 ```bash
 git clone https://github.com/dmoreq/agent-weave.git

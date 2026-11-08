@@ -227,7 +227,7 @@ pub fn run_reuse(
     })
 }
 
-fn analyze_corpus(
+pub(crate) fn analyze_corpus(
     conn: &Connection,
     path_filter: Option<&[String]>,
     target_names: Option<&HashSet<String>>,

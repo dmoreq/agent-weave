@@ -297,20 +297,27 @@ aw-dashboard [--open] [--serve [PORT]] [--out <PATH>]
 - `--serve [PORT]`: Starts a live HTTP server with Server-Sent Events (SSE) streaming real-time queries.
 - Includes repository filter dropdown, active repositories overview, tool breakdown charts, and an error triage inspection table.
 
-### Live Monitor (`aw-monitor`)
-Interactive real-time live monitor streaming queries as they happen across all repositories.
+### Native Dashboard (`aw dashboard`)
+Serve the interactive 3-tab web dashboard (Telemetry, Anti-Reinvention, Agent Memory) with real-time SSE streaming. Built into the native Rust binary with zero Python dependencies.
 
 ```bash
-# Terminal User Interface (TUI) live monitor
-aw-monitor [--errors-only] [--repo <NAME>]
-
-# Live web dashboard with real-time SSE stream
-aw-monitor --web [PORT]
+aw dashboard [--port 7890] [--host 127.0.0.1] [--open] [--global]
 ```
 
-- **TUI Hotkeys**: `q` quit, `e` toggle error-only filter, `r` cycle repository filter, `p` / `Space` pause/resume streaming, `c` clear buffer.
-- **Header**: Live QPS, active repo count, total session queries, reliability %, p50 latency, token savings.
-- **Alert Bar**: Instant red alert flash on non-zero exit codes with exact command and arguments.
+- `--port <PORT>`: Port to bind the local dashboard web server (default: 7890).
+- `--host <HOST>`: Loopback interface to bind (default: 127.0.0.1).
+- `--open`: Automatically opens the dashboard in your default browser.
+- `--global`: Reads telemetry and memories across all repositories from `~/.aw/`.
+
+### Live Query Monitor (`aw monitor`)
+Stream real-time query events directly in your terminal with colored ANSI output and zero dependencies.
+
+```bash
+aw monitor [--repo <NAME>] [--errors-only]
+```
+
+- `--repo <NAME>`: Restrict streaming query output to a specific repository.
+- `--errors-only`: Filter for critical errors (exit code >= 3).
 
 ---
 

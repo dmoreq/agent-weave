@@ -18,7 +18,11 @@ fn main() {
     let journaled = !no_journal
         && !matches!(
             cli.cmd,
-            cli::Cmd::Doctor { .. } | cli::Cmd::Usage { .. } | cli::Cmd::Mcp { .. }
+            cli::Cmd::Doctor { .. }
+                | cli::Cmd::Usage { .. }
+                | cli::Cmd::Mcp { .. }
+                | cli::Cmd::Dashboard { .. }
+                | cli::Cmd::Monitor { .. }
         );
     let started = std::time::Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -88,6 +92,20 @@ fn run(cli: cli::Cli, no_journal: bool, journaled: bool) -> Result<i32, AwError>
     let (root, cmd) = (cli.root, cli.cmd);
     if let cli::Cmd::Mcp { all_tools } = cmd {
         mcp::serve(root.as_deref(), no_journal, all_tools)?;
+        return Ok(0);
+    }
+    if let cli::Cmd::Dashboard {
+        port,
+        host,
+        open,
+        global,
+    } = cmd
+    {
+        agent_weave::dashboard::run_dashboard(root.as_deref(), &host, port, open, global)?;
+        return Ok(0);
+    }
+    if let cli::Cmd::Monitor { repo, errors_only } = cmd {
+        agent_weave::dashboard::run_monitor(root.as_deref(), repo.as_deref(), errors_only)?;
         return Ok(0);
     }
     let req = service::CommandRequest::from_cli(cmd)?;

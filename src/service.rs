@@ -151,7 +151,9 @@ fn cli_family(cmd: &crate::cli::Cmd) -> Family {
         crate::cli::Cmd::Build { .. }
         | crate::cli::Cmd::Doctor { .. }
         | crate::cli::Cmd::Usage { .. }
-        | crate::cli::Cmd::Mcp { .. } => Family::Diag,
+        | crate::cli::Cmd::Mcp { .. }
+        | crate::cli::Cmd::Dashboard { .. }
+        | crate::cli::Cmd::Monitor { .. } => Family::Diag,
         crate::cli::Cmd::Callers { .. }
         | crate::cli::Cmd::Callees { .. }
         | crate::cli::Cmd::Context { .. }
