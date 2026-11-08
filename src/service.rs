@@ -994,6 +994,7 @@ struct MemQueryArgs<'a> {
     all: bool,
     limit: usize,
     filter: crate::db::MemFilter<'a>,
+    index_conn: Option<&'a rusqlite::Connection>,
 }
 
 /// The local and global memory stores a read command resolves once: `None`
@@ -1048,6 +1049,10 @@ fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut
     };
     let effective_all = *all || terms.is_empty();
     validate_mem_query(terms, *all, effective_all, *include_superseded)?;
+    let index_conn = root_arg
+        .and_then(|r| crate::walk::discover_root(Some(r)).ok())
+        .or_else(|| crate::walk::discover_root(None).ok())
+        .and_then(|root| crate::db::open_for_query(&root).ok());
     let args = MemQueryArgs {
         terms,
         all: effective_all,
@@ -1058,6 +1063,7 @@ fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut
             now: crate::db::unix_now(),
             include_superseded: *include_superseded,
         },
+        index_conn: index_conn.as_ref(),
     };
 
     if *global {
@@ -1074,16 +1080,59 @@ fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut
     }
 }
 
-/// The `[superseded]`/`[global]` listing tag for one row, shared by the
-/// single-store and merged listings so the markers cannot drift. Ranked rows
-/// are always current, so the supersession half is empty there.
-fn mem_row_tag(row: &crate::db::MemRow, is_global: bool) -> String {
+/// Check if a referenced file or symbol is stale against the current index:
+/// returns true if missing from index.db or if the underlying file was modified
+/// after the note was created.
+fn is_ref_stale(index_conn: &rusqlite::Connection, r: &str, created_at: i64) -> bool {
+    let file_check: rusqlite::Result<i64> = index_conn.query_row(
+        "SELECT mtime FROM files WHERE path = ?1 LIMIT 1",
+        rusqlite::params![r],
+        |row| row.get(0),
+    );
+    if let Ok(mtime_nanos) = file_check {
+        return (mtime_nanos / 1_000_000_000) > created_at;
+    }
+
+    let sym_check: rusqlite::Result<i64> = index_conn.query_row(
+        "SELECT f.mtime FROM symbols s JOIN files f ON s.file_id = f.id
+         WHERE s.qualname = ?1 OR s.name = ?1 LIMIT 1",
+        rusqlite::params![r],
+        |row| row.get(0),
+    );
+    if let Ok(mtime_nanos) = sym_check {
+        return (mtime_nanos / 1_000_000_000) > created_at;
+    }
+
+    true
+}
+
+fn check_note_stale_ref(
+    index_conn: Option<&rusqlite::Connection>,
+    row: &crate::db::MemRow,
+) -> bool {
+    let Some(conn) = index_conn else {
+        return false;
+    };
+    if row.refs.trim().is_empty() {
+        return false;
+    }
+    row.refs
+        .split_whitespace()
+        .any(|r| is_ref_stale(conn, r, row.created_at))
+}
+
+/// The `[superseded]`/`[global]`/`[stale-ref]` listing tag for one row, shared
+/// by the single-store and merged listings so the markers cannot drift.
+fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, is_stale: bool) -> String {
     let mut tag = String::new();
     if row.superseded_by.is_some() {
         tag.push_str(" [superseded]");
     }
     if is_global {
         tag.push_str(" [global]");
+    }
+    if is_stale {
+        tag.push_str(" [stale-ref]");
     }
     tag
 }
@@ -1115,7 +1164,8 @@ fn render_mem_rows(
         .iter()
         .take(shown)
         .map(|(row, is_global)| {
-            crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global))
+            let is_stale = check_note_stale_ref(args.index_conn, row);
+            crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global, is_stale))
         })
         .collect();
     Ok(render_mem_list(&rendered, total, shown))
@@ -1290,23 +1340,42 @@ fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> 
     let CommandRequest::MemGet { key, global } = req else {
         unreachable!("run_mem_get called with a non-get request")
     };
+    let index_conn = root_arg
+        .and_then(|r| crate::walk::discover_root(Some(r)).ok())
+        .or_else(|| crate::walk::discover_root(None).ok())
+        .and_then(|root| crate::db::open_for_query(&root).ok());
+
     if *global {
         let conn = crate::db::open_global_memory_query()?;
         return match crate::db::memory_get(&conn, key)? {
             None => Err(mem_unknown_key(key)),
-            Some((row, revs)) => Ok(render_mem_hit(&row, " [global]", revs)),
+            Some((row, revs)) => {
+                let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
+                let mut tag = " [global]".to_string();
+                if is_stale {
+                    tag.push_str(" [stale-ref]");
+                }
+                Ok(render_mem_hit(&row, &tag, revs))
+            }
         };
     }
 
     let stores = resolve_memory_stores(root_arg)?;
     if let Some(local) = &stores.local {
         if let Some((row, revs)) = crate::db::memory_get(local, key)? {
-            return Ok(render_mem_hit(&row, "", revs));
+            let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
+            let tag = if is_stale { " [stale-ref]" } else { "" };
+            return Ok(render_mem_hit(&row, tag, revs));
         }
     }
     if let Some(global) = &stores.global {
         if let Some((row, revs)) = crate::db::memory_get(global, key)? {
-            return Ok(render_mem_hit(&row, " [global]", revs));
+            let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
+            let mut tag = " [global]".to_string();
+            if is_stale {
+                tag.push_str(" [stale-ref]");
+            }
+            return Ok(render_mem_hit(&row, &tag, revs));
         }
     }
 
@@ -1441,19 +1510,40 @@ fn mem_ranked(
 ) -> Result<Vec<crate::memory::Candidate>> {
     let query = crate::memory::mem_query_terms(joined_terms);
     let hits = crate::db::memory_fts_candidates(conn, &query, crate::memory::CANDIDATE_CAP)?;
-    if hits.is_empty() {
+    let query_tokens_vec = crate::memory::mem_tokens(joined_terms);
+    let query_tokens: std::collections::BTreeSet<String> =
+        query_tokens_vec.iter().cloned().collect();
+
+    let mut hit_map: std::collections::HashMap<i64, f64> = hits.into_iter().collect();
+    let ref_rows = if !query_tokens_vec.is_empty() {
+        crate::db::memory_ref_candidate_rows(conn, &query_tokens_vec, crate::memory::CANDIDATE_CAP)?
+    } else {
+        Vec::new()
+    };
+
+    let mut by_id: std::collections::HashMap<i64, crate::db::MemRow> =
+        std::collections::HashMap::new();
+    for row in ref_rows {
+        hit_map.entry(row.id).or_insert(0.0);
+        by_id.insert(row.id, row);
+    }
+
+    if hit_map.is_empty() {
         return Ok(Vec::new());
     }
-    let ids: Vec<i64> = hits.iter().map(|(id, _)| *id).collect();
-    let by_id: std::collections::HashMap<i64, crate::db::MemRow> =
-        crate::db::memory_rows_by_ids(conn, &ids)?
-            .into_iter()
-            .map(|row| (row.id, row))
-            .collect();
-    let query_tokens: std::collections::BTreeSet<String> = crate::memory::mem_tokens(joined_terms)
-        .into_iter()
+
+    let missing_ids: Vec<i64> = hit_map
+        .keys()
+        .copied()
+        .filter(|id| !by_id.contains_key(id))
         .collect();
-    let candidates = hits
+    if !missing_ids.is_empty() {
+        for row in crate::db::memory_rows_by_ids(conn, &missing_ids)? {
+            by_id.insert(row.id, row);
+        }
+    }
+
+    let candidates = hit_map
         .into_iter()
         .filter_map(|(id, lex_raw)| {
             mem_candidate(by_id.get(&id)?, lex_raw, &query_tokens, filter, is_global)

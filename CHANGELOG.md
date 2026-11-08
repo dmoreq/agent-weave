@@ -16,6 +16,17 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-08
+
+### Fixed
+
+- **Memory retrieval via code-anchored `--refs`.** `aw mem query` now indexes and retrieves candidate notes directly by `--refs` tokens even when the search query term does not appear in `key`, `tags`, or `body`, eliminating candidate drops for AST entity lookups.
+- **Automated `[stale-ref]` verification across CLI and MCP.** `aw mem query` and `aw mem get` now automatically verify referenced files and symbols against `.aw/index.db`. If an anchor symbol/file has been removed or modified since the note was authored (`mtime > created_at`), the note is flagged with `[stale-ref]`, matching the contract documented in `README.md` and `docs/usage.md`.
+- **MCP `build` incremental reuse hint delivery.** `aw build` over MCP now forwards `stderr` diagnostic hints (including `aw: reuse-hint:`) within the tool call response text when build succeeds (exit code 0), ensuring coding agents on MCP receive real-time anti-reinvention alerts.
+- **Targeted incremental hint filtering.** `incremental_reuse_hints` now inspects `resolution.existing_ids` to evaluate only genuinely new or modified symbols, eliminating false-positive reuse alerts on carried symbols in dirty closures.
+- **Intra-file duplicate detection in `aw reuse`.** Detectors D1 (callee containment), D2 (interface token overlap), and D3 (raw client bypass) now detect duplicate helper functions authored within the same file (protecting against multi-turn intra-file duplication), while ignoring overlapping/enclosing AST spans.
+- **Symmetric D1 containment.** Callee footprint containment in D1 now uses symmetric containment $\max\left(\frac{|C(t) \cap C(c)|}{|C(c)|}, \frac{|C(t) \cap C(c)|}{|C(t)|}\right) \ge 0.80$ guarded by a size ratio ($2 \times \min \ge \max$) to catch both subset and superset duplicates.
+
 ### Added
 
 - **Native Rust web dashboard: `aw dashboard`.** Pure Rust HTTP 1.1 +

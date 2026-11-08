@@ -560,7 +560,13 @@ fn best_by_overlap(
 ) -> Option<ReuseCandidate> {
     let mut best: Option<(u64, &SymbolData, Vec<String>)> = None;
     for candidate in symbols.values() {
-        if candidate.id == target.id || candidate.file_id == target.file_id {
+        if candidate.id == target.id {
+            continue;
+        }
+        // If in the same file, drop enclosing/overlapping spans (e.g. methods in class or nested fns)
+        if candidate.file_id == target.file_id
+            && !(candidate.line_end < target.line_start || candidate.line_start > target.line_end)
+        {
             continue;
         }
         if !is_more_canonical(candidate, target) {
@@ -584,7 +590,7 @@ fn best_by_overlap(
 
 /// Detector D1: Callee Footprint Containment.
 /// Flag when (g, f) not in calls, |C(f)| >= 3, |resolved(g) ∩ resolved(f)| >= 2,
-/// and |C(g) ∩ C(f)| / |C(f)| >= 0.80.
+/// and max(|C(g) ∩ C(f)| / |C(f)|, |C(g) ∩ C(f)| / |C(g)|) >= 0.80.
 fn find_best_d1(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Option<ReuseCandidate> {
     if target.all_callees.len() < 3 || target.resolved_callees.len() < 2 {
         return None;
@@ -614,7 +620,15 @@ fn find_best_d1(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Opti
             .intersection(c_callees)
             .cloned()
             .collect();
-        let ratio = shared.len() as f64 / c_callees.len() as f64;
+        // Guard size balance: min callees must be at least 50% of max callees
+        let min_len = target.all_callees.len().min(c_callees.len());
+        let max_len = target.all_callees.len().max(c_callees.len());
+        if min_len * 2 < max_len {
+            return None;
+        }
+        let ratio_candidate = shared.len() as f64 / c_callees.len() as f64;
+        let ratio_target = shared.len() as f64 / target.all_callees.len() as f64;
+        let ratio = ratio_candidate.max(ratio_target);
         if ratio < 0.80 {
             return None;
         }
@@ -667,8 +681,10 @@ fn check_d3(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Option<R
 
     let mut best_wrapper: Option<&SymbolData> = None;
     for s in symbols.values() {
+        let same_file_overlap = s.file_id == target.file_id
+            && !(s.line_end < target.line_start || s.line_start > target.line_end);
         if s.id != target.id
-            && s.file_id != target.file_id
+            && !same_file_overlap
             && is_more_canonical(s, target)
             && s.all_callees
                 .iter()

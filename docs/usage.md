@@ -90,8 +90,8 @@ aw reuse
 aw reuse src/walk.rs src/parse.rs
 ```
 
-`aw reuse` executes four calibrated detectors:
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines.
+`aw reuse` executes four calibrated detectors across files and within the same file:
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard).
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
 - **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
 - **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.

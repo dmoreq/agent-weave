@@ -527,7 +527,15 @@ fn call_tool(root: &Path, tool: &str, args: &Value) -> (String, bool, i32, Optio
         (exec.stdout, exec.stderr, exec.exit_code, exec.shown)
     });
     match outcome {
-        Ok((stdout, _stderr, 0, shown)) => (stdout, false, 0, shown),
+        Ok((mut stdout, stderr, 0, shown)) => {
+            if tool == "build" && !stderr.is_empty() {
+                if !stdout.is_empty() && !stdout.ends_with('\n') {
+                    stdout.push('\n');
+                }
+                stdout.push_str(&stderr);
+            }
+            (stdout, false, 0, shown)
+        }
         Ok((stdout, stderr, code, _shown)) => {
             let mut text = stdout;
             text.push_str(&stderr);

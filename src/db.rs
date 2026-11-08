@@ -1936,6 +1936,39 @@ pub fn memory_rows_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<MemRow>>
         .map_err(map_memory_err)
 }
 
+/// Candidates from code-anchored `refs`: returns current unexpired rows whose
+/// `refs` field matches any of the query `tokens` via substring matching.
+pub fn memory_ref_candidate_rows(
+    conn: &Connection,
+    tokens: &[String],
+    cap: usize,
+) -> Result<Vec<MemRow>> {
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    let clauses: Vec<String> = (1..=tokens.len())
+        .map(|i| format!("refs LIKE ?{i}"))
+        .collect();
+    let sql = format!(
+        "SELECT {MEM_ROW_SQL} FROM memories
+         WHERE superseded_by IS NULL AND refs != '' AND ({})
+         ORDER BY id DESC LIMIT ?{}",
+        clauses.join(" OR "),
+        tokens.len() + 1
+    );
+    let mut params: Vec<rusqlite::types::Value> = tokens
+        .iter()
+        .map(|t| rusqlite::types::Value::Text(format!("%{t}%")))
+        .collect();
+    params.push(rusqlite::types::Value::Integer(cap as i64));
+    let mut stmt = conn.prepare(&sql).map_err(map_memory_err)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(params.iter()), mem_row)
+        .map_err(map_memory_err)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(map_memory_err)
+}
+
 /// The subset of `keys` that carry a current, unexpired row — the existence
 /// probe behind the merged-store shadowing check (one IN query replaces a
 /// per-key `memory_get`, at most CANDIDATE_CAP keys). Matches `memory_get`'s

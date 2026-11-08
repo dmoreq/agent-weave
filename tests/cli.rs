@@ -5591,3 +5591,103 @@ fn global_usage_dual_writes_and_summarizes_cross_repo() {
     let stdout_ext = String::from_utf8_lossy(&out_ext.stdout);
     assert!(stdout_ext.contains("aw global usage: 3 journaled calls across 2 repositories"));
 }
+
+#[test]
+fn mem_query_finds_note_via_refs_when_terms_absent_from_body() {
+    let repo = temp_repo("mem-refs-query");
+    let (code, stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "resolver-gotcha",
+            "--body",
+            "ambiguous edges keep target null",
+            "--kind",
+            "gotcha",
+            "--refs",
+            "src/extract/resolve.rs",
+        ],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+
+    // Query for 'resolve' which is ONLY present in --refs (not key, tags, or body)
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "resolve"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.contains("resolver-gotcha"),
+        "must find note via refs: {stdout}"
+    );
+}
+
+#[test]
+fn mem_stale_ref_flagged_when_anchor_modified_or_missing() {
+    let repo = temp_repo("mem-stale-ref");
+    write(&repo, "app.py", "def run():\n    return 42\n");
+    build(&repo);
+
+    let (code, stdout, stderr) = mem_out(
+        &repo,
+        &[
+            "write",
+            "app-note",
+            "--body",
+            "settled architecture for run function",
+            "--kind",
+            "decision",
+            "--refs",
+            "app.py",
+        ],
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+
+    // Right after build: app.py mtime <= note created_at, ref is valid
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "architecture"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("app-note"));
+    assert!(
+        !stdout.contains("[stale-ref]"),
+        "must not be stale initially: {stdout}"
+    );
+
+    // Now sleep 1.1s and modify app.py, re-index so files.mtime > created_at
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    write(&repo, "app.py", "def run():\n    return 43\n");
+    build(&repo);
+
+    // Stale check in mem query
+    let (code, stdout, stderr) = mem_out(&repo, &["query", "architecture"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(stdout.contains("app-note"));
+    assert!(
+        stdout.contains("[stale-ref]"),
+        "must flag [stale-ref] after file modification: {stdout}"
+    );
+
+    // Stale check in mem get
+    let (code, stdout, stderr) = mem_out(&repo, &["get", "app-note"]);
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.contains("[stale-ref]"),
+        "mem get must also flag [stale-ref]: {stdout}"
+    );
+}
+
+#[test]
+fn reuse_detects_intra_file_duplication() {
+    let repo = temp_repo("reuse-intra-file");
+    write(
+        &repo,
+        "helpers.py",
+        "def parse_token(token: str):\n    return token.strip()\n\ndef parse_token_v2(token: str):\n    return token.strip()\n",
+    );
+    build(&repo);
+
+    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("duplication candidate(s) found"),
+        "must detect intra-file duplicate: {stdout}"
+    );
+    assert!(stdout.contains("parse_token"), "{stdout}");
+}

@@ -1344,3 +1344,36 @@ fn mcp_dynamic_root_initialization_from_non_git_cwd() {
     let _ = child.wait();
     let _ = fs::remove_dir_all(&empty_dir);
 }
+
+#[test]
+fn mcp_build_emits_incremental_reuse_hints() {
+    let repo = fixture("build-hint");
+    fs::write(
+        repo.join("core.py"),
+        "def transform_data(data: str):\n    return data.strip().lower()\n",
+    )
+    .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    fs::write(
+        repo.join("extra.py"),
+        "def transform_data(data: str):\n    return data.strip().lower()\n",
+    )
+    .unwrap();
+
+    let mut srv = spawn(&repo);
+    let resp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "build", "arguments": {}}),
+    );
+    assert_eq!(resp["result"]["isError"], false);
+    let text = result_text(&resp);
+    assert!(
+        text.contains("aw: reuse-hint:"),
+        "MCP build output must include reuse hints on stderr: {text}"
+    );
+    assert!(text.contains("transform_data"), "{text}");
+}

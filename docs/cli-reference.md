@@ -173,7 +173,7 @@ aw symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 ---
 
 ### 10. `aw reuse`
-Real-time anti-reinvention engine. Detects duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
+Real-time anti-reinvention engine. Detects cross-file and intra-file duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
 ```bash
 aw reuse [PATHS]... [--limit <N>]
@@ -185,7 +185,7 @@ aw reuse [PATHS]... [--limit <N>]
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
 
 #### Calibrated Detectors
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions.
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard).
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Flags functions with heavily overlapping signatures and parameter types.
 - **D3: Raw Client Bypass**: Warns when callers invoke raw primitives rather than existing canonical wrappers.
 - **D4: 1-Caller Wrappers**: Surfaces redundant single-use forwarding functions.
@@ -235,6 +235,7 @@ aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 | `--global` | `false` | Restrict search exclusively to global store (`~/.aw/memory.db`). |
 
 - **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
+- **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.aw/index.db`. Stale or modified references are badged with `[stale-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
 
 ---
 

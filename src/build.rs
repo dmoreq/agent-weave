@@ -201,8 +201,8 @@ fn incremental_reuse_hints(
         return String::new();
     }
     let mut new_names = std::collections::HashSet::new();
-    for s in &resolution.symbols {
-        if !s.is_test {
+    for (s, existing) in resolution.symbols.iter().zip(&resolution.existing_ids) {
+        if !s.is_test && existing.is_none() {
             new_names.insert(s.name.clone());
             new_names.insert(s.qualname.clone());
         }
