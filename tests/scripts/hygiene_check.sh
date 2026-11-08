@@ -1,11 +1,11 @@
+#!/usr/bin/env bash
 # tests/scripts/hygiene_check.sh
 # Repository Hygiene & Anti-Smell Verification Gate
 # Enforces:
 # 1. Zero personal paths (/Users/, /home/<user>/, /Workspace/) & secret patterns in tracked text files.
 # 2. Zero Unicode emojis & sparkline/bar characters (except deliberate '⚡ aw:' MCP KPI footer token).
 # 3. Rust Code-Smells Gate:
-#    - Hard fail on any NEW .rs file > 500 lines.
-#    - Ratchet check on legacy files (blocks LOC inflation past established baseline).
+#    - Hard fail on ANY .rs file > 500 lines (Zero exception / Zero allowlist).
 #    - Forbids 'unsafe { ... }', 'unsafe fn', 'unsafe trait', 'unsafe impl' blocks in src/.
 #    - Forbids stray 'dbg!' macros in src/.
 
@@ -27,7 +27,6 @@ fi
 ERRORS=0
 
 # 1. Zero Private Leakage Check
-# Exclude known test baseline vaults, reports, designs, and public export scripts
 LEAK_PATTERNS='(/Users/|/home/[A-Za-z0-9._-]+/|/Workspace/|quy\.doan@|@be\.com\.vn|(AKIA|ASIA)[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
 
 for f in "${FILES[@]}"; do
@@ -75,32 +74,8 @@ if failed:
     sys.exit(1)
 PY
 
-# 3. Rust Code-Smells Gate: File Size (500 LOC), Unsafe & Debug Macros
-# Baseline LOC for existing legacy modules
-get_baseline_loc() {
-  case "$1" in
-    "src/db.rs"|*/src/db.rs) echo 2800 ;;
-    "src/service.rs"|*/src/service.rs) echo 2500 ;;
-    "src/extract/resolve.rs"|*/src/extract/resolve.rs) echo 1950 ;;
-    "src/extract/walk/mod.rs"|*/src/extract/walk/mod.rs) echo 1350 ;;
-    "src/build.rs"|*/src/build.rs) echo 1150 ;;
-    "src/query/callgraph.rs"|*/src/query/callgraph.rs) echo 950 ;;
-    "src/journal.rs"|*/src/journal.rs) echo 920 ;;
-    "src/extract.rs"|*/src/extract.rs) echo 850 ;;
-    "src/dashboard/data.rs"|*/src/dashboard/data.rs) echo 820 ;;
-    "src/memory.rs"|*/src/memory.rs) echo 780 ;;
-    "src/query/reuse.rs"|*/src/query/reuse.rs) echo 760 ;;
-    "src/query/analysis.rs"|*/src/query/analysis.rs) echo 740 ;;
-    "src/query/impact.rs"|*/src/query/impact.rs) echo 670 ;;
-    "src/mcp.rs"|*/src/mcp.rs) echo 560 ;;
-    "src/extract/walk/rust.rs"|*/src/extract/walk/rust.rs) echo 550 ;;
-    # Integration test harnesses
-    "tests/cli.rs"|*/tests/cli.rs) echo 5800 ;;
-    "tests/mcp.rs"|*/tests/mcp.rs) echo 1450 ;;
-    "tests/fixtures.rs"|*/tests/fixtures.rs) echo 850 ;;
-    *) echo 500 ;; # Standard hard cap for all new or unlisted files
-  esac
-}
+# 3. Rust Code-Smells Gate: Hard Cap 500 LOC (Zero Allowlist), Unsafe & Debug Macros
+MAX_LOC=500
 
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || continue
@@ -112,12 +87,10 @@ for f in "${FILES[@]}"; do
       ;;
   esac
 
-  # Check LOC
+  # Check LOC - Strict enforcement on ALL rust files
   lines=$(wc -l < "$f" | tr -d ' ')
-  cap=$(get_baseline_loc "$f")
-  if [ "$lines" -gt "$cap" ]; then
-    echo "CODE-SMELL ERROR [oversized-file]: $f has $lines lines (exceeds cap of $cap LOC)." >&2
-    echo "  Please refactor and decompose into cohesive submodules." >&2
+  if [ "$lines" -gt "$MAX_LOC" ]; then
+    echo "CODE-SMELL ERROR [oversized-file]: $f has $lines lines (exceeds 500 LOC threshold by $((lines - MAX_LOC)) lines)." >&2
     ERRORS=$((ERRORS + 1))
   fi
 
@@ -137,8 +110,8 @@ for f in "${FILES[@]}"; do
 done
 
 if [ "$ERRORS" -gt 0 ]; then
-  echo "hygiene_check: $ERRORS check(s) failed." >&2
+  echo "hygiene_check: $ERRORS code-smell check(s) failed." >&2
   exit 1
 fi
 
-echo "hygiene_check: all files clean (leakage, emoji, LOC, unsafe, dbg) — PASS"
+echo "hygiene_check: all files clean (leakage, emoji, LOC <= 500, unsafe, dbg) — PASS"
