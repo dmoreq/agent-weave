@@ -1797,8 +1797,8 @@ fn fifo_gitignore_marker_fails_closed_without_hanging() {
         "mkfifo failed"
     );
 
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_aw"));
-    cmd.arg("--root").arg(&repo).arg("build");
+    let mut cmd = aw(&repo);
+    cmd.arg("build");
     // The budget only bounds the wait; a true FIFO hang is killed and still
     // fails via None. Sized for a loaded host, where a sub-second fail-closed
     // exit can inflate past a 20 s wall clock.
@@ -2771,9 +2771,7 @@ fn serial_and_parallel_builds_are_identical() {
     let serial = mk("serial");
     let parallel = mk("parallel");
     for (repo, workers) in [(&serial, "1"), (&parallel, "4")] {
-        let out = Command::new(env!("CARGO_BIN_EXE_aw"))
-            .arg("--root")
-            .arg(repo)
+        let out = aw(repo)
             .arg("build")
             .env("AW_WORKERS", workers)
             .output()

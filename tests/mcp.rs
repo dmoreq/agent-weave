@@ -23,6 +23,13 @@ impl Drop for Server {
     }
 }
 
+fn aw_cmd(repo: &Path) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_aw"));
+    c.arg("--root").arg(repo);
+    c.env("AW_GLOBAL_DIR", repo.join(".test_global"));
+    c
+}
+
 fn spawn(repo: &Path) -> Server {
     spawn_with(repo, true)
 }
@@ -134,36 +141,23 @@ fn fixture(name: &str) -> PathBuf {
 fn g10_initialize_tools_list_and_parity() {
     let repo = fixture("parity");
     // Build the index before capturing CLI references.
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     // CLI reference outputs, captured before the server opens the journal.
-    let cli_callers = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let cli_callers = aw_cmd(&repo)
         .args(["callers", "normalize"])
         .output()
         .unwrap();
     assert_eq!(cli_callers.status.code(), Some(0));
-    let cli_symbols = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let cli_symbols = aw_cmd(&repo)
         .args(["symbols", "utils.py"])
         .output()
         .unwrap();
-    let cli_symbols_outline = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let cli_symbols_outline = aw_cmd(&repo)
         .args(["symbols", "utils.py", "--outline"])
         .output()
         .unwrap();
-    let cli_search = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let cli_search = aw_cmd(&repo)
         .args(["search", "normalize"])
         .output()
         .unwrap();
@@ -272,12 +266,7 @@ fn g10_initialize_tools_list_and_parity() {
         ),
         ("reuse", json!({}), vec!["reuse"]),
     ] {
-        let cli = Command::new(env!("CARGO_BIN_EXE_aw"))
-            .arg("--root")
-            .arg(&repo)
-            .args(&cli_args)
-            .output()
-            .unwrap();
+        let cli = aw_cmd(&repo).args(&cli_args).output().unwrap();
         assert_eq!(cli.status.code(), Some(0), "{tool} CLI failed");
         let via_mcp = rpc(
             &mut srv,
@@ -294,12 +283,7 @@ fn g10_initialize_tools_list_and_parity() {
     }
 
     // P8 no-result parity: imports on an unknown file (CLI stderr, MCP text).
-    let cli_imports_missing = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .args(["imports", "nope.py"])
-        .output()
-        .unwrap();
+    let cli_imports_missing = aw_cmd(&repo).args(["imports", "nope.py"]).output().unwrap();
     assert_eq!(cli_imports_missing.status.code(), Some(1));
     let imports_missing = rpc(
         &mut srv,
@@ -315,9 +299,7 @@ fn g10_initialize_tools_list_and_parity() {
     assert!(result_text(&imports_missing).contains("⚡ aw:"));
 
     // G10 parity extends to context (Amendment 17).
-    let cli_context = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let cli_context = aw_cmd(&repo)
         .args(["context", "normalize"])
         .output()
         .unwrap();
@@ -336,9 +318,7 @@ fn g10_initialize_tools_list_and_parity() {
 
     // G10 parity extends to path (Amendment 13): hop pointers + chain line
     // byte-equal between the surfaces.
-    let cli_path = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let cli_path = aw_cmd(&repo)
         .args(["path", "caller", "normalize"])
         .output()
         .unwrap();
@@ -394,12 +374,7 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
         "class B:\n    def process(self):\n        return 2\n",
     )
     .unwrap();
-    Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    aw_cmd(&repo).arg("build").output().unwrap();
 
     let mut srv = spawn(&repo);
     let resp = rpc(
@@ -422,12 +397,7 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 #[test]
 fn reuse_arguments_via_mcp() {
     let repo = fixture("mcp-reuse");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
 
@@ -474,12 +444,7 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
 #[test]
 fn malformed_json_frame_returns_parse_error() {
     let repo = fixture("mcp-badjson");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
     srv.stdin.write_all(b"not json\n").unwrap();
@@ -495,12 +460,7 @@ fn missing_required_argument_returns_invalid_params() {
     // R7 L4: a schema-required string must fail at the protocol layer, not as
     // a downstream "symbol '' not in index" tool result.
     let repo = fixture("mcp-required");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
     let resp = rpc(
@@ -695,13 +655,7 @@ fn mem_fixture(name: &str) -> PathBuf {
 }
 
 fn cli_mem(repo: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(repo)
-        .args(["mem"])
-        .args(args)
-        .output()
-        .unwrap();
+    let out = aw_cmd(repo).args(["mem"]).args(args).output().unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -1005,12 +959,7 @@ fn mem_all_tools_exposes_full_family_with_parity() {
 #[test]
 fn mcp_response_includes_kpi_footer() {
     let repo = fixture("kpi-footer");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
 
     let mut srv = spawn(&repo);
@@ -1089,12 +1038,7 @@ fn mcp_response_includes_kpi_footer() {
 #[test]
 fn mcp_usage_tool_returns_telemetry() {
     let repo = fixture("mcp-usage");
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
-        .arg("build")
-        .output()
-        .unwrap();
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
 
     let mut srv = spawn(&repo);
@@ -1290,9 +1234,7 @@ fn global_usage_mcp_returns_cross_repo_summary() {
     let repo = fixture("mcp-global-usage");
     let global_dir = mem_fixture("mcp-global-usage-aw");
 
-    let build = Command::new(env!("CARGO_BIN_EXE_aw"))
-        .arg("--root")
-        .arg(&repo)
+    let build = aw_cmd(&repo)
         .env("AW_GLOBAL_DIR", &global_dir)
         .arg("build")
         .output()
