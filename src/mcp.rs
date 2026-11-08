@@ -456,7 +456,7 @@ fn format_token_count(tokens: usize) -> String {
 }
 
 /// Reply to a request; a notification (`id: None`) gets no response frame.
-/// Protocol-level errors on unparseable frames reply with an explicit null
+/// Protocol-level errors on unparsable frames reply with an explicit null
 /// id via `Some(Value::Null)`.
 fn write_result(out: &mut impl Write, id: Option<Value>, result: Value) -> std::io::Result<()> {
     let Some(id) = id else {

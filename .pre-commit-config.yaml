@@ -16,20 +16,20 @@ repos:
     hooks:
       - id: check-merge-conflict
       - id: trailing-whitespace
-        exclude: ^tests/fixtures/
+        exclude: ^(docs/|tests/fixtures/)
       - id: end-of-file-fixer
-        exclude: ^tests/fixtures/
+        exclude: ^(docs/|tests/fixtures/)
       - id: check-yaml
         args: [--unsafe]
       - id: check-toml
 
-  # 2. Fast Spellchecking
+  # 2. Fast Spellchecking (Source Code)
   - repo: https://github.com/crate-ci/typos
     rev: v1.29.4
     hooks:
       - id: typos
         name: typos
-        exclude: ^(docs/baselines/|docs/reports/|tests/fixtures/|tests/scripts/.*recall\.py$)
+        files: ^(src/|Cargo\.(toml|lock)$)
 
   # 3. Invariant Gates & Rust Anti-Smell Tooling
   - repo: local

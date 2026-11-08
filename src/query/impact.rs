@@ -525,7 +525,7 @@ fn level_impact(
 
 /// One settled impact record: the representative row kept for one file path.
 /// Named fields replace the positional 6-tuple so a SELECT column reorder
-/// cannot silently mis-bind the `ImpactTop` comparison and render inputs.
+/// cannot silently misbind the `ImpactTop` comparison and render inputs.
 /// Field order mirrors the retired tuple, so the derived `Ord` keeps the
 /// lexicographic order `BinaryHeap` relied on (paths are distinct in the heap).
 #[derive(Eq, Ord, PartialEq, PartialOrd)]

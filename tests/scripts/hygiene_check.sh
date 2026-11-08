@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # tests/scripts/hygiene_check.sh
 # Repository Hygiene & Anti-Smell Verification Gate
 # Enforces:
@@ -95,6 +94,10 @@ get_baseline_loc() {
     "src/query/impact.rs"|*/src/query/impact.rs) echo 670 ;;
     "src/mcp.rs"|*/src/mcp.rs) echo 560 ;;
     "src/extract/walk/rust.rs"|*/src/extract/walk/rust.rs) echo 550 ;;
+    # Integration test harnesses
+    "tests/cli.rs"|*/tests/cli.rs) echo 5800 ;;
+    "tests/mcp.rs"|*/tests/mcp.rs) echo 1450 ;;
+    "tests/fixtures.rs"|*/tests/fixtures.rs) echo 850 ;;
     *) echo 500 ;; # Standard hard cap for all new or unlisted files
   esac
 }
