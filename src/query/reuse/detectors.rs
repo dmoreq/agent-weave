@@ -24,6 +24,33 @@ pub(super) type Detector = fn(&SymbolData, &HashMap<i64, SymbolData>) -> Option<
 
 /// The detector cascade in priority order; a target stops at the first
 /// detector that produces a candidate.
+/// The closed D1-D4 detector set. `as_str` keeps the journal and dashboard
+/// spelling ("D1"...) byte-identical; exhaustive matches replace the old
+/// string comparisons and their silent `_` fallbacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetectorId {
+    /// Callee Footprint Overlap.
+    D1,
+    /// Interface Token Overlap.
+    D2,
+    /// Raw Client Bypass.
+    D3,
+    /// Redundant Pass-Through Wrapper.
+    D4,
+}
+
+impl DetectorId {
+    /// The stable wire spelling used in journal hints and dashboard JSON.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DetectorId::D1 => "D1",
+            DetectorId::D2 => "D2",
+            DetectorId::D3 => "D3",
+            DetectorId::D4 => "D4",
+        }
+    }
+}
+
 pub(super) const DETECTORS: &[Detector] = &[find_best_d1, find_best_d2, check_d3, check_d4];
 
 /// Deterministic ordering: candidate is more canonical if it has more callers,
@@ -48,7 +75,7 @@ fn is_more_canonical(candidate: &SymbolData, target: &SymbolData) -> bool {
 /// candidate) pair; detectors only differ in the overlap signal above it.
 /// `shared` is sorted into the candidate's display items.
 fn make_candidate(
-    detector: &'static str,
+    detector: DetectorId,
     target: &SymbolData,
     candidate: &SymbolData,
     overlap_pct: u64,
@@ -76,7 +103,7 @@ fn make_candidate(
 /// breaks the tie by the canonical key (file_path, line_start, qualname
 /// ascending) so the winner does not depend on HashMap iteration order.
 fn best_by_overlap(
-    detector: &'static str,
+    detector: DetectorId,
     target: &SymbolData,
     symbols: &HashMap<i64, SymbolData>,
     signal: impl Fn(&SymbolData) -> Option<(u64, Vec<String>)>,
@@ -118,7 +145,7 @@ fn find_best_d1(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Opti
     if target.all_callees.len() < 3 || target.resolved_callees.len() < 2 {
         return None;
     }
-    best_by_overlap("D1", target, symbols, |candidate| {
+    best_by_overlap(DetectorId::D1, target, symbols, |candidate| {
         let c_callees = &candidate.all_callees;
         if c_callees.len() < 3 || candidate.resolved_callees.len() < 2 {
             return None;
@@ -164,7 +191,7 @@ fn find_best_d2(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Opti
     if target.tokens.len() < 2 {
         return None;
     }
-    best_by_overlap("D2", target, symbols, |candidate| {
+    best_by_overlap(DetectorId::D2, target, symbols, |candidate| {
         if candidate.tokens.len() < 2 {
             return None;
         }
@@ -228,7 +255,7 @@ fn check_d3(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Option<R
     }
 
     Some(make_candidate(
-        "D3",
+        DetectorId::D3,
         target,
         canonical,
         90,
@@ -254,7 +281,7 @@ fn check_d4(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Option<R
     }
 
     Some(make_candidate(
-        "D4",
+        DetectorId::D4,
         target,
         callee,
         100,

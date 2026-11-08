@@ -145,23 +145,24 @@ pub fn collect_memories(
                 let refs_list: Vec<String> =
                     refs_raw.split_whitespace().map(|s| s.to_string()).collect();
 
-                let (prev_cat, prev_title, prev_detail) = match kind.as_str() {
-                    "gotcha" => (
+                let (prev_cat, prev_title, prev_detail) = match crate::memory::MemKind::parse(&kind)
+                {
+                    Some(crate::memory::MemKind::Gotcha) => (
                         "REGRESSION GUARD",
                         "Regression & Bug Guard",
                         format!("Prevents repeating root-cause trap in '{}'. Blocks known fragility before changes are committed.", key),
                     ),
-                    "decision" => (
+                    Some(crate::memory::MemKind::Decision) => (
                         "ARCHITECTURE INVARIANT",
                         "Architecture & Policy Guard",
                         format!("Enforces repository architectural constraint '{}'. Prevents forbidden abstractions or boundary violations.", key),
                     ),
-                    "fact" => (
+                    Some(crate::memory::MemKind::Fact) => (
                         "EXPLORATION SHORTCUT",
                         "Verified Fact Shortcut",
                         format!("Avoids costly multi-file grep scans by caching verified system truth for '{}'.", key),
                     ),
-                    _ => (
+                    Some(crate::memory::MemKind::Task) | None => (
                         "HANDOFF CONTEXT",
                         "Cross-Session Handoff Guard",
                         format!("Preserves active state across conversation turns for '{}'.", key),

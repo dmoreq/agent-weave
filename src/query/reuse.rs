@@ -15,11 +15,13 @@ use crate::query::{clamp_limit, QueryCtx};
 
 use corpus::{load_callees, load_symbols, select_targets};
 use detectors::DETECTORS;
+
+pub use detectors::DetectorId;
 use tokens::build_stoplist;
 
 #[derive(Debug, Clone)]
 pub struct ReuseCandidate {
-    pub detector: &'static str,
+    pub detector: DetectorId,
     pub symbol: String,
     pub file: String,
     pub line: i64,
@@ -40,11 +42,11 @@ impl ReuseCandidate {
         );
         match self.detector {
             // D1/D2 share the overlap template and differ only in the noun.
-            "D1" | "D2" => format!(
+            DetectorId::D1 | DetectorId::D2 => format!(
                 "symbol '{}' shares {}% {} with existing '{}' {}",
                 self.symbol,
                 self.overlap_pct,
-                if self.detector == "D1" {
+                if self.detector == DetectorId::D1 {
                     "callee footprint"
                 } else {
                     "interface token overlap"
@@ -52,16 +54,12 @@ impl ReuseCandidate {
                 self.canonical,
                 tail
             ),
-            "D3" => format!(
+            DetectorId::D3 => format!(
                 "symbol '{}' bypasses canonical client '{}' to call raw external client {}",
                 self.symbol, self.canonical, tail
             ),
-            "D4" => format!(
+            DetectorId::D4 => format!(
                 "symbol '{}' is a pass-through wrapper around existing '{}' {}",
-                self.symbol, self.canonical, tail
-            ),
-            _ => format!(
-                "symbol '{}' potential duplication of existing '{}' {}",
                 self.symbol, self.canonical, tail
             ),
         }
@@ -71,10 +69,10 @@ impl ReuseCandidate {
         let mut line = self.hint_line();
         if !self.shared_items.is_empty() {
             let label = match self.detector {
-                "D1" => "shared callees",
-                "D2" => "shared tokens",
-                "D3" => "client bypass",
-                _ => "details",
+                DetectorId::D1 => "shared callees",
+                DetectorId::D2 => "shared tokens",
+                DetectorId::D3 => "client bypass",
+                DetectorId::D4 => "details",
             };
             line.push_str(&format!(
                 "\n  {}: [{}]",

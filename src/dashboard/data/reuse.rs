@@ -9,6 +9,7 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 
 use crate::error::Result;
+use crate::query::reuse::DetectorId;
 
 use super::discover_repos;
 use super::read_snippet;
@@ -89,19 +90,19 @@ pub fn collect_reuse_candidates(
 
         for c in candidates {
             let (det_title, det_summary) = match c.detector {
-                "D1" => (
+                DetectorId::D1 => (
                     "D1 Callee Footprint Overlap",
                     format!("Workflow '{}' calls identical downstream functions as canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
                 ),
-                "D2" => (
+                DetectorId::D2 => (
                     "D2 Interface Token Overlap",
                     format!("Signature and parameters of '{}' duplicate canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
                 ),
-                "D3" => (
+                DetectorId::D3 => (
                     "D3 Raw Client Bypass",
                     format!("Symbol '{}' calls raw external clients directly instead of canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
                 ),
-                _ => (
+                DetectorId::D4 => (
                     "D4 Redundant Pass-Through Wrapper",
                     format!("Single-caller wrapper '{}' adds zero logic around canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
                 ),
@@ -135,10 +136,10 @@ pub fn collect_reuse_candidates(
                 format!(
                     "{}: [{}]",
                     match c.detector {
-                        "D1" => "shared callees",
-                        "D2" => "shared tokens",
-                        "D3" => "client bypass",
-                        _ => "details",
+                        DetectorId::D1 => "shared callees",
+                        DetectorId::D2 => "shared tokens",
+                        DetectorId::D3 => "client bypass",
+                        DetectorId::D4 => "details",
                     },
                     c.shared_items.join(", ")
                 )
@@ -147,7 +148,7 @@ pub fn collect_reuse_candidates(
             candidates_json.push(json!({
                 "id": format!("{}:{}->{}", r_name, c.symbol, c.canonical),
                 "repo": r_name,
-                "detector": c.detector,
+                "detector": c.detector.as_str(),
                 "detector_title": det_title,
                 "detector_summary": det_summary,
                 "symbol": c.symbol,
