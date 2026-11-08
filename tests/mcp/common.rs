@@ -1,0 +1,173 @@
+//! Shared MCP test helpers: server process lifecycle, JSON-RPC framing I/O,
+//! and temp-repo fixtures.
+
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+
+use serde_json::{json, Value};
+
+pub(crate) struct Server {
+    pub(crate) child: Child,
+    pub(crate) stdin: ChildStdin,
+    pub(crate) reader: BufReader<std::process::ChildStdout>,
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+pub(crate) fn aw_cmd(repo: &Path) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_aw"));
+    c.arg("--root").arg(repo);
+    c.env("AW_GLOBAL_DIR", repo.join(".test_global"));
+    c
+}
+
+pub(crate) fn spawn(repo: &Path) -> Server {
+    spawn_with(repo, true)
+}
+
+pub(crate) fn spawn_with(repo: &Path, all_tools: bool) -> Server {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(repo)
+        .env("AW_GLOBAL_DIR", repo.join(".test_global"))
+        .arg("mcp")
+        .args(all_tools.then_some("--all-tools"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let reader = BufReader::new(child.stdout.take().unwrap());
+    Server {
+        child,
+        stdin,
+        reader,
+    }
+}
+
+pub(crate) fn rpc(server: &mut Server, id: u64, method: &str, params: Value) -> Value {
+    let req = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+    writeln!(server.stdin, "{req}").unwrap();
+    server.stdin.flush().unwrap();
+    let mut line = String::new();
+    server.reader.read_line(&mut line).unwrap();
+    serde_json::from_str(&line).expect("valid JSON-RPC response")
+}
+
+pub(crate) fn notification(server: &mut Server, method: &str) {
+    let req = json!({"jsonrpc": "2.0", "method": method});
+    writeln!(server.stdin, "{req}").unwrap();
+    server.stdin.flush().unwrap();
+}
+
+/// Initialize the server, send the initialized notification, and return the
+/// advertised tool names from `tools/list`.
+pub(crate) fn init_and_list_tools(server: &mut Server) -> Vec<String> {
+    let init = rpc(
+        server,
+        1,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18"}),
+    );
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    assert!(init["result"]["protocolVersion"].is_string());
+    notification(server, "notifications/initialized");
+    let list = rpc(server, 2, "tools/list", json!({}));
+    list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+pub(crate) fn send_raw(server: &mut Server, frame: &str) {
+    writeln!(server.stdin, "{frame}").unwrap();
+    server.stdin.flush().unwrap();
+}
+
+pub(crate) fn read_response(server: &mut Server) -> Value {
+    let mut line = String::new();
+    server.reader.read_line(&mut line).unwrap();
+    serde_json::from_str(&line).expect("valid JSON-RPC response")
+}
+
+pub(crate) fn result_text(resp: &Value) -> String {
+    resp["result"]["content"][0]["text"]
+        .as_str()
+        .expect("text content")
+        .to_string()
+}
+
+pub(crate) fn strip_footer(text: &str) -> &str {
+    if let Some(pos) = text.rfind("\n───\n⚡ aw:") {
+        &text[..=pos]
+    } else if let Some(pos) = text.rfind("⚡ aw:") {
+        &text[..pos]
+    } else {
+        text
+    }
+}
+
+pub(crate) fn fixture(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("aw-mcp-{}-{}", name, std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let tail =
+        "def tail_block(v):\n    a = v + 1\n    b = v + 2\n    c = v + 3\n    return a + b + c\n";
+    fs::write(dir.join("utils.py"), format!("def normalize(text):\n    return text.strip()\n\ndef caller():\n    return normalize('a')\n{}", tail)).unwrap();
+    fs::write(
+        dir.join("app.py"),
+        format!(
+            "from utils import normalize\n\ndef run():\n    return normalize('x')\n{}\ndef test_run():\n    return run()\n",
+            tail
+        ),
+    )
+    .unwrap();
+    dir
+}
+
+pub(crate) fn mem_fixture(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("aw-mcp-mem-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+pub(crate) fn cli_mem(repo: &Path, args: &[&str]) -> (i32, String, String) {
+    let out = aw_cmd(repo).args(["mem"]).args(args).output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+pub(crate) fn spawn_with_global(repo: &Path, global_dir: &Path) -> Server {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("--root")
+        .arg(repo)
+        .env("AW_GLOBAL_DIR", global_dir)
+        .arg("mcp")
+        .arg("--all-tools")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let reader = BufReader::new(child.stdout.take().unwrap());
+    Server {
+        child,
+        stdin,
+        reader,
+    }
+}

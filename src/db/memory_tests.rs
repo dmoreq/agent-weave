@@ -1,0 +1,299 @@
+//! `db` unit tests (split by area; fs mutations go through `test_support`).
+
+use std::fs;
+
+use super::test_support::remove_tree;
+use super::*;
+
+pub(super) fn note<'a>(key: &'a str, body: &'a str, kind: &'a str) -> MemNoteInput<'a> {
+    MemNoteInput {
+        key,
+        kind,
+        tags: "",
+        refs: "",
+        scope: "durable",
+        session: "",
+        body,
+        source: "cli",
+        expires_at: 0,
+        supersedes: None,
+    }
+}
+
+#[test]
+fn memories_fts_is_pure_function_of_memories() {
+    let root = temp_root("mem-purity");
+    let mut conn = open_memory_store(&root).unwrap();
+    let now = unix_now();
+    memory_write(&mut conn, &note("k1", "first body text", "fact"), now).unwrap();
+    memory_write(&mut conn, &note("k1", "second body", "fact"), now).unwrap();
+    memory_write(&mut conn, &note("k2", "other note", "gotcha"), now).unwrap();
+    memory_write(&mut conn, &note("k2", "other note", "gotcha"), now).unwrap(); // duplicate no-op
+    memory_delete(&mut conn, "k2").unwrap();
+
+    // Rebuild the derived FTS from the authoritative table and compare.
+    let current = memory_current_rows(
+        &conn,
+        &MemFilter {
+            kind: None,
+            scope: None,
+            now,
+            include_superseded: false,
+        },
+    )
+    .unwrap();
+    let mut fts: Vec<(i64, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT rowid, text FROM memories_fts ORDER BY rowid")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    fts.sort();
+    let mut expected: Vec<(i64, String)> = current
+        .iter()
+        .map(|row| {
+            (
+                row.id,
+                crate::memory::mem_fts_text(&row.key, &row.tags, &row.body),
+            )
+        })
+        .collect();
+    expected.sort();
+    assert_eq!(
+        fts, expected,
+        "memories_fts must be a pure function of memories"
+    );
+    drop(conn);
+    remove_tree(&root);
+}
+
+/// The predicate-matrix fixture: one store holding a durable note, an
+/// expired note, a future-expiry note, and a superseded revision pair.
+fn current_rows_fixture() -> (PathBuf, Connection, i64, Vec<MemRow>) {
+    let root = temp_root("mem-current-predicate");
+    let mut conn = open_memory_store(&root).unwrap();
+    let now = unix_now();
+    memory_write(&mut conn, &note("d1", "durable body", "fact"), now).unwrap();
+    let mut expired = note("d2", "stale body", "fact");
+    expired.expires_at = now - 10;
+    memory_write(&mut conn, &expired, now).unwrap();
+    let mut expiring_soon = note("d3", "later body", "gotcha");
+    expiring_soon.expires_at = now + 3600;
+    memory_write(&mut conn, &expiring_soon, now).unwrap();
+    memory_write(&mut conn, &note("d4", "old rev", "decision"), now).unwrap();
+    memory_write(&mut conn, &note("d4", "new rev", "decision"), now).unwrap();
+
+    let all_rows: Vec<MemRow> = {
+        let mut stmt = conn
+            .prepare(&format!("SELECT {MEM_ROW_SQL} FROM memories"))
+            .unwrap();
+        stmt.query_map([], mem_row)
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    (root, conn, now, all_rows)
+}
+
+#[test]
+fn memory_current_rows_matches_is_current_predicate() {
+    // The `--all` SQL filter and the ranked resolver's Rust predicate must
+    // stay row-by-row equal across every filter combination, or the two
+    // query modes drift on expiry/supersession semantics.
+    let (root, conn, now, all_rows) = current_rows_fixture();
+    // The fixture must actually contain the superseded and expired rows
+    // the filter combinations below exist to distinguish.
+    assert!(all_rows.iter().any(|r| r.superseded_by.is_some()));
+    assert!(all_rows
+        .iter()
+        .any(|r| r.expires_at != 0 && r.expires_at <= now));
+    for include_superseded in [false, true] {
+        for kind in [None, Some("fact"), Some("decision")] {
+            for scope in [None, Some("durable"), Some("project")] {
+                let filter = MemFilter {
+                    kind,
+                    scope,
+                    now,
+                    include_superseded,
+                };
+                let mut expected: Vec<i64> = all_rows
+                    .iter()
+                    .filter(|row| memory_row_is_current(row, &filter))
+                    .map(|row| row.id)
+                    .collect();
+                expected.sort();
+                let mut got: Vec<i64> = memory_current_rows(&conn, &filter)
+                    .unwrap()
+                    .iter()
+                    .map(|row| row.id)
+                    .collect();
+                got.sort();
+                assert_eq!(
+                    got, expected,
+                    "kind={kind:?} scope={scope:?} include_superseded={include_superseded}"
+                );
+            }
+        }
+    }
+    drop(conn);
+    remove_tree(&root);
+}
+
+/// Column names of `CREATE TABLE memories(...)` in schema_memory.sql:
+/// first token per line inside the parens, with trailing comments and
+/// constraint heads stripped.
+fn schema_memory_columns(sql: &str) -> Vec<String> {
+    let body = sql
+        .split("CREATE TABLE memories(")
+        .nth(1)
+        .expect("schema_memory.sql must declare memories");
+    let body = body.split(");").next().unwrap_or(body);
+    const CONSTRAINT_HEADS: [&str; 5] = ["primary", "unique", "check", "foreign", "constraint"];
+    body.lines()
+        .filter_map(|line| {
+            let line = line.split("--").next().unwrap_or("").trim();
+            let head = line.split_whitespace().next()?.trim_end_matches(',');
+            (!head.is_empty() && !CONSTRAINT_HEADS.contains(&head.to_ascii_lowercase().as_str()))
+                .then(|| head.to_string())
+        })
+        .collect()
+}
+
+#[test]
+fn memory_required_manifest_matches_schema_file() {
+    // MEMORY_REQUIRED is the hand-copied "required structure" manifest the
+    // open gates check; this pins it to schema_memory.sql in both
+    // directions, so a schema bump that forgets the manifest (or a
+    // manifest edit that outlives a column) fails here instead of pushing
+    // a valid store to exit 5 or opening a short store read-write.
+    let sql = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("schema_memory.sql"))
+        .unwrap();
+    let schema_columns = schema_memory_columns(&sql);
+    let required: std::collections::HashSet<&str> = MEMORY_REQUIRED
+        .iter()
+        .map(|(table, column)| {
+            assert_eq!(*table, "memories", "unexpected manifest table: {table}");
+            *column
+        })
+        .collect();
+    for column in &schema_columns {
+        assert!(
+            required.contains(&column.as_str()),
+            "schema_memory.sql column '{column}' is missing from MEMORY_REQUIRED"
+        );
+    }
+    for column in &required {
+        assert!(
+            schema_columns.iter().any(|c| c == column),
+            "MEMORY_REQUIRED column '{column}' is missing from schema_memory.sql"
+        );
+    }
+}
+
+#[test]
+fn memory_write_dedup_supersedes_versions() {
+    let root = temp_root("mem-lifecycle");
+    let mut conn = open_memory_store(&root).unwrap();
+    let now = unix_now();
+    let first = memory_write(&mut conn, &note("k", "body one", "decision"), now).unwrap();
+    assert!(matches!(
+        first,
+        MemWriteOutcome::Written {
+            rev: 1,
+            superseded_rev: None
+        }
+    ));
+    // Idempotent replay: identical content is a no-op naming the rev.
+    let dup = memory_write(&mut conn, &note("k", "body one", "decision"), now).unwrap();
+    assert!(matches!(dup, MemWriteOutcome::Duplicate { rev: 1 }));
+    // Different content: new rev, previous marked superseded.
+    let second = memory_write(&mut conn, &note("k", "body two", "decision"), now).unwrap();
+    assert!(matches!(
+        second,
+        MemWriteOutcome::Written {
+            rev: 2,
+            superseded_rev: Some(1)
+        }
+    ));
+    let (row, revs) = memory_get(&conn, "k").unwrap().unwrap();
+    assert_eq!((row.rev, row.body.as_str(), revs), (2, "body two", 2));
+    drop(conn);
+    remove_tree(&root);
+}
+
+#[test]
+fn memory_missing_key_reads_and_deletes_none() {
+    // Missing key reads as None; deleting an unknown key deletes nothing.
+    let root = temp_root("mem-missing-key");
+    let mut conn = open_memory_store(&root).unwrap();
+    assert!(memory_get(&conn, "missing").unwrap().is_none());
+    assert!(memory_delete(&mut conn, "missing").unwrap().is_none());
+    drop(conn);
+    remove_tree(&root);
+}
+
+#[test]
+fn memory_open_gates_reject_version_and_structure_skew() {
+    let root = temp_root("mem-gates");
+    drop(open_memory_store(&root).unwrap());
+    // Newer than the binary -> exit 5 with the export-backup message.
+    {
+        let conn = Connection::open(memory_db_path(&root)).unwrap();
+        conn.execute_batch("PRAGMA user_version = 99").unwrap();
+    }
+    let err = open_memory_query(&root).unwrap_err();
+    assert_eq!(err.exit_code(), 5);
+    assert!(
+        err.to_string()
+            .contains("restore from an aw mem export backup"),
+        "{err}"
+    );
+    // Older but missing required structure -> the other exit-5 message.
+    {
+        let conn = Connection::open(memory_db_path(&root)).unwrap();
+        conn.execute_batch(
+            "PRAGMA user_version = 0;
+                 DROP TABLE memories_fts;",
+        )
+        .unwrap();
+    }
+    let err = open_memory_store(&root).unwrap_err();
+    assert_eq!(err.exit_code(), 5);
+    assert!(
+        err.to_string().contains("missing required structure"),
+        "{err}"
+    );
+    remove_tree(&root);
+}
+
+#[test]
+fn cross_key_supersede_removes_target_fts() {
+    let root = temp_root("mem-cross-supersede");
+    let mut conn = open_memory_store(&root).unwrap();
+    let now = unix_now();
+    memory_write(&mut conn, &note("k1", "alpha payload", "fact"), now).unwrap();
+    let mut target = note("k2", "beta payload", "fact");
+    target.supersedes = Some("k1");
+    memory_write(&mut conn, &target, now).unwrap();
+    // k1 is superseded: `mem get` hides it and its FTS row left the index.
+    assert!(memory_get(&conn, "k1").unwrap().is_none());
+    let hits = memory_fts_candidates(
+        &conn,
+        &crate::memory::mem_query_terms("alpha"),
+        crate::memory::CANDIDATE_CAP,
+    )
+    .unwrap();
+    assert!(hits.is_empty(), "superseded note still matched: {hits:?}");
+    let orphan: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memories_fts WHERE rowid NOT IN (SELECT id FROM memories)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(orphan, 0);
+    remove_tree(&root);
+}
