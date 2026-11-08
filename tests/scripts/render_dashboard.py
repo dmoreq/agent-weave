@@ -829,6 +829,15 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
     log_file = aw_dir / "usage.log"
 
     class SSEHandler(http.server.BaseHTTPRequestHandler):
+        def do_HEAD(self):
+            if self.path in ("/", "/index.html", "/dashboard.html"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+            else:
+                self.send_response(404)
+                self.end_headers()
+
         def do_GET(self):
             if self.path in ("/", "/index.html", "/dashboard.html"):
                 entries = parse_usage_log_from_dir(aw_dir)
