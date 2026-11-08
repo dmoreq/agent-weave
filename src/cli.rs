@@ -133,7 +133,7 @@ pub enum Cmd {
         #[arg(required = false)]
         paths: Vec<String>,
         /// Maximum candidates shown (default 10, max 100)
-        #[arg(long, default_value_t = 10)]
+        #[arg(long, default_value_t = crate::query::DEFAULT_REUSE_LIMIT)]
         limit: usize,
     },
     /// Symbol-level search: bm25-ranked FTS5 over identifier tokens with interface cards

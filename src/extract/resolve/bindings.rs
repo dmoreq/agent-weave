@@ -21,7 +21,9 @@ pub(super) fn follow_binding<'a>(
         return None;
     }
     if let Some(out) = bare_candidates(
-        t.by_mod_name.get(&(module.to_string(), name.to_string())),
+        t.by_mod_name
+            .get(&(module.to_string(), name.to_string()))
+            .map(|v| v.as_slice()),
         display,
     ) {
         return Some(out);

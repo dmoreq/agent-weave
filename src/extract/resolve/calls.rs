@@ -205,7 +205,8 @@ pub(super) fn resolve_name_callee(ctx: &CallCtx<'_>, name: &str) -> Outcome {
     if let Some(out) = bare_candidates(
         ctx.t
             .by_mod_name
-            .get(&(ctx.fctx.module.to_string(), name.to_string())),
+            .get(&(ctx.fctx.module.to_string(), name.to_string()))
+            .map(|v| v.as_slice()),
         name,
     ) {
         return out;
@@ -216,9 +217,13 @@ pub(super) fn resolve_name_callee(ctx: &CallCtx<'_>, name: &str) -> Outcome {
     }
     // Star imports: defer to each star module's top-level names.
     for (m, _) in &ctx.fctx.bindings.stars {
-        if let Some(out) =
-            bare_candidates(ctx.t.by_mod_name.get(&(m.clone(), name.to_string())), name)
-        {
+        if let Some(out) = bare_candidates(
+            ctx.t
+                .by_mod_name
+                .get(&(m.clone(), name.to_string()))
+                .map(|v| v.as_slice()),
+            name,
+        ) {
             return out;
         }
     }
@@ -236,7 +241,10 @@ pub(super) fn lexical_scope_lookup(ctx: &CallCtx<'_>, name: &str) -> Option<Outc
     let mut scope = ctx.site.scope_func.clone();
     while Some(scope.as_str()) != ctx.site.scope_class.as_deref() && scope != ctx.fctx.module {
         let candidate = format!("{scope}.{name}");
-        if let Some(out) = bare_candidates(ctx.t.by_qualname.get(&candidate), name) {
+        if let Some(out) = bare_candidates(
+            ctx.t.by_qualname.get(&candidate).map(|v| v.as_slice()),
+            name,
+        ) {
             return Some(out);
         }
         let Some((parent, _)) = scope.rsplit_once('.') else {
@@ -277,7 +285,9 @@ pub(super) fn alias_target_outcome(
             None
         }
         ImportTarget::ModuleRoot { path } => bare_candidates(
-            t.by_mod_name.get(&(path.to_string(), name.to_string())),
+            t.by_mod_name
+                .get(&(path.to_string(), name.to_string()))
+                .map(|v| v.as_slice()),
             name,
         ),
         ImportTarget::Module { .. } => None,

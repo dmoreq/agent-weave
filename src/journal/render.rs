@@ -87,6 +87,36 @@ fn load_global_usage_lines() -> crate::error::Result<String> {
     load_usage_lines_from_path(&path)
 }
 
+/// Fold one parsed journal line into its per-tool aggregate. The single copy
+/// of the counter rules shared by the per-repo and global summaries, so their
+/// error/empty/capped/stale semantics cannot drift apart.
+fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
+    agg.calls += 1;
+    if fields.exit_code != 0 {
+        agg.errors += 1;
+    }
+    if fields.result_count == 0 {
+        agg.empty += 1;
+        if fields.exit_code == 0 {
+            agg.empty_ok += 1;
+        } else {
+            agg.empty_error += 1;
+        }
+    }
+    if fields.total > fields.shown {
+        agg.capped += 1;
+    }
+    if fields.stale {
+        agg.stale += 1;
+    }
+    agg.ambiguous += fields.ambiguous.max(0) as usize;
+    agg.total_shown += fields.shown.max(0) as usize;
+    agg.total_results += fields.result_count.max(0) as usize;
+    if let Some(us) = fields.latency_us {
+        agg.latencies.push(us.max(0) as u64);
+    }
+}
+
 /// Fold every parsed line into one `ToolAgg` per tool.
 fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
     let mut aggs: std::collections::BTreeMap<String, ToolAgg> = Default::default();
@@ -94,42 +124,19 @@ fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        let agg = aggs.entry(fields.tool).or_default();
-        agg.calls += 1;
-        if fields.exit_code != 0 {
-            agg.errors += 1;
-        }
-        if fields.result_count == 0 {
-            agg.empty += 1;
-            if fields.exit_code == 0 {
-                agg.empty_ok += 1;
-            } else {
-                agg.empty_error += 1;
-            }
-        }
-        if fields.total > fields.shown {
-            agg.capped += 1;
-        }
-        if fields.stale {
-            agg.stale += 1;
-        }
-        agg.ambiguous += fields.ambiguous.max(0) as usize;
-        agg.total_shown += fields.shown.max(0) as usize;
-        agg.total_results += fields.result_count.max(0) as usize;
-        if let Some(us) = fields.latency_us {
-            agg.latencies.push(us.max(0) as u64);
-        }
+        fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
     }
     aggs
 }
 
-fn render_summary(
+/// Shared KPI section for both summaries: overall latency percentiles,
+/// reliability, and the token-savings block. `errors_note` carries the global
+/// summary's " across all repos" wording into the otherwise-identical line.
+fn kpi_section(
     aggs: &std::collections::BTreeMap<String, ToolAgg>,
-    quality: bool,
+    errors_note: &str,
 ) -> Vec<String> {
     let total: usize = aggs.values().map(|a| a.calls).sum();
-    let mut out = vec![format!("aw usage: {total} journaled calls")];
-
     let mut all_lat: Vec<u64> = aggs
         .values()
         .flat_map(|a| a.latencies.iter().copied())
@@ -150,16 +157,25 @@ fn render_summary(
     let dollars = (saved_tokens as f64) * PRICE_PER_TOKEN;
     let saved_tokens_formatted = format_number_with_commas(saved_tokens);
 
-    out.push(format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"));
-    out.push(format!(
-        "  ├─ Reliability: {reliability_pct:.1}% ok ({total_errors} errors, {total_stale} stale reads)"
-    ));
-    out.push(format!(
-        "  ├─ Estimated Token Savings: ~{saved_tokens_formatted} tokens (~${dollars:.2})"
-    ));
-    out.push(format!(
-        "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
-    ));
+    vec![
+        format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"),
+        format!("  ├─ Reliability: {reliability_pct:.1}% ok ({total_errors} errors{errors_note}, {total_stale} stale reads)"),
+        format!(
+            "  ├─ Estimated Token Savings: ~{saved_tokens_formatted} tokens (~${dollars:.2})"
+        ),
+        format!(
+            "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
+        ),
+    ]
+}
+
+fn render_summary(
+    aggs: &std::collections::BTreeMap<String, ToolAgg>,
+    quality: bool,
+) -> Vec<String> {
+    let total: usize = aggs.values().map(|a| a.calls).sum();
+    let mut out = vec![format!("aw usage: {total} journaled calls")];
+    out.extend(kpi_section(aggs, ""));
 
     let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
     rows.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
@@ -185,31 +201,7 @@ fn aggregate_global_usage(
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        let agg = aggs.entry(fields.tool.clone()).or_default();
-        agg.calls += 1;
-        if fields.exit_code != 0 {
-            agg.errors += 1;
-        }
-        if fields.result_count == 0 {
-            agg.empty += 1;
-            if fields.exit_code == 0 {
-                agg.empty_ok += 1;
-            } else {
-                agg.empty_error += 1;
-            }
-        }
-        if fields.total > fields.shown {
-            agg.capped += 1;
-        }
-        if fields.stale {
-            agg.stale += 1;
-        }
-        agg.ambiguous += fields.ambiguous.max(0) as usize;
-        agg.total_shown += fields.shown.max(0) as usize;
-        agg.total_results += fields.result_count.max(0) as usize;
-        if let Some(us) = fields.latency_us {
-            agg.latencies.push(us.max(0) as u64);
-        }
+        fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
 
         let repo_key = fields
             .repo_name
@@ -246,37 +238,7 @@ fn render_global_summary(
     let mut out = vec![format!(
         "aw global usage: {total} journaled calls across {repo_count} repositories"
     )];
-
-    let mut all_lat: Vec<u64> = aggs
-        .values()
-        .flat_map(|a| a.latencies.iter().copied())
-        .collect();
-    all_lat.sort_unstable();
-    let p50 = percentile(&all_lat, 0.5);
-    let p95 = percentile(&all_lat, 0.95);
-
-    let total_errors: usize = aggs.values().map(|a| a.errors).sum();
-    let total_stale: usize = aggs.values().map(|a| a.stale).sum();
-    let reliability_pct = if total > 0 {
-        100.0 * (total.saturating_sub(total_errors) as f64) / (total as f64)
-    } else {
-        100.0
-    };
-
-    let (saved_tokens, reuse_hits) = calculate_telemetry_totals(aggs);
-    let dollars = (saved_tokens as f64) * PRICE_PER_TOKEN;
-    let saved_tokens_formatted = format_number_with_commas(saved_tokens);
-
-    out.push(format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"));
-    out.push(format!(
-        "  ├─ Reliability: {reliability_pct:.1}% ok ({total_errors} errors across all repos, {total_stale} stale reads)"
-    ));
-    out.push(format!(
-        "  ├─ Estimated Token Savings: ~{saved_tokens_formatted} tokens (~${dollars:.2})"
-    ));
-    out.push(format!(
-        "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
-    ));
+    out.extend(kpi_section(aggs, " across all repos"));
 
     if !repo_aggs.is_empty() {
         out.push("  ├─ Active Repositories:".to_string());

@@ -18,6 +18,12 @@ pub const DEFAULT_LIMIT: usize = 50;
 pub const DEFAULT_DEPTH: usize = 1;
 pub const DEFAULT_CONTEXT_LIMIT: usize = 10;
 pub const DEFAULT_PATH_DEPTH: usize = 10;
+/// Hard ceiling on transitive traversal (`callers`/`callees`/`path`/`impact`
+/// `--depth`): one constant shared by the CLI help, the MCP ParamSpec bounds,
+/// and every clamp, so the surfaces cannot disagree.
+pub const MAX_DEPTH: usize = 10;
+/// Default candidate cap for `aw reuse` (CLI default and MCP fallback).
+pub const DEFAULT_REUSE_LIMIT: usize = 10;
 pub const DEFAULT_MAX_PARSE_ERROR_RATE: f64 = 0.05;
 pub const DEFAULT_IMPACT_EDGES: &str = "calls";
 /// Cap on rendered ambiguous-name candidates (R6f: common method names could

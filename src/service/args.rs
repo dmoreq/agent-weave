@@ -209,7 +209,7 @@ fn from_tool_args_analysis(a: &ArgReader<'_>, tool: &str) -> Result<CommandReque
         },
         "reuse" => CommandRequest::Reuse {
             paths: a.str_array("paths")?,
-            limit: a.n_spec(tool, "limit", 10)?,
+            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_REUSE_LIMIT)?,
         },
         "search" => CommandRequest::Search {
             terms: a.req("terms")?,

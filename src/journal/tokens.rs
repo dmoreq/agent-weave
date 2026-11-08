@@ -1,7 +1,7 @@
 //! Token-savings accounting: pricing model, per-tool savings arms, and the
 //! number and percent formatting helpers for summary rows.
 
-pub(super) const PRICE_PER_TOKEN: f64 = 0.000003;
+pub(crate) const PRICE_PER_TOKEN: f64 = 0.000003;
 
 /// Estimated tokens one rendered graph/context row replaces: a pointer the
 /// agent would otherwise re-derive by reading the callee/caller source.

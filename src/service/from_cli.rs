@@ -68,9 +68,9 @@ fn graph_args(name: &str, depth: Option<usize>, limit: usize) -> JournalArgs {
 /// Shared trailing journal fields for the path-scoped analysis commands:
 /// `head` first, then the optional path (empty when absent) and the limit.
 /// Field order matches the historical journal line.
-fn path_limit_args(head: &JournalArgs, path: Option<&String>, limit: usize) -> JournalArgs {
+fn path_limit_args(head: &JournalArgs, path: Option<&str>, limit: usize) -> JournalArgs {
     let mut out = head.to_vec();
-    out.push(("path", path.cloned().unwrap_or_default()));
+    out.push(("path", path.map(str::to_string).unwrap_or_default()));
     out.push(("limit", limit.to_string()));
     out
 }
@@ -361,7 +361,7 @@ impl CommandRequest {
     fn journal_args_analysis(&self) -> JournalArgs {
         match self {
             CommandRequest::Unresolved { names, path, limit } => {
-                path_limit_args(&vec![("names", names.to_string())], path.as_ref(), *limit)
+                path_limit_args(&vec![("names", names.to_string())], path.as_deref(), *limit)
             }
             CommandRequest::Symbols {
                 file,

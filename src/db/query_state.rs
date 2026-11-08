@@ -324,11 +324,6 @@ fn collect_gap_paths(
     Ok(())
 }
 
-/// Source-symbol join `edges e -> symbols s`, for statements that read the
-/// source symbol without its file. Same alias set as [`EDGE_SRC_FILE_JOIN`],
-/// the one home for the source-side join vocabulary.
-pub(crate) const EDGE_SRC_JOIN: &str = "JOIN symbols s ON s.id = e.src_id";
-
 /// Source-side join `edges e -> symbols s -> files f`, the single rendering
 /// shared by the import-scoping, stats, and dirty-closure SQL so the join
 /// aliases have one home.

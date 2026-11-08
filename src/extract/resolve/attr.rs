@@ -324,7 +324,7 @@ pub(super) fn chain_is_module_start(t: &Tables, fi: usize, first: &str, scope: &
 
 /// Candidate outcome for a bare-name lookup across one namespace.
 /// by_mod_name already holds only direct module children (function/class).
-pub(super) fn bare_candidates(cands: Option<&Vec<usize>>, display: &str) -> Option<Outcome> {
+pub(super) fn bare_candidates(cands: Option<&[usize]>, display: &str) -> Option<Outcome> {
     let v = cands?;
     match v.len() {
         1 => Some(Outcome::Extracted(v[0])),

@@ -14,7 +14,7 @@ use super::*;
 /// resolved full qualnames.
 pub fn path(ctx: &QueryCtx<'_>, from: &str, to: &str, depth: usize) -> Result<LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
-    let depth = depth.clamp(1, 10);
+    let depth = depth.clamp(1, crate::query::MAX_DEPTH);
     let (from_id, from_qn) = resolve_endpoint(conn, from, "from")?;
     let (to_id, to_qn) = resolve_endpoint(conn, to, "to")?;
     if from_id == to_id {

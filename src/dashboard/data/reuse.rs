@@ -10,41 +10,62 @@ use serde_json::{json, Value};
 
 use crate::error::Result;
 
+use super::discover_repos;
 use super::read_snippet;
+
+/// A resolved source location for a reuse candidate or its canonical twin:
+/// backed by the symbol index when the qualname exists, an estimate from the
+/// extraction header otherwise.
+struct Loc {
+    file: String,
+    start: i64,
+    end: i64,
+    loc: i64,
+}
+
+impl Loc {
+    /// Estimate for a symbol with no index row: the extraction header plus a
+    /// 10-line body assumption.
+    fn estimated(file: String, line: i64) -> Self {
+        Self {
+            file,
+            start: line,
+            end: line + 10,
+            loc: 10,
+        }
+    }
+}
+
+/// Resolve one qualname's location from the index (exact match, then suffix
+/// match), falling back to `estimate` when the symbols table has no row.
+fn symbol_loc(conn: &Connection, qualname: &str, estimate: Loc) -> Loc {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT file_path, line_start, line_end FROM symbols WHERE qualname = ?1 OR qualname LIKE ?2 LIMIT 1",
+    ) else {
+        return estimate;
+    };
+    match stmt.query_row(rusqlite::params![qualname, format!("%{qualname}")], |r| {
+        let fp: String = r.get(0)?;
+        let ls: i64 = r.get(1)?;
+        let le: i64 = r.get(2)?;
+        Ok((fp, ls, le))
+    }) {
+        Ok((file, start, end)) => Loc {
+            loc: (end - start + 1).max(1),
+            file,
+            start,
+            end,
+        },
+        Err(_) => estimate,
+    }
+}
 
 pub fn collect_reuse_candidates(
     root: Option<&Path>,
     entries: &[Value],
 ) -> Result<(Vec<Value>, Value, Vec<Value>)> {
     let mut repos: HashMap<String, PathBuf> = HashMap::new();
-    if let Some(r) = root {
-        let db_path = r.join(".aw").join("index.db");
-        if db_path.is_file() {
-            let name = r.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
-            repos.insert(name.to_string(), r.to_path_buf());
-        }
-    } else {
-        for e in entries {
-            if let (Some(r), Some(r_name)) = (
-                e.get("repo").and_then(Value::as_str),
-                e.get("repo_name").and_then(Value::as_str),
-            ) {
-                let p = PathBuf::from(r);
-                if p.join(".aw").join("index.db").is_file() && !repos.contains_key(r_name) {
-                    repos.insert(r_name.to_string(), p);
-                }
-            }
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            let name = cwd
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("workspace");
-            if cwd.join(".aw").join("index.db").is_file() && !repos.contains_key(name) {
-                repos.insert(name.to_string(), cwd);
-            }
-        }
-    }
+    discover_repos(root, entries, "index.db", &mut repos);
 
     let mut candidates_json = Vec::new();
 
@@ -87,63 +108,22 @@ pub fn collect_reuse_candidates(
             };
 
             // Query candidate location and canonical location from symbols
-            let mut cand_info = json!({
-                "file": c.file,
-                "line_start": c.line,
-                "line_end": c.line + 10,
-                "loc": 10
-            });
-            let mut can_info = json!({
-                "file": c.canonical_file,
-                "line_start": c.canonical_line,
-                "line_end": c.canonical_line + 10,
-                "loc": 10
-            });
+            let cand_loc = symbol_loc(&conn, &c.symbol, Loc::estimated(c.file.clone(), c.line));
+            let can_loc = symbol_loc(
+                &conn,
+                &c.canonical,
+                Loc::estimated(c.canonical_file.clone(), c.canonical_line),
+            );
+            let cand_snippet = read_snippet(
+                &r_root.join(&cand_loc.file),
+                cand_loc.start,
+                cand_loc.end,
+                30,
+            );
+            let can_snippet =
+                read_snippet(&r_root.join(&can_loc.file), can_loc.start, can_loc.end, 30);
 
-            if let Ok(mut stmt) = conn.prepare("SELECT file_path, line_start, line_end FROM symbols WHERE qualname = ?1 OR qualname LIKE ?2 LIMIT 1") {
-                if let Ok(row) = stmt.query_row(rusqlite::params![c.symbol, format!("%{}", c.symbol)], |r| {
-                    let fp: String = r.get(0)?;
-                    let ls: i64 = r.get(1)?;
-                    let le: i64 = r.get(2)?;
-                    Ok((fp, ls, le))
-                }) {
-                    let loc = (row.2 - row.1 + 1).max(1);
-                    cand_info = json!({ "file": row.0, "line_start": row.1, "line_end": row.2, "loc": loc });
-                }
-                if let Ok(row) = stmt.query_row(rusqlite::params![c.canonical, format!("%{}", c.canonical)], |r| {
-                    let fp: String = r.get(0)?;
-                    let ls: i64 = r.get(1)?;
-                    let le: i64 = r.get(2)?;
-                    Ok((fp, ls, le))
-                }) {
-                    let loc = (row.2 - row.1 + 1).max(1);
-                    can_info = json!({ "file": row.0, "line_start": row.1, "line_end": row.2, "loc": loc });
-                }
-            }
-
-            let cand_file = cand_info.get("file").and_then(Value::as_str).unwrap_or("");
-            let cand_start = cand_info
-                .get("line_start")
-                .and_then(Value::as_i64)
-                .unwrap_or(1);
-            let cand_end = cand_info
-                .get("line_end")
-                .and_then(Value::as_i64)
-                .unwrap_or(cand_start + 15);
-            let cand_snippet = read_snippet(&r_root.join(cand_file), cand_start, cand_end, 30);
-
-            let can_file = can_info.get("file").and_then(Value::as_str).unwrap_or("");
-            let can_start = can_info
-                .get("line_start")
-                .and_then(Value::as_i64)
-                .unwrap_or(1);
-            let can_end = can_info
-                .get("line_end")
-                .and_then(Value::as_i64)
-                .unwrap_or(can_start + 15);
-            let can_snippet = read_snippet(&r_root.join(can_file), can_start, can_end, 30);
-
-            let loc_saving = cand_info.get("loc").and_then(Value::as_i64).unwrap_or(10);
+            let loc_saving = cand_loc.loc;
             let narrative = format!(
                 "Consolidating '{}' into authoritative '{}' ([callers={}]) deletes ~{} duplicate lines and eliminates drift between twin implementations.",
                 c.symbol, c.canonical, c.canonical_callers, loc_saving
@@ -177,8 +157,18 @@ pub fn collect_reuse_candidates(
                 "canonical_line": c.canonical_line,
                 "overlap_pct": c.overlap_pct,
                 "shared_evidence": shared_evidence,
-                "candidate_info": cand_info,
-                "canonical_info": can_info,
+                "candidate_info": json!({
+                    "file": cand_loc.file,
+                    "line_start": cand_loc.start,
+                    "line_end": cand_loc.end,
+                    "loc": cand_loc.loc,
+                }),
+                "canonical_info": json!({
+                    "file": can_loc.file,
+                    "line_start": can_loc.start,
+                    "line_end": can_loc.end,
+                    "loc": can_loc.loc,
+                }),
                 "candidate_snippet": cand_snippet,
                 "canonical_snippet": can_snippet,
                 "loc_saving": loc_saving,

@@ -19,11 +19,7 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
             None => Err(mem_unknown_key(key)),
             Some((row, revs)) => {
                 let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
-                let mut tag = " [global]".to_string();
-                if is_stale {
-                    tag.push_str(" [stale-ref]");
-                }
-                Ok(render_mem_hit(&row, &tag, revs))
+                Ok(render_mem_hit(&row, &store_tags(true, is_stale), revs))
             }
         };
     }
@@ -32,18 +28,13 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
     if let Some(local) = &stores.local {
         if let Some((row, revs)) = crate::db::memory_get(local, key)? {
             let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
-            let tag = if is_stale { " [stale-ref]" } else { "" };
-            return Ok(render_mem_hit(&row, tag, revs));
+            return Ok(render_mem_hit(&row, &store_tags(false, is_stale), revs));
         }
     }
     if let Some(global) = &stores.global {
         if let Some((row, revs)) = crate::db::memory_get(global, key)? {
             let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
-            let mut tag = " [global]".to_string();
-            if is_stale {
-                tag.push_str(" [stale-ref]");
-            }
-            return Ok(render_mem_hit(&row, &tag, revs));
+            return Ok(render_mem_hit(&row, &store_tags(true, is_stale), revs));
         }
     }
 

@@ -1,7 +1,6 @@
 //! Depth > 1 reverse BFS traversal and the bounded per-file record store.
 
 use super::*;
-use crate::db::EDGE_SRC_JOIN;
 
 use std::collections::BinaryHeap;
 

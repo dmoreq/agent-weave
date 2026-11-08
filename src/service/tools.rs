@@ -41,7 +41,7 @@ const LIMIT_PARAM: ParamSpec = ParamSpec {
     name: "limit",
     kind: ParamKind::Int {
         min: 1,
-        max: Some(10_000),
+        max: Some(crate::query::MAX_LIMIT as i64),
     },
     required: false,
     description: "Maximum results shown (default 50)",
@@ -51,7 +51,7 @@ const DEPTH_PARAM: ParamSpec = ParamSpec {
     name: "depth",
     kind: ParamKind::Int {
         min: 1,
-        max: Some(10),
+        max: Some(crate::query::MAX_DEPTH as i64),
     },
     required: false,
     description: "Transitive depth (default 1)",

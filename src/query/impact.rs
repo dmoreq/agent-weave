@@ -47,6 +47,12 @@ pub(crate) fn parse_edge_kinds(spec: &str) -> Result<Vec<EdgeKind>> {
     Ok(out)
 }
 
+/// Source-symbol join `edges e -> symbols s`, for statements that read the
+/// source symbol without its file. Same alias set as
+/// [`crate::db::EDGE_SRC_FILE_JOIN`], the one home for the source-side join
+/// vocabulary. Lives here because impact is its only consumer.
+pub(crate) const EDGE_SRC_JOIN: &str = "JOIN symbols s ON s.id = e.src_id";
+
 /// Destination-side joins shared by every impact SQL statement that filters
 /// on the destination file: edge -> destination symbol -> its file.
 const IMPACT_DST_JOINS: &str = "JOIN symbols ds ON ds.id = e.dst_id
@@ -91,7 +97,7 @@ pub fn impact(
         kinds,
     } = opts;
     let limit = clamp_limit(limit)?;
-    let depth = depth.clamp(1, 10);
+    let depth = depth.clamp(1, crate::query::MAX_DEPTH);
     let kind_sql = db::edge_kind_sql(&kinds);
     let rel = indexed_file(qctx.conn, file)?;
     let extended = depth > 1 || kinds.iter().any(|k| *k != EdgeKind::Calls);

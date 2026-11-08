@@ -22,7 +22,7 @@ fn prepare_graph_query(
 ) -> Result<(usize, usize, Vec<i64>)> {
     let GraphQueryOpts { limit, depth } = opts;
     let limit = clamp_limit(limit)?;
-    let depth = depth.clamp(1, 10);
+    let depth = depth.clamp(1, crate::query::MAX_DEPTH);
     let (ids, _) = resolve_targets(conn, name, None)?;
     Ok((limit, depth, ids))
 }

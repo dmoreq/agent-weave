@@ -26,34 +26,20 @@ pub fn collect_memories(
     }
 
     if !global_only {
-        if let Some(r) = root {
+        let mut locals: HashMap<String, PathBuf> = HashMap::new();
+        super::discover_repos(root, entries, "memory.db", &mut locals);
+        // An explicit root replaces a same-named store (today's short-circuit
+        // overwrite); discovered repos only fill gaps, matching the scan's
+        // contains_key guard against the already-inserted global store.
+        let store_pair = |r: PathBuf| {
             let l_db = r.join(".aw").join("memory.db");
-            if l_db.is_file() {
-                let name = r.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
-                stores.insert(name.to_string(), (r.to_path_buf(), l_db));
-            }
+            (r, l_db)
+        };
+        if root.is_some() {
+            stores.extend(locals.into_iter().map(|(n, r)| (n, store_pair(r))));
         } else {
-            for e in entries {
-                if let (Some(r), Some(r_name)) = (
-                    e.get("repo").and_then(Value::as_str),
-                    e.get("repo_name").and_then(Value::as_str),
-                ) {
-                    let rp = PathBuf::from(r);
-                    let l_db = rp.join(".aw").join("memory.db");
-                    if l_db.is_file() && !stores.contains_key(r_name) {
-                        stores.insert(r_name.to_string(), (rp, l_db));
-                    }
-                }
-            }
-            if let Ok(cwd) = std::env::current_dir() {
-                let name = cwd
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("workspace");
-                let l_db = cwd.join(".aw").join("memory.db");
-                if l_db.is_file() && !stores.contains_key(name) {
-                    stores.insert(name.to_string(), (cwd, l_db));
-                }
+            for (name, r) in locals {
+                stores.entry(name).or_insert_with(|| store_pair(r));
             }
         }
     }

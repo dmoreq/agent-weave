@@ -81,25 +81,13 @@ pub fn compute_summary(entries: &[Value]) -> Value {
         }
 
         if exit_code == 0 {
-            match tool {
-                "context" | "callers" | "callees" | "path" | "impact" | "imports" => {
-                    saved_tokens += shown * 350 + 100;
-                }
-                "search" => {
-                    saved_tokens += shown * 300 + 100;
-                }
-                "reuse" => {
-                    reuse_hits += shown.max(result_count);
-                    saved_tokens += result_count * 800 + 1200;
-                }
-                "symbols" => {
-                    saved_tokens += shown * 150;
-                }
-                "build" => {
-                    saved_tokens += 500;
-                }
-                _ => {}
+            // The journal's single pricing table is authoritative for BOTH
+            // telemetry surfaces (see journal/tokens.rs); `calls` is 1 because
+            // one usage entry is one journaled call.
+            if tool == "reuse" {
+                reuse_hits += shown.max(result_count);
             }
+            saved_tokens += crate::journal::estimated_tokens_saved(tool, shown, result_count, 1);
         }
     }
 
@@ -162,7 +150,7 @@ pub fn compute_summary(entries: &[Value]) -> Value {
     }
 
     let reliability = 100.0 * (total_calls - errors) as f64 / total_calls as f64;
-    let saved_dollars = saved_tokens as f64 * 0.000003;
+    let saved_dollars = saved_tokens as f64 * crate::journal::PRICE_PER_TOKEN;
 
     let recent_queries: Vec<Value> = entries.iter().rev().take(50).cloned().collect();
     recent_errors.reverse();

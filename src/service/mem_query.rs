@@ -91,6 +91,19 @@ pub(super) fn check_note_stale_ref(
         .any(|r| is_ref_stale(conn, r, row.created_at))
 }
 
+/// The `[global] [stale-ref]` store markers shared by `mem get` output and
+/// the listing tag builder, so the suffix order cannot drift.
+pub(super) fn store_tags(is_global: bool, is_stale: bool) -> String {
+    let mut tag = String::new();
+    if is_global {
+        tag.push_str(" [global]");
+    }
+    if is_stale {
+        tag.push_str(" [stale-ref]");
+    }
+    tag
+}
+
 /// The `[superseded]`/`[global]`/`[stale-ref]` listing tag for one row, shared
 /// by the single-store and merged listings so the markers cannot drift.
 fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, is_stale: bool) -> String {
@@ -98,12 +111,7 @@ fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, is_stale: bool) -> Stri
     if row.superseded_by.is_some() {
         tag.push_str(" [superseded]");
     }
-    if is_global {
-        tag.push_str(" [global]");
-    }
-    if is_stale {
-        tag.push_str(" [stale-ref]");
-    }
+    tag.push_str(&store_tags(is_global, is_stale));
     tag
 }
 

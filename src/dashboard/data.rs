@@ -9,11 +9,54 @@ pub use memories::collect_memories;
 pub use reuse::collect_reuse_candidates;
 pub use summary::compute_summary;
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+
+/// Discover candidate repo roots for a dashboard panel into `repos`. An
+/// explicit root short-circuits the scan (its entry replaces any same-named
+/// one); otherwise every journaled repo with `.aw/<db_rel>` present is added
+/// without displacing existing entries, and the current directory joins last
+/// as "workspace". Shared by the reuse and memories panels so their store
+/// discovery cannot drift.
+fn discover_repos(
+    root: Option<&Path>,
+    entries: &[Value],
+    db_rel: &str,
+    repos: &mut HashMap<String, PathBuf>,
+) {
+    if let Some(r) = root {
+        let db_path = r.join(".aw").join(db_rel);
+        if db_path.is_file() {
+            let name = r.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
+            repos.insert(name.to_string(), r.to_path_buf());
+        }
+    } else {
+        for e in entries {
+            if let (Some(r), Some(r_name)) = (
+                e.get("repo").and_then(Value::as_str),
+                e.get("repo_name").and_then(Value::as_str),
+            ) {
+                let p = PathBuf::from(r);
+                if p.join(".aw").join(db_rel).is_file() && !repos.contains_key(r_name) {
+                    repos.insert(r_name.to_string(), p);
+                }
+            }
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            let name = cwd
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("workspace");
+            if cwd.join(".aw").join(db_rel).is_file() && !repos.contains_key(name) {
+                repos.insert(name.to_string(), cwd);
+            }
+        }
+    }
+}
 
 pub struct AggregatedData {
     pub summary: Value,

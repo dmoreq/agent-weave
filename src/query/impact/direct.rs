@@ -1,7 +1,7 @@
 //! Depth-1 impact phases: grouped per-file rows and per-site rows.
 
 use super::*;
-use crate::db::{EDGE_SRC_FILE_JOIN, EDGE_SRC_JOIN};
+use crate::db::EDGE_SRC_FILE_JOIN;
 
 /// Empty default (calls-only) detail: name the import/inherit files the
 /// calls-only default skipped, so a file that only has importers points the
