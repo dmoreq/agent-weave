@@ -66,7 +66,7 @@ mod staleness;
 use resolve::*;
 pub(crate) use scope::normalize_scope;
 pub(crate) use scope::scoped_params;
-pub use scope::validate_path_scope;
+pub(crate) use scope::validate_path_scope;
 use scope::*;
 pub(crate) use staleness::file_changed;
 use staleness::*;

@@ -452,9 +452,9 @@ mod query_state;
 #[cfg(test)]
 mod tests;
 
-pub use inserts::*;
-pub use memory_query::*;
-pub use memory_store::*;
-pub use memory_write::*;
-pub use meta::*;
-pub use query_state::*;
+pub(crate) use inserts::*;
+pub(crate) use memory_query::*;
+pub(crate) use memory_store::*;
+pub(crate) use memory_write::*;
+pub(crate) use meta::*;
+pub(crate) use query_state::*;

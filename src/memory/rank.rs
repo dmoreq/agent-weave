@@ -1,7 +1,12 @@
 //! Ranked-memory model: candidate scoring features, min-max fusion, and
 //! row rendering for mem query output.
 
-use super::*;
+/// Fusion weights for the three ranked-candidate features (lexical token
+/// overlap, ref-token overlap, bounded recency decay). Tuning constants of
+/// `fuse` alone, private to this module.
+const W_LEX: f64 = 0.5;
+const W_REF: f64 = 0.3;
+const W_REC: f64 = 0.2;
 
 /// One candidate row with its raw signals. `lex_raw` is the FTS5 bm25 rank
 /// (smaller is better); `ref_raw` is the token-overlap fraction in [0,1];
@@ -70,7 +75,7 @@ pub fn fuse(mut candidates: Vec<Candidate>) -> Vec<Candidate> {
 // ---------------------------------------------------------------------------
 
 /// One note row header line: `key rev kind scope created_at`.
-pub fn render_row_header(row: &crate::db::MemRow) -> String {
+fn render_row_header(row: &crate::db::MemRow) -> String {
     format!(
         "{} r{} {} {} {}",
         row.key, row.rev, row.kind, row.scope, row.created_at

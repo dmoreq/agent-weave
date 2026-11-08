@@ -89,7 +89,7 @@ pub fn mem_tokens(text: &str) -> Vec<String> {
 }
 
 /// Tokenize one ref (extension stripped first) — the ref-overlap signal.
-pub fn mem_ref_tokens(ref_text: &str) -> Vec<String> {
+pub(crate) fn mem_ref_tokens(ref_text: &str) -> Vec<String> {
     mem_tokens(strip_ref_extension(ref_text))
 }
 

@@ -22,11 +22,6 @@ const SUSPECTED_SECRET_MSG: &str = "mem write: content contains suspected secret
 
 /// Hard cap on resolver candidate rows pulled from the FTS match list.
 pub const CANDIDATE_CAP: usize = 256;
-/// Fusion weights (D4-A): lexical, ref/token-overlap, recency. Fixed until the
-/// Phase 3 frozen oracle produces evidence for a retune.
-pub const W_LEX: f64 = 0.5;
-pub const W_REF: f64 = 0.3;
-pub const W_REC: f64 = 0.2;
 /// `mem query` result cap: default 10, clamp 1..=100.
 pub const DEFAULT_MEM_LIMIT: usize = 10;
 pub const MAX_MEM_LIMIT: usize = 100;
@@ -147,9 +142,9 @@ mod note;
 mod rank;
 mod tokens;
 
-pub use note::*;
-pub use rank::*;
-pub use tokens::*;
+pub(crate) use note::*;
+pub(crate) use rank::*;
+pub(crate) use tokens::*;
 #[cfg(test)]
 mod tests {
     use super::*;

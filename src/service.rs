@@ -261,7 +261,7 @@ use mem_query::*;
 use mem_write::*;
 use run::*;
 
-pub use args::from_tool_args;
+pub(crate) use args::from_tool_args;
 pub use tools::{ParamKind, ParamSpec, ToolSpec, MAX_STR_ARRAY_ITEMS, TOOL_SPECS};
 #[cfg(test)]
 mod tests {

@@ -317,8 +317,8 @@ fn parse_usage_line(line: &str) -> Option<UsageFields> {
 mod render;
 mod tokens;
 
-pub use render::*;
-pub use tokens::*;
+pub(crate) use render::*;
+pub(crate) use tokens::*;
 #[cfg(test)]
 mod tests {
     use super::*;
