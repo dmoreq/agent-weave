@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aw telemetry, anti-reinvention &amp; memory dashboard</title>
+<title>Agent Weave — Code Intelligence &amp; Operations Console</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div class="container">
   <header>
     <div class="header-left">
-      <h1 id="header-title">aw local telemetry dashboard</h1>
-      <span class="header-meta" id="header-meta">Local SQLite Code Index · Zero External Network Access</span>
+      <h1 id="header-title">Agent Weave Console</h1>
+      <span class="header-meta" id="header-meta">Deterministic Code Graph &middot; Real-Time Anti-Reinvention &middot; Zero-Token Memory</span>
     </div>
     <div class="header-right">
       <span id="live-indicator" class="badge status-ok" style="display: none;"><span class="live-dot"></span>LIVE</span>
@@ -38,24 +38,24 @@
   <div id="tab-telemetry-content">
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Total Queries</div>
+        <div class="kpi-label">Total Operations</div>
         <div id="metric-total-calls" class="kpi-value">0</div>
-        <div id="metric-reliability" class="kpi-sub">100.0% clean (0 errs)</div>
+        <div id="metric-reliability" class="kpi-sub">100.0% clean (0 errors)</div>
       </div>
       <div class="kpi-tile">
         <div class="kpi-label">Median Latency (p50)</div>
         <div id="metric-p50" class="kpi-value text-success">0.0ms</div>
-        <div id="metric-latency-sub" class="kpi-sub">p95 = 0.0ms · avg = 0.0ms</div>
+        <div id="metric-latency-sub" class="kpi-sub">p95 = 0.0ms &middot; avg = 0.0ms</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Est. Tokens Saved</div>
+        <div class="kpi-label">Context Efficiency</div>
         <div id="metric-tokens" class="kpi-value">~0</div>
-        <div id="metric-dollars" class="kpi-sub">~$0.00 avoided vs full reads</div>
+        <div id="metric-dollars" class="kpi-sub">Avoided model context overhead</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Anti-Reinvention &amp; Memory</div>
-        <div class="kpi-value"><span id="metric-reuse-hits">0</span> <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: normal;">hits</span></div>
-        <div class="kpi-sub"><span id="metric-active-memories">0</span> memories across stores</div>
+        <div class="kpi-label">Active Workspaces</div>
+        <div class="kpi-value"><span id="metric-active-repos">0</span> <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: normal;">repos</span></div>
+        <div id="metric-active-worktrees" class="kpi-sub">Multi-repository telemetry attribution</div>
       </div>
     </div>
 
@@ -63,8 +63,8 @@
       <!-- Repositories & Worktrees Breakdown -->
       <div class="card">
         <div class="card-title">
-          <span>Active Repositories &amp; Worktrees</span>
-          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Click row to filter</span>
+          <span>Monitored Repositories &amp; Worktrees</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Filter telemetry by workspace</span>
         </div>
         <table>
           <thead>
@@ -84,8 +84,8 @@
       <!-- Tool Distribution -->
       <div class="card">
         <div class="card-title">
-          <span>Tool Distribution &amp; Latency</span>
-          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Volume &amp; p50</span>
+          <span>Command Distribution &amp; Latency Profile</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Execution volume and median latency</span>
         </div>
         <table>
           <thead>
@@ -105,8 +105,8 @@
     <!-- Live Query Stream -->
     <div class="card">
       <div class="card-title">
-        <span>Recent Query Activity</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Streaming via native SSE</span>
+        <span>Real-Time Invocations</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Live query telemetry stream</span>
       </div>
 
       <div class="filter-bar">
@@ -121,7 +121,7 @@
           <option value="0">OK (Exit 0)</option>
           <option value="1">Empty (Exit 1)</option>
           <option value="2">Ambiguous (Exit 2)</option>
-          <option value="ERR">Errors (Exit >= 3)</option>
+          <option value="ERR">Errors (Exit &gt;= 3)</option>
         </select>
 
         <input type="text" id="query-search" class="search-input" placeholder="Search tool or argument..." oninput="applyTelemetryFilters()">
@@ -148,8 +148,8 @@
     <!-- Triage Log -->
     <div class="card">
       <div class="card-title">
-        <span>Critical Error &amp; Bug Triage</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Exit Code >= 3</span>
+        <span>Operational Diagnostics &amp; Exceptions</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Exit status &gt;= 3</span>
       </div>
       <table>
         <thead>
@@ -174,24 +174,24 @@
     <!-- Prevention KPI Strip -->
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Duplicate Candidates Caught</div>
+        <div class="kpi-label">Duplicate Candidates Identified</div>
         <div class="kpi-value text-success" id="reuse-kpi-count">0</div>
-        <div class="kpi-sub">D1–D4 detectors across code index</div>
+        <div class="kpi-sub">D1–D4 syntactic &amp; structural detectors</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Preventable Excess LOC</div>
+        <div class="kpi-label">Preventable Excess Code</div>
         <div class="kpi-value" id="reuse-kpi-loc">~0</div>
-        <div class="kpi-sub">Redundant lines saved via consolidation</div>
+        <div class="kpi-sub">Redundant lines eliminated via consolidation</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Pre-Write Helper Searches</div>
+        <div class="kpi-label">Proactive Reuse Lookups</div>
         <div class="kpi-value" id="reuse-kpi-prewrite">0</div>
-        <div class="kpi-sub">aw search queries finding [callers=N] helpers</div>
+        <div class="kpi-sub">Pre-write searches discovering canonical helpers</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Canonical Concentration</div>
+        <div class="kpi-label">Canonical Target Concentration</div>
         <div class="kpi-value"><span id="reuse-kpi-callers">0.0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">callers</span></div>
-        <div class="kpi-sub">Authoritative reuse targets</div>
+        <div class="kpi-sub">Average caller volume on authoritative helpers</div>
       </div>
     </div>
 
@@ -227,8 +227,8 @@
     <!-- Pre-Write Helper Discovery Feed -->
     <div class="card" style="margin-top: 1.5rem;">
       <div class="card-title">
-        <span>Pre-Write Helper Discovery Stream (`aw search` &amp; `aw reuse`)</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Searches before writing code</span>
+        <span>Pre-Implementation Discovery Queries</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Agent search queries executed prior to code generation</span>
       </div>
       <table>
         <thead>
@@ -253,24 +253,24 @@
     <!-- Memory KPI Strip -->
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Active Memories</div>
+        <div class="kpi-label">Active Project Memories</div>
         <div class="kpi-value text-success" id="mem-kpi-active">0</div>
-        <div class="kpi-sub">Across all connected stores</div>
+        <div class="kpi-sub">Invariants &amp; conventions across local and global stores</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Agent Recalls</div>
+        <div class="kpi-label">Correlated Agent Recalls</div>
         <div class="kpi-value text-success"><span id="mem-kpi-recalls">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">queries</span></div>
-        <div class="kpi-sub">Correlated from mem_query / mem_get</div>
+        <div class="kpi-sub">Retrieval queries from agent sessions</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Bugs &amp; Regressions Guarded</div>
+        <div class="kpi-label">Invariants &amp; Regressions Guarded</div>
         <div class="kpi-value"><span id="mem-kpi-guarded">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">rules</span></div>
-        <div class="kpi-sub" id="mem-kpi-guarded-sub">0 gotchas · 0 decisions</div>
+        <div class="kpi-sub" id="mem-kpi-guarded-sub">0 gotchas &middot; 0 decisions</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Code References Guarded</div>
+        <div class="kpi-label">Verified Graph References</div>
         <div class="kpi-value"><span id="mem-kpi-refs">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">symbols</span></div>
-        <div class="kpi-sub">Verified in repository index</div>
+        <div class="kpi-sub">Anchored symbols and files validated against index</div>
       </div>
     </div>
 
@@ -294,7 +294,7 @@
 
       <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
         <input type="checkbox" id="mem-show-superseded" onchange="renderMemoryList()">
-        <span class="text-muted">Show superseded revs</span>
+        <span class="text-muted">Include superseded revisions</span>
       </label>
     </div>
 

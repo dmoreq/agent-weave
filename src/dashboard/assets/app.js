@@ -86,6 +86,20 @@ function loadSummaryData() {
       const dolEl = document.getElementById('metric-dollars');
       if (dolEl) dolEl.textContent = '~$' + (data.saved_dollars || 0.0).toFixed(2) + ' avoided vs full reads';
 
+      const activeReposEl = document.getElementById('metric-active-repos');
+      if (activeReposEl) {
+        const repoCount = Object.keys(data.repo_aggs || {}).length;
+        activeReposEl.textContent = repoCount.toLocaleString();
+      }
+
+      const activeWorktreesEl = document.getElementById('metric-active-worktrees');
+      if (activeWorktreesEl) {
+        const wtCount = Object.values(data.repo_aggs || {}).filter(r => r.worktree).length;
+        activeWorktreesEl.textContent = wtCount > 0
+          ? wtCount + ' worktree' + (wtCount > 1 ? 's' : '') + ' active'
+          : 'Multi-repository attribution';
+      }
+
       const reuseHitsEl = document.getElementById('metric-reuse-hits');
       if (reuseHitsEl) reuseHitsEl.textContent = (data.reuse_hits || 0).toLocaleString();
 
