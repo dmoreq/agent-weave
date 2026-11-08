@@ -828,18 +828,43 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
     """Run lightweight HTTP + SSE server for real-time dashboard updates."""
     log_file = aw_dir / "usage.log"
 
+    class QuietThreadingHTTPServer(http.server.ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+        def handle_error(self, request, client_address):
+            exc_type, exc_value, _ = sys.exc_info()
+            if exc_type in (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+                return
+            if isinstance(exc_value, OSError) and exc_value.errno in (32, 54, 104):
+                return
+            super().handle_error(request, client_address)
+
     class SSEHandler(http.server.BaseHTTPRequestHandler):
         def do_HEAD(self):
+            self.close_connection = True
             if self.path in ("/", "/index.html", "/dashboard.html"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Connection", "close")
+                self.end_headers()
+            elif self.path == "/favicon.ico":
+                self.send_response(204)
+                self.send_header("Connection", "close")
+                self.end_headers()
+            elif self.path in ("/api/summary", "/api/metrics"):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Connection", "close")
                 self.end_headers()
             else:
                 self.send_response(404)
+                self.send_header("Connection", "close")
                 self.end_headers()
 
         def do_GET(self):
             if self.path in ("/", "/index.html", "/dashboard.html"):
+                self.close_connection = True
                 entries = parse_usage_log_from_dir(aw_dir)
                 metrics = calculate_metrics(entries)
                 content = render_html_dashboard(metrics, inspect_index_db(None), "Global Multi-Repo", is_global=True)
@@ -847,6 +872,35 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(encoded)
+            elif self.path == "/favicon.ico":
+                self.close_connection = True
+                self.send_response(204)
+                self.send_header("Connection", "close")
+                self.end_headers()
+            elif self.path in ("/api/summary", "/api/metrics"):
+                self.close_connection = True
+                entries = parse_usage_log_from_dir(aw_dir)
+                metrics = calculate_metrics(entries)
+                data = {
+                    "total_calls": metrics.get("total_calls", 0),
+                    "error_count": metrics.get("error_count", 0),
+                    "warning_count": metrics.get("warning_count", 0),
+                    "reliability_pct": metrics.get("reliability_pct", 100.0),
+                    "p50_ms": metrics.get("p50_ms", 0.0),
+                    "p95_ms": metrics.get("p95_ms", 0.0),
+                    "saved_tokens": metrics.get("saved_tokens", 0),
+                    "saved_dollars": metrics.get("saved_dollars", 0.0),
+                    "repo_count": len(metrics.get("repo_aggs", {})),
+                    "tool_counts": {t: d.get("calls", 0) for t, d in metrics.get("tool_aggs", {}).items()},
+                }
+                encoded = json.dumps(data, indent=2).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(encoded)
             elif self.path == "/events":
@@ -864,8 +918,10 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                     except OSError:
                         pass
 
+                last_keepalive = time.time()
                 while True:
                     try:
+                        now = time.time()
                         if log_file.is_file():
                             current_size = log_file.stat().st_size
                             if current_size < last_pos:
@@ -878,23 +934,42 @@ def run_live_server(aw_dir: Path, port: int = 7890, open_browser: bool = True) -
                                         if line:
                                             self.wfile.write(f"data: {line}\n\n".encode("utf-8"))
                                             self.wfile.flush()
+                                            last_keepalive = now
                                     last_pos = f.tell()
-                        self.wfile.write(b": keepalive\n\n")
-                        self.wfile.flush()
-                        time.sleep(0.2)
-                    except (BrokenPipeError, ConnectionResetError):
+
+                        # Keepalive every 15 seconds instead of flooding every 200ms
+                        if now - last_keepalive >= 15.0:
+                            self.wfile.write(b": keepalive\n\n")
+                            self.wfile.flush()
+                            last_keepalive = now
+
+                        time.sleep(0.5)
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                        break
+                    except OSError as e:
+                        if e.errno in (32, 54, 104):
+                            break
                         break
                     except Exception:
                         break
             else:
+                self.close_connection = True
                 self.send_response(404)
+                self.send_header("Connection", "close")
                 self.end_headers()
 
         def log_message(self, format, *args):
             pass
 
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), SSEHandler)
-    url = f"http://127.0.0.1:{port}/"
+    # Bind to 0.0.0.0 to support both IPv4 and IPv6 loopbacks (localhost)
+    bind_host = "0.0.0.0"
+    try:
+        server = QuietThreadingHTTPServer((bind_host, port), SSEHandler)
+    except OSError:
+        bind_host = "127.0.0.1"
+        server = QuietThreadingHTTPServer((bind_host, port), SSEHandler)
+
+    url = f"http://localhost:{port}/"
     print(f"⚡ aw live dashboard running at {url}")
     print("Press Ctrl+C to stop.")
 

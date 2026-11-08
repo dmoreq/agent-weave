@@ -327,6 +327,11 @@ def main():
         default="ALL",
         help="Filter live monitor to specific repository name",
     )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Do not automatically open the browser when starting --web server",
+    )
     args = parser.parse_args()
 
     aw_dir = resolve_global_aw_dir()
@@ -343,8 +348,9 @@ def main():
             "--global",
             "--serve",
             str(args.web),
-            "--open",
         ]
+        if not args.no_open:
+            cmd.append("--open")
         try:
             subprocess.run(cmd)
         except KeyboardInterrupt:
