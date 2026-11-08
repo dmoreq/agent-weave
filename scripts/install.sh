@@ -82,8 +82,14 @@ fi
 log_info "Installing binaries and scripts into ~/.cargo/bin and ~/.local/bin..."
 mkdir -p "$HOME/.cargo/bin" "$HOME/.local/bin"
 
-cp -f "$RELEASE_BIN" "$HOME/.cargo/bin/aw"
-chmod +x "$HOME/.cargo/bin/aw"
+# Atomic replacement of binary to avoid macOS in-place inode execution kill (SIGKILL 9)
+rm -f "$HOME/.cargo/bin/aw"
+cp "$RELEASE_BIN" "$HOME/.cargo/bin/aw.tmp"
+chmod +x "$HOME/.cargo/bin/aw.tmp"
+mv -f "$HOME/.cargo/bin/aw.tmp" "$HOME/.cargo/bin/aw"
+if command -v codesign >/dev/null 2>&1; then
+  codesign -s - -f "$HOME/.cargo/bin/aw" >/dev/null 2>&1 || true
+fi
 ln -sf "$HOME/.cargo/bin/aw" "$HOME/.local/bin/aw"
 
 # Symlink monitor and dashboard utilities
