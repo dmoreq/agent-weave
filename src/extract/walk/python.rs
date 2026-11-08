@@ -208,3 +208,96 @@ pub(super) fn resolve_from_module(
         format!("{}.{}", parts.join("."), rest)
     }
 }
+
+pub(super) fn visit_python_node<'a>(w: &mut Walker<'a, '_, '_>) -> bool {
+    match w.node.kind() {
+        "decorated_definition" => visit_decorated_definition(w),
+        "function_definition" => visit_python_function(w),
+        "class_definition" => visit_python_class(w),
+        "import_statement" | "import_from_statement" => {
+            record_import(w.node, w.src, w.fx, &w.ctx.scope_func());
+        }
+        "assignment" | "augmented_assignment" => {
+            record_assignment(w);
+            push_children_rev(w.work, w.node);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn visit_decorated_definition<'a>(w: &mut Walker<'a, '_, '_>) {
+    let mut cursor = w.node.walk();
+    let mut decorators = Vec::new();
+    for child in w.node.children(&mut cursor) {
+        if child.kind() == "decorator" {
+            decorators.push(child);
+        }
+    }
+    for d in decorators {
+        let mut stack = vec![d];
+        while let Some(n) = stack.pop() {
+            if n.kind() == "call" {
+                record_call(n, w.src, w.fx, w.ctx);
+            }
+            let mut c = n.walk();
+            for child in n.children(&mut c) {
+                stack.push(child);
+            }
+        }
+    }
+    if let Some(def) = w.node.child_by_field_name("definition") {
+        w.work.push(Step::Visit(def));
+    }
+}
+
+fn visit_python_function<'a>(w: &mut Walker<'a, '_, '_>) {
+    let Some(name_node) = w.node.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, w.src);
+    let parent_qn = innermost_scope(w.ctx, &w.fx.module);
+    let kind = if w.ctx.class_stack.last() == Some(&parent_qn) {
+        SymbolKind::Method
+    } else {
+        SymbolKind::Function
+    };
+    let qualname = format!("{parent_qn}.{name}");
+    let mut spec = w.callable_spec(kind, &name, &qualname);
+    spec.always_push_scope = true;
+    define_callable(w, &spec);
+}
+
+fn visit_python_class<'a>(w: &mut Walker<'a, '_, '_>) {
+    let Some(name_node) = w.node.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, w.src);
+    let parent_qn = innermost_scope(w.ctx, &w.fx.module);
+    let qualname = format!("{parent_qn}.{name}");
+    let sym_idx = w.fx.symbols.len();
+    w.fx.push_symbol(NewSymbol::from_node(
+        w,
+        SymbolKind::Class,
+        name.clone(),
+        qualname.clone(),
+        w.node,
+        w.node,
+        is_test_item(w.fx, w.ctx, &name),
+    ));
+    if let Some(bases) = w.node.child_by_field_name("superclasses") {
+        let mut cursor = bases.walk();
+        for b in bases.named_children(&mut cursor) {
+            if let Some(chain) = dotted_chain(b, w.src) {
+                w.fx.inherits.push((sym_idx, chain));
+            }
+        }
+    }
+    w.ctx.class_stack.push(qualname);
+    if let Some(body) = w.node.child_by_field_name("body") {
+        w.work.push(Step::PopClass);
+        push_children_rev(w.work, body);
+    } else {
+        w.ctx.class_stack.pop();
+    }
+}
