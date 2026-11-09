@@ -69,8 +69,9 @@ pub fn collect_reuse_candidates(
     discover_repos(root, entries, "index.db", &mut repos);
 
     let mut candidates_json = Vec::new();
+    let mut total_corpus_candidates = 0;
     for (r_name, r_root) in &repos {
-        collect_repo_candidates(r_name, r_root, &mut candidates_json);
+        total_corpus_candidates += collect_repo_candidates(r_name, r_root, &mut candidates_json);
     }
 
     let prewrite_searches = collect_prewrite_searches(entries);
@@ -84,27 +85,29 @@ pub fn collect_reuse_candidates(
         })
         .count();
 
-    let summary = summarize_reuse_metrics(&candidates_json, prewrite_count);
+    let summary =
+        summarize_reuse_metrics(&candidates_json, total_corpus_candidates, prewrite_count);
     Ok((candidates_json, summary, prewrite_searches))
 }
 
-fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) {
+fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
     let db_path = r_root.join(".aw").join("index.db");
     if !db_path.is_file() {
-        return;
+        return 0;
     }
     let conn =
         match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
             Ok(c) => c,
-            Err(_) => return,
+            Err(_) => return 0,
         };
-    let (candidates, _) = match crate::query::reuse::analyze_corpus(&conn, None, None, 25) {
+    let (candidates, total) = match crate::query::reuse::analyze_corpus(&conn, None, None, 25) {
         Ok(res) => res,
-        Err(_) => return,
+        Err(_) => return 0,
     };
     for c in candidates {
         out.push(format_candidate_json(r_name, r_root, &conn, &c));
     }
+    total
 }
 
 fn format_detector_metadata(c: &ReuseCandidate) -> (&'static str, String, String) {
@@ -239,13 +242,23 @@ fn collect_prewrite_searches(entries: &[Value]) -> Vec<Value> {
     out
 }
 
-fn summarize_reuse_metrics(candidates_json: &[Value], prewrite_count: usize) -> Value {
-    let total_cands = candidates_json.len();
-    let prev_loc: i64 = candidates_json
+fn summarize_reuse_metrics(
+    candidates_json: &[Value],
+    total_corpus_candidates: usize,
+    prewrite_count: usize,
+) -> Value {
+    let sample_cands = candidates_json.len();
+    let total_cands = total_corpus_candidates.max(sample_cands);
+    let sample_loc: i64 = candidates_json
         .iter()
         .map(|c| c.get("loc_saving").and_then(Value::as_i64).unwrap_or(0))
         .sum();
-    let avg_callers = if total_cands > 0 {
+    let prev_loc = if sample_cands > 0 && total_cands > sample_cands {
+        (sample_loc as f64 * (total_cands as f64 / sample_cands as f64)).round() as i64
+    } else {
+        sample_loc
+    };
+    let avg_callers = if sample_cands > 0 {
         let callers_sum: i64 = candidates_json
             .iter()
             .map(|c| {
@@ -254,13 +267,14 @@ fn summarize_reuse_metrics(candidates_json: &[Value], prewrite_count: usize) -> 
                     .unwrap_or(0)
             })
             .sum();
-        callers_sum as f64 / total_cands as f64
+        callers_sum as f64 / sample_cands as f64
     } else {
         0.0
     };
 
     json!({
         "total_candidates": total_cands,
+        "sample_candidates": sample_cands,
         "preventable_loc": prev_loc,
         "prewrite_count": prewrite_count,
         "avg_callers": (avg_callers * 10.0).round() / 10.0,

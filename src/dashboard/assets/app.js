@@ -162,13 +162,24 @@ function loadReuseData() {
       reuseCandidates = data.candidates || [];
       prewriteSearches = data.prewrite_searches || [];
 
+      const summary = data.summary || {};
+      const totalCandidates = summary.total_candidates !== undefined ? summary.total_candidates : reuseCandidates.length;
+
       const countBadge = document.getElementById('nav-reuse-count');
-      if (countBadge) countBadge.textContent = reuseCandidates.length;
+      if (countBadge) countBadge.textContent = totalCandidates.toLocaleString();
 
       const kpiCount = document.getElementById('reuse-kpi-count');
-      if (kpiCount) kpiCount.textContent = reuseCandidates.length;
+      if (kpiCount) kpiCount.textContent = totalCandidates.toLocaleString();
 
-      const summary = data.summary || {};
+      const kpiCountSub = document.getElementById('reuse-kpi-count-sub');
+      if (kpiCountSub) {
+        if (totalCandidates > reuseCandidates.length) {
+          kpiCountSub.textContent = 'Top ' + reuseCandidates.length + ' of ' + totalCandidates.toLocaleString() + ' duplicate twins';
+        } else {
+          kpiCountSub.textContent = 'Syntactic & structural duplicate twins';
+        }
+      }
+
       const kpiLoc = document.getElementById('reuse-kpi-loc');
       if (kpiLoc) kpiLoc.textContent = '~' + (summary.preventable_loc || 0).toLocaleString() + ' LOC';
 
@@ -272,10 +283,19 @@ function updateMemoryKpis() {
   // KPI 4: Guarded Symbols & Hotspots
   const gotchas = currentNotes.filter(m => m.kind === 'gotcha').length;
   const decisions = currentNotes.filter(m => m.kind === 'decision').length;
+  const facts = currentNotes.filter(m => m.kind === 'fact').length;
+  const tasks = currentNotes.filter(m => m.kind === 'task').length;
   const guardedEl = document.getElementById('mem-kpi-guarded');
-  if (guardedEl) guardedEl.textContent = gotchas + decisions;
+  if (guardedEl) guardedEl.textContent = currentNotes.length;
   const guardedSub = document.getElementById('mem-kpi-guarded-sub');
-  if (guardedSub) guardedSub.textContent = gotchas + ' gotchas · ' + decisions + ' decisions';
+  if (guardedSub) {
+    const details = [];
+    if (gotchas > 0) details.push(gotchas + ' gotchas');
+    if (decisions > 0) details.push(decisions + ' decisions');
+    if (facts > 0) details.push(facts + ' facts');
+    if (tasks > 0) details.push(tasks + ' tasks');
+    guardedSub.textContent = details.length > 0 ? details.join(' · ') : currentNotes.length + ' active notes';
+  }
 
   updateActionCenter(currentNotes, modifiedCount, brokenCount);
 }
