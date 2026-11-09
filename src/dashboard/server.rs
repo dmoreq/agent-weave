@@ -175,7 +175,7 @@ fn serve_api_route(
     path: &str,
     log_path: &Path,
     root: Option<&Path>,
-    global: bool,
+    _global: bool,
     is_head: bool,
 ) -> std::io::Result<bool> {
     match path {
@@ -213,7 +213,7 @@ fn serve_api_route(
         }
         "/api/memories" => {
             let entries = data::read_usage_entries(log_path);
-            let notes = data::collect_memories(root, global, &entries).unwrap_or_default();
+            let notes = data::collect_memories(root, &entries).unwrap_or_default();
             let encoded = serde_json::to_vec_pretty(&notes).unwrap_or_default();
             send_response(
                 stream,

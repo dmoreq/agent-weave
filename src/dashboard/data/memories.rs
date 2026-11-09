@@ -11,12 +11,8 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::error::Result;
 
-pub fn collect_memories(
-    root: Option<&Path>,
-    global_only: bool,
-    entries: &[Value],
-) -> Result<Vec<Value>> {
-    let stores = discover_memory_stores(root, global_only, entries);
+pub fn collect_memories(root: Option<&Path>, entries: &[Value]) -> Result<Vec<Value>> {
+    let stores = discover_memory_stores(root, entries);
     let recalls_map = aggregate_recalls(entries);
     let mut notes_json = Vec::new();
 
@@ -36,7 +32,6 @@ pub fn collect_memories(
 
 fn discover_memory_stores(
     root: Option<&Path>,
-    global_only: bool,
     entries: &[Value],
 ) -> HashMap<String, (PathBuf, PathBuf)> {
     let mut stores: HashMap<String, (PathBuf, PathBuf)> = HashMap::new();
@@ -48,20 +43,14 @@ fn discover_memory_stores(
         }
     }
 
-    if !global_only {
-        let mut locals: HashMap<String, PathBuf> = HashMap::new();
-        super::discover_repos(root, entries, "memory.db", &mut locals);
-        let store_pair = |r: PathBuf| {
-            let l_db = r.join(".aw").join("memory.db");
-            (r, l_db)
-        };
-        if root.is_some() {
-            stores.extend(locals.into_iter().map(|(n, r)| (n, store_pair(r))));
-        } else {
-            for (name, r) in locals {
-                stores.entry(name).or_insert_with(|| store_pair(r));
-            }
-        }
+    let mut locals: HashMap<String, PathBuf> = HashMap::new();
+    super::discover_repos(root, entries, "memory.db", &mut locals);
+    let store_pair = |r: PathBuf| {
+        let l_db = r.join(".aw").join("memory.db");
+        (r, l_db)
+    };
+    for (name, r) in locals {
+        stores.entry(name).or_insert_with(|| store_pair(r));
     }
 
     stores
