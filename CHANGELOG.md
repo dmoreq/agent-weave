@@ -14,6 +14,16 @@ changes bump the minor while 0.x is unstable.
 - Read [evaluation](docs/evaluation.md) for the public evidence summary and its limitations, not replacement original evidence.
 - Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
+## [1.0.2] - 2026-11-09
+
+### Fixed
+- Fixed clippy `unneeded_wildcard_pattern` warning in `src/query/analysis/unresolved.rs`.
+
+### Documentation
+- Grounded canonical specs and guides in peer-reviewed research papers (RepoReuse, Zero-Mem, Agent Zero Memory, Agent-Native Memory Systems).
+- Removed 185 non-shipping historical baseline snapshots and archive drafts from `docs/archive/` and `docs/baselines/`.
+- Updated cross-references across `CONTRIBUTING.md`, `AGENTS.md`, and GitHub templates to canonical architecture paths.
+
 ## [1.0.1] - 2026-11-09
 
 ### Added

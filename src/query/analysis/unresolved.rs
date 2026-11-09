@@ -16,7 +16,6 @@ struct UnresolvedScope<'a> {
 /// Unresolved edge names with locations (Amendment 19). Report shape: header,
 /// then one `path:line kind name` row per unresolved site.
 pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Result<LineQuery> {
-    let QueryCtx { conn: _, .. } = *ctx;
     let (limit, clause, params) = scoped_query(path, limit, "f", "path", 1)?;
     let scope = UnresolvedScope {
         conn: ctx.conn,
