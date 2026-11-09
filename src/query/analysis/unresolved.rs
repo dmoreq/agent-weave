@@ -24,7 +24,7 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
         params,
     };
     let Some((total, files, unlocated)) = unresolved_counts(&scope)? else {
-        return Err(AwError::NoResults(
+        return Err(EgError::NoResults(
             "0 unresolved names (external/builtin calls are not counted)".to_string(),
         ));
     };
@@ -37,7 +37,7 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
         .collect();
     let (header, stale) = staleness_header(ctx, &displayed);
     let mut out = vec![format!(
-        "aw: unresolved={total} rows in {files} files (call/import/inherit)"
+        "eg: unresolved={total} rows in {files} files (call/import/inherit)"
     )];
     if let Some(header) = header {
         out.push(header);
@@ -53,7 +53,7 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
     }));
     let cap = finish_capped(&mut out, shown, total as usize, stale, "rows");
     let cap = if unlocated > 0 {
-        format!("[aw] {unlocated} unresolved row(s) have site_line=0 and are omitted\n{cap}")
+        format!("[eg] {unlocated} unresolved row(s) have site_line=0 and are omitted\n{cap}")
     } else {
         cap
     };
@@ -133,7 +133,7 @@ pub fn unresolved(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Resul
     let rows = unresolved_file_rows(&scope)?;
     let total: i64 = rows.iter().map(|(_, n)| *n).sum();
     if total == 0 {
-        return Err(AwError::NoResults(
+        return Err(EgError::NoResults(
             "0 unresolved in indexed scope (external/builtin calls are not counted)".to_string(),
         ));
     }
@@ -141,7 +141,7 @@ pub fn unresolved(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Resul
     let shown = n_files.min(limit);
     let (names, internal, distinct) = unresolved_name_view(&scope)?;
     let mut out = vec![format!(
-        "aw: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})"
+        "eg: unresolved={total} callees in {n_files} files, {distinct} distinct names (internal={internal})"
     )];
     if !names.is_empty() {
         out.push("top unresolved names:".to_string());

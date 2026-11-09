@@ -1,10 +1,10 @@
 //! Project memory: pure presentation and scoring over rows `db.rs` returns.
 //! No write primitives, no connection opening — everything here is a pure
 //! function of its inputs, so CLI and MCP render byte-identical output by
-//! construction (companion design: docs/designs/2026-11-05_agent-weave-
+//! construction (companion design: docs/archive/designs/2026-11-05_agent-weave-
 //! memory-retrieval.md; resolver constants follow its Decision D4-A).
 
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 
 // ---------------------------------------------------------------------------
 // Tuning constants (one module, compile-in only — no config surface).
@@ -13,7 +13,7 @@ use crate::error::{AwError, Result};
 /// Honesty caveat, stdout first line of every mem command except `mem export`
 /// (whose stdout must stay pure JSONL; the caveat goes to stderr there).
 pub const MEMORY_CAVEAT: &str =
-    "aw: memory — agent-authored notes, candidates only, never proof of current behavior";
+    "eg: memory — agent-authored notes, candidates only, never proof of current behavior";
 
 /// Single source of the `mem write` secret-rejection usage text: key, body,
 /// and tags/refs validation all emit this exact message so the bytes cannot
@@ -100,7 +100,7 @@ impl MemScope {
 pub fn parse_kind_filter(command: &str, raw: Option<&str>) -> Result<Option<MemKind>> {
     raw.map(|k| {
         MemKind::parse(k).ok_or_else(|| {
-            AwError::Usage(format!(
+            EgError::Usage(format!(
                 "{command}: kind must be one of {} (got '{k}')",
                 MEM_KINDS.map(MemKind::as_str).join("|")
             ))
@@ -114,7 +114,7 @@ pub fn parse_kind_filter(command: &str, raw: Option<&str>) -> Result<Option<MemK
 pub fn parse_scope_filter(command: &str, raw: Option<&str>) -> Result<Option<MemScope>> {
     raw.map(|s| {
         MemScope::parse(s).ok_or_else(|| {
-            AwError::Usage(format!(
+            EgError::Usage(format!(
                 "{command}: scope must be one of durable|session (got '{s}')"
             ))
         })

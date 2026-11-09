@@ -6,7 +6,7 @@ Sources:
 - `src/main.rs` — journal args, exits, payload routing, resolve caps.
 - `src/journal.rs` — usage.log/usage-results.jsonl contracts.
 - `README.md`, `skills/kg-first/SKILL.md`, `/Users/quy.doan/Workspace/personal/agent-skills/skills/code-index/SKILL.md`.
-- `docs/EVALUATION.md` §10-11.
+- `docs/evaluation.md` §10-11.
 
 For every feature/candidate, derive:
 - CLI command and flags;

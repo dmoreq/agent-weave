@@ -1,9 +1,0 @@
-{
-  "task": "I1",
-  "items": [
-    "10 src.db",
-    "11 src.error",
-    "12 src.hash"
-  ],
-  "note": "crate-internal imports in src/query.rs"
-}

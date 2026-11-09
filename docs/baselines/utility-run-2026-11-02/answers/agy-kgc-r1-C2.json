@@ -1,7 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "pairs": [],
-  "answer": "No. Comparing near.py against all repository files shows at most one matching line (\"for item in items:\") due to renamed identifiers, so no identical normalized-text block of 5+ lines exists."
-}

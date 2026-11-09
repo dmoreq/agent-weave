@@ -1,2 +1,0 @@
-{"ts":1793622378,"surface":"cli","tool":"search","args":{"terms":"_raw_items_from_sklearn_input","kind":"","path":"","exact":"false","limit":"50"},"result_count":50,"shown":50,"total":295,"ambiguous":0,"exit_code":0,"latency_us":7200,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
-{"ts":1793622383,"surface":"cli","tool":"search","args":{"terms":"_to_list","kind":"","path":"","exact":"false","limit":"50"},"result_count":50,"shown":50,"total":517,"ambiguous":0,"exit_code":0,"latency_us":3767,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

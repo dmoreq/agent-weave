@@ -9,7 +9,7 @@ use super::*;
 ///
 /// Debt (S2): one command still edits 11 sites even with this enum; the
 /// review's `<= 7` needs a macro/registry or a single clap-derived enum.
-/// Accepted and tracked in `docs/reports/2026-11-06_s2-dispatch-edit-sites.md`.
+/// Accepted and tracked in `docs/archive/reports/2026-11-06_s2-dispatch-edit-sites.md`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Family {
     Diag,

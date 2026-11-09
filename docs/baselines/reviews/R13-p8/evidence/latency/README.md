@@ -1,8 +1,8 @@
 # Latency / scale evidence
 
 Budgets and prior measurements:
-- `docs/designs/2026-11-02_p8-structural-graph_amendment.md` §7.5 and Amendment 21.
-- `docs/EVALUATION.md` §10.
+- `docs/archive/designs/2026-11-02_p8-structural-graph_amendment.md` §7.5 and Amendment 21.
+- `docs/evaluation.md` §10.
 - `tests/scripts/timing_assert.sh`.
 - `tests/scripts/make_synth_corpus.py`.
 - `/tmp/kg-r11-a3/synth1m` — 987k-symbol corpus when present.

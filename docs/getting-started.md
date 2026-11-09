@@ -1,6 +1,6 @@
-# Getting Started with agent-weave (`aw`)
+# Getting Started with engram (`eg`)
 
-Get up and running with `agent-weave` in under 5 minutes. Learn how to index a repository, navigate code relationships deterministically, prevent duplicate code, and carry zero-token memory across sessions.
+Get up and running with `engram` in under 5 minutes. Learn how to index a repository, navigate code relationships deterministically, prevent duplicate code, and carry zero-token memory across sessions.
 
 ---
 
@@ -13,11 +13,11 @@ Get up and running with `agent-weave` in under 5 minutes. Learn how to index a r
 - **C Compiler**: `cc` or `clang` for bundled SQLite and tree-sitter parsers
 
 ### 1-Click Automated Setup (Binary + All Agents)
-Run the automated installer to compile `aw`, install binaries (`aw`, `aw-dashboard`), and configure detected coding agents (Antigravity, Grok, Zcode, OpenCode, Zed, Claude, Cursor):
+Run the automated installer to compile `eg`, install binaries (`eg`, `eg-dashboard`), and configure detected coding agents (Antigravity, Grok, Zcode, OpenCode, Zed, Claude, Cursor):
 
 ```bash
-git clone https://github.com/dmoreq/agent-weave.git
-cd agent-weave
+git clone https://github.com/dmoreq/engram.git
+cd engram
 ./install.sh
 ```
 
@@ -31,47 +31,55 @@ cargo install --path . --locked
 Confirm that the binary is available in your `$PATH` (typically in `~/.cargo/bin`):
 
 ```bash
-aw --version
-aw --help
+eg --version
+eg --help
 ```
 
-*Note*: `aw` is built entirely with offline-capable bundled sources. Runtime execution requires zero network access.
+*Note*: `eg` is built entirely with offline-capable bundled sources. Runtime execution requires zero network access.
+
+### Upgrading from `agent-weave` (`aw`)
+State now lives in `.engram/` and `~/.engram/`. On first use, `eg` copies a
+pre-rename `.aw/memory.db` or `~/.aw/memory.db` into the new location when the
+new store is absent, so project memory survives the rename. Indexes are not
+migrated: `eg build` rebuilds them. The legacy `AW_*` environment variables
+(`AW_NO_JOURNAL`, `AW_GLOBAL_DIR`, `AW_SESSION`, `AW_AGENT`) keep resolving as
+fallbacks, and the installer leaves a transitional `aw -> eg` symlink.
 
 ---
 
 ## 2. The First 5 Minutes: Core USPs in Action
 
-Navigate to any supported code repository (Python, TypeScript, JavaScript, or Rust). You can also run these commands directly inside the `agent-weave` checkout.
+Navigate to any supported code repository (Python, TypeScript, JavaScript, or Rust). You can also run these commands directly inside the `engram` checkout.
 
 ### Step 1: Build the Local Index (USP 1)
 
 Generate the local SQLite AST graph:
 
 ```bash
-aw build
+eg build
 ```
 
-`aw` indexes source files into `.aw/index.db`. Initial builds complete in a few hundred milliseconds; subsequent incremental rebuilds take **~0.02s**.
+`eg` indexes source files into `.engram/index.db`. Initial builds complete in a few hundred milliseconds; subsequent incremental rebuilds take **~0.02s**.
 
 Verify index health and coverage:
 
 ```bash
-aw doctor
+eg doctor
 ```
 
-`aw doctor` checks database integrity, parser health, and changed file ratios.
+`eg doctor` checks database integrity, parser health, and changed file ratios.
 
 ---
 
 ### Step 2: Deterministic Code Navigation (USP 1)
 
-Traditional agent navigation burns thousands of tokens reading entire files to locate references. `aw` gives you exact, sub-2ms pointers:
+Traditional agent navigation burns thousands of tokens reading entire files to locate references. `eg` gives you exact, sub-2ms pointers:
 
 #### Inspect Symbol Surroundings
 Get definition ranges, signatures, callers, and callees in a single query:
 
 ```bash
-aw context run_build
+eg context run_build
 ```
 
 #### Find Incoming Callers
@@ -79,10 +87,10 @@ Trace direct and transitive callers without grepping:
 
 ```bash
 # Direct callers
-aw callers run_build
+eg callers run_build
 
 # Transitive callers up to 2 hops away
-aw callers run_build --depth 2
+eg callers run_build --depth 2
 ```
 
 Outputs list exact `path:line qualname [depth=N]` pointers. Open only the specific lines in your editor.
@@ -91,20 +99,20 @@ Outputs list exact `path:line qualname [depth=N]` pointers. Open only the specif
 Identify every file that calls into a target file before you edit it:
 
 ```bash
-aw impact src/build.rs
+eg impact src/build.rs
 ```
 
 ---
 
 ### Step 3: Anti-Reinvention Discovery & Verification (USP 2)
 
-Unguided AI agents frequently reinvent existing helpers because they cannot easily find canonical functions. `aw` provides two-moment protection:
+Unguided AI agents frequently reinvent existing helpers because they cannot easily find canonical functions. `eg` provides two-moment protection:
 
 #### Pre-Write Discovery
 Search for existing helpers before implementing new utility functions:
 
 ```bash
-aw search "read bounded"
+eg search "read bounded"
 ```
 
 Output delivers **Concise Interface Cards** ranked by caller popularity:
@@ -117,10 +125,10 @@ The `[callers=14]` tag signals that `read_bounded` is an established, canonical 
 Verify that your changes did not introduce duplicate logic or bypass existing helpers:
 
 ```bash
-aw reuse
+eg reuse
 ```
 
-`aw reuse` analyzes callee footprints and interface similarities across four calibrated detectors to surface duplicate function candidates.
+`eg reuse` analyzes callee footprints and interface similarities across four calibrated detectors to surface duplicate function candidates.
 
 ---
 
@@ -132,18 +140,18 @@ Avoid the token overhead of external memory servers. Persist durable decisions, 
 Anchor architectural decisions directly to source files:
 
 ```bash
-aw mem write resolver-strategy --kind decision \
+eg mem write resolver-strategy --kind decision \
   --body "Resolver maintains explicit confidence tiers. Ambiguous calls remain dst_id NULL." \
   --refs src/extract/resolve.rs
 ```
 
-If `src/extract/resolve.rs` is renamed or refactored, `aw` flags `[stale-ref]` alerts automatically.
+If `src/extract/resolve.rs` is renamed or refactored, `eg` flags `[stale-ref]` alerts automatically.
 
 #### Save Cross-Project Developer Preferences
-Use `--global` to persist global habits and profile settings in `~/.aw/memory.db`:
+Use `--global` to persist global habits and profile settings in `~/.engram/memory.db`:
 
 ```bash
-aw mem write dev-profile --kind decision --global \
+eg mem write dev-profile --kind decision --global \
   --body "Preferred stack: Rust. Coding style: Minimalist. Reject unrequested abstractions."
 ```
 
@@ -151,8 +159,8 @@ aw mem write dev-profile --kind decision --global \
 Query across both local repository decisions and global profile preferences:
 
 ```bash
-aw mem query resolver
-aw mem query profile
+eg mem query resolver
+eg mem query profile
 ```
 
 Local repository notes automatically shadow global notes with the same key. Global notes are labeled with `[global]`.
@@ -161,7 +169,7 @@ Local repository notes automatically shadow global notes with the same key. Glob
 
 ## 3. What is Indexed
 
-`aw` indexes code using AST grammars for the following file extensions:
+`eg` indexes code using AST grammars for the following file extensions:
 
 | Language | Extensions |
 |---|---|
@@ -173,7 +181,7 @@ Local repository notes automatically shadow global notes with the same key. Glob
 ### Index Boundaries
 - **Size Cap**: Individual files larger than 1 MiB are skipped to avoid indexing large generated assets.
 - **Git Awareness**: Automatically respects `.gitignore` rules and excludes untracked ignored paths.
-- **Confinement**: `.aw/` directories and external build artifacts are excluded.
+- **Confinement**: `.engram/` directories and external build artifacts are excluded.
 
 ---
 
@@ -182,13 +190,13 @@ Local repository notes automatically shadow global notes with the same key. Glob
 Derived data (the SQLite AST index and usage journals) can be cleaned up at any time:
 
 ```bash
-aw doctor --invalidate
+eg doctor --invalidate
 ```
 
-`--invalidate` removes `.aw/index.db` and temporary locks, but safely **preserves** your agent-authored project memory (`.aw/memory.db`). To back up memory notes before a full cleanup, run:
+`--invalidate` removes `.engram/index.db` and temporary locks, but safely **preserves** your agent-authored project memory (`.engram/memory.db`). To back up memory notes before a full cleanup, run:
 
 ```bash
-aw mem export > memory_backup.jsonl
+eg mem export > memory_backup.jsonl
 ```
 
 ---
@@ -197,4 +205,4 @@ aw mem export > memory_backup.jsonl
 
 - **[Usage Guide](usage.md)**: Master real-world developer and agent scenarios.
 - **[CLI Reference](cli-reference.md)**: Explore the complete 10-command syntax and exit codes.
-- **[Agent Integration](agent-integration.md)**: Connect `aw` to Claude Desktop, Cursor, or Antigravity via MCP.
+- **[Agent Integration](agent-integration.md)**: Connect `eg` to Claude Desktop, Cursor, or Antigravity via MCP.

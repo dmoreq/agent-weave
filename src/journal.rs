@@ -1,5 +1,5 @@
 //! Usage journal: one JSONL line per journaled invocation appended to
-//! `.aw/usage.log`. Best-effort by contract: a failed journal write is
+//! `.engram/usage.log`. Best-effort by contract: a failed journal write is
 //! silently ignored and can never alter a command's output or exit code.
 //! The line is serialized by serde_json (the MCP boundary dependency); the
 //! summary reader extracts only the fixed keys we write.
@@ -15,25 +15,29 @@ use serde_json::Value;
 pub(crate) const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
 pub fn usage_log_path(root: &Path) -> PathBuf {
-    crate::db::aw_dir(root).join("usage.log")
+    crate::db::eg_dir(root).join("usage.log")
 }
 
-/// Session/arm attribution: R1/R2 A/B tags, sanitized.
-fn env_tag(key: &str) -> String {
-    std::env::var(key)
+/// Session/arm attribution: R1/R2 A/B tags, sanitized. The first key that is
+/// set wins, so the pre-rename spelling still feeds attribution.
+fn env_tag(keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| std::env::var(key).ok())
         .map(|v| v.trim().chars().take(64).collect())
         .unwrap_or_default()
 }
 
 /// Session attribution for memory rows (`memories.session`): the same
-/// sanitized AW_SESSION tag the journal line carries. Public because the
+/// sanitized `ENGRAM_SESSION` tag the journal line carries. Public because the
 /// memory write path stamps it at write time.
 pub fn session_tag() -> String {
-    env_tag("AW_SESSION")
+    env_tag(&["ENGRAM_SESSION", "AW_SESSION"])
 }
 
-/// Journal opt-out contract: env `AW_NO_JOURNAL=1` (checked in `begin`) or
+/// Journal opt-out contract: env `ENGRAM_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
+/// `AW_NO_JOURNAL` is still honored: an operator who exported the pre-rename
+/// variable must not silently start journaling again.
 struct Pending {
     surface: &'static str,
     tool: String,
@@ -69,7 +73,7 @@ pub fn detect_agent() -> String {
     if let Some(agent) = CURRENT_AGENT.with(|a| a.borrow().clone()) {
         return agent;
     }
-    if let Ok(val) = std::env::var("AW_AGENT") {
+    if let Ok(val) = std::env::var("ENGRAM_AGENT").or_else(|_| std::env::var("AW_AGENT")) {
         let trimmed = val.trim();
         if !trimmed.is_empty() {
             return trimmed.chars().take(32).collect();
@@ -79,6 +83,13 @@ pub fn detect_agent() -> String {
         return "antigravity".to_string();
     }
     "user".to_string()
+}
+
+/// The opt-out is `1` in either spelling; any other value leaves journaling on.
+fn no_journal_requested() -> bool {
+    ["ENGRAM_NO_JOURNAL", "AW_NO_JOURNAL"]
+        .iter()
+        .any(|key| std::env::var(key).as_deref() == Ok("1"))
 }
 
 /// Disable journaling for this process without mutating the environment.
@@ -95,7 +106,7 @@ pub type JournalArgs = Vec<(&'static str, String)>;
 /// Arm the journal for this invocation. No-op when the env opt-out is set;
 /// the `--no-journal` flag is enforced by the caller skipping `begin`.
 pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
-    if DISABLED.with(|d| d.get()) || std::env::var("AW_NO_JOURNAL").as_deref() == Ok("1") {
+    if DISABLED.with(|d| d.get()) || no_journal_requested() {
         return;
     }
     let args: serde_json::Map<String, serde_json::Value> = args
@@ -112,62 +123,17 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
             total: 0,
             ambiguous: 0,
             stale: false,
-            session: env_tag("AW_SESSION"),
-            arm: env_tag("AW_ARM"),
+            session: env_tag(&["ENGRAM_SESSION", "AW_SESSION"]),
+            arm: env_tag(&["ENGRAM_ARM", "AW_ARM"]),
             agent: detect_agent(),
         });
-    });
-}
-
-/// The three same-typed outcome counters `record_result` journals. Named
-/// fields keep `result_count`/`shown`/`total` from being swapped silently at
-/// the call sites.
-pub struct OutcomeCounts {
-    pub result_count: usize,
-    pub shown: usize,
-    pub total: usize,
-}
-
-impl OutcomeCounts {
-    /// One count for all three counters: the non-paginated commands that
-    /// journal no truncation and no filtering.
-    pub fn uniform(n: usize) -> Self {
-        Self {
-            result_count: n,
-            shown: n,
-            total: n,
-        }
-    }
-
-    /// The paginated pointer queries: the journal count is the displayed set,
-    /// so `result_count` equals `shown` and only `total` can differ.
-    pub fn of(shown: usize, total: usize) -> Self {
-        Self {
-            result_count: shown,
-            shown,
-            total,
-        }
-    }
-}
-
-/// Handlers inject the query outcome before the process exits. No-op when the
-/// journal was not armed (disabled, or a non-journaled subcommand).
-pub fn record_result(counts: OutcomeCounts, stale: bool, ambiguous: usize) {
-    PENDING.with(|p| {
-        if let Some(pending) = p.borrow_mut().as_mut() {
-            pending.result_count = counts.result_count;
-            pending.shown = counts.shown;
-            pending.total = counts.total;
-            pending.stale = stale;
-            pending.ambiguous = ambiguous;
-        }
     });
 }
 
 /// Serialize and append the usage line. Called exactly once per process,
 /// after the outcome is known. All I/O failures are swallowed by contract.
 /// A `None` root (repo discovery failed) skips the write — there is no
-/// `.aw/` location.
+/// `.engram/` location.
 pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
@@ -191,7 +157,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "exit_code": exit_code,
         "latency_us": latency_us,
         "stale": pending.stale,
-        "aw_version": env!("CARGO_PKG_VERSION"),
+        "engram_version": env!("CARGO_PKG_VERSION"),
         "session": pending.session,
         "arm": pending.arm,
         "agent": pending.agent,
@@ -206,7 +172,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     }
     if let Ok(global_log) = crate::db::global_usage_log_path() {
         if let Some(parent) = global_log.parent() {
-            let should_append = if std::env::var("AW_GLOBAL_DIR").is_ok() {
+            let should_append = if crate::db::global_dir_overridden() {
                 parent.is_dir()
             } else {
                 true
@@ -220,7 +186,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
 
 fn append_line(path: &Path, line: &str) {
     // Write confinement: the journal is derived state and may only grow a
-    // regular file under a real `.aw/` directory. A symlinked directory or log
+    // regular file under a real `.engram/` directory. A symlinked directory or log
     // would append attacker-chosen content outside the repo (the read path
     // already rejects non-regular files).
     if let Some(dir) = path.parent() {
@@ -236,10 +202,10 @@ fn append_line(path: &Path, line: &str) {
         }
     }
     rotate_if_needed(path, ROTATE_BYTES);
-    // Whether `.aw` exists before this append: the journal seeds the gitignore
-    // marker only when IT creates the directory. A pre-existing `.aw` is owned
+    // Whether `.engram` exists before this append: the journal seeds the gitignore
+    // marker only when IT creates the directory. A pre-existing `.engram` is owned
     // by build/doctor (or the user) — appending must not touch its marker.
-    let aw_created_here = path
+    let eg_created_here = path
         .parent()
         .is_none_or(|dir| fs::symlink_metadata(dir).is_err());
     if let Some(dir) = path.parent() {
@@ -248,7 +214,7 @@ fn append_line(path: &Path, line: &str) {
     let mut file = match OpenOptions::new().append(true).open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            recreate_journal(path, aw_created_here);
+            recreate_journal(path, eg_created_here);
             match OpenOptions::new().create_new(true).append(true).open(path) {
                 Ok(file) => file,
                 Err(_) => return,
@@ -256,17 +222,19 @@ fn append_line(path: &Path, line: &str) {
         }
         Err(_) => return,
     };
+    // Owner-only mode: the journal carries repository paths and tool usage.
+    let _ = crate::db::harden_file_mode(path);
     let _ = file.write_all(line.as_bytes());
 }
 
-/// Seed the `.aw` gitignore marker on the recreate path, but only when THIS
-/// append created the directory: a pre-existing `.aw` is owned by
+/// Seed the `.engram` gitignore marker on the recreate path, but only when THIS
+/// append created the directory: a pre-existing `.engram` is owned by
 /// build/doctor (or the user) and appending must not touch its marker.
-fn recreate_journal(path: &Path, aw_created_here: bool) {
-    if !aw_created_here {
+fn recreate_journal(path: &Path, eg_created_here: bool) {
+    if !eg_created_here {
         return;
     }
-    if let Ok(global_dir) = crate::db::global_aw_dir() {
+    if let Ok(global_dir) = crate::db::global_eg_dir() {
         if path.starts_with(&global_dir) {
             return;
         }
@@ -274,7 +242,7 @@ fn recreate_journal(path: &Path, aw_created_here: bool) {
     let Some(root) = path.parent().and_then(Path::parent) else {
         return;
     };
-    let _ = crate::db::ensure_aw_gitignore(root);
+    let _ = crate::db::ensure_eg_gitignore(root);
 }
 
 fn rotate_if_needed(path: &Path, max: u64) {
@@ -346,9 +314,11 @@ pub fn prune_deleted_worktrees_all(base_path: &Path) -> std::io::Result<usize> {
     Ok(total)
 }
 
+mod outcome;
 mod render;
 mod tokens;
 
+pub(crate) use outcome::*;
 pub(crate) use render::*;
 pub(crate) use tokens::*;
 #[cfg(test)]
@@ -369,7 +339,7 @@ mod tests {
 
     #[test]
     fn extract_fields_round_trip() {
-        let line = "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"args\":{\"name\":\"a\"},\"result_count\":3,\"shown\":3,\"total\":3,\"ambiguous\":1,\"exit_code\":0,\"latency_us\":9800,\"stale\":false,\"aw_version\":\"0.1.0\"}";
+        let line = "{\"ts\":1,\"surface\":\"cli\",\"tool\":\"callers\",\"args\":{\"name\":\"a\"},\"result_count\":3,\"shown\":3,\"total\":3,\"ambiguous\":1,\"exit_code\":0,\"latency_us\":9800,\"stale\":false,\"engram_version\":\"0.1.0\"}";
         let f = parse_usage_line(line).unwrap();
         assert_eq!(f.tool, "callers");
         assert_eq!(f.result_count, 3);
@@ -399,7 +369,7 @@ mod tests {
     #[test]
     fn summary_quality_splits_empty_and_cap() {
         let root = crate::db::temp_root("journal-quality");
-        fs::create_dir_all(root.join(".aw")).unwrap();
+        fs::create_dir_all(root.join(".engram")).unwrap();
         let lines = [
             r#"{"tool":"callers","result_count":2,"shown":2,"total":2,"exit_code":0,"latency_us":1000}"#,
             r#"{"tool":"callers","result_count":0,"shown":0,"total":0,"exit_code":0,"latency_us":2000}"#,
@@ -425,12 +395,12 @@ mod tests {
     #[test]
     fn env_tag_trims_and_caps_at_64() {
         // Safety: test-only env mutation, single-threaded test binary section.
-        std::env::set_var("AW_TEST_TAG", "  r1-task-1  ");
-        assert_eq!(env_tag("AW_TEST_TAG"), "r1-task-1");
-        std::env::set_var("AW_TEST_TAG", "x".repeat(100));
-        assert_eq!(env_tag("AW_TEST_TAG").len(), 64);
-        std::env::remove_var("AW_TEST_TAG");
-        assert_eq!(env_tag("AW_TEST_TAG"), "");
+        std::env::set_var("ENGRAM_TEST_TAG", "  r1-task-1  ");
+        assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]), "r1-task-1");
+        std::env::set_var("ENGRAM_TEST_TAG", "x".repeat(100));
+        assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]).len(), 64);
+        std::env::remove_var("ENGRAM_TEST_TAG");
+        assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]), "");
     }
 
     #[cfg(unix)]
@@ -444,13 +414,13 @@ mod tests {
         append_line(&log, "line\n");
         assert_eq!(fs::read(&target).unwrap(), b"keep");
 
-        // A symlinked `.aw` directory must not redirect the write either.
+        // A symlinked `.engram` directory must not redirect the write either.
         let outside = dir.join("outside");
         fs::create_dir_all(&outside).unwrap();
         let linked_root = dir.join("repo");
         fs::create_dir_all(&linked_root).unwrap();
-        std::os::unix::fs::symlink(&outside, linked_root.join(".aw")).unwrap();
-        append_line(&linked_root.join(".aw/usage.log"), "line\n");
+        std::os::unix::fs::symlink(&outside, linked_root.join(".engram")).unwrap();
+        append_line(&linked_root.join(".engram/usage.log"), "line\n");
         assert!(!outside.join("usage.log").exists());
         let _ = fs::remove_dir_all(&dir);
     }

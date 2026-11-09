@@ -1,3 +1,0 @@
-I'll check the pending handoff, then ask the code index whether `pkg.m0.f0` reaches `pkg.g0.g0`.`kg path` found no route within depth 10 and left a longer path open. I'll check whether a deeper search is supported.`pkg.g0.g0` has no resolved callers, so nothing in the call graph reaches it. I'll write that result.No route exists from `pkg.m0.f0` to `pkg.g0.g0` in the resolved call graph.
-
-`kg path` found no path within depth 10. `pkg.g0.g0` has zero resolved callers, so no longer route exists either. The result is in `/tmp/utility-answers-2026-11-02/grok-kgp-r2-D2.json` with `exists: false`, `hops: 0`, and `route: []`.

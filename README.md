@@ -1,6 +1,6 @@
-# agent-weave (`aw`)
+# engram (`eg`)
 
-[![CI](https://github.com/dmoreq/agent-weave/actions/workflows/ci.yml/badge.svg)](https://github.com/dmoreq/agent-weave/actions/workflows/ci.yml)
+[![CI](https://github.com/dmoreq/engram/actions/workflows/ci.yml/badge.svg)](https://github.com/dmoreq/engram/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](#license)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](docs/getting-started.md#requirements)
 [![Offline](https://img.shields.io/badge/runtime-100%25%20offline-success.svg)](#security-and-confinement)
@@ -8,7 +8,7 @@
 
 Local deterministic code graph, real-time anti-reinvention engine, and zero-token persistent memory for AI coding agents.
 
-Single native binary. Zero background daemons. Zero runtime network access. Zero writes outside `.aw/`.
+Single native binary. Zero background daemons. Zero runtime network access. Zero writes outside `.engram/`.
 
 ---
 
@@ -16,8 +16,8 @@ Single native binary. Zero background daemons. Zero runtime network access. Zero
 
 ```text
 +-----------------------------------------------------------------------------------+
-|                                 agent-weave (aw)                                  |
-|   Single native binary | 0 daemons | 0 network requests | Strict .aw/ confinement |
+|                                    engram (eg)                                    |
+| Single native binary | 0 daemons | 0 network requests | Strict .engram/           |
 +-----------------------------------------------------------------------------------+
         |                                    |                                    |
         v                                    v                                    v
@@ -26,7 +26,7 @@ Single native binary. Zero background daemons. Zero runtime network access. Zero
 |  Deterministic Graph  |  |      Anti-Reinvention Engine      |  |  Zero-Token Layered   |
 |      Navigation       |  |   (arXiv:2609.35357 RepoReuse)    |  |        Memory         |
 |                       |  |                                   |  | (arXiv:2607.29377)    |
-| • < 2ms query latency |  | • Pre-write: aw search interface  |  |                       |
+| • < 2ms query latency |  | • Pre-write: eg search interface  |  |                       |
 | • 0.02s rebuild       |  |   cards with [callers=N]          |  | • 0 LLM tokens tax    |
 | • -27.3% input tokens |  | • Post-edit: instant build hints  |  | • Local: repo context |
 | • 98.6% recall        |  | • Calibrated detector (Cdup >= 80%)|  | • Global: dev profile |
@@ -34,29 +34,29 @@ Single native binary. Zero background daemons. Zero runtime network access. Zero
 ```
 
 ### 1. Sub-2ms Deterministic Code Navigation (Zero Daemon, Zero Token Waste)
-Large Language Models waste context windows dumping whole source files to find call sites. `aw` parses Python, TypeScript, JavaScript, and Rust into a local SQLite AST graph:
+Large Language Models waste context windows dumping whole source files to find call sites. `eg` parses Python, TypeScript, JavaScript, and Rust into a local SQLite AST graph:
 - **Sub-2ms query latency** across multi-thousand file codebases.
 - **0.02s–0.03s incremental rebuilds** via content-addressed AST hashing.
 - **Empirical impact**: **98.6% recall** (vs 81.9% grep-only), **-27.3% input tokens**, and **-57% to -86% tool calls**.
 - **Deterministic pointers**: `path:line qualname` outputs allow agents to inspect exact slices instead of burning tokens on file scans.
 
 ### 2. Real-Time Anti-Reinvention Engine (Prevents Duplicate Code & Exploration Collapse)
-Unguided AI coding agents duplicate existing logic at alarming rates (up to 50.8% duplicate code by Turn 5 under standard multi-turn benchmarks, as documented in RepoReuse, [arXiv:2609.35357](https://arxiv.org/abs/2609.35357)). `aw` provides two-moment protection:
-- **Pre-write Discovery**: `aw search` returns zero-body Concise Interface Cards ranked by `BM25 + log(1 + callers)` to surface canonical functions before agents author new code.
-- **Post-edit Defense**: Incremental `aw build` emits instant stderr hints (< 1ms), while `aw reuse` runs four calibrated detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, client bypass, and 1-caller wrappers).
+Unguided AI coding agents duplicate existing logic at alarming rates (up to 50.8% duplicate code by Turn 5 under standard multi-turn benchmarks, as documented in RepoReuse, [arXiv:2609.35357](https://arxiv.org/abs/2609.35357)). `eg` provides two-moment protection:
+- **Pre-write Discovery**: `eg search` returns zero-body Concise Interface Cards ranked by `BM25 + log(1 + callers)` to surface canonical functions before agents author new code.
+- **Post-edit Defense**: Incremental `eg build` emits instant stderr hints (< 1ms), while `eg reuse` runs four calibrated detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, client bypass, and 1-caller wrappers).
 
 ### 3. Zero-Token Code-Anchored Project & Global Memory (Unified Single Binary)
-External memory MCP servers introduce an expensive "Memory Tax" through prompt-injected summaries and LLM-based extractions. Based on Zero-Mem ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377)), `aw` implements zero-token persistent memory:
+External memory MCP servers introduce an expensive "Memory Tax" through prompt-injected summaries and LLM-based extractions. Based on Zero-Mem ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377)), `eg` implements zero-token persistent memory:
 - **0 LLM tokens consumed**: Pure SQLite FTS5 BM25 + deterministic recency/ref score fusion in under 2ms.
-- **Layered storage**: Local `.aw/memory.db` for repository decisions, gotchas, and task handoffs; global `~/.aw/memory.db` (`--global`) for developer preferences and cross-project conventions.
-- **Code-anchored references**: Notes anchor directly to AST symbols via `--refs`. When code refactors invalidate an anchor, `aw` flags `[stale-ref]` automatically.
+- **Layered storage**: Local `.engram/memory.db` for repository decisions, gotchas, and task handoffs; global `~/.engram/memory.db` (`--global`) for developer preferences and cross-project conventions.
+- **Code-anchored references**: Notes anchor directly to AST symbols via `--refs`. When code refactors invalidate an anchor, `eg` flags `[stale-ref]` automatically.
 - **Unified binary**: Replaces separate memory servers (`ai-memory`) with a single toolchain.
 
 ---
 
 ## Workflow Comparison Matrix
 
-| Metric / Capability | Grep / Whole-File Reads | Language Server Protocol (LSP) | `agent-weave` (`aw`) |
+| Metric / Capability | Grep / Whole-File Reads | Language Server Protocol (LSP) | `engram` (`eg`) |
 |---|---|---|---|
 | **Query Latency** | 100ms–5000ms | 50ms–2000ms (daemon startup) | **< 2ms** (in-process SQLite) |
 | **Incremental Rebuild** | N/A (re-scans every time) | Continuous background indexing | **0.02s** on edit |
@@ -75,8 +75,8 @@ External memory MCP servers introduce an expensive "Memory Tax" through prompt-i
 Build from source and configure all active AI agents automatically:
 
 ```bash
-git clone https://github.com/dmoreq/agent-weave.git
-cd agent-weave
+git clone https://github.com/dmoreq/engram.git
+cd engram
 ./install.sh
 ```
 
@@ -87,32 +87,32 @@ cargo install --path . --locked
 
 Confirm the installation:
 ```bash
-aw --version
+eg --version
 ```
 
 ### Quick Walkthrough
 
 ```bash
 # 1. Build the local index
-aw build
+eg build
 
 # 2. USP 2: Discover canonical interfaces before writing code
-aw search "read bounded"
+eg search "read bounded"
 # Output: src/walk.rs:42 fn read_bounded(path: &Path, max_bytes: usize) -> Result<Vec<u8>> [callers=14]
 
 # 3. USP 1: Inspect surroundings and callers in sub-2ms
-aw context read_bounded
-aw callers read_bounded --depth 2
+eg context read_bounded
+eg callers read_bounded --depth 2
 
 # 4. USP 2: Verify zero duplicate functions after edits
-aw reuse
+eg reuse
 
 # 5. USP 3: Persist cross-project developer preferences (0 tokens)
-aw mem write dev-profile --kind decision --global \
+eg mem write dev-profile --kind decision --global \
   --body "Preferred stack: Rust. Coding style: Minimalist. Reject unrequested dependencies."
 
 # 6. USP 3: Persist a code-anchored repository decision
-aw mem write resolver-strategy --kind decision \
+eg mem write resolver-strategy --kind decision \
   --body "Resolver maintains explicit confidence tiers. Ambiguous calls remain dst_id NULL." \
   --refs src/extract/resolve.rs
 ```
@@ -125,28 +125,28 @@ The 10 core command surfaces cover complete code navigation, anti-reinvention, a
 
 | Subcommand | Primary Purpose | Key Output / Behavior |
 |---|---|---|
-| `aw build` | Compile or incrementally update AST index | Rebuilds in ~0.02s; atomic swap |
-| `aw callers <symbol>` | Find incoming callers (direct or transitive) | `path:line qualname [depth=N]` |
-| `aw callees <symbol>` | Trace outgoing function calls | Resolved call targets by depth |
-| `aw context <symbol>` | 1-call definition, callers, and callees | Consolidated symbol surroundings |
-| `aw path <from> <to>` | Find shortest call route between symbols | Exact hop sequence with call sites |
-| `aw impact <file>` | Identify files calling into target file | File grouping with caller counts |
-| `aw imports <file>` | Outbound resolved imports for a file | Module import targets |
-| `aw search <terms>` | BM25 + caller-weighted symbol discovery | Interface cards with `[callers=N]` |
-| `aw symbols <path>` | File/directory outline with signatures | `path:line kind qualname (signature)` |
-| `aw reuse [paths...]` | Detect duplicate functions and wrappers | 4 calibrated anti-reinvention detectors |
+| `eg build` | Compile or incrementally update AST index | Rebuilds in ~0.02s; atomic swap |
+| `eg callers <symbol>` | Find incoming callers (direct or transitive) | `path:line qualname [depth=N]` |
+| `eg callees <symbol>` | Trace outgoing function calls | Resolved call targets by depth |
+| `eg context <symbol>` | 1-call definition, callers, and callees | Consolidated symbol surroundings |
+| `eg path <from> <to>` | Find shortest call route between symbols | Exact hop sequence with call sites |
+| `eg impact <file>` | Identify files calling into target file | File grouping with caller counts |
+| `eg imports <file>` | Outbound resolved imports for a file | Module import targets |
+| `eg search <terms>` | BM25 + caller-weighted symbol discovery | Interface cards with `[callers=N]` |
+| `eg symbols <path>` | File/directory outline with signatures | `path:line kind qualname (signature)` |
+| `eg reuse [paths...]` | Detect duplicate functions and wrappers | 4 calibrated anti-reinvention detectors |
 
 ### Platform & Maintenance Commands
 
-- `aw mem write|query|get|delete|export|gc`: Zero-token project and global memory management.
-- `aw doctor [--invalidate]`: Verify index integrity, staleness, or reset derived data.
-- `aw stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
-- `aw unresolved [--names]`: Inspect where static resolution could not resolve call sites.
-- `aw usage [--global] [--quality]`: View latency distribution, token savings, and query success telemetry (local or machine-wide).
-- `aw dashboard [--port 7890] [--open]`: Native live streaming Web SSE dashboard (Telemetry, Anti-Reinvention, Memory).
-- `aw monitor [--repo <NAME>] [--errors-only]`: Real-time terminal ANSI query event stream.
-- `aw-dashboard`: Convenience launcher for native web dashboard.
-- `aw mcp`: Start the Model Context Protocol stdio server.
+- `eg mem write|query|get|delete|export|gc`: Zero-token project and global memory management.
+- `eg doctor [--invalidate]`: Verify index integrity, staleness, or reset derived data.
+- `eg stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
+- `eg unresolved [--names]`: Inspect where static resolution could not resolve call sites.
+- `eg usage [--global] [--quality]`: View latency distribution, token savings, and query success telemetry (local or machine-wide).
+- `eg dashboard [--port 7890] [--open]`: Native live streaming Web SSE dashboard (Telemetry, Anti-Reinvention, Memory).
+- `eg monitor [--repo <NAME>] [--errors-only]`: Real-time terminal ANSI query event stream.
+- `eg-dashboard`: Convenience launcher for native web dashboard.
+- `eg mcp`: Start the Model Context Protocol stdio server.
 
 See the complete [CLI Reference](docs/cli-reference.md) for flag details and exit codes.
 
@@ -154,7 +154,7 @@ See the complete [CLI Reference](docs/cli-reference.md) for flag details and exi
 
 ## Agent Integration (MCP)
 
-`aw` integrates seamlessly with AI coding agents via the Model Context Protocol (MCP).
+`eg` integrates seamlessly with AI coding agents via the Model Context Protocol (MCP).
 
 ### 1-Click Host Configurations
 
@@ -162,8 +162,8 @@ See the complete [CLI Reference](docs/cli-reference.md) for flag details and exi
 ```json
 {
   "mcpServers": {
-    "agent-weave": {
-      "command": "aw",
+    "engram": {
+      "command": "eg",
       "args": ["--root", "/absolute/path/to/repository", "mcp"]
     }
   }
@@ -174,8 +174,8 @@ See the complete [CLI Reference](docs/cli-reference.md) for flag details and exi
 ```json
 {
   "mcpServers": {
-    "agent-weave": {
-      "command": "aw",
+    "engram": {
+      "command": "eg",
       "args": ["--root", "${workspaceFolder}", "mcp"]
     }
   }
@@ -186,8 +186,8 @@ See the complete [CLI Reference](docs/cli-reference.md) for flag details and exi
 ```json
 {
   "mcpServers": {
-    "agent-weave": {
-      "command": "aw",
+    "engram": {
+      "command": "eg",
       "args": ["--root", ".", "mcp"]
     }
   }
@@ -197,21 +197,21 @@ See the complete [CLI Reference](docs/cli-reference.md) for flag details and exi
 ### Real-Time Performance & Telemetry Footer
 Every MCP response includes a compact execution summary:
 ```text
-⚡ aw: 1.2ms | ~3.8k tokens saved
+⚡ eg: 1.2ms | ~3.8k tokens saved
 ```
 Verify aggregate session savings at any time:
 ```bash
-aw usage --quality
+eg usage --quality
 ```
 
-For complete agent routing instructions and the `aw-first` skill, see [Agent Integration](docs/agent-integration.md).
+For complete agent routing instructions and the `engram-first` skill, see [Agent Integration](docs/agent-integration.md).
 
 ---
 
 ## Security and Confinement
 
-- **Zero Runtime Network Access**: `aw` makes no network connections during operation.
-- **Strict Filesystem Confinement**: All runtime writes and deletes are confined strictly to `.aw/` inside the target repository root, plus `~/.aw/` for global memory. `aw` never edits source files, git configuration, hooks, or agent settings.
+- **Zero Runtime Network Access**: `eg` makes no network connections during operation.
+- **Strict Filesystem Confinement**: All runtime writes and deletes are confined strictly to `.engram/` inside the target repository root, plus `~/.engram/` for global memory. `eg` never edits source files, git configuration, hooks, or agent settings.
 - **Zero Background Daemons**: No background processes, file watchers, or persistent sockets. Every command runs synchronously and exits immediately.
 - **Deterministic and Audited**: Zero `unsafe` Rust code in `src/` or `tests/`. Dependencies are pinned and strictly allowlisted.
 

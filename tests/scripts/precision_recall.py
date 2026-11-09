@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""G2 — precision + recall of `aw callers` against the 30 frozen GT rows.
+"""G2 — precision + recall of `eg callers` against the 30 frozen GT rows.
 
-Recall: a GT row hits when aw's caller pointers for the row's callee qualname
-contain the row's caller file:line; when aw exits 2 (ambiguous symbol), the
+Recall: a GT row hits when eg's caller pointers for the row's callee qualname
+contain the row's caller file:line; when eg exits 2 (ambiguous symbol), the
 row hits only if the true callee qualname appears in the candidate list
 (tasks.md scoring contract). Dynamic rows (G28) are excluded from both
 denominators per spec.
@@ -10,11 +10,11 @@ denominators per spec.
 Precision: every emitted pointer for the queried callees is verified against
 the vihap working tree — the source line must contain the callee's short name
 followed by "(" (a real call site). EXTRACTED-tier precision uses the same
-verification (aw emits only EXTRACTED-tier pointers for these queries).
+verification (eg emits only EXTRACTED-tier pointers for these queries).
 
 Wilson 95% intervals are computed from the binomial standard formulas.
 
-Usage: precision_recall.py <vihap-root> <aw-binary> <ground-truth.md>
+Usage: precision_recall.py <vihap-root> <eg-binary> <ground-truth.md>
 Exit 0 when the historical gate passes; prints the gate verdict.
 """
 import math
@@ -24,10 +24,10 @@ import sys
 from pathlib import Path
 
 
-def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
-    """Run aw with journaling off; shared by the measurement scripts."""
+def run_eg(eg: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
+    """Run eg with journaling off; shared by the measurement scripts."""
     return subprocess.run(
-        [aw, "--root", str(root), "--no-journal", *args],
+        [eg, "--root", str(root), "--no-journal", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -62,15 +62,15 @@ def parse_gt(path):
     return rows
 
 
-def aw_callers(aw, root, qualname):
+def eg_callers(eg, root, qualname):
     proc = subprocess.run(
-        [aw, "callers", qualname, "--limit", "10000", "--root", root],
+        [eg, "callers", qualname, "--limit", "10000", "--root", root],
         capture_output=True, text=True,
     )
     if proc.returncode == 0:
         pointers = set()
         for line in proc.stdout.splitlines():
-            if line.startswith("aw:") or line.startswith("showing "):
+            if line.startswith("eg:") or line.startswith("showing "):
                 continue
             # R7 pointer lines may carry an identity detail after the
             # pointer ("src/query.rs:1499 src.query.collect_output"); parse
@@ -89,7 +89,7 @@ def aw_callers(aw, root, qualname):
 
 
 def main():
-    root, aw, gt_path = sys.argv[1], sys.argv[2], sys.argv[3]
+    root, eg, gt_path = sys.argv[1], sys.argv[2], sys.argv[3]
     rows = parse_gt(gt_path)
     scored = [r for r in rows if not r[2].startswith("(dynamic)")]
     dynamic = [r for r in rows if r[2].startswith("(dynamic)")]
@@ -102,7 +102,7 @@ def main():
             targets.append(callee[: -len(".__init__")])
         for t in targets:
             if t not in callee_pointers:
-                callee_pointers[t] = aw_callers(aw, root, t)
+                callee_pointers[t] = eg_callers(eg, root, t)
 
     hits = 0
     site_hits = 0

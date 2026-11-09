@@ -1,1 +1,0 @@
-{"exists": true, "hops": 0, "route": ["vihap/adapters/sklearn.py:117"], "answer": "vihap.adapters.sklearn._coerce_string_sequence accepts X: Any and returns list[str]; _fit_string_sequence calls _coerce_string_sequence(X) at vihap/adapters/sklearn.py:225."}

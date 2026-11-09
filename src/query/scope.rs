@@ -12,7 +12,7 @@ pub fn validate_path_scope(path: &str, allow_root: bool) -> Result<()> {
         || p.starts_with('/')
         || p.contains('\\')
     {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "invalid scope '{path}' (repo-relative path required)"
         )));
     }

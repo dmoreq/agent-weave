@@ -1,4 +1,0 @@
-vihap/formatters/osm.py:10:    from ..validators.gso_index import GsoIndex
-vihap/formatters/osm.py:197:def _get_gso_index() -> GsoIndex:
-vihap/formatters/osm.py:235:    index: GsoIndex,
-vihap/formatters/osm.py:305:    index: GsoIndex,

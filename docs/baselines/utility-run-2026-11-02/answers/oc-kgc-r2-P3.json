@@ -1,1 +1,0 @@
-{"exists": true, "hops": 3, "route": ["scripts/build_knowledge_base.py:1702", "scripts/build_knowledge_base.py:1423", "vihap/cleaners/admin.py:92"], "answer": "Yes. main calls export_master_admin_marshal, which calls normalize_admin_name, which calls vihap.cleaners.unicode.normalize_ascii."}

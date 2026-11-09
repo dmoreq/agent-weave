@@ -1,1 +1,0 @@
-{"exists":true,"hops":0,"route":["src/journal.rs:432"],"answer":"src.journal.verify samples payload-log entries, replays their pointers against current source files, and classifies each as OK, CHANGED, or FAIL."}

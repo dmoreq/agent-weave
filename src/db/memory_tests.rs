@@ -153,14 +153,14 @@ fn memory_current_rows_matches_is_current_predicate() {
     remove_tree(&root);
 }
 
-/// Column names of `CREATE TABLE memories(...)` in schema_memory.sql:
+/// Column names of `CREATE TABLE memories(...)` in schema/memory.sql:
 /// first token per line inside the parens, with trailing comments and
 /// constraint heads stripped.
 fn schema_memory_columns(sql: &str) -> Vec<String> {
     let body = sql
         .split("CREATE TABLE memories(")
         .nth(1)
-        .expect("schema_memory.sql must declare memories");
+        .expect("schema/memory.sql must declare memories");
     let body = body.split(");").next().unwrap_or(body);
     const CONSTRAINT_HEADS: [&str; 5] = ["primary", "unique", "check", "foreign", "constraint"];
     body.lines()
@@ -176,12 +176,16 @@ fn schema_memory_columns(sql: &str) -> Vec<String> {
 #[test]
 fn memory_required_manifest_matches_schema_file() {
     // MEMORY_REQUIRED is the hand-copied "required structure" manifest the
-    // open gates check; this pins it to schema_memory.sql in both
+    // open gates check; this pins it to schema/memory.sql in both
     // directions, so a schema bump that forgets the manifest (or a
     // manifest edit that outlives a column) fails here instead of pushing
     // a valid store to exit 5 or opening a short store read-write.
-    let sql = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("schema_memory.sql"))
-        .unwrap();
+    let sql = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("schema")
+            .join("memory.sql"),
+    )
+    .unwrap();
     let schema_columns = schema_memory_columns(&sql);
     let required: std::collections::HashSet<&str> = MEMORY_REQUIRED
         .iter()
@@ -193,13 +197,13 @@ fn memory_required_manifest_matches_schema_file() {
     for column in &schema_columns {
         assert!(
             required.contains(&column.as_str()),
-            "schema_memory.sql column '{column}' is missing from MEMORY_REQUIRED"
+            "schema/memory.sql column '{column}' is missing from MEMORY_REQUIRED"
         );
     }
     for column in &required {
         assert!(
             schema_columns.iter().any(|c| c == column),
-            "MEMORY_REQUIRED column '{column}' is missing from schema_memory.sql"
+            "MEMORY_REQUIRED column '{column}' is missing from schema/memory.sql"
         );
     }
 }
@@ -259,7 +263,7 @@ fn memory_open_gates_reject_version_and_structure_skew() {
     assert_eq!(err.exit_code(), 5);
     assert!(
         err.to_string()
-            .contains("restore from an aw mem export backup"),
+            .contains("restore from an eg mem export backup"),
         "{err}"
     );
     // Older but missing required structure -> the other exit-5 message.

@@ -1,8 +1,0 @@
-I'll list any pending handoff first, then resolve `resolve_street` from the code index.No pending handoff. Next I’ll pull `resolve_street` from the code index: qualname, callers, and callees.Wrote `/tmp/utility-answers-2026-11-02/grok-kgx-r1-F2.json`.
-
-`vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street` (`vihap/cleaners/abbreviation_engine.py:436`) has 4 direct call sites and 5 direct callee definitions.
-
-| Role | Pointers |
-|---|---|
-| Callers | `tests/test_abbreviation_engine.py:26`, `:48`, `:53`; `tests/test_street_validator.py:156` |
-| Callees | `vihap/cleaners/abbreviation_engine.py:58`, `:347`, `:361`, `:413`; `vihap/cleaners/unicode.py:47` |

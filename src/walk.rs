@@ -1,5 +1,5 @@
 //! Repository walk: `ignore` WalkBuilder from the git root discovered upward,
-//! `.aw/` skipped unconditionally, per-file size cap 1 MB (skipped + counted),
+//! `.engram/` skipped unconditionally, per-file size cap 1 MB (skipped + counted),
 //! extension allowlist per language generation.
 
 use std::collections::HashMap;
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
 
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 
 pub const MAX_FILE_SIZE: u64 = 1024 * 1024;
 
@@ -41,7 +41,7 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
     match explicit {
         Some(p) => {
             if !p.is_dir() {
-                return Err(AwError::Usage(format!(
+                return Err(EgError::Usage(format!(
                     "--root {} is not a directory",
                     p.display()
                 )));
@@ -50,9 +50,9 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
         }
         None => {
             let cwd = std::env::current_dir()
-                .map_err(|e| AwError::Internal(format!("cannot read cwd: {e}")))?;
+                .map_err(|e| EgError::Internal(format!("cannot read cwd: {e}")))?;
             find_git_root(&cwd).ok_or_else(|| {
-                AwError::Usage("no git root ancestor found — pass --root <path>".to_string())
+                EgError::Usage("no git root ancestor found — pass --root <path>".to_string())
             })
         }
     }
@@ -124,9 +124,9 @@ enum WalkVerdict {
     OverCap,
 }
 
-/// The guard chain for one git-visible path: `.aw/` membership, extension
-/// allowlist, ancestor-symlink containment, symlink leaf, non-file, and size
-/// cap. The metadata is stat'ed exactly once, here.
+/// The guard chain for one git-visible path: `.engram/`/`.aw/` membership,
+/// extension allowlist, ancestor-symlink containment, symlink leaf, non-file,
+/// and size cap. The metadata is stat'ed exactly once, here.
 fn walk_verdict(
     rel: &str,
     root: &Path,
@@ -134,7 +134,9 @@ fn walk_verdict(
     root_canon: &Path,
     parent_contained: &mut HashMap<PathBuf, bool>,
 ) -> WalkVerdict {
-    if rel.split('/').any(|seg| seg == ".aw") {
+    // Whole-segment equality keeps application paths such as `src/engram/`
+    // indexed while both confinement directories stay out of the graph.
+    if rel.split('/').any(|seg| seg == ".engram" || seg == ".aw") {
         return WalkVerdict::Skip;
     }
     let ext = Path::new(rel)
@@ -175,7 +177,7 @@ fn walk_verdict(
 }
 
 /// Stat each git-visible path once. Missing paths (staged deletions), symlinks,
-/// directories (submodules), `.aw/`, unsupported extensions, and files over
+/// directories (submodules), `.engram/`, unsupported extensions, and files over
 /// `MAX_FILE_SIZE` are skipped; the size cap is counted for the build report.
 fn walk_git_visible(root: &Path, rels: &[String], exts: &[&str]) -> WalkStats {
     let mut files = Vec::new();
@@ -223,7 +225,7 @@ pub(crate) fn open_regular_file(path: &Path) -> std::io::Result<Option<std::fs::
 /// than a truncated parse.
 pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     use std::io::Read;
-    let not_regular = || AwError::Internal(format!("not a regular file: {}", path.display()));
+    let not_regular = || EgError::Internal(format!("not a regular file: {}", path.display()));
     let file = match open_regular_file(path)? {
         Some(file) => file,
         None => return Err(not_regular()),
@@ -233,7 +235,7 @@ pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
         return Err(not_regular());
     }
     if meta.len() > MAX_FILE_SIZE {
-        return Err(AwError::Internal(format!(
+        return Err(EgError::Internal(format!(
             "file exceeds the 1 MiB cap after walk: {}",
             path.display()
         )));
@@ -242,7 +244,7 @@ pub fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     let mut reader = file.take(MAX_FILE_SIZE + 1);
     reader.read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_FILE_SIZE {
-        return Err(AwError::Internal(format!(
+        return Err(EgError::Internal(format!(
             "file grew past the 1 MiB cap during read: {}",
             path.display()
         )));
@@ -255,14 +257,18 @@ fn walk_fallback(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     let mut builder = WalkBuilder::new(root);
     // Respect .gitignore/.ignore (node_modules and build dirs vanish here).
     // Hidden files are kept so dot-directories are governed solely by the
-    // explicit .aw/ filter below, not by ignore's hidden heuristic.
+    // explicit confinement-directory filter below, not by ignore's hidden
+    // heuristic.
     builder.hidden(false);
-    builder.filter_entry(|entry| entry.file_name() != std::ffi::OsStr::new(".aw"));
+    builder.filter_entry(|entry| {
+        let name = entry.file_name();
+        name != std::ffi::OsStr::new(".engram") && name != std::ffi::OsStr::new(".aw")
+    });
 
     let mut files = Vec::new();
     let mut skipped_large = 0usize;
     for entry in builder.build() {
-        let entry = entry.map_err(|e| AwError::Internal(format!("walk error: {e}")))?;
+        let entry = entry.map_err(|e| EgError::Internal(format!("walk error: {e}")))?;
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
@@ -306,12 +312,12 @@ mod tests {
     }
 
     #[test]
-    fn walk_skips_aw_dir_and_large_files_and_filters_ext() {
+    fn walk_skips_eg_dir_and_large_files_and_filters_ext() {
         let dir = crate::db::temp_root("walk-test");
         write(&dir.join("a.py"), b"x = 1\n");
         write(&dir.join("sub/b.py"), b"y = 2\n");
         write(&dir.join("sub/c.txt"), b"not indexed\n");
-        write(&dir.join(".aw/index.db"), b"stale");
+        write(&dir.join(".engram/index.db"), b"stale");
         write(
             &dir.join("sub/huge.py"),
             &[b'a'; MAX_FILE_SIZE as usize + 1],

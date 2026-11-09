@@ -1,2 +1,0 @@
-{"ts":1793622412,"surface":"cli","tool":"search","args":{"terms":"_fit_string_sequence","kind":"","path":"","exact":"false","limit":"50"},"result_count":50,"shown":50,"total":62,"ambiguous":0,"exit_code":0,"latency_us":5381,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
-{"ts":1793622412,"surface":"cli","tool":"search","args":{"terms":"list str sequence helper","kind":"","path":"","exact":"false","limit":"50"},"result_count":50,"shown":50,"total":1740,"ambiguous":0,"exit_code":0,"latency_us":6003,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

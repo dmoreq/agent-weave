@@ -50,7 +50,7 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
     } = input;
     let key = validate_key(key)?;
     let kind = MemKind::parse(kind).ok_or_else(|| {
-        AwError::Usage(format!(
+        EgError::Usage(format!(
             "mem write: kind must be one of {} (got '{kind}')",
             MEM_KINDS.map(MemKind::as_str).join("|")
         ))
@@ -59,7 +59,7 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
     if contains_suspected_secret(tags.unwrap_or(""))
         || contains_suspected_secret(refs.unwrap_or(""))
     {
-        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     // Keep the original validation order: tags, refs, then scope/ttl last, so
     // a multi-field error reports the same field as before the enum split.
@@ -87,20 +87,20 @@ fn contains_suspected_secret(text: &str) -> bool {
 fn validate_key(key: &str) -> Result<&str> {
     let key = key.trim();
     if key.is_empty() {
-        return Err(AwError::Usage("mem write: key must not be empty".into()));
+        return Err(EgError::Usage("mem write: key must not be empty".into()));
     }
     if key.len() > MAX_KEY_BYTES {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: key exceeds {MAX_KEY_BYTES} bytes"
         )));
     }
     if key.chars().any(|c| c.is_control()) {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem write: key must not contain control characters".into(),
         ));
     }
     if contains_suspected_secret(key) {
-        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     Ok(key)
 }
@@ -108,15 +108,15 @@ fn validate_key(key: &str) -> Result<&str> {
 fn validate_body(body: &str) -> Result<()> {
     let body_len = body.len();
     if body.trim().is_empty() {
-        return Err(AwError::Usage("mem write: body must not be empty".into()));
+        return Err(EgError::Usage("mem write: body must not be empty".into()));
     }
     if body_len > MAX_BODY_BYTES {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: body exceeds {MAX_BODY_BYTES} bytes (got {body_len})"
         )));
     }
     if contains_suspected_secret(body) {
-        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     Ok(())
 }
@@ -124,12 +124,12 @@ fn validate_body(body: &str) -> Result<()> {
 fn normalize_token_set(raw: &str, max: usize, max_len: usize, label: &str) -> Result<String> {
     let tokens: Vec<String> = raw.split_whitespace().map(str::to_string).collect();
     if tokens.len() > max {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: more than {max} {label}"
         )));
     }
     if let Some(t) = tokens.iter().find(|t| t.len() > max_len) {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: {label} token exceeds {max_len} bytes: '{t}'"
         )));
     }
@@ -162,7 +162,7 @@ fn normalize_refs(raw: &str) -> Result<String> {
 /// parsed variant so the note carries the enum, not the string.
 fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
     let scope = MemScope::parse(scope).ok_or_else(|| {
-        AwError::Usage(format!(
+        EgError::Usage(format!(
             "mem write: scope must be '{}' or '{}' (got '{scope}')",
             MemScope::Durable.as_str(),
             MemScope::Session.as_str()
@@ -171,7 +171,7 @@ fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
     let ttl_secs = match scope {
         MemScope::Durable => {
             if ttl.is_some() {
-                return Err(AwError::Usage(
+                return Err(EgError::Usage(
                     "mem write: --ttl is only valid with --scope session".to_string(),
                 ));
             }
@@ -180,7 +180,7 @@ fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
         MemScope::Session => match ttl {
             None => DEFAULT_SESSION_TTL_SECS,
             Some(t) if t == 0 || t > MAX_SESSION_TTL_SECS => {
-                return Err(AwError::Usage(format!(
+                return Err(EgError::Usage(format!(
                     "mem write: --ttl must be in 1..={MAX_SESSION_TTL_SECS} seconds"
                 )));
             }

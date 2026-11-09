@@ -90,6 +90,6 @@ ea7c54044712bd5224d81ed568258f5f3beb4f2c8d8e05dd7e043b86c802cbb6  lenses/L5-remo
 
 Known deviations recorded by L6: the rule file was extended for the L5/L6 wave
 after L1-L4 ran; L4 and L5 disclose a grep that returned prior-verdict lines in
-`docs/EVALUATION.md`; the reports were untracked during the audit and are
+`docs/evaluation.md`; the reports were untracked during the audit and are
 committed with this record. These deviations do not change the L6 verdict:
 INSUFFICIENT for REMOVE.

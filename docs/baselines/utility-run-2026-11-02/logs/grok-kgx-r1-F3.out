@@ -1,5 +1,0 @@
-The pending handoff is a different symbol question. I will answer the current request for `_ascii_diacritic_trans` from `kg context`.Wrote `/tmp/utility-answers-2026-11-02/grok-kgx-r1-F3.json`.
-
-- **qualname:** `vihap.cleaners.unicode._ascii_diacritic_trans`
-- **callers:** `vihap/cleaners/unicode.py:55`, `vihap/grammar/entity.py:53`, `vihap/grammar/entity.py:98`, `vihap/grammar/entity.py:254`
-- **callees:** none

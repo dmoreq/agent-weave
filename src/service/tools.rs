@@ -30,7 +30,7 @@ pub struct ToolSpec {
     pub name: &'static str,
     pub description: &'static str,
     pub params: &'static [ParamSpec],
-    /// Default `aw mcp` surface (without `--all-tools`): the eight core
+    /// Default `eg mcp` surface (without `--all-tools`): the eight core
     /// navigation tools plus mem_write/mem_query (OQ1 owner decision,
     /// 2026-11-05). One source of truth — a spec without this flag stays
     /// behind `--all-tools` and cannot silently drop off the default set.
@@ -81,7 +81,7 @@ const KEY_PARAM: ParamSpec = ParamSpec {
 pub const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
         name: "build",
-        description: "Index the repository into .aw/index.db (full atomic replacement)",
+        description: "Index the repository into .engram/index.db (full atomic replacement)",
         params: &[
             ParamSpec {
                 name: "force",
@@ -213,7 +213,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "global",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Aggregate telemetry globally across all repositories (~/.aw/usage.log) (default false)",
+                description: "Aggregate telemetry globally across all repositories (~/.engram/usage.log) (default false)",
             },
         ],
         core: true,
@@ -277,7 +277,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "global",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Write to the cross-project global memory store (~/.aw/memory.db) instead of the local repo",
+                description: "Write to the cross-project global memory store (~/.engram/memory.db) instead of the local repo",
             },
             ParamSpec {
                 name: "touch",

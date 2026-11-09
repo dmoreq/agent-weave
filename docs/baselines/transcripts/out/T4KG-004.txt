@@ -1,6 +1,0 @@
-vihap/failure_classifier.py:95
-vihap/formatters/standard_formatter.py:154
-vihap/models.py:287
-vihap/models.py:419
-vihap/quality/confidence.py:145
-vihap/validators/admin_validator.py:329

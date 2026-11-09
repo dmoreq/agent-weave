@@ -1,9 +1,0 @@
-I'll list pending handoffs for this project, then resolve `pairwise_address_similarity` from the code index.Pending handoffs are other sessions' prompts, so they stay unused. Next I will query the code index for `pairwise_address_similarity`.The index lists five caller sites and five callee edges. I will write those pointers into the JSON deliverable.Wrote `/tmp/utility-answers-2026-11-02/grok-kgx-r1-F1.json`.
-
-`vihap.matching.similarity.pairwise_address_similarity` has five direct call sites and two direct callees (five resolved edges).
-
-| Section | Pointers |
-|---|---|
-| qualname | `vihap.matching.similarity.pairwise_address_similarity` |
-| callers | `tests/test_scoring_sklearn_api.py:120`, `:128`, `:137`, `:142`, `vihap/matching/similarity.py:356` |
-| callees | `vihap/cleaners/unicode.py:47` (2 edges), `vihap/matching/similarity.py:158` (3 edges) |

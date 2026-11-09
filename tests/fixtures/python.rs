@@ -1,7 +1,7 @@
 //! Python resolution fixtures: imports, receiver typing, MRO, and scoping.
 
-use agent_weave::extract::{extract_file, resolve, Confidence, EdgeKind};
-use agent_weave::parse::{parse_source, Lang};
+use engram::extract::{extract_file, resolve, Confidence, EdgeKind};
+use engram::parse::{parse_source, Lang};
 
 use super::common::edges_for;
 

@@ -8,7 +8,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::db;
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 use crate::extract::{Confidence, EdgeKind, SymbolKind};
 use crate::hash::fnv1a64;
 
@@ -22,7 +22,7 @@ pub const DEFAULT_PATH_DEPTH: usize = 10;
 /// `--depth`): one constant shared by the CLI help, the MCP ParamSpec bounds,
 /// and every clamp, so the surfaces cannot disagree.
 pub const MAX_DEPTH: usize = 10;
-/// Default candidate cap for `aw reuse` (CLI default and MCP fallback).
+/// Default candidate cap for `eg reuse` (CLI default and MCP fallback).
 pub const DEFAULT_REUSE_LIMIT: usize = 10;
 pub const DEFAULT_MAX_PARSE_ERROR_RATE: f64 = 0.05;
 pub const DEFAULT_IMPACT_EDGES: &str = "calls";
@@ -31,20 +31,20 @@ pub const DEFAULT_IMPACT_EDGES: &str = "calls";
 pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
 
-/// Permanent honesty caveat for `aw path` (Amendment 13): resolved static
+/// Permanent honesty caveat for `eg path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
-const PATH_CAVEAT: &str = "aw: path — resolved static edges only; dynamic dispatch may hide paths";
+const PATH_CAVEAT: &str = "eg: path — resolved static edges only; dynamic dispatch may hide paths";
 
-/// Permanent honesty caveat for `aw context` (Amendment 17).
+/// Permanent honesty caveat for `eg context` (Amendment 17).
 const CONTEXT_CAVEAT: &str =
-    "aw: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees";
+    "eg: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees";
 
 /// `impact` caveats (Amendment 19): the default calls-only shape stays
 /// byte-identical; the extended shapes state their static-edge limit.
 const IMPACT_EDGES_CAVEAT: &str =
-    "aw: impact — resolved static edges only; unresolved imports/inherits are omitted";
+    "eg: impact — resolved static edges only; unresolved imports/inherits are omitted";
 const IMPACT_CALLS_CAVEAT: &str =
-    "aw: impact — resolved static call edges only; dynamic dispatch may hide dependents";
+    "eg: impact — resolved static call edges only; dynamic dispatch may hide dependents";
 
 /// One import statement is one site even when it resolves to both a module and
 /// a symbol edge; every non-import edge remains an individual site.
@@ -55,9 +55,9 @@ fn impact_site_key() -> String {
     )
 }
 
-/// `aw imports` caveat (Amendment 19): outbound resolved imports only.
+/// `eg imports` caveat (Amendment 19): outbound resolved imports only.
 const IMPORTS_CAVEAT: &str =
-    "aw: imports — resolved static imports only; external and unresolved imports are omitted";
+    "eg: imports — resolved static imports only; external and unresolved imports are omitted";
 
 mod resolve;
 mod scope;
@@ -157,9 +157,9 @@ pub fn cap_line(shown: usize, total: usize, unit: &str) -> Option<String> {
     Some(format!("showing {shown} of {total}{suffix}"))
 }
 
-/// `[aw] capped at N results (M total)` stderr note, without the newline.
+/// `[eg] capped at N results (M total)` stderr note, without the newline.
 pub fn cap_notice(shown: usize, total: usize) -> Option<String> {
-    (total > shown).then(|| format!("[aw] capped at {shown} results ({total} total)"))
+    (total > shown).then(|| format!("[eg] capped at {shown} results ({total} total)"))
 }
 
 /// Stderr form of the cap notice (trailing newline included): the one
@@ -194,7 +194,7 @@ pub fn prepend_header(out: &mut QueryOutput, caveat: &str) {
 
 pub fn clamp_limit(limit: usize) -> Result<usize> {
     if limit == 0 {
-        return Err(AwError::Usage("--limit must be >= 1".to_string()));
+        return Err(EgError::Usage("--limit must be >= 1".to_string()));
     }
     Ok(limit.min(MAX_LIMIT))
 }
@@ -240,7 +240,7 @@ fn search_lines(out: QueryOutput) -> Result<LineQuery> {
 /// Resolve a repo-relative file path and fail with the shared not-indexed
 /// error. `imports` and `impact` both start with this gate.
 fn indexed_file(conn: &Connection, file: &str) -> Result<String> {
-    indexed_file_opt(conn, normalize_scope(file))?.ok_or_else(|| AwError::not_indexed(file))
+    indexed_file_opt(conn, normalize_scope(file))?.ok_or_else(|| EgError::not_indexed(file))
 }
 
 /// The same files-row lookup without the not-indexed error, so `symbols` can

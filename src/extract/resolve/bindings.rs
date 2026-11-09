@@ -29,7 +29,7 @@ pub(super) fn follow_binding<'a>(
         return Some(out);
     }
     // Bounded re-export walk: a chain longer than 4 hops stays UNRESOLVED.
-    // The cap is deliberate (bounded work per call site); `aw unresolved`
+    // The cap is deliberate (bounded work per call site); `eg unresolved`
     // reports the resulting gaps rather than hiding them.
     if depth >= 4 {
         return None;
@@ -48,7 +48,7 @@ pub(super) fn follow_binding<'a>(
 /// MRO walk, level by level: one match at the nearest level wins; several at
 /// the same level are AMBIGUOUS; exhausted -> UNRESOLVED. Bounded at 6 levels
 /// (deliberate work cap; deeper hierarchies stay UNRESOLVED and surface in
-/// `aw unresolved`).
+/// `eg unresolved`).
 pub(super) fn mro_outcome(t: &Tables, class_qn: &str, method: &str) -> Outcome {
     let mut level = vec![class_qn.to_string()];
     let mut seen: HashSet<String> = HashSet::new();

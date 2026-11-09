@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to agent-weave are documented here. Format follows
+All notable changes to engram are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [Calm SemVer](https://calver.org) 0.x — breaking contract
 changes bump the minor while 0.x is unstable.
@@ -11,10 +11,34 @@ changes bump the minor while 0.x is unstable.
 - Entries describe their dated implementation snapshot. Later entries can supersede earlier schemas, limits, and output formats.
 - Historical measurements and review verdicts below are internally reported, not new verification of this checkout.
   Original internal evidence is unavailable in the public distribution; this history does not make it publicly reproducible.
-- Read [evaluation](docs/EVALUATION.md) for the public evidence summary and its limitations, not replacement original evidence.
+- Read [evaluation](docs/evaluation.md) for the public evidence summary and its limitations, not replacement original evidence.
 - Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
 ## [Unreleased]
+
+### Changed — project rename: `engram` / `eg` (2026-11-09)
+
+- The package is now `engram` and the installed command is `eg`. The crate
+  compiles into one native binary with every subcommand, including
+  `eg dashboard` and `eg monitor`.
+- Confinement directories move to `.engram/` and `~/.engram/`. A pre-rename
+  `.aw/memory.db` or `~/.aw/memory.db` is migrated automatically on the first
+  memory read or write when the new store is absent; the legacy file is copied,
+  never moved, so a downgrade keeps working. Indexes are not migrated: `eg build`
+  rebuilds them.
+- Environment variables use the `ENGRAM_` prefix. `ENGRAM_NO_JOURNAL`,
+  `ENGRAM_SESSION`, `ENGRAM_GLOBAL_DIR`, and `ENGRAM_AGENT` resolve the legacy
+  `AW_*` spelling as a fallback, so existing privacy opt-outs and global-store
+  overrides keep applying.
+- The MCP server identifies itself as `engram`, the KPI footer reads `⚡ eg:`,
+  and CLI output prefixes read `eg: ...`. The routing skill moves to
+  `skills/engram-first`, and the installer keeps a transitional `aw -> eg`
+  symlink plus a legacy `agent-weave` MCP entry for running agent hosts.
+- Security hardening: repo-local `.engram/` state that is tracked in Git is
+  rejected with exit 2 (`eg: security: ...`) to block committed memory
+  injection, `~/.engram/` is created `0700` with `0600` stores and journals on
+  Unix, and `eg doctor --invalidate` unlinks symlinked entries instead of
+  traversing them.
 
 ## [0.5.3] - 2026-11-09
 
@@ -100,7 +124,7 @@ changes bump the minor while 0.x is unstable.
   (BM25 + ref/token overlap + recency fusion). Notes are candidates, never
   proof: every mem command opens with the caveat line. Bodies cap at 8 KiB;
   the journal carries `body_len`, never body text. Design:
-  `docs/designs/2026-11-05_agent-weave-memory-retrieval.md`.
+  `docs/archive/designs/2026-11-05_agent-weave-memory-retrieval.md`.
 - **`aw mem export` JSONL backup.** stdout is pure JSONL (the caveat goes to
   stderr); restore = `mem write` replay, idempotent by content hash. This is
   the recovery path for the primary memory store.
@@ -123,7 +147,7 @@ changes bump the minor while 0.x is unstable.
   oracle `tests/fixtures/memory/oracle-v2.json` with a Wilson 95% interval
   and a seeded negative control (gate: recall >= 0.8, shuffled mapping below
   the gate). First run: recall@5 = 1.000 [0.839, 1.000], negative control
-  0.050 — see [Evaluation](docs/EVALUATION.md). Weight tuning stays gated on
+  0.050 — see [Evaluation](docs/evaluation.md). Weight tuning stays gated on
   a sub-threshold oracle run.
 
 ### Changed (breaking)
@@ -665,7 +689,7 @@ Review the output-contract changes below if scripts consume query text.
 
 ### Added — agent-tooling design companion (docs)
 
-- `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
+- `docs/archive/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
   features distilled from the pi-sherlock reference analysis — F1
   `aw symbols --outline` (signature column), F2 `aw search` (FTS5 symbol
   lookup), F3 skill hardening + drift gate, F4 `aw clones` (shingle
@@ -791,7 +815,7 @@ precision/recall PASS.
 
 ### Added — docs
 
-- In-repo canonical spec + concepts brief under `docs/designs/` (cross-repo
+- In-repo canonical spec + concepts brief under `docs/archive/designs/` (cross-repo
   references retired); GitHub community health files.
 
 ### Fixed — post-review

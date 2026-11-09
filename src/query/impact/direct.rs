@@ -78,7 +78,7 @@ pub(super) fn impact_direct_grouped(
         }
         // Default calls-only mode: a file with importers but no inbound calls
         // is not a bare zero — name the skipped relationships.
-        return Err(AwError::NoResultsCaveated {
+        return Err(EgError::NoResultsCaveated {
             caveat: IMPACT_CALLS_CAVEAT,
             detail: importer_caveat_detail(conn, ctx.rel)?,
         });
@@ -139,7 +139,7 @@ pub(super) fn impact_direct_sites(qctx: &QueryCtx<'_>, ctx: &ImpactCtx<'_>) -> R
         if ctx.extended {
             return Err(impact_no_results(ctx));
         }
-        return Err(AwError::NoResults("0 impacting files found".to_string()));
+        return Err(EgError::NoResults("0 impacting files found".to_string()));
     }
     let rows = impact_site_rows(conn, ctx)?;
     let out = collect_output(qctx, rows.into_iter().map(Ok), ctx.limit, total)?;

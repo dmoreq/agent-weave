@@ -1,5 +1,5 @@
 //! Project memory over MCP (companion design, Phase 1): OQ1 puts mem_write +
-//! mem_query in the default `aw mcp` tool set (ToolSpec::core); the other four
+//! mem_query in the default `eg mcp` tool set (ToolSpec::core); the other four
 //! stay behind --all-tools. Every call dispatches through service::execute, so
 //! the result text is the CLI's stdout byte for byte.
 
@@ -8,7 +8,7 @@ use std::fs;
 use serde_json::json;
 
 use super::common::{
-    aw_cmd, cli_mem, fixture, init_and_list_tools, mem_fixture, notification, result_text, rpc,
+    cli_mem, eg_cmd, fixture, init_and_list_tools, mem_fixture, notification, result_text, rpc,
     spawn_with, spawn_with_global,
 };
 
@@ -41,7 +41,7 @@ fn mem_core_tools_default_surface_and_byte_parity() {
         "initialize",
         json!({"protocolVersion": "2025-06-18"}),
     );
-    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    assert_eq!(init["result"]["serverInfo"]["name"], "engram");
     notification(&mut srv, "notifications/initialized");
     let list = rpc(&mut srv, 2, "tools/list", json!({}));
     let names: Vec<String> = list["result"]["tools"]
@@ -99,7 +99,7 @@ fn mem_core_tools_default_surface_and_byte_parity() {
 
     // Journal: MCP surface tag lands on mem tool rows.
     drop(srv);
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     assert!(
         log.lines()
             .any(|l| l.contains("\"tool\":\"mem_write\"") && l.contains("\"surface\":\"mcp\"")),
@@ -179,7 +179,7 @@ fn mem_all_tools_exposes_full_family_with_parity() {
     );
     assert_eq!(result_text(&export), cli_export, "mem_export byte parity");
     assert!(
-        !result_text(&export).contains("aw: memory"),
+        !result_text(&export).contains("eg: memory"),
         "{:?}",
         result_text(&export)
     );
@@ -249,7 +249,7 @@ fn mem_all_tools_exposes_full_family_with_parity() {
 
     // mem_gc parity: expire the session note via the store, then compare.
     {
-        let conn = rusqlite::Connection::open(repo.join(".aw/memory.db")).unwrap();
+        let conn = rusqlite::Connection::open(repo.join(".engram/memory.db")).unwrap();
         conn.execute(
             "UPDATE memories SET expires_at = 1 WHERE key = 'mcp-session-note'",
             [],
@@ -318,7 +318,7 @@ fn mem_all_tools_exposes_full_family_with_parity() {
 #[test]
 fn global_memory_mcp_protocol_parity() {
     let repo = mem_fixture("mcp-global-memory");
-    let global_dir = mem_fixture("mcp-global-aw");
+    let global_dir = mem_fixture("mcp-global-eg");
     let mut srv = spawn_with_global(&repo, &global_dir);
     init_and_list_tools(&mut srv);
 
@@ -343,7 +343,7 @@ fn global_memory_mcp_protocol_parity() {
 
     // Global file exists, local file does not
     assert!(global_dir.join("memory.db").exists());
-    assert!(!repo.join(".aw/memory.db").exists());
+    assert!(!repo.join(".engram/memory.db").exists());
 
     // 2. mem_query without global flag (layered query) returns the global note tagged [global]
     let query_res = rpc(
@@ -441,10 +441,10 @@ fn global_memory_mcp_protocol_parity() {
 #[test]
 fn global_usage_mcp_returns_cross_repo_summary() {
     let repo = fixture("mcp-global-usage");
-    let global_dir = mem_fixture("mcp-global-usage-aw");
+    let global_dir = mem_fixture("mcp-global-usage-eg");
 
-    let build = aw_cmd(&repo)
-        .env("AW_GLOBAL_DIR", &global_dir)
+    let build = eg_cmd(&repo)
+        .env("ENGRAM_GLOBAL_DIR", &global_dir)
         .arg("build")
         .output()
         .unwrap();
@@ -470,7 +470,7 @@ fn global_usage_mcp_returns_cross_repo_summary() {
     );
     assert_eq!(usage["result"]["isError"], false, "{usage}");
     let text = result_text(&usage);
-    assert!(text.contains("aw global usage:"), "header: {text}");
+    assert!(text.contains("eg global usage:"), "header: {text}");
     assert!(text.contains("Speed: p50 ="), "speed: {text}");
     assert!(
         text.contains("Active Repositories:"),

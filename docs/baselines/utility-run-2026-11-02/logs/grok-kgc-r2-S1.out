@@ -1,3 +1,0 @@
-I'll list pending handoffs first, then locate the identifier-splitting function in this repo.The pending handoff is a different deliverable. I'll search this repo for the function that splits camelCase and snake_case identifiers.`src.extract.split_ident` is defined at `src/extract.rs:308`. I'll write that pointer to the answer file.`src.extract.split_ident` at `src/extract.rs:308` splits camelCase humps and snake_case underscores into tokens.
-
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-S1.json` with `exists=true`, `hops=0`, and route `["src/extract.rs:308"]`.

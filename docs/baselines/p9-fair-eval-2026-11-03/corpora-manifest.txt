@@ -1,4 +1,0 @@
-corpus|path|index|head|built_at
-kg|/tmp/p9-corpus-2026-11-03/kg|/tmp/p9-corpus-2026-11-03/kg/.aw/index.db|4f56c93b75dc261ce4674f51b093f1cf368bff84|2026-11-03T14:26:37Z
-vihap|/tmp/p9-corpus-2026-11-03/vihap|/tmp/p9-corpus-2026-11-03/vihap/.aw/index.db|7329f593b3e9fb45c637b1d9dd9411a40bb7f5f3|2026-11-03T14:26:37Z
-finguard|/tmp/p9-corpus-2026-11-03/finguard|/tmp/p9-corpus-2026-11-03/finguard/.aw/index.db|9c19ff4076c4c78d1fb6c05554ba7b5dd0a0de67|2026-11-03T14:26:37Z

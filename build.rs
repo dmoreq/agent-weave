@@ -29,5 +29,5 @@ fn main() {
         pair("tree-sitter-javascript", "js"),
         pair("tree-sitter-rust", "rs")
     );
-    println!("cargo:rustc-env=AW_GRAMMAR_VERSION={value}");
+    println!("cargo:rustc-env=ENGRAM_GRAMMAR_VERSION={value}");
 }

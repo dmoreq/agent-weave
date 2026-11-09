@@ -5,10 +5,10 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "aw",
+    name = "eg",
     version,
     about = "Local code knowledge index: who calls this, what does this call, what is impacted by this file.",
-    long_about = "aw indexes a repository's symbols and call/inheritance edges into a local\nSQLite index. It is consultative only: no hooks, no daemon, no network,\nno writes outside .aw/."
+    long_about = "eg indexes a repository's symbols and call/inheritance edges into a local\nSQLite index. It is consultative only: no hooks, no daemon, no network,\nno writes outside .engram/."
 )]
 pub struct Cli {
     /// Repository root (default: nearest git root ancestor of cwd).
@@ -26,7 +26,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Cmd {
-    /// Index the repository into .aw/index.db (full atomic replacement)
+    /// Index the repository into .engram/index.db (full atomic replacement)
     Build {
         /// Re-extract everything (disable the unchanged-file fast path) and
         /// bypass the parse-error abort
@@ -104,7 +104,7 @@ pub enum Cmd {
         #[arg(long, default_value_t = crate::query::DEFAULT_LIMIT)]
         limit: usize,
     },
-    /// Per-file unresolved-callee counts (where aw could not resolve calls)
+    /// Per-file unresolved-callee counts (where eg could not resolve calls)
     Unresolved {
         /// List unresolved edge sites with file:line instead of per-file counts
         #[arg(long)]
@@ -152,9 +152,9 @@ pub enum Cmd {
     },
     /// Inspect index health (integrity, versions, staleness, orphans)
     Doctor {
-        /// Reset the derived .aw state: index, journals, locks, and orphan
-        /// files. The project-memory store (.aw/memory.db) is primary data
-        /// and is kept — export it with aw mem export if you want a copy.
+        /// Reset the derived .engram state: index, journals, locks, and orphan
+        /// files. The project-memory store (.engram/memory.db) is primary data
+        /// and is kept — export it with eg mem export if you want a copy.
         #[arg(long)]
         invalidate: bool,
     },
@@ -165,12 +165,13 @@ pub enum Cmd {
         #[arg(long)]
         quality: bool,
 
-        /// Aggregate telemetry globally across all repositories (~/.aw/usage.log)
+        /// Aggregate telemetry globally across all repositories (~/.engram/usage.log)
         #[arg(long)]
         global: bool,
     },
-    /// Project memory: agent-authored notes persisted in .aw/memory.db
+    /// Project memory: agent-authored notes persisted in .engram/memory.db
     /// (write/query/get/delete/export/gc). Notes are candidates, never proof.
+    #[command(alias = "memory")]
     Mem {
         #[command(subcommand)]
         action: MemAction,
@@ -192,7 +193,7 @@ pub enum Cmd {
         /// Open dashboard in default web browser automatically
         #[arg(long)]
         open: bool,
-        /// Scope dashboard telemetry exclusively to current repository (.aw/)
+        /// Scope dashboard telemetry exclusively to current repository (.engram/)
         #[arg(long)]
         local: bool,
         /// Deprecated alias: global is now the default mode across all repositories
@@ -207,7 +208,7 @@ pub enum Cmd {
         /// Filter for critical errors only (exit code >= 3)
         #[arg(long)]
         errors_only: bool,
-        /// Scope monitor stream exclusively to current repository (.aw/)
+        /// Scope monitor stream exclusively to current repository (.engram/)
         #[arg(long)]
         local: bool,
     },
@@ -244,7 +245,7 @@ pub enum MemAction {
         /// unknown target exits 1, same key exits 2)
         #[arg(long)]
         supersedes: Option<String>,
-        /// Persist to the cross-project global memory store (~/.aw/memory.db)
+        /// Persist to the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
         /// Refresh timestamp when content_hash matches an existing current note
@@ -273,7 +274,7 @@ pub enum MemAction {
         /// With --all, also list superseded revisions (tagged [superseded])
         #[arg(long)]
         include_superseded: bool,
-        /// Restrict search exclusively to the global store (~/.aw/memory.db)
+        /// Restrict search exclusively to the global store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },
@@ -281,7 +282,7 @@ pub enum MemAction {
     Touch {
         /// The note's stable identity
         key: String,
-        /// Touch in the cross-project global memory store (~/.aw/memory.db)
+        /// Touch in the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },
@@ -289,7 +290,7 @@ pub enum MemAction {
     Get {
         /// The note's stable identity
         key: String,
-        /// Fetch from the cross-project global memory store (~/.aw/memory.db)
+        /// Fetch from the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },
@@ -297,7 +298,7 @@ pub enum MemAction {
     Delete {
         /// The note's stable identity
         key: String,
-        /// Delete from the cross-project global memory store (~/.aw/memory.db)
+        /// Delete from the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },
@@ -307,14 +308,14 @@ pub enum MemAction {
         /// Take the N most recent notes instead of all of them
         #[arg(long)]
         limit: Option<usize>,
-        /// Export from the cross-project global memory store (~/.aw/memory.db)
+        /// Export from the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },
     /// Reclaim disk: purge expired session notes and superseded revisions
     /// older than the 30-day retention clock, then report counts
     Gc {
-        /// Run GC on the cross-project global memory store (~/.aw/memory.db)
+        /// Run GC on the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },

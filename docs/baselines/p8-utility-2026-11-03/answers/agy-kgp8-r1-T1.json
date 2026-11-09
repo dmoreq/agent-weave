@@ -1,7 +1,0 @@
-{
-  "task": "T1",
-  "items": [
-    "tests/test_centralized_grammar_patterns.py:19 tests.test_centralized_grammar_patterns.test_exact_text_key"
-  ],
-  "answer": "The test function `tests.test_centralized_grammar_patterns.test_exact_text_key` directly calls `vihap.cleaners.text_utils.exact_text_key` to verify tokenization and normalization on various inputs."
-}

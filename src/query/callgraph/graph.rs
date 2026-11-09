@@ -36,7 +36,7 @@ pub fn callers(ctx: &QueryCtx<'_>, name: &str, opts: GraphQueryOpts) -> Result<Q
 
     let (callers, total) = direct_callers(conn, &ids, limit)?;
     if total == 0 {
-        return Err(AwError::NoResults(
+        return Err(EgError::NoResults(
             "0 callers found (dynamic dispatch possible — grep fallback recommended)".to_string(),
         ));
     }
@@ -63,7 +63,7 @@ fn callers_transitive(
     // the NOT EXISTS guard drops callers already reached at or before the
     // destination's distance — so each symbol displays once, at the depth it
     // is first reached, and the seed symbols never reappear as callers.
-    let caveat = format!("aw: transitive callers — resolved static call edges only; depth {depth}");
+    let caveat = format!("eg: transitive callers — resolved static call edges only; depth {depth}");
     let (cte, select) = callers_transitive_sql(ids.len());
     transitive_page(
         ctx,
@@ -144,7 +144,7 @@ fn callees_direct(ctx: &QueryCtx<'_>, ids: &[i64], limit: usize) -> Result<Query
     let QueryCtx { conn, .. } = *ctx;
     let (callees, total) = direct_callees(conn, ids, limit)?;
     if total == 0 {
-        return Err(AwError::NoResults(callee_empty_reason(conn, ids)?));
+        return Err(EgError::NoResults(callee_empty_reason(conn, ids)?));
     }
     let rows = callees.into_iter().map(|row| {
         Ok(Pointer {

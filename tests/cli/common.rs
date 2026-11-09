@@ -9,7 +9,7 @@ pub(crate) static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn temp_repo(name: &str) -> PathBuf {
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("aw-it-{}-{}-{seq}", name, std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eg-it-{}-{}-{seq}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -21,15 +21,15 @@ pub(crate) fn write(repo: &Path, rel: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
-pub(crate) fn aw(repo: &Path) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_aw"));
+pub(crate) fn eg(repo: &Path) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_eg"));
     c.arg("--root").arg(repo);
-    c.env("AW_GLOBAL_DIR", repo.join(".test_global"));
+    c.env("ENGRAM_GLOBAL_DIR", repo.join(".test_global"));
     c
 }
 
 pub(crate) fn build(repo: &Path) -> (i32, String, String) {
-    let out = aw(repo).args(["build"]).output().unwrap();
+    let out = eg(repo).args(["build"]).output().unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -81,7 +81,7 @@ pub(crate) fn fixture(name: &str) -> PathBuf {
     repo
 }
 
-/// Walk the tree collecting (path, len) for files outside .aw/ — the read-only
+/// Walk the tree collecting (path, len) for files outside .engram/ — the read-only
 /// invariant probe.
 pub(crate) fn snapshot(repo: &Path) -> Vec<(String, u64, u64)> {
     // (path, len, content hash) — hashes catch same-size edits (invariant 3).
@@ -89,7 +89,7 @@ pub(crate) fn snapshot(repo: &Path) -> Vec<(String, u64, u64)> {
     fn rec(dir: &Path, acc: &mut Vec<(String, u64, u64)>) {
         for e in fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
-            if p.file_name().is_some_and(|n| n == ".aw") {
+            if p.file_name().is_some_and(|n| n == ".engram") {
                 continue;
             }
             if p.is_dir() {
@@ -170,7 +170,7 @@ pub(crate) fn dump_edges(db: &Path) -> String {
 }
 
 pub(crate) fn mem_write(repo: &Path, key: &str, body: &str, kind: &str) -> (i32, String, String) {
-    let out = aw(repo)
+    let out = eg(repo)
         .args(["mem", "write", key, "--body", body, "--kind", kind])
         .output()
         .unwrap();
@@ -182,7 +182,7 @@ pub(crate) fn mem_write(repo: &Path, key: &str, body: &str, kind: &str) -> (i32,
 }
 
 pub(crate) fn mem_out(repo: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = aw(repo).args(["mem"]).args(args).output().unwrap();
+    let out = eg(repo).args(["mem"]).args(args).output().unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),

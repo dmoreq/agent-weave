@@ -37,7 +37,7 @@ fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String, O
     let mut terms_cap = None;
     if toks.len() > SEARCH_MAX_TERMS {
         toks.truncate(SEARCH_MAX_TERMS);
-        terms_cap = Some(format!("[aw] search terms capped at {SEARCH_MAX_TERMS}"));
+        terms_cap = Some(format!("[eg] search terms capped at {SEARCH_MAX_TERMS}"));
     }
     let mut expr = toks
         .iter()
@@ -45,7 +45,7 @@ fn search_expr(conn: &Connection, terms: &str) -> Result<(Vec<String>, String, O
         .collect::<Vec<_>>()
         .join(" OR ");
     if expr.is_empty() {
-        return Err(AwError::Usage("empty search terms".to_string()));
+        return Err(EgError::Usage("empty search terms".to_string()));
     }
     // Identity fast path (R7): a qualified input (`.`, `/`, `::`) matched as
     // an adjacent-token phrase preserves exact identity and avoids ranking
@@ -213,7 +213,7 @@ pub fn search(ctx: &QueryCtx<'_>, terms: &str, limit: usize) -> Result<LineQuery
         (fts_ptrs, total)
     };
     if total == 0 {
-        return Err(AwError::NoResults(format!(
+        return Err(EgError::NoResults(format!(
             "0 symbols matched '{terms}' — try fewer or broader terms"
         )));
     }

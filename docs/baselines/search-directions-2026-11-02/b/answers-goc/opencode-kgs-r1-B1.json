@@ -1,7 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["pkg/alpha.py:2"],
-  "qualname": "pkg.alpha.process",
-  "answer": "process accepts the mercer_street_tolerance keyword parameter and returns a dict with the input converted to float under 'value' and the tolerance under 'tolerance'."
-}

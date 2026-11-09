@@ -1,5 +1,5 @@
 //! Data aggregation engine for the native dashboard.
-//! Queries `.aw/usage.log`, `.aw/index.db`, and `.aw/memory.db` with sub-millisecond latency.
+//! Queries `.engram/usage.log`, `.engram/index.db`, and `.engram/memory.db` with sub-millisecond latency.
 
 mod memories;
 mod reuse;
@@ -18,7 +18,7 @@ use serde_json::Value;
 
 /// Discover candidate repo roots for a dashboard panel into `repos`. An
 /// explicit root short-circuits the scan (its entry replaces any same-named
-/// one); otherwise every journaled repo with `.aw/<db_rel>` present is added
+/// one); otherwise every journaled repo with `.engram/<db_rel>` present is added
 /// without displacing existing entries, and the current directory joins last
 /// as "workspace". Shared by the reuse and memories panels so their store
 /// discovery cannot drift.
@@ -29,7 +29,7 @@ fn discover_repos(
     repos: &mut HashMap<String, PathBuf>,
 ) {
     if let Some(r) = root {
-        let db_path = r.join(".aw").join(db_rel);
+        let db_path = r.join(".engram").join(db_rel);
         if db_path.is_file() {
             let name = r.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
             repos.insert(name.to_string(), r.to_path_buf());
@@ -41,7 +41,7 @@ fn discover_repos(
                 e.get("repo_name").and_then(Value::as_str),
             ) {
                 let p = PathBuf::from(r);
-                if p.join(".aw").join(db_rel).is_file() && !repos.contains_key(r_name) {
+                if p.join(".engram").join(db_rel).is_file() && !repos.contains_key(r_name) {
                     repos.insert(r_name.to_string(), p);
                 }
             }
@@ -51,7 +51,7 @@ fn discover_repos(
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("workspace");
-            if cwd.join(".aw").join(db_rel).is_file() && !repos.contains_key(name) {
+            if cwd.join(".engram").join(db_rel).is_file() && !repos.contains_key(name) {
                 repos.insert(name.to_string(), cwd);
             }
         }

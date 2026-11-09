@@ -1,9 +1,0 @@
-{
-  "task": "D1",
-  "items": [
-    "tests/test_temporal_dag.py",
-    "tests/test_temporal_dag_benchmark.py",
-    "vihap/reform/__init__.py"
-  ],
-  "note": "direct importers of vihap/reform/temporal.py"
-}

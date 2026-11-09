@@ -1,1 +1,0 @@
-{"task": "T5", "seq": 1, "tool": "kg", "cmd": "/Users/quy.doan/Workspace/kg/target/release/kg callees vihap.parsers.hierarchical_parser.HierarchicalAddressParser.parse --depth 2 --limit 10000 --root .", "in_bytes": 153, "out_bytes": 919, "err_bytes": 0, "out_file": "out/kgarm/T5-001-kg.txt"}

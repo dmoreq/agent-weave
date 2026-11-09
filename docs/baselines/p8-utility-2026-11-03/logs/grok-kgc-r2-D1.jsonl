@@ -1,7 +1,0 @@
-I'll list pending handoffs first, then find every file that imports `vihap/reform/temporal.py` directly.The current task asks for source and grep only, so I'll search the repo for direct imports of `vihap/reform/temporal.py`.Three Python files import that module directly. I'll write the JSON answer and stop.Wrote `/tmp/p8-utility-answers-2026-11-03/grok-kgc-r2-D1.json`.
-
-Three files directly import `vihap/reform/temporal.py`:
-
-- `tests/test_temporal_dag.py`
-- `tests/test_temporal_dag_benchmark.py`
-- `vihap/reform/__init__.py`

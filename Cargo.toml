@@ -1,13 +1,13 @@
 [package]
-name = "agent-weave"
+name = "engram"
 version = "0.5.3"
 edition = "2021"
 description = "Local deterministic code graph, real-time anti-reinvention engine, and zero-token persistent memory for AI coding agents."
 license = "MIT OR Apache-2.0"
-publish = false  # review pending; crates.io name is prepared as `agent-weave`
-repository = "https://github.com/dmoreq/agent-weave"
-homepage = "https://github.com/dmoreq/agent-weave"
-documentation = "https://docs.rs/agent-weave"
+publish = false  # review pending; crates.io name is prepared as `engram`
+repository = "https://github.com/dmoreq/engram"
+homepage = "https://github.com/dmoreq/engram"
+documentation = "https://docs.rs/engram"
 readme = "README.md"
 keywords = ["code-index", "call-graph", "anti-reinvention", "agent-memory", "mcp"]
 categories = ["development-tools", "command-line-utilities"]
@@ -20,9 +20,7 @@ include = [
     "/tests/fixtures/main.rs",
     "/tests/mcp/**",
     "/tests/scripts/timing_assert.sh",
-    "/schema.sql",
-    "/schema_memory.sql",
-    "/schema_indexes.sql",
+    "/schema/**",
     "/build.rs",
     "/Cargo.toml",
     "/Cargo.lock",
@@ -35,11 +33,11 @@ include = [
 ]
 
 [lib]
-name = "agent_weave"
+name = "engram"
 path = "src/lib.rs"
 
 [[bin]]
-name = "aw"
+name = "eg"
 path = "src/main.rs"
 
 [dependencies]

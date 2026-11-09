@@ -17,7 +17,7 @@ fn removed_duplicate_candidate_invalidates_ambiguous_sites() {
     write(&repo, "pkg/__init__.py", "def foo():\n    pass\n");
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let ambiguous = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    let ambiguous = eg(&repo).args(["callees", "invoke"]).output().unwrap();
     assert_eq!(ambiguous.status.code(), Some(0), "{ambiguous:?}");
     assert!(
         String::from_utf8_lossy(&ambiguous.stdout).contains("[ambiguous] foo"),
@@ -27,7 +27,7 @@ fn removed_duplicate_candidate_invalidates_ambiguous_sites() {
     fs::remove_file(repo.join("pkg/__init__.py")).unwrap();
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let after = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    let after = eg(&repo).args(["callees", "invoke"]).output().unwrap();
     assert_eq!(after.status.code(), Some(0), "{after:?}");
     let text = String::from_utf8_lossy(&after.stdout);
     assert!(
@@ -37,12 +37,12 @@ fn removed_duplicate_candidate_invalidates_ambiguous_sites() {
     assert!(text.contains("pkg.foo"), "{after:?}");
 
     let incremental_db = repo.join("incremental.db");
-    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
-    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    fs::copy(repo.join(".engram/index.db"), &incremental_db).unwrap();
+    let force = eg(&repo).args(["build", "--force"]).output().unwrap();
     assert_eq!(force.status.code(), Some(0), "{force:?}");
     assert_eq!(
         dump_edges(&incremental_db),
-        dump_edges(&repo.join(".aw/index.db")),
+        dump_edges(&repo.join(".engram/index.db")),
         "incremental and fresh edge sets differ"
     );
 }
@@ -57,7 +57,7 @@ fn assignment_shadows_bare_callable_name() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "target"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("sample.control"), "{text}");
@@ -77,7 +77,7 @@ fn arrow_parameter_shadows_global_function() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "target"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("sample.control"), "{text}");
@@ -97,7 +97,7 @@ fn nested_self_parameter_shadows_receiver() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "C.run"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "C.run"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("sample.C.ok"), "{text}");
@@ -117,7 +117,7 @@ fn ordered_bindings_resolve_at_call_site() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let a = aw(&repo).args(["callers", "A.run"]).output().unwrap();
+    let a = eg(&repo).args(["callers", "A.run"]).output().unwrap();
     assert_eq!(a.status.code(), Some(0), "{a:?}");
     let atext = String::from_utf8_lossy(&a.stdout);
     assert!(
@@ -128,7 +128,7 @@ fn ordered_bindings_resolve_at_call_site() {
         !atext.contains("sample.py:11"),
         "later assignment changed the first call: {atext}"
     );
-    let b = aw(&repo).args(["callers", "B.run"]).output().unwrap();
+    let b = eg(&repo).args(["callers", "B.run"]).output().unwrap();
     assert_eq!(b.status.code(), Some(0), "{b:?}");
     let btext = String::from_utf8_lossy(&b.stdout);
     assert!(
@@ -151,7 +151,7 @@ fn annotation_is_initial_binding_not_override() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let go = aw(&repo).args(["callees", "go"]).output().unwrap();
+    let go = eg(&repo).args(["callees", "go"]).output().unwrap();
     assert_eq!(go.status.code(), Some(0), "{go:?}");
     let gtext = String::from_utf8_lossy(&go.stdout);
     assert!(gtext.contains("sample.B.run"), "{gtext}");
@@ -159,7 +159,7 @@ fn annotation_is_initial_binding_not_override() {
         !gtext.contains("sample.A.run"),
         "annotation overrode reassignment: {gtext}"
     );
-    let keep = aw(&repo).args(["callees", "keep"]).output().unwrap();
+    let keep = eg(&repo).args(["callees", "keep"]).output().unwrap();
     assert_eq!(keep.status.code(), Some(0), "{keep:?}");
     assert!(
         String::from_utf8_lossy(&keep.stdout).contains("sample.A.run"),
@@ -177,7 +177,7 @@ fn typescript_receiver_annotations_and_construction() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "C.run"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "C.run"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("sample.typed"), "{text}");
@@ -195,13 +195,13 @@ fn rust_struct_literal_and_self_new_type_receiver() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let a = aw(&repo).args(["callers", "A.render"]).output().unwrap();
+    let a = eg(&repo).args(["callers", "A.render"]).output().unwrap();
     assert_eq!(a.status.code(), Some(0), "{a:?}");
     assert!(
         String::from_utf8_lossy(&a.stdout).contains("lib.A.go"),
         "{a:?}"
     );
-    let b = aw(&repo).args(["callers", "B.render"]).output().unwrap();
+    let b = eg(&repo).args(["callers", "B.render"]).output().unwrap();
     assert_eq!(b.status.code(), Some(1), "{b:?}");
 }
 
@@ -220,7 +220,7 @@ fn local_qualified_import_and_class_receiver() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let run = aw(&repo).args(["callers", "helpers.run"]).output().unwrap();
+    let run = eg(&repo).args(["callers", "helpers.run"]).output().unwrap();
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     let runtext = String::from_utf8_lossy(&run.stdout);
     assert!(runtext.contains("app.go"), "{runtext}");
@@ -228,7 +228,7 @@ fn local_qualified_import_and_class_receiver() {
         !runtext.contains("app.shadow"),
         "parameter shadow leaked: {runtext}"
     );
-    let method = aw(&repo).args(["callers", "C.run"]).output().unwrap();
+    let method = eg(&repo).args(["callers", "C.run"]).output().unwrap();
     assert_eq!(method.status.code(), Some(0), "{method:?}");
     assert!(
         String::from_utf8_lossy(&method.stdout).contains("app.constructed"),
@@ -247,7 +247,7 @@ fn typescript_default_export_binds_default_import() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "work"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "work"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("app.go"), "{text}");
@@ -269,12 +269,12 @@ fn rust_inline_module_aliases_do_not_leak() {
         write(&repo, file, src);
         let (code, stdout, stderr) = build(&repo);
         assert_eq!(code, 0, "{name}: {stdout}{stderr}");
-        let a = aw(&repo).args(["callers", "a.target"]).output().unwrap();
+        let a = eg(&repo).args(["callers", "a.target"]).output().unwrap();
         assert_eq!(a.status.code(), Some(0), "{name}: {a:?}");
         let atext = String::from_utf8_lossy(&a.stdout);
         assert!(atext.contains(left_qn), "{name}: {atext}");
         assert!(!atext.contains(right_qn), "{name} left leaked: {atext}");
-        let b = aw(&repo).args(["callers", "b.target"]).output().unwrap();
+        let b = eg(&repo).args(["callers", "b.target"]).output().unwrap();
         assert_eq!(b.status.code(), Some(0), "{name}: {b:?}");
         let btext = String::from_utf8_lossy(&b.stdout);
         assert!(btext.contains(right_qn), "{name}: {btext}");
@@ -294,10 +294,10 @@ fn local_imports_do_not_cross_bindings() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let a = aw(&repo).args(["callers", "a.f"]).output().unwrap();
+    let a = eg(&repo).args(["callers", "a.f"]).output().unwrap();
     assert_eq!(a.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&a.stdout).contains("app.left"));
-    let b = aw(&repo).args(["callers", "b.f"]).output().unwrap();
+    let b = eg(&repo).args(["callers", "b.f"]).output().unwrap();
     assert_eq!(b.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&b.stdout).contains("app.right"));
 }
@@ -312,12 +312,12 @@ fn parameter_binding_shadows_module_function() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "target"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "target"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("sample.run2"), "{stdout}");
     assert!(!stdout.contains("sample.run "), "{stdout}");
-    let unresolved = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let unresolved = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     assert!(
         String::from_utf8_lossy(&unresolved.stdout).contains("sample.py:4 call target"),
         "{unresolved:?}"
@@ -334,7 +334,7 @@ fn unknown_reassignment_clears_receiver_type() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "A.m"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "A.m"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("sample.run2"), "{stdout}");
@@ -351,7 +351,7 @@ fn rust_factory_does_not_type_receiver() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callees", "run"]).output().unwrap();
+    let out = eg(&repo).args(["callees", "run"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("lib.A.make"), "{stdout}");
@@ -368,7 +368,7 @@ fn arrow_initializer_has_one_owner() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "helper"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "helper"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("sample.run"), "{stdout}");
@@ -388,11 +388,11 @@ fn nested_class_methods_keep_class_qualname() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let symbols = aw(&repo).args(["symbols", "sample.py"]).output().unwrap();
+    let symbols = eg(&repo).args(["symbols", "sample.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&symbols.stdout);
     assert!(stdout.contains("sample.outer.C.m"), "{stdout}");
     assert!(stdout.contains("sample.outer.C.run"), "{stdout}");
-    let callees = aw(&repo)
+    let callees = eg(&repo)
         .args(["callees", "sample.outer.C.run"])
         .output()
         .unwrap();
@@ -413,12 +413,12 @@ fn local_receiver_blocks_shadowed_module() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let callers = aw(&repo)
+    let callers = eg(&repo)
         .args(["callers", "tools.execute"])
         .output()
         .unwrap();
     assert_eq!(callers.status.code(), Some(1), "{callers:?}");
-    let callees = aw(&repo).args(["callees", "run"]).output().unwrap();
+    let callees = eg(&repo).args(["callees", "run"]).output().unwrap();
     assert!(
         !String::from_utf8_lossy(&callees.stdout).contains("tools.execute"),
         "{callees:?}"
@@ -436,7 +436,7 @@ fn local_binding_blocks_long_module_chain() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let shadowed = aw(&repo)
+    let shadowed = eg(&repo)
         .args(["callees", "app.shadowed"])
         .output()
         .unwrap();
@@ -444,7 +444,7 @@ fn local_binding_blocks_long_module_chain() {
         !String::from_utf8_lossy(&shadowed.stdout).contains("pkg.mod.f"),
         "{shadowed:?}"
     );
-    let control = aw(&repo).args(["callees", "app.control"]).output().unwrap();
+    let control = eg(&repo).args(["callees", "app.control"]).output().unwrap();
     assert!(
         String::from_utf8_lossy(&control.stdout).contains("pkg.mod.f"),
         "{control:?}"
@@ -461,7 +461,7 @@ fn ambiguous_class_does_not_pick_one_method() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callees", "run"]).output().unwrap();
+    let out = eg(&repo).args(["callees", "run"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     assert!(!String::from_utf8_lossy(&out.stdout).contains("A.render"));
 }

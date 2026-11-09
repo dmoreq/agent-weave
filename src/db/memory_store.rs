@@ -3,7 +3,7 @@
 
 use super::*;
 
-/// Compiled memory schema version; gates `.aw/memory.db` like SCHEMA_VERSION
+/// Compiled memory schema version; gates `.engram/memory.db` like SCHEMA_VERSION
 /// gates the index, with a diverging policy: older-but-structurally-complete
 /// stores open read-write (memory cannot be rebuilt), only newer-than-binary
 /// or missing-required-structure exits 5.
@@ -11,10 +11,11 @@ pub const MEMORY_SCHEMA_VERSION: i32 = 1;
 const MEMORY_BUSY_TIMEOUT_MS: u64 = 5000;
 /// Recovery hint shared by every memory-store failure message (corruption
 /// and both schema-gate shapes) so the wording cannot drift apart.
-const MEMORY_RESTORE_HINT: &str = "restore from an aw mem export backup or remove .aw/memory.db";
+const MEMORY_RESTORE_HINT: &str =
+    "restore from an eg mem export backup or remove .engram/memory.db";
 
 pub fn memory_db_path(root: &Path) -> PathBuf {
-    aw_dir(root).join("memory.db")
+    eg_dir(root).join("memory.db")
 }
 
 /// Required structure manifest, checked at open via pragma_table_info — the
@@ -39,10 +40,10 @@ pub(super) const MEMORY_REQUIRED: [(&str, &str); 15] = [
 
 /// Map a rusqlite failure to the memory error contract: corruption -> exit 3,
 /// busy after the timeout -> exit 4, everything else internal (exit 6).
-pub(super) fn map_memory_err(e: rusqlite::Error) -> AwError {
+pub(super) fn map_memory_err(e: rusqlite::Error) -> EgError {
     if let rusqlite::Error::SqliteFailure(ffi, _) = &e {
         if is_sqlite_corruption(&e) {
-            return AwError::CorruptMemory(format!(
+            return EgError::CorruptMemory(format!(
                 "memory.db failed integrity check — {MEMORY_RESTORE_HINT}"
             ));
         }
@@ -54,10 +55,10 @@ pub(super) fn map_memory_err(e: rusqlite::Error) -> AwError {
             ffi.code,
             rusqlite::ffi::ErrorCode::DatabaseBusy | rusqlite::ffi::ErrorCode::DatabaseLocked
         ) {
-            return AwError::MemoryLocked;
+            return EgError::MemoryLocked;
         }
     }
-    AwError::Internal(format!("memory database error: {e}"))
+    EgError::Internal(format!("memory database error: {e}"))
 }
 
 fn memory_manifest_complete(conn: &Connection) -> Result<bool> {
@@ -78,20 +79,20 @@ fn memory_manifest_complete(conn: &Connection) -> Result<bool> {
 
 /// Two distinct exit-5 messages (Storage section): newer than the binary vs
 /// older but failing the compiled manifest. Memory cannot be rebuilt, so both
-/// point at the `aw mem export` backup, never at `aw build`.
+/// point at the `eg mem export` backup, never at `eg build`.
 fn memory_version_gate(conn: &Connection) -> Result<()> {
     let have: i32 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(map_memory_err)?;
     if have > MEMORY_SCHEMA_VERSION {
-        return Err(AwError::MemorySchema {
+        return Err(EgError::MemorySchema {
             detail: format!(
                 "memory.db schema v{have} is newer than the binary expects (v{MEMORY_SCHEMA_VERSION}) — {MEMORY_RESTORE_HINT}"
             ),
         });
     }
     if !memory_manifest_complete(conn)? {
-        return Err(AwError::MemorySchema {
+        return Err(EgError::MemorySchema {
             detail: format!(
                 "memory.db schema v{have} is missing required structure for this binary — {MEMORY_RESTORE_HINT}"
             ),
@@ -110,35 +111,24 @@ fn memory_pragmas(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn resolve_default_home_aw_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| {
-            AwError::Internal(
-                "could not determine home directory (HOME/USERPROFILE unset)".to_string(),
-            )
-        })?;
-    Ok(PathBuf::from(home).join(".aw"))
+fn resolve_default_home_eg_dir() -> Result<PathBuf> {
+    Ok(PathBuf::from(home_dir()?).join(".engram"))
 }
 
 /// Directory for the cross-project global memory store.
-/// Reads $AW_GLOBAL_DIR, falling back to $HOME/.aw or %USERPROFILE%/.aw.
+/// Reads `$ENGRAM_GLOBAL_DIR`, falling back to the pre-rename
+/// `$AW_GLOBAL_DIR`, then to `$HOME/.engram` or `%USERPROFILE%/.engram`.
 /// Refuses symlinks.
-pub fn global_aw_dir() -> Result<PathBuf> {
-    let path = if let Ok(val) = std::env::var("AW_GLOBAL_DIR") {
-        if !val.trim().is_empty() {
-            PathBuf::from(val)
-        } else {
-            resolve_default_home_aw_dir()?
-        }
-    } else {
-        resolve_default_home_aw_dir()?
+pub fn global_eg_dir() -> Result<PathBuf> {
+    let path = match env_non_empty(&["ENGRAM_GLOBAL_DIR", "AW_GLOBAL_DIR"]) {
+        Some(val) => PathBuf::from(val),
+        None => resolve_default_home_eg_dir()?,
     };
-    reject_symlink(&path, "global .aw directory")?;
+    reject_symlink(&path, "global .engram directory")?;
     if let Ok(meta) = fs::symlink_metadata(&path) {
         if !meta.is_dir() {
-            return Err(AwError::Internal(format!(
-                "global .aw exists but is not a directory: {}",
+            return Err(EgError::Internal(format!(
+                "global .engram exists but is not a directory: {}",
                 path.display()
             )));
         }
@@ -146,16 +136,58 @@ pub fn global_aw_dir() -> Result<PathBuf> {
     Ok(path)
 }
 
-fn ensure_global_aw_dir(path: &Path) -> Result<()> {
-    ensure_dir_validated(path, "global .aw directory", true)
+/// First non-empty value among `keys`, in priority order. The rename reads the
+/// new variable first and the legacy one second, so an operator who exported
+/// only the old name keeps their confinement directory and privacy settings.
+pub(crate) fn env_non_empty(keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| match std::env::var(key) {
+        Ok(val) if !val.trim().is_empty() => Some(val),
+        _ => None,
+    })
+}
+
+/// Whether the global confinement directory was overridden by an environment
+/// variable in either spelling (`ENGRAM_GLOBAL_DIR` or legacy `AW_GLOBAL_DIR`).
+pub fn global_dir_overridden() -> bool {
+    env_non_empty(&["ENGRAM_GLOBAL_DIR", "AW_GLOBAL_DIR"]).is_some()
+}
+
+/// Directory the pre-rename binary used for machine-wide state: the legacy
+/// `$AW_GLOBAL_DIR` override, else `$HOME/.aw`. `None` when the new override
+/// `$ENGRAM_GLOBAL_DIR` points somewhere else: that is an explicit relocation,
+/// not a machine-wide default, so the home store must not be pulled into it.
+fn legacy_global_store_path() -> Option<PathBuf> {
+    if let Some(val) = env_non_empty(&["AW_GLOBAL_DIR"]) {
+        return Some(PathBuf::from(val).join("memory.db"));
+    }
+    if env_non_empty(&["ENGRAM_GLOBAL_DIR"]).is_some() {
+        return None;
+    }
+    home_dir()
+        .ok()
+        .map(|home| PathBuf::from(home).join(".aw").join("memory.db"))
+}
+
+fn home_dir() -> Result<String> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| {
+            EgError::Internal(
+                "could not determine home directory (HOME/USERPROFILE unset)".to_string(),
+            )
+        })
+}
+
+fn ensure_global_eg_dir(path: &Path) -> Result<()> {
+    crate::db::ensure_global_dir(path)
 }
 
 pub fn global_memory_db_path() -> Result<PathBuf> {
-    Ok(global_aw_dir()?.join("memory.db"))
+    Ok(global_eg_dir()?.join("memory.db"))
 }
 
 pub fn global_usage_log_path() -> Result<PathBuf> {
-    Ok(global_aw_dir()?.join("usage.log"))
+    Ok(global_eg_dir()?.join("usage.log"))
 }
 
 fn global_memory_store_path() -> Result<PathBuf> {
@@ -164,24 +196,24 @@ fn global_memory_store_path() -> Result<PathBuf> {
     Ok(path)
 }
 
-fn no_global_memory_error(path: &Path) -> AwError {
-    AwError::NoMemory(format!(
-        "no {} — write with aw mem write --global",
+fn no_global_memory_error(path: &Path) -> EgError {
+    EgError::NoMemory(format!(
+        "no {} — write with eg mem write --global",
         path.display()
     ))
 }
 
-/// Open the memory store for writing, creating `.aw/memory.db` (schema v1)
+/// Open the memory store for writing, creating `.engram/memory.db` (schema v1)
 /// when absent. An existing store must pass the version gate (read-forward:
 /// older structurally complete stores open read-write).
 pub fn open_memory_store(root: &Path) -> Result<Connection> {
     let path = memory_store_path(root)?;
     if !path.exists() {
-        ensure_aw_gitignore(root)?;
+        ensure_eg_gitignore(root)?;
+        migrate_legacy_store(&legacy_memory_db_path(root), &path)?;
     }
     open_memory_conn_path(&path, true, || no_memory_error(root))
 }
-
 /// Open an existing memory store for mutation WITHOUT creating one: a delete
 /// against a missing store must exit 1, never conjure an empty database.
 pub fn open_memory_mutation(root: &Path) -> Result<Connection> {
@@ -190,9 +222,14 @@ pub fn open_memory_mutation(root: &Path) -> Result<Connection> {
 }
 
 pub fn open_global_memory_store() -> Result<Connection> {
-    let dir = global_aw_dir()?;
-    ensure_global_aw_dir(&dir)?;
+    let dir = global_eg_dir()?;
+    ensure_global_eg_dir(&dir)?;
     let path = global_memory_store_path()?;
+    if !path.exists() {
+        if let Some(legacy) = legacy_global_store_path() {
+            migrate_legacy_store(&legacy, &path)?;
+        }
+    }
     open_memory_conn_path(&path, true, || no_global_memory_error(&path))
 }
 
@@ -201,16 +238,69 @@ pub fn open_global_memory_mutation() -> Result<Connection> {
     open_memory_conn_path(&path, false, || no_global_memory_error(&path))
 }
 
+/// Pre-rename project store location, the migration source for
+/// `.engram/memory.db`.
+fn legacy_memory_db_path(root: &Path) -> PathBuf {
+    root.join(".aw").join("memory.db")
+}
+
+/// Migrate a pre-rename project store when this repo has none yet. The
+/// confinement directory and its gitignore marker are created first, so the
+/// atomic copy inside [`migrate_legacy_store`] always has a private parent.
+fn migrate_local_store(root: &Path, target: &Path) -> Result<()> {
+    let legacy = legacy_memory_db_path(root);
+    if target.exists() || !legacy.exists() {
+        return Ok(());
+    }
+    // Importing a legacy store into a confinement directory that git tracks
+    // would launder planted notes into the new location: refuse instead.
+    if eg_dir(root).exists() {
+        crate::db::reject_tracked_eg_dir(root)?;
+    }
+    ensure_eg_gitignore(root)?;
+    migrate_legacy_store(&legacy, target)
+}
+
+/// Zero-loss migration on a cold start: when `.engram/memory.db` is absent and
+/// a pre-rename `.aw/memory.db` exists, validate the legacy store's integrity,
+/// copy it into place atomically, then hand it to the normal open gate. The
+/// legacy file is never modified or deleted, so a downgrade keeps working.
+/// A corrupt legacy store aborts (exit 3) instead of being silently replaced —
+/// the notes cannot be rebuilt from source.
+fn migrate_legacy_store(legacy: &Path, target: &Path) -> Result<()> {
+    if target.exists() || !legacy.exists() {
+        return Ok(());
+    }
+    reject_symlink(legacy, "legacy memory.db")?;
+    let conn = Connection::open_with_flags(legacy, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(map_memory_err)?;
+    let integrity: String = conn
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .map_err(map_memory_err)?;
+    drop(conn);
+    if integrity != "ok" {
+        return Err(EgError::CorruptMemory(format!(
+            "legacy .aw/memory.db failed integrity check ({integrity}) — {MEMORY_RESTORE_HINT}"
+        )));
+    }
+    crate::db::copy_file_atomic(legacy, target)
+}
+
 fn memory_store_path(root: &Path) -> Result<PathBuf> {
-    reject_symlink(&aw_dir(root), ".aw directory")?;
+    reject_symlink(&eg_dir(root), ".engram directory")?;
     let path = memory_db_path(root);
     reject_symlink(&path, "memory.db")?;
+    // Only an existing store can carry planted notes, and the provenance probe
+    // costs a `git` spawn: an absent store is created fresh by the write path.
+    if path.exists() {
+        crate::db::reject_tracked_eg_dir(root)?;
+    }
     Ok(path)
 }
 
-pub fn no_memory_error(root: &Path) -> AwError {
-    AwError::NoMemory(format!(
-        "no .aw/memory.db under {} — write with aw mem write",
+pub fn no_memory_error(root: &Path) -> EgError {
+    EgError::NoMemory(format!(
+        "no .engram/memory.db under {} — write with eg mem write",
         root.display()
     ))
 }
@@ -218,7 +308,7 @@ pub fn no_memory_error(root: &Path) -> AwError {
 fn open_memory_conn_path(
     path: &Path,
     create: bool,
-    missing_err: impl FnOnce() -> AwError,
+    missing_err: impl FnOnce() -> EgError,
 ) -> Result<Connection> {
     let existed = path.exists();
     if !existed && !create {
@@ -234,6 +324,8 @@ fn open_memory_conn_path(
         create_memory_schema(&conn)?;
     }
     memory_version_gate(&conn)?;
+    // Owner-only mode: notes are private primary data.
+    let _ = crate::db::harden_file_mode(path);
     Ok(conn)
 }
 
@@ -246,7 +338,7 @@ fn create_memory_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(map_memory_err)?;
     if !memory_manifest_complete(conn)? {
-        match conn.execute_batch(include_str!("../../schema_memory.sql")) {
+        match conn.execute_batch(include_str!("../../schema/memory.sql")) {
             Ok(()) => {
                 conn.pragma_update(None, "user_version", MEMORY_SCHEMA_VERSION)
                     .map_err(map_memory_err)?;
@@ -269,7 +361,7 @@ fn create_memory_schema(conn: &Connection) -> Result<()> {
 
 fn open_memory_query_path(
     path: &Path,
-    missing_err: impl FnOnce() -> AwError,
+    missing_err: impl FnOnce() -> EgError,
 ) -> Result<Connection> {
     if !path.exists() {
         return Err(missing_err());
@@ -283,12 +375,26 @@ fn open_memory_query_path(
 
 /// Open the memory store read-only for the read commands. Missing -> exit 1
 /// (no-memory), corrupt -> exit 3, skew -> exit 5 — the shared gate chain.
+/// A pre-rename `.aw/memory.db` is migrated on this cold-start read path so a
+/// first query never reports empty over a store that still holds the notes.
 pub fn open_memory_query(root: &Path) -> Result<Connection> {
     let path = memory_store_path(root)?;
+    migrate_local_store(root, &path)?;
     open_memory_query_path(&path, || no_memory_error(root))
 }
 
 pub fn open_global_memory_query() -> Result<Connection> {
     let path = global_memory_store_path()?;
+    if !path.exists() {
+        if let Some(legacy) = legacy_global_store_path() {
+            if legacy.exists() {
+                let dir = path
+                    .parent()
+                    .ok_or_else(|| EgError::Internal("global memory.db has no parent".into()))?;
+                ensure_global_eg_dir(dir)?;
+                migrate_legacy_store(&legacy, &path)?;
+            }
+        }
+    }
     open_memory_query_path(&path, || no_global_memory_error(&path))
 }

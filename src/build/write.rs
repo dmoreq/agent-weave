@@ -221,7 +221,10 @@ fn write_meta_identity(conn: &rusqlite::Connection, root: &Path) -> Result<()> {
         .map(|d| d.as_millis().to_string())
         .unwrap_or_else(|_| "0".into());
     for (key, value) in [
-        (crate::db::meta_keys::AW_VERSION, env!("CARGO_PKG_VERSION")),
+        (
+            crate::db::meta_keys::ENGRAM_VERSION,
+            env!("CARGO_PKG_VERSION"),
+        ),
         (
             crate::db::meta_keys::GRAMMAR_VERSION,
             crate::db::GRAMMAR_VERSION,
@@ -317,7 +320,7 @@ pub(super) fn write_meta_universe(conn: &rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
-/// The `aw: built index: ...` stats line shared by the full build and the
+/// The `eg: built index: ...` stats line shared by the full build and the
 /// no-op path (which passes zero write-phase timings), so the field contract
 /// stays byte-identical across both branches.
 pub(super) fn built_index_line(prep: &BuildPrep, totals: &MetaTotals, secs: PhaseSecs) -> String {
@@ -326,7 +329,7 @@ pub(super) fn built_index_line(prep: &BuildPrep, totals: &MetaTotals, secs: Phas
     // Amendment 11c: parse= is the parallel phase's wall time and extract= the
     // summed per-worker extraction time — the two overlap on parallel builds.
     format!(
-        "aw: built index: files={total} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={carried} wall={wall:.2}s (walk={w:.2}s parse={p:.2}s extract={e:.2}s db={d:.2}s)",
+        "eg: built index: files={total} symbols={symbols} edges={edges} parse_errors={perr} unresolved={unres} carried={carried} wall={wall:.2}s (walk={w:.2}s parse={p:.2}s extract={e:.2}s db={d:.2}s)",
         total = prep.stats.files.len(),
         symbols = totals.sym_total,
         edges = totals.edge_total,

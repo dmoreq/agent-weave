@@ -91,7 +91,7 @@ pub fn collect_reuse_candidates(
 }
 
 fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
-    let db_path = r_root.join(".aw").join("index.db");
+    let db_path = r_root.join(".engram").join("index.db");
     if !db_path.is_file() {
         return 0;
     }

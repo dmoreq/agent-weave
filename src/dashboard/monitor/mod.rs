@@ -1,4 +1,4 @@
-//! Interactive terminal monitor for `aw`.
+//! Interactive terminal monitor for `eg`.
 //! Zero external curses dependencies, zero unsafe code.
 
 pub mod render;
@@ -268,7 +268,7 @@ fn get_terminal_size() -> (usize, usize) {
 
 fn stream_linear(log_path: &Path, repo_filter: Option<&str>, errors_only: bool) -> Result<()> {
     println!(
-        "aw: query monitor (linear streaming) from {}",
+        "eg: query monitor (linear streaming) from {}",
         log_path.display()
     );
     let mut last_pos = file_len(log_path).saturating_sub(4096);

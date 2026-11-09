@@ -15,7 +15,7 @@
 | 1 | Important | G17 fixture 2 was not a diamond: `dtop` called only `dm1`, so no BFS tie existed and no parent rule was falsifiable; the test comment described behavior the fixture never exercised | Fixture rewritten as a true diamond (`dtop -> {dm1, dm2} -> dbot`, both 2-hop routes); expected bytes unchanged (the pinned rule still selects dm1) — the fixture now fails under any other parent rule |
 | 2 | Suggestion | Skill behavior entry covered 3 of 4 pinned exit-1 shapes; recovery guidance attached only to exit 2 | Same-symbol shape + not-in-index recovery (`kg search`/`kg symbols <file>`) written into the `kg path` behavior entry |
 | 3 | Suggestion | `path()` ~213 lines (2x repo norm); `level_edges` closure indented off-grid | Split into `path_bfs()` (BFS + reconstruction, `PathSearch` enum for the two negative shapes) + render tail in `path()`; closure re-indented to house style |
-| 4 | Suggestion | `docs/EVALUATION.md` gate table lacks G17 | Accepted as phase-close work per the P4 convention (separate `docs(publish)` sync commit) |
+| 4 | Suggestion | `docs/evaluation.md` gate table lacks G17 | Accepted as phase-close work per the P4 convention (separate `docs(publish)` sync commit) |
 | 5 | Nit | "0.63-0.86 ms" misattributed the 26-file self-index figure to the 85k-symbol scale | Reworded to the two-scale table (0.6-1.4 ms across synth corpus + self-index; reviewer re-run under load included) in CHANGELOG + canonical spec |
 | 6 | Nit | Stale skill heading "the two contract behaviors" | Reworded |
 | 7 | Nit | Chain render silently rendered an empty segment on a map miss while neighboring guards returned `Internal` | Aligned: map miss now returns `KgError::Internal` |

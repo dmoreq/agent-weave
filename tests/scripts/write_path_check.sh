@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # G5 invariant 4: no agent-config references; write/delete primitives only in
-# aw_dir-scoped helpers. walk.rs is allowed ONLY inside #[cfg(test)].
+# eg_dir-scoped helpers. walk.rs is allowed ONLY inside #[cfg(test)].
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")/../.." && pwd)/src"
 FORBIDDEN='(\.claude|\.codex|AGENTS\.md|CLAUDE\.md|settings\.json|keychain|credentials|hook_file|pre-commit)'
@@ -60,10 +60,10 @@ if [ -n "$VIOLATIONS" ]; then
 fi
 probe="$(mktemp -d)"; trap 'rm -rf "$probe"' EXIT
 cp -R "$SRC" "$probe/src"
-printf 'fn evil() { let _ = std::fs::File::create("/tmp/aw-write-probe"); }\n' > "$probe/src/evil.rs"
+printf 'fn evil() { let _ = std::fs::File::create("/tmp/eg-write-probe"); }\n' > "$probe/src/evil.rs"
 mkdir -p "$probe/src/nested"
-printf 'fn nested_evil() { let _ = std::fs::write("/tmp/aw-write-probe", b"x"); }\n' > "$probe/src/nested/evil.rs"
-printf 'fn nested_db() { let _ = std::fs::write("/tmp/aw-write-probe", b"x"); }\n' > "$probe/src/nested/db.rs"
+printf 'fn nested_evil() { let _ = std::fs::write("/tmp/eg-write-probe", b"x"); }\n' > "$probe/src/nested/evil.rs"
+printf 'fn nested_db() { let _ = std::fs::write("/tmp/eg-write-probe", b"x"); }\n' > "$probe/src/nested/db.rs"
 printf '#[cfg(test)]\nmod tests { fn t() { std::fs::write("/tmp/x", b"y").unwrap(); } }\n\npub fn leaky() { std::fs::write("/tmp/z", b"w").unwrap(); }\n' > "$probe/src/walk.rs"
 printf 'fn t() { std::fs::File::options().write(true).create(true).open("/tmp/y").unwrap(); }\n' >> "$probe/src/query.rs"
 probe_bad="$(check "$probe/src")"
@@ -82,4 +82,4 @@ fi
 if ! echo "$probe_bad" | grep -q "src/nested/db.rs"; then
   echo "G5 write-path: negative control let a nested db.rs inherit the write exemption" >&2; exit 1
 fi
-echo "G5 write-path: writes confined to aw_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"
+echo "G5 write-path: writes confined to eg_dir-scoped helpers (walk.rs test-only; controls caught) — PASS"

@@ -145,7 +145,7 @@ fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, status: RefStatus) -> S
 
 /// The caveated empty error for the `--all` listing, keyed on whether the
 /// listing extended to superseded revisions.
-fn mem_all_empty(include_superseded: bool) -> AwError {
+fn mem_all_empty(include_superseded: bool) -> EgError {
     mem_empty(if include_superseded {
         "memory store has no notes"
     } else {
@@ -159,7 +159,7 @@ fn mem_all_empty(include_superseded: bool) -> AwError {
 fn render_mem_rows(
     rows: Vec<(crate::db::MemRow, bool)>,
     args: &MemQueryArgs<'_>,
-    empty_error: impl FnOnce() -> AwError,
+    empty_error: impl FnOnce() -> EgError,
 ) -> Result<ArmOut> {
     let rows: Vec<_> = if let Some(target_ref) = args.reference {
         rows.into_iter()
@@ -296,19 +296,19 @@ fn validate_mem_query(
     include_superseded: bool,
 ) -> Result<()> {
     if explicit_all && !terms.is_empty() {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem query: --all and terms are mutually exclusive".to_string(),
         ));
     }
     if !terms.is_empty() && terms.iter().all(|t| !t.is_empty() && t.trim().is_empty()) {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem query: provide terms or --all".to_string(),
         ));
     }
     // Superseded rows participate in the explicit listing only; the
     // ranked resolver keeps supersession-at-result-time exclusion.
     if include_superseded && !effective_all {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem query: --include-superseded requires --all".to_string(),
         ));
     }

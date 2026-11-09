@@ -14,7 +14,7 @@ fn param_spec(tool: &str, name: &str) -> Result<&'static ParamSpec> {
         .find(|t| t.name == tool)
         .and_then(|t| t.params.iter().find(|p| p.name == name))
         .ok_or_else(|| {
-            AwError::Internal(format!(
+            EgError::Internal(format!(
                 "argument '{name}' of tool '{tool}' has no ParamSpec declaration"
             ))
         })
@@ -36,7 +36,7 @@ impl ArgReader<'_> {
 
     fn req(&self, key: &str) -> Result<String> {
         self.s(key)
-            .ok_or_else(|| AwError::Usage(format!("missing required argument '{key}'")))
+            .ok_or_else(|| EgError::Usage(format!("missing required argument '{key}'")))
     }
 
     /// Read an Int argument per its TOOL_SPECS declaration (absent or null
@@ -57,7 +57,7 @@ impl ArgReader<'_> {
     /// (`ttl`, `mem_export` limit): `None` only when the key is absent/null.
     fn n_opt_spec(&self, tool: &str, name: &str) -> Result<Option<usize>> {
         let ParamKind::Int { max, .. } = param_spec(tool, name)?.kind else {
-            return Err(AwError::Internal(format!(
+            return Err(EgError::Internal(format!(
                 "argument '{name}' of tool '{tool}' is not declared as Int"
             )));
         };
@@ -65,7 +65,7 @@ impl ArgReader<'_> {
             return Ok(None);
         };
         let mut n = v.as_u64().ok_or_else(|| {
-            AwError::Usage(format!(
+            EgError::Usage(format!(
                 "argument '{name}' must be a non-negative integer, got {v}"
             ))
         })? as usize;
@@ -81,7 +81,7 @@ impl ArgReader<'_> {
     /// consumer contract (`build.rs` rejects outside [0, 1]).
     fn f_spec(&self, tool: &str, name: &str, default: f64) -> Result<f64> {
         let ParamKind::Float { min, max } = param_spec(tool, name)?.kind else {
-            return Err(AwError::Internal(format!(
+            return Err(EgError::Internal(format!(
                 "argument '{name}' of tool '{tool}' is not declared as Float"
             )));
         };
@@ -92,7 +92,7 @@ impl ArgReader<'_> {
             .as_f64()
             .filter(|x| x.is_finite() && *x >= min && *x <= max)
             .ok_or_else(|| {
-                AwError::Usage(format!(
+                EgError::Usage(format!(
                     "argument '{name}' must be a finite number in [{min}, {max}], got {v}"
                 ))
             })?;
@@ -110,12 +110,12 @@ impl ArgReader<'_> {
             return Ok(Vec::new());
         };
         let arr = v.as_array().ok_or_else(|| {
-            AwError::Usage(format!("argument '{name}' must be an array of strings"))
+            EgError::Usage(format!("argument '{name}' must be an array of strings"))
         })?;
         let mut out = Vec::with_capacity(arr.len().min(MAX_STR_ARRAY_ITEMS));
         for item in arr {
             let s = item.as_str().ok_or_else(|| {
-                AwError::Usage(format!("argument '{name}' elements must be strings"))
+                EgError::Usage(format!("argument '{name}' elements must be strings"))
             })?;
             out.push(s.to_string());
         }
@@ -126,8 +126,8 @@ impl ArgReader<'_> {
 
 /// Usage error for a tool name the `from_tool_args*` family does not route;
 /// shared so the message cannot drift between the families.
-fn unknown_tool(tool: &str) -> AwError {
-    AwError::Usage(format!("unknown tool '{tool}'"))
+fn unknown_tool(tool: &str) -> EgError {
+    EgError::Usage(format!("unknown tool '{tool}'"))
 }
 
 pub fn from_tool_args(tool: &str, args: &serde_json::Value) -> Result<CommandRequest> {

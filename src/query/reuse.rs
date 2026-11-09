@@ -93,12 +93,12 @@ pub fn detect_hints(conn: &Connection, new_names: &HashSet<String>) -> Result<Ve
     let (candidates, _) = analyze_corpus(conn, None, Some(new_names), 3)?;
     let mut hints = Vec::new();
     for c in candidates.iter().take(3) {
-        hints.push(format!("aw: reuse-hint: {}", c.hint_line()));
+        hints.push(format!("eg: reuse-hint: {}", c.hint_line()));
     }
     Ok(hints)
 }
 
-/// Run `aw reuse` across the whole repository or specified paths.
+/// Run `eg reuse` across the whole repository or specified paths.
 pub fn run_reuse(
     ctx: &QueryCtx<'_>,
     paths: &[String],
@@ -119,7 +119,7 @@ pub fn run_reuse(
     }
 
     let mut out = vec![format!(
-        "aw: reuse — {} duplication candidate(s) found",
+        "eg: reuse — {} duplication candidate(s) found",
         candidates.len()
     )];
     for c in &candidates {

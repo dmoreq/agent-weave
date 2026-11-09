@@ -7,8 +7,8 @@
 # sandbox is expected to deny it.
 set -euo pipefail
 AW="$1"; REPO="$2"
-PROFILE="$(mktemp -t aw-seatbelt.XXXXXX).sb"
-PORT="${AW_SEATBELT_PORT:-$((20000 + RANDOM % 20000))}"
+PROFILE="$(mktemp -t eg-seatbelt.XXXXXX).sb"
+PORT="${ENGRAM_SEATBELT_PORT:-$((20000 + RANDOM % 20000))}"
 SERVER_PID=""
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true

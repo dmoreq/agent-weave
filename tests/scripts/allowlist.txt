@@ -1,4 +1,3 @@
-agent-weave
 aho-corasick
 anstream
 anstyle
@@ -16,6 +15,7 @@ colorchoice
 crossbeam-deque
 crossbeam-epoch
 crossbeam-utils
+engram
 equivalent
 fallible-iterator
 fallible-streaming-iterator

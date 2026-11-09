@@ -1,7 +1,0 @@
-I'll check pending session handoff, then trace whether `pkg.m0.f0` reaches `pkg.g0.g0` in the resolved call graph.The pending handoff is an earlier run of the same graph question. I'll trace `pkg.m0.f0` to `pkg.g0.g0` in this repository's resolved call graph.No route exists from `pkg.m0.f0` to `pkg.g0.g0` in the resolved call graph.
-
-{"exists": false, "hops": 0, "route": [], "answer": "No route exists from pkg.m0.f0 to pkg.g0.g0 in the resolved call graph. kg callers reports zero callers of pkg.g0.g0, and pkg.m0.f0 only calls along the m-chain (pkg/m1.py:3 onward)."}
-
-Written to `/tmp/utility-answers-2026-11-02/grok-kgc-r2-D2.json`.
-
-`kg callers pkg.g0.g0` reports 0 callers. `pkg.m0.f0` calls `pkg/m1.py:3` (`pkg.m1.f1`) and that chain stays on `mN` through `pkg.m1999.f1999`. `pkg.g0.g0` only calls `pkg/g1.py:3`. Source has no `pkg.g0` import and no `.g0(` call.

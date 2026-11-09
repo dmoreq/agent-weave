@@ -1,1 +1,0 @@
-{"exists":true,"hops":0,"route":["vihap/models.py:127"],"answer":"vihap.models.ParserConfig.to_dict serializes configuration to a dictionary, as its docstring states and its signature returns dict[str, Any]."}

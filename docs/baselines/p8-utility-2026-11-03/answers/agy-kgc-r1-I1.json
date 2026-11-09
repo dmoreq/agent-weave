@@ -1,9 +1,0 @@
-{
-  "task": "I1",
-  "items": [
-    "10 src.db",
-    "11 src.error",
-    "12 src.hash"
-  ],
-  "answer": "The crate-internal modules directly imported by src/query.rs are src.db at line 10, src.error at line 11, and src.hash at line 12. External crate dependencies and specific imported symbol names are excluded per the specification."
-}

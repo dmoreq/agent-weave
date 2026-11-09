@@ -14,6 +14,7 @@ mod memory_doctor;
 mod memory_enhancements;
 mod memory_session;
 mod p8_impact;
+mod rename_migration;
 mod reuse;
 mod robustness;
 mod stats;

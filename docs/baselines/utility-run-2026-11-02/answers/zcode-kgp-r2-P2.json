@@ -1,6 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "answer": "No route exists. `kg path src.parse src.extract.record_ts_arrow_function` reports no call path at any depth <= 10, and `src.parse` is a module node at src/parse.rs:1 with zero resolved callers and callees."
-}

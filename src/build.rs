@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 
 /// Move `rel` from carried to fresh when the dirty/gap closure names it.
 fn take_fresh(
@@ -44,7 +44,7 @@ fn take_fresh_batch(
 fn skipped_notice(stats: &crate::walk::WalkStats) -> String {
     if stats.skipped_large > 0 {
         format!(
-            "[aw] skipped {} file(s) over the 1MB size cap\n",
+            "[eg] skipped {} file(s) over the 1MB size cap\n",
             stats.skipped_large
         )
     } else {
@@ -130,7 +130,7 @@ pub fn run_build(
     max_parse_error_rate: f64,
 ) -> Result<(String, String, usize)> {
     if !max_parse_error_rate.is_finite() || !(0.0..=1.0).contains(&max_parse_error_rate) {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "--max-parse-error-rate must be a finite value in [0, 1], got {max_parse_error_rate}"
         )));
     }
@@ -163,7 +163,7 @@ fn parse_gate(prep: &BuildPrep, fe: &FreshExtract) -> Result<()> {
         let rate = error_files as f64 / total_files as f64;
         if rate > prep.opts.max_parse_error_rate {
             let _ = std::fs::remove_file(crate::db::db_new_path(&prep.root));
-            return Err(AwError::ParseQuality {
+            return Err(EgError::ParseQuality {
                 rate,
                 files: total_files,
                 threshold: prep.opts.max_parse_error_rate,

@@ -1,5 +1,5 @@
 //! MCP stdio server (Amendment 8): newline-delimited JSON-RPC 2.0 over
-//! stdin/stdout, spawned by the agent host — aw still spawns no daemons.
+//! stdin/stdout, spawned by the agent host — eg still spawns no daemons.
 //! Tools correspond to CLI subcommands and return the CLI's byte-identical
 //! stdout text; `--all-tools` controls the exposed set. Tool schemas and the
 //! required-argument contract are rendered from the single `service::TOOL_SPECS`
@@ -292,7 +292,7 @@ fn handle_initialize(
     let result = json!({
         "protocolVersion": requested,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
+        "serverInfo": {"name": "engram", "version": env!("CARGO_PKG_VERSION")},
     });
     write_result(out, id, result)
 }
@@ -332,7 +332,7 @@ fn handle_tools_call(
             out,
             id,
             json!({
-                "content": [{"type": "text", "text": "aw: usage: no git root ancestor found — initialize MCP with rootUri or run inside a git repository\n"}],
+                "content": [{"type": "text", "text": "eg: usage: no git root ancestor found — initialize MCP with rootUri or run inside a git repository\n"}],
                 "isError": true
             }),
         );
@@ -404,7 +404,7 @@ fn run_tool_journaled(
         })) {
             Ok(v) => v,
             Err(_) => (
-                "aw: internal: tool panicked — server still running\n".to_string(),
+                "eg: internal: tool panicked — server still running\n".to_string(),
                 true,
                 6,
                 None,

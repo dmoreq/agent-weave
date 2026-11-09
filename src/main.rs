@@ -3,10 +3,10 @@
 //! aborts with exit 6, never partial stdout.
 #![forbid(unsafe_code)]
 
-use agent_weave::{cli, error, journal, mcp, service, walk};
+use engram::{cli, error, journal, mcp, service, walk};
 
 use clap::Parser;
-use error::AwError;
+use error::EgError;
 
 fn main() {
     quiet_pipe_hook();
@@ -56,9 +56,9 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
 }
 
 /// Map the run outcome to an exit code. A closed downstream pipe
-/// (`aw callers x | head -1`) exits 0 quietly like a POSIX filter (R6d A8).
+/// (`eg callers x | head -1`) exits 0 quietly like a POSIX filter (R6d A8).
 fn exit_code_of(
-    result: std::thread::Result<Result<i32, AwError>>,
+    result: std::thread::Result<Result<i32, EgError>>,
     root: Option<&std::path::Path>,
     latency_us: u64,
     journaled: bool,
@@ -80,7 +80,7 @@ fn exit_code_of(
             if journaled {
                 journal::finalize(root, 6, latency_us);
             }
-            eprintln!("aw: internal: unexpected panic — no output written");
+            eprintln!("eg: internal: unexpected panic — no output written");
             6
         }
     }
@@ -88,7 +88,7 @@ fn exit_code_of(
 
 /// Execute one command and write its output. Output happens here (inside the
 /// panic boundary) so a closed downstream pipe exits 0, not 6 (R6 finding).
-fn run(cli: cli::Cli, no_journal: bool, journaled: bool) -> Result<i32, AwError> {
+fn run(cli: cli::Cli, no_journal: bool, journaled: bool) -> Result<i32, EgError> {
     let (root, cmd) = (cli.root, cli.cmd);
     if let cli::Cmd::Mcp { all_tools } = cmd {
         mcp::serve(root.as_deref(), no_journal, all_tools)?;
@@ -102,7 +102,7 @@ fn run(cli: cli::Cli, no_journal: bool, journaled: bool) -> Result<i32, AwError>
         global: _,
     } = cmd
     {
-        agent_weave::dashboard::run_dashboard(root.as_deref(), &host, port, open, local)?;
+        engram::dashboard::run_dashboard(root.as_deref(), &host, port, open, local)?;
         return Ok(0);
     }
     if let cli::Cmd::Monitor {
@@ -111,7 +111,7 @@ fn run(cli: cli::Cli, no_journal: bool, journaled: bool) -> Result<i32, AwError>
         local,
     } = cmd
     {
-        agent_weave::dashboard::run_monitor(root.as_deref(), repo.as_deref(), errors_only, local)?;
+        engram::dashboard::run_monitor(root.as_deref(), repo.as_deref(), errors_only, local)?;
         return Ok(0);
     }
     let req = service::CommandRequest::from_cli(cmd)?;

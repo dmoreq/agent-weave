@@ -126,7 +126,7 @@ pub fn memory_write(
     }
     match last_error {
         Some(e) => Err(map_memory_err(e)),
-        None => Err(AwError::Internal(
+        None => Err(EgError::Internal(
             "memory write: no attempt completed".to_string(),
         )),
     }
@@ -291,7 +291,7 @@ fn supersede_cross_key(
         .optional()
         .map_err(map_memory_err)?;
     let Some(target_id) = target_id else {
-        return Err(AwError::NoResults(format!(
+        return Err(EgError::NoResults(format!(
             "unknown memory key '{target}' — nothing superseded, write rolled back"
         )));
     };

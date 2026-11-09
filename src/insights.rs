@@ -3,7 +3,7 @@
 use rusqlite::Connection;
 
 use crate::db;
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 use crate::extract::EdgeKind;
 use crate::query::QueryCtx;
 
@@ -35,13 +35,14 @@ pub fn stats(ctx: &QueryCtx<'_>, path: Option<&str>) -> Result<String> {
         Some(scope) => scoped_totals(conn, scope)?,
     };
     let size = db::file_size(&db::db_path(root));
-    let aw_version = db::meta_get(conn, db::meta_keys::AW_VERSION).unwrap_or_else(|| "?".into());
+    let eg_version =
+        db::meta_get(conn, db::meta_keys::ENGRAM_VERSION).unwrap_or_else(|| "?".into());
     let grammar = db::meta_get(conn, db::meta_keys::GRAMMAR_VERSION).unwrap_or_else(|| "?".into());
     Ok(stats_line(
         scope.as_deref(),
         &totals,
         size,
-        &aw_version,
+        &eg_version,
         &grammar,
     ))
 }
@@ -83,7 +84,7 @@ fn scoped_totals(conn: &Connection, scope: &str) -> Result<StatsTotals> {
     };
     let files = scalar("COUNT(*)", "files f", "")?;
     if files == 0 {
-        return Err(AwError::NoResults(format!("no indexed files in '{scope}'")));
+        return Err(EgError::NoResults(format!("no indexed files in '{scope}'")));
     }
     let edge_from = format!("edges e {}", db::EDGE_SRC_FILE_JOIN);
     let (edges, calls, imports, inherits) = conn.query_row(
@@ -116,7 +117,7 @@ fn stats_line(
     scope: Option<&str>,
     totals: &StatsTotals,
     size: u64,
-    aw_version: &str,
+    eg_version: &str,
     grammar: &str,
 ) -> String {
     let scope_prefix = scope.map(|s| format!("scope={s} ")).unwrap_or_default();
@@ -131,6 +132,6 @@ fn stats_line(
         unresolved,
     } = totals;
     format!(
-        "aw stats: {scope_prefix}files={files} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} aw={aw_version} grammar={grammar}"
+        "eg stats: {scope_prefix}files={files} symbols={symbols} edges={edges} (calls={calls} imports={imports} inherits={inherits}) parse_errors={perr} unresolved={unresolved} db_bytes={size} eg={eg_version} grammar={grammar}"
     )
 }

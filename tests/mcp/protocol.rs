@@ -7,12 +7,12 @@ use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
 
-use super::common::{aw_cmd, fixture, read_response, rpc, send_raw, spawn};
+use super::common::{eg_cmd, fixture, read_response, rpc, send_raw, spawn};
 
 #[test]
 fn malformed_json_frame_returns_parse_error() {
     let repo = fixture("mcp-badjson");
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
     srv.stdin.write_all(b"not json\n").unwrap();
@@ -28,7 +28,7 @@ fn missing_required_argument_returns_invalid_params() {
     // R7 L4: a schema-required string must fail at the protocol layer, not as
     // a downstream "symbol '' not in index" tool result.
     let repo = fixture("mcp-required");
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
     let resp = rpc(
@@ -144,14 +144,14 @@ fn client_response_envelope_is_ignored() {
 #[test]
 fn mcp_dynamic_root_initialization_from_non_git_cwd() {
     let repo = fixture("dynamic-root");
-    aw_cmd(&repo).arg("build").output().unwrap();
+    eg_cmd(&repo).arg("build").output().unwrap();
 
-    let empty_dir = std::env::temp_dir().join(format!("aw-mcp-empty-{}", std::process::id()));
+    let empty_dir = std::env::temp_dir().join(format!("eg-mcp-empty-{}", std::process::id()));
     let _ = fs::create_dir_all(&empty_dir);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_eg"))
         .current_dir(&empty_dir)
-        .env("AW_GLOBAL_DIR", repo.join(".test_global"))
+        .env("ENGRAM_GLOBAL_DIR", repo.join(".test_global"))
         .arg("mcp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -179,7 +179,7 @@ fn mcp_dynamic_root_initialization_from_non_git_cwd() {
     reader.read_line(&mut line).unwrap();
     let init_resp: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(init_resp["id"], 1);
-    assert_eq!(init_resp["result"]["serverInfo"]["name"], "agent-weave");
+    assert_eq!(init_resp["result"]["serverInfo"]["name"], "engram");
 
     // 2. Call search tool on the dynamically bound repo
     let call_req = json!({
@@ -207,7 +207,7 @@ fn mcp_dynamic_root_initialization_from_non_git_cwd() {
 #[test]
 fn mcp_client_info_sets_agent_identity() {
     let repo = fixture("mcp-agent-id");
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
 
     let mut srv = spawn(&repo);
@@ -237,7 +237,7 @@ fn mcp_client_info_sets_agent_identity() {
     );
     assert_eq!(call["id"], 2);
 
-    let usage_log = repo.join(".aw/usage.log");
+    let usage_log = repo.join(".engram/usage.log");
     let content = fs::read_to_string(&usage_log).unwrap();
     assert!(
         content.contains("\"agent\":\"antigravity-test\""),

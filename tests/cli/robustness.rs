@@ -21,7 +21,7 @@ fn deep_nesting_does_not_abort_build() {
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "deep nesting must not abort: {stdout}{stderr}");
     assert!(stdout.contains("files=3"), "{stdout}");
-    let out = aw(&repo).args(["stats"]).output().unwrap();
+    let out = eg(&repo).args(["stats"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
 }
 
@@ -37,7 +37,7 @@ fn incremental_build_heals_resolution_gaps() {
         "import b\n\ndef use():\n    return b.foo()\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["callers", "foo"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "foo"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "foo does not exist yet");
     // Add the missing symbol; the next incremental build must heal a.py.
     write(
@@ -47,7 +47,7 @@ fn incremental_build_heals_resolution_gaps() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let out = aw(&repo).args(["callers", "foo"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "foo"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -76,7 +76,7 @@ fn gap_healing_reapplies_inbound_closure() {
     );
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let before = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    let before = eg(&repo).args(["callees", "invoke"]).output().unwrap();
     assert_eq!(before.status.code(), Some(0), "{before:?}");
     assert!(
         String::from_utf8_lossy(&before.stdout).contains("a.entry"),
@@ -88,7 +88,7 @@ fn gap_healing_reapplies_inbound_closure() {
     write(&repo, "missing.py", "def foo():\n    pass\n");
     let (code, stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stdout}{stderr}");
-    let after = aw(&repo).args(["callees", "invoke"]).output().unwrap();
+    let after = eg(&repo).args(["callees", "invoke"]).output().unwrap();
     assert_eq!(after.status.code(), Some(0), "{after:?}");
     assert!(
         String::from_utf8_lossy(&after.stdout).contains("a.entry"),
@@ -96,12 +96,12 @@ fn gap_healing_reapplies_inbound_closure() {
     );
 
     let incremental_db = repo.join("incremental.db");
-    fs::copy(repo.join(".aw/index.db"), &incremental_db).unwrap();
-    let force = aw(&repo).args(["build", "--force"]).output().unwrap();
+    fs::copy(repo.join(".engram/index.db"), &incremental_db).unwrap();
+    let force = eg(&repo).args(["build", "--force"]).output().unwrap();
     assert_eq!(force.status.code(), Some(0), "{force:?}");
     assert_eq!(
         dump_edges(&incremental_db),
-        dump_edges(&repo.join(".aw/index.db")),
+        dump_edges(&repo.join(".engram/index.db")),
         "incremental and fresh edge sets differ"
     );
 }
@@ -117,7 +117,7 @@ fn constructor_calls_attribute_to_the_class() {
         "class Widget:\n    def __init__(self):\n        self.x = 1\n\ndef make():\n    return Widget()\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["callers", "Widget"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "Widget"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -126,12 +126,12 @@ fn constructor_calls_attribute_to_the_class() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("c.py:6"), "{stdout}");
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["callers", "c.Widget.__init__"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "ctor keeps its own edge");
-    let out = aw(&repo).args(["dead"]).output().unwrap();
+    let out = eg(&repo).args(["dead"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         !stdout.contains("c.py:1"),
@@ -161,9 +161,9 @@ fn grammar_version_matches_cargo_lock() {
     ] {
         let expected = format!("{short}-{}", versions[crate_name]);
         assert!(
-            agent_weave::db::GRAMMAR_VERSION.contains(&expected),
+            engram::db::GRAMMAR_VERSION.contains(&expected),
             "GRAMMAR_VERSION {} missing {expected}",
-            agent_weave::db::GRAMMAR_VERSION
+            engram::db::GRAMMAR_VERSION
         );
     }
 }
@@ -188,15 +188,15 @@ fn tracked_but_gitignored_sources_are_indexed() {
         .unwrap();
     assert!(out.status.success());
     build(&repo);
-    let out = aw(&repo).args(["stats"]).output().unwrap();
+    let out = eg(&repo).args(["stats"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("files=1"),
         "tracked-ignored file indexed: {stdout}"
     );
-    let out = aw(&repo).args(["callers", "hidden_fn"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "hidden_fn"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "defined but uncalled");
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["symbols", "generated/g.py"])
         .output()
         .unwrap();
@@ -216,7 +216,7 @@ fn parallel_builds_produce_identical_tables() {
         );
     }
     let dump = |tag: &str| -> String {
-        let db = repo.join(".aw/index.db");
+        let db = repo.join(".engram/index.db");
         let out = Command::new("python3")
             .arg("-c")
             .arg(format!(
@@ -239,7 +239,7 @@ fn parallel_builds_produce_identical_tables() {
     let (code, stdout, stderr) = build(&repo); // fast path
     assert_eq!(code, 0, "{stdout}{stderr}");
     let second = dump("second");
-    let out = aw(&repo).args(["build", "--force"]).output().unwrap();
+    let out = eg(&repo).args(["build", "--force"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let third = dump("force");
     assert_eq!(first, second, "fast-path rebuild changed table content");
@@ -250,11 +250,11 @@ fn parallel_builds_produce_identical_tables() {
 fn doctor_invalidate_removes_the_index() {
     let repo = fixture("invalidate");
     build(&repo);
-    assert!(repo.join(".aw/index.db").exists());
-    let out = aw(&repo).args(["doctor", "--invalidate"]).output().unwrap();
+    assert!(repo.join(".engram/index.db").exists());
+    let out = eg(&repo).args(["doctor", "--invalidate"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
-    assert!(!repo.join(".aw/index.db").exists(), "index removed");
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    assert!(!repo.join(".engram/index.db").exists(), "index removed");
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "no index after invalidate");
 }
 
@@ -263,11 +263,11 @@ fn truncated_index_exits_3() {
     // CUJ3: a truncated index file is the corrupt-index class (exit 3).
     let repo = fixture("truncated");
     build(&repo);
-    let db = repo.join(".aw/index.db");
+    let db = repo.join(".engram/index.db");
     let mut bytes = fs::read(&db).unwrap();
     bytes.truncate(bytes.len() / 3);
     fs::write(&db, bytes).unwrap();
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(3), "truncated index is corrupt");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("corrupt-index"), "{stderr}");
@@ -290,11 +290,11 @@ fn context_shows_definition_callers_and_callees() {
         "from b import caller\n\ndef top():\n    return caller()\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["context", "caller"]).output().unwrap();
+    let out = eg(&repo).args(["context", "caller"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let expected =
-        "aw: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees\n\
+        "eg: context — resolved static edges plus tagged [ambiguous] candidates; dynamic dispatch may hide callers or callees\n\
 b.py:3-4 function b.caller def caller()\n\
 callers (showing 1 of 1):\n\
 c.py:4 c.top\n\
@@ -309,7 +309,7 @@ a.py:1 a.target\n";
         "from b import caller\n\ndef other():\n    return caller()\n",
     );
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["context", "caller", "--limit", "1"])
         .output()
         .unwrap();
@@ -317,7 +317,7 @@ a.py:1 a.target\n";
     assert!(stdout.contains("callers (showing 1 of 2):"), "{stdout}");
 
     // Missing symbol: exit 1.
-    let out = aw(&repo).args(["context", "nope_xyz"]).output().unwrap();
+    let out = eg(&repo).args(["context", "nope_xyz"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not in index"), "{stderr}");
@@ -325,7 +325,7 @@ a.py:1 a.target\n";
     // Ambiguous name: exit 2 with candidates.
     write(&repo, "e.py", "class A1:\n    def dup(self):\n        return 1\n\nclass B1:\n    def dup(self):\n        return 2\n");
     build(&repo);
-    let out = aw(&repo).args(["context", "dup"]).output().unwrap();
+    let out = eg(&repo).args(["context", "dup"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
 
@@ -346,9 +346,9 @@ fn serial_and_parallel_builds_are_identical() {
     let serial = mk("serial");
     let parallel = mk("parallel");
     for (repo, workers) in [(&serial, "1"), (&parallel, "4")] {
-        let out = aw(repo)
+        let out = eg(repo)
             .arg("build")
-            .env("AW_WORKERS", workers)
+            .env("ENGRAM_WORKERS", workers)
             .output()
             .unwrap();
         assert!(out.status.success());
@@ -358,7 +358,7 @@ fn serial_and_parallel_builds_are_identical() {
             .arg("-c")
             .arg(format!(
                 "import sqlite3,hashlib\nc=sqlite3.connect('file:{}?mode=ro',uri=True)\nrows=[]\nfor q in ['SELECT path,size,parse_status,error_nodes,unresolved FROM files ORDER BY path','SELECT qualname,kind,line_start,line_end,signature,is_test,file_path FROM symbols ORDER BY qualname,file_path,line_start','SELECT src_id,dst_id,dst_name,kind,confidence,site_line FROM edges ORDER BY src_id,dst_id,kind,site_line','SELECT file_id,dst_name,kind,site_line FROM unresolved_calls ORDER BY file_id,kind,dst_name,site_line']:\n rows += [tuple(str(x) for x in r) for r in c.execute(q)]\nprint(hashlib.sha256(repr(rows).encode()).hexdigest())",
-                repo.join(".aw/index.db").display()
+                repo.join(".engram/index.db").display()
             ))
             .output()
             .unwrap();
@@ -380,7 +380,7 @@ fn unresolved_names_flag_internal_misses() {
     write(&repo, "a.py", "def helper():\n    return 1\n");
     write(&repo, "b.py", "def go():\n    return helper()\n");
     build(&repo);
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("1 distinct names (internal=1)"), "{stdout}");

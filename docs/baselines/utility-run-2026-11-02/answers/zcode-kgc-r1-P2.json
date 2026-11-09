@@ -1,6 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "answer": "No route exists. The resolved graph gives module src.parse zero callees, and its symbols only reach src.parse.count_error_nodes and src.parse.parse_source, while src.extract.record_ts_arrow_function is reached solely from src.extract.walk_node."
-}

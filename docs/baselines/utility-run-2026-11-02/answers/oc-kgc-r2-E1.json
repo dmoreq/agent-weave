@@ -1,1 +1,0 @@
-{"exists":true,"hops":0,"route":["src/journal.rs:142"],"answer":"src.journal.finalize serializes and appends the usage line, then appends the payload line when pointers were captured, as its docstring states."}

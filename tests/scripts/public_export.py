@@ -2,7 +2,7 @@
 """Build the public export tree and prove it clean (R6b gate).
 
 Exports `git archive HEAD`, removes private evidence and reports
-(docs/baselines and docs/reports), scrubs private identifiers/paths/emails, rounds the
+(docs/archive and docs/baselines), scrubs private identifiers/paths/emails, rounds the
 per-corpus table, then runs zero-assert checks over the staged tree.
 
 Usage: python3 tests/scripts/public_export.py --src <repo> --out <empty dir>
@@ -107,7 +107,7 @@ def export(src: Path, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     subprocess.run(["tar", "-x", "-C", str(out)], input=archive, check=True)
     shutil.rmtree(out / "docs" / "baselines", ignore_errors=True)
-    shutil.rmtree(out / "docs" / "reports", ignore_errors=True)
+    shutil.rmtree(out / "docs" / "archive", ignore_errors=True)
     for name in PRIVATE_SCRIPTS:
         (out / "tests" / "scripts" / name).unlink(missing_ok=True)
 
@@ -129,7 +129,7 @@ def scrub(out: Path) -> None:
         if path.is_symlink():
             continue
         t = path.read_text(errors="replace")
-        t = re.sub(r"\[([^\]]+)\]\([^)]*(?:docs/)?baselines[^)]*\)", r"\1", t)
+        t = re.sub(r"\[([^\]]+)\]\([^)]*(?:docs/)?(?:baselines|archive)[^)]*\)", r"\1", t)
         t = t.replace("docs/baselines/", "evidence/").replace("baselines/", "evidence/")
         path.write_text(t)
     # The gate script itself carries the private-pattern vocabulary; it stays
@@ -137,14 +137,14 @@ def scrub(out: Path) -> None:
     for name in PRIVATE_SCRIPTS:
         (out / "tests" / "scripts" / name).unlink(missing_ok=True)
     # Round the per-corpus table (exact counts are fingerprints).
-    ev = out / "docs" / "EVALUATION.md"
+    ev = out / "docs" / "evaluation.md"
     if ev.exists():
         text = ev.read_text()
         text = re.sub(
-            r"\| corpus A \|.*?\n\| aw self \|.*?\n",
+            r"\| corpus A \|.*?\n\| eg self \|.*?\n",
             "| corpora | six repositories, ~1.2k files / ~8.8k symbols / "
             "~19.2k edges total (per-corpus detail withheld) | - | - | - |\n"
-            "| aw self | this repository (Rust) | - | - | - |\n",
+            "| eg self | this repository (Rust) | - | - | - |\n",
             text, flags=re.S,
         )
         text = text.replace(
@@ -214,7 +214,7 @@ def gate(out: Path) -> int:
     if "include = [" not in cargo or "exclude = [" in cargo:
         print("Cargo.toml include allowlist is missing or exclude is still set")
         rc = 1
-    for bad in ("docs/baselines", "docs/reports", ".aw", "target", ".zcode"):
+    for bad in ("docs/baselines", "docs/archive", ".engram", "target", ".zcode"):
         p = out / bad
         if p.exists():
             print(f"forbidden path present: {bad}")

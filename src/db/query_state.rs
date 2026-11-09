@@ -6,7 +6,7 @@ use super::*;
 /// Fast path gate: a usable previous index under the SAME schema AND grammar
 /// versions (any mismatch disables the fast path for the whole build).
 pub fn probe_old(root: &Path) -> Result<Option<Connection>> {
-    reject_symlink(&aw_dir(root), ".aw directory")?;
+    reject_symlink(&eg_dir(root), ".engram directory")?;
     let old_path = db_path(root);
     reject_symlink(&old_path, "index.db")?;
     if !old_path.exists() {

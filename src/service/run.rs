@@ -54,15 +54,15 @@ pub(super) fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) ->
     let root = match crate::walk::discover_root(root_arg) {
         Ok(r) => r,
         Err(e) => {
-            return Err(AwError::NoResults(format!(
-                "{e}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+            return Err(EgError::NoResults(format!(
+                "{e}\n(hint: to view machine-wide telemetry across all repos, run: eg usage --global)"
             )));
         }
     };
     match crate::journal::summary(&root, quality) {
         Ok(lines) => Ok(ArmOut::plain(join_lines(lines), String::new())),
-        Err(AwError::NoResults(msg)) => Err(AwError::NoResults(format!(
-            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+        Err(EgError::NoResults(msg)) => Err(EgError::NoResults(format!(
+            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: eg usage --global)"
         ))),
         Err(e) => Err(e),
     }

@@ -1,8 +1,0 @@
-{
- "exists": true,
- "hops": 0,
- "route": [
-  "pkg/alpha.py:2"
- ],
- "qualname": "pkg.alpha.process"
-}

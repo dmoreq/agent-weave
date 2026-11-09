@@ -85,7 +85,7 @@ pub(super) fn extract_units(
         for h in handles {
             let (units, secs) = h
                 .join()
-                .map_err(|_| AwError::Internal("parse worker panicked".to_string()))??;
+                .map_err(|_| EgError::Internal("parse worker panicked".to_string()))??;
             extract_secs_sum += secs;
             merge_units(units, &mut rows, &mut extractions, &mut error_files);
         }
@@ -125,7 +125,7 @@ fn extract_chunk(
 }
 
 fn worker_count() -> usize {
-    std::env::var("AW_WORKERS")
+    std::env::var("ENGRAM_WORKERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or_else(|| {
@@ -162,7 +162,7 @@ fn extract_one(
     // The walk allowlist guarantees a known extension; an unknown one is an
     // internal invariant break, not a silent JavaScript default.
     let lang = crate::parse::Lang::from_rel(&file.rel)
-        .ok_or_else(|| AwError::Internal(format!("unsupported source extension: {}", file.rel)))?;
+        .ok_or_else(|| EgError::Internal(format!("unsupported source extension: {}", file.rel)))?;
     let tree = parser.parse(&bytes, lang)?;
     let crate::parse::SyntaxStats {
         error_nodes,

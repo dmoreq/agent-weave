@@ -26,7 +26,7 @@ pub fn meta_get(conn: &Connection, key: &str) -> Option<String> {
 /// to an edge scan instead.
 pub(crate) mod meta_keys {
     // Identity and provenance keys written by `write_meta_identity`.
-    pub const AW_VERSION: &str = "aw_version";
+    pub const ENGRAM_VERSION: &str = "engram_version";
     pub const GRAMMAR_VERSION: &str = "grammar_version";
     pub const SIGNATURE_VERSION: &str = "signature_version";
     pub const METRICS_VERSION: &str = "metrics_version";
@@ -47,7 +47,7 @@ pub(crate) mod meta_keys {
 }
 
 /// Build-time meta counters with their fallback SQL (R7 L4): one (key, SQL)
-/// pair per counter, shared by `aw stats` (insights) and the no-op build
+/// pair per counter, shared by `eg stats` (insights) and the no-op build
 /// line (build), so a new counter is registered once and both readers stay
 /// in sync. The fallback COUNT keeps pre-counter indexes working. Kind
 /// filters render through the enum so the vocabularies stay single-sourced.
@@ -153,8 +153,8 @@ pub fn stat_size(path: &Path) -> Option<i64> {
 }
 
 // ---------------------------------------------------------------------------
-// Project memory store (`.aw/memory.db`) — companion design:
-// docs/designs/2026-11-05_agent-weave-memory-retrieval.md. All memory.db
+// Project memory store (`.engram/memory.db`) — companion design:
+// docs/archive/designs/2026-11-05_agent-weave-memory-retrieval.md. All memory.db
 // lifecycle lives here so the write-confinement allowlist stays unchanged.
 // Pragma regime (deliberately NOT the index build's OFF/OFF/EXCLUSIVE — the
 // design's Storage note): default rollback journal, synchronous = FULL, and a

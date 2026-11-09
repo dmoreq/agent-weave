@@ -1,8 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": [
-    "vihap/adapters/sklearn.py:79"
-  ],
-  "answer": "vihap.adapters.sklearn._to_list converts an input sequence to list[Any] via def _to_list(seq: Any) -> list[Any] and is called directly within _raw_items_from_sklearn_input."
-}

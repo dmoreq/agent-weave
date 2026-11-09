@@ -1,9 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": [
-    "pkg/alpha.py:2"
-  ],
-  "qualname": "pkg.alpha.process",
-  "answer": "The pkg.alpha.process function accepts the mercer_street_tolerance parameter and returns a dictionary of type dict[str, float] containing the value and tolerance."
-}

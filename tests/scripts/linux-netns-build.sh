@@ -5,7 +5,7 @@
 # masquerade as successful isolation.
 set -euo pipefail
 AW="$1"; REPO="$2"
-PORT="${AW_NETNS_PORT:-$((20000 + RANDOM % 20000))}"
+PORT="${ENGRAM_NETNS_PORT:-$((20000 + RANDOM % 20000))}"
 SERVER_PID=""
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true

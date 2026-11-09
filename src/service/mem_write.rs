@@ -26,7 +26,7 @@ pub(super) fn run_mem_write(
     };
     if let Some(target) = supersedes {
         if target.trim() == key.trim() {
-            return Err(AwError::Usage(
+            return Err(EgError::Usage(
                 "mem write: --supersedes must name a different key (same-key updates go through the revision chain)"
                     .to_string(),
             ));
@@ -134,14 +134,14 @@ pub(super) fn resolve_memory_stores(root_arg: Option<&Path>) -> Result<MemorySto
     let local = match crate::walk::discover_root(root_arg) {
         Ok(root) => match crate::db::open_memory_query(&root) {
             Ok(conn) => Some(conn),
-            Err(AwError::NoMemory(_)) => None,
+            Err(EgError::NoMemory(_)) => None,
             Err(e) => return Err(e),
         },
         Err(_) => None,
     };
     let global = match crate::db::open_global_memory_query() {
         Ok(conn) => Some(conn),
-        Err(AwError::NoMemory(_)) => None,
+        Err(EgError::NoMemory(_)) => None,
         Err(e) => return Err(e),
     };
     Ok(MemoryStores { local, global })
@@ -149,10 +149,10 @@ pub(super) fn resolve_memory_stores(root_arg: Option<&Path>) -> Result<MemorySto
 
 /// The shared "no memory store anywhere" error: name the local root when
 /// discovery worked, the generic write hint otherwise.
-pub(super) fn no_memory_store_error(root_arg: Option<&Path>) -> AwError {
+pub(super) fn no_memory_store_error(root_arg: Option<&Path>) -> EgError {
     if let Ok(root) = crate::walk::discover_root(root_arg) {
         crate::db::no_memory_error(&root)
     } else {
-        AwError::NoMemory("no memory store found — write with aw mem write".to_string())
+        EgError::NoMemory("no memory store found — write with eg mem write".to_string())
     }
 }

@@ -2,8 +2,8 @@
 //! build inserts under one caller-owned transaction (Amendment 11b; 500-row
 //! prepared batches), and the full-atomic-replacement build policy.
 //!
-//! Build semantics (spec, single rule): `aw build` always produces a full
-//! atomic replacement — extract into `.aw/index.db.new` (fresh schema), close,
+//! Build semantics (spec, single rule): `eg build` always produces a full
+//! atomic replacement — extract into `.engram/index.db.new` (fresh schema), close,
 //! then rename(2) onto `index.db`. A concurrent reader sees the old or the new
 //! DB, never a missing one. There is no delete step; orphan sidecars are
 //! cleaned at build start and by `doctor`.
@@ -16,7 +16,7 @@ use std::time::UNIX_EPOCH;
 
 use rusqlite::{Connection, OpenFlags};
 
-use crate::error::{is_sqlite_corruption, AwError, Result};
+use crate::error::{is_sqlite_corruption, EgError, Result};
 use crate::extract::{
     CarriedIndex, CarriedSymbol, Confidence, EdgeKind, EdgeSiteKind, NewSymbol, SymbolKind,
     SCHEMA_VERSION,
@@ -25,7 +25,7 @@ use crate::extract::{
 /// Compile-time grammar identity, derived from the Cargo.lock-pinned grammar
 /// crate versions by build.rs (R6d A8: a hand-maintained string had already
 /// drifted from the lock). The identity gates the fast path.
-pub const GRAMMAR_VERSION: &str = env!("AW_GRAMMAR_VERSION");
+pub const GRAMMAR_VERSION: &str = env!("ENGRAM_GRAMMAR_VERSION");
 /// Extraction revision: older indexes must be re-extracted when capture or
 /// resolution rules change. This does not change the table shape.
 pub const SIGNATURE_VERSION: &str = "3";
@@ -70,14 +70,46 @@ pub(crate) fn ints4(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64, i64, i
     Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
 }
 
-pub fn aw_dir(root: &Path) -> PathBuf {
-    root.join(".aw")
+pub fn eg_dir(root: &Path) -> PathBuf {
+    root.join(".engram")
+}
+
+/// Compatibility alias for the pre-rename confinement helper: downstream
+/// code compiled against the old crate identity keeps resolving.
+#[doc(hidden)]
+pub use eg_dir as aw_dir;
+
+/// Copy one confinement file into place atomically: private temp file beside
+/// the target, fsync, then rename. The source is left untouched, so a downgrade
+/// to the pre-rename binary keeps reading its own store.
+pub(crate) fn copy_file_atomic(from: &Path, to: &Path) -> Result<()> {
+    let tmp = match to.parent() {
+        Some(dir) => dir.join(format!(
+            ".{}.{}.migrating",
+            to.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            std::process::id()
+        )),
+        None => return Err(EgError::Internal("migration target has no parent".into())),
+    };
+    let _ = fs::remove_file(&tmp);
+    fs::copy(from, &tmp)?;
+    File::open(&tmp)?.sync_all()?;
+    fs::rename(&tmp, to)?;
+    let _ = harden_file_mode(to);
+    if let Some(dir) = to.parent() {
+        if let Ok(handle) = File::open(dir) {
+            let _ = handle.sync_all();
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
     if let Ok(meta) = fs::symlink_metadata(path) {
         if meta.file_type().is_symlink() {
-            return Err(AwError::Internal(format!(
+            return Err(EgError::Internal(format!(
                 "refusing symlinked {label}: {}",
                 path.display()
             )));
@@ -86,21 +118,21 @@ pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
-fn unsafe_lock(path: &Path) -> AwError {
-    AwError::Internal(format!("refusing unsafe build lock: {}", path.display()))
+fn unsafe_lock(path: &Path) -> EgError {
+    EgError::Internal(format!("refusing unsafe build lock: {}", path.display()))
 }
 
 /// Create or validate a directory, refusing a symlinked path. A symlink can
 /// redirect every later write outside the intended root. `recursive` creates
-/// missing parents (the global store may nest under `$HOME/.aw`); the
-/// repo-local `.aw` must not. Creation race (two first-time writers, e.g.
+/// missing parents (the global store may nest under `$HOME/.engram`); the
+/// repo-local `.engram` must not. Creation race (two first-time writers, e.g.
 /// concurrent mem writes — memory takes no build lock): the loser's create
 /// reports AlreadyExists and re-validates the winner's directory. The single
-/// implementation shared by the local and global `.aw` sides.
-fn ensure_dir_validated(path: &Path, label: &str, recursive: bool) -> Result<()> {
+/// implementation shared by the local and global `.engram` sides.
+pub(crate) fn ensure_dir_validated(path: &Path, label: &str, recursive: bool) -> Result<()> {
     reject_symlink(path, label)?;
     match fs::symlink_metadata(path) {
-        Ok(meta) if !meta.is_dir() => Err(AwError::Internal(format!(
+        Ok(meta) if !meta.is_dir() => Err(EgError::Internal(format!(
             "{label} exists but is not a directory: {}",
             path.display()
         ))),
@@ -123,15 +155,15 @@ fn ensure_dir_validated(path: &Path, label: &str, recursive: bool) -> Result<()>
     }
 }
 
-/// Create or validate `.aw/`, refusing a symlinked directory.
-pub fn ensure_aw_dir(root: &Path) -> Result<PathBuf> {
-    let dir = aw_dir(root);
-    ensure_dir_validated(&dir, ".aw directory", false)?;
+/// Create or validate `.engram/`, refusing a symlinked directory.
+pub fn ensure_eg_dir(root: &Path) -> Result<PathBuf> {
+    let dir = eg_dir(root);
+    ensure_dir_validated(&dir, ".engram directory", false)?;
     Ok(dir)
 }
 
 pub fn db_path(root: &Path) -> PathBuf {
-    aw_dir(root).join("index.db")
+    eg_dir(root).join("index.db")
 }
 
 /// Best-effort byte size of one file; `0` when the path is absent or
@@ -141,25 +173,25 @@ pub(crate) fn file_size(path: &Path) -> u64 {
 }
 
 pub fn db_new_path(root: &Path) -> PathBuf {
-    aw_dir(root).join("index.db.new")
+    eg_dir(root).join("index.db.new")
 }
 
-fn unexpected_gitignore(marker: &Path) -> AwError {
-    AwError::Internal(format!(
-        "unexpected .aw/.gitignore content: {}",
+fn unexpected_gitignore(marker: &Path) -> EgError {
+    EgError::Internal(format!(
+        "unexpected .engram/.gitignore content: {}",
         marker.display()
     ))
 }
 
-/// Write the tool-owned `.aw/.gitignore` (`*`) on first build: the whole
+/// Write the tool-owned `.engram/.gitignore` (`*`) on first build: the whole
 /// directory disappears from `git status` without touching the repo's own
 /// .gitignore (allowed write path per invariant 3's constant list).
 /// Fail-closed: a symlink, non-regular file (FIFO/device — rejected before
 /// any open), over-cap file, or wrong content is an error, never kept silent.
-pub fn ensure_aw_gitignore(root: &Path) -> Result<()> {
-    let dir = ensure_aw_dir(root)?;
+pub fn ensure_eg_gitignore(root: &Path) -> Result<()> {
+    let dir = ensure_eg_dir(root)?;
     let marker = dir.join(".gitignore");
-    reject_symlink(&marker, ".aw/.gitignore")?;
+    reject_symlink(&marker, ".engram/.gitignore")?;
     match fs::symlink_metadata(&marker) {
         Ok(_) => {
             // An existing marker must still be the tool's own: `read_bounded`
@@ -208,12 +240,12 @@ fn publish_gitignore_marker(dir: &Path, marker: &Path) -> Result<()> {
                 Err(unexpected_gitignore(marker))
             }
         }
-        // Filesystems without hard links (rare for a local .aw):
+        // Filesystems without hard links (rare for a local .engram):
         // fall back to the atomic rename, which replaces the target.
         Err(link_err) if link_err.kind() == std::io::ErrorKind::Unsupported => {
             let renamed = fs::rename(&tmp, marker);
             let _ = fs::remove_file(&tmp);
-            renamed.map_err(AwError::from)
+            renamed.map_err(EgError::from)
         }
         Err(e) => {
             let _ = fs::remove_file(&tmp);
@@ -233,7 +265,7 @@ fn link_count(_: &fs::Metadata) -> u64 {
     1
 }
 
-/// Exclusive flock over `.aw/build.lock` for the whole build (CUJ6). This is
+/// Exclusive flock over `.engram/build.lock` for the whole build (CUJ6). This is
 /// the only build lock: one POSIX flock identity for builds and (via the same
 /// acquire) for `doctor --invalidate`.
 pub struct BuildLock {
@@ -242,7 +274,7 @@ pub struct BuildLock {
 
 impl BuildLock {
     pub fn acquire(root: &Path) -> Result<BuildLock> {
-        let dir = ensure_aw_dir(root)?;
+        let dir = ensure_eg_dir(root)?;
         let lock_path = dir.join("build.lock");
         let mut file = open_lock_file(&lock_path)?;
         match file.try_lock() {
@@ -258,7 +290,7 @@ impl BuildLock {
                         })
                     })
                     .unwrap_or(0);
-                return Err(AwError::Locked(pid));
+                return Err(EgError::Locked(pid));
             }
             Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
         }
@@ -324,15 +356,15 @@ impl Drop for BuildLock {
 /// linear in DB size, on every open (CLI and per-MCP-tool-call). Corruption
 /// still exits 3: SQLITE_NOTADB surfaces on the first statement against a
 /// non-SQLite file, SQLITE_CORRUPT when a query hits a malformed page, and
-/// both map to the contract message via `AwError::from(rusqlite::Error)`.
-/// Deep integrity remains `aw doctor` (`PRAGMA integrity_check`).
+/// both map to the contract message via `EgError::from(rusqlite::Error)`.
+/// Deep integrity remains `eg doctor` (`PRAGMA integrity_check`).
 pub fn open_for_query(root: &Path) -> Result<Connection> {
-    reject_symlink(&aw_dir(root), ".aw directory")?;
+    reject_symlink(&eg_dir(root), ".engram directory")?;
     let path = db_path(root);
     reject_symlink(&path, "index.db")?;
     if !path.exists() {
-        return Err(AwError::NoResults(format!(
-            "no .aw/index.db under {} — run aw build",
+        return Err(EgError::NoResults(format!(
+            "no .engram/index.db under {} — run eg build",
             root.display()
         )));
     }
@@ -344,7 +376,7 @@ pub fn open_for_query(root: &Path) -> Result<Connection> {
 pub fn check_schema_version(conn: &Connection) -> Result<()> {
     let have: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if have != SCHEMA_VERSION {
-        return Err(AwError::SchemaMismatch {
+        return Err(EgError::SchemaMismatch {
             have,
             want: SCHEMA_VERSION,
         });
@@ -352,11 +384,12 @@ pub fn check_schema_version(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Fresh DB at `.aw/index.db.new` with tables, FTS, and user_version stamped.
+/// Fresh DB at `.engram/index.db.new` with tables, FTS, and user_version stamped.
 /// Secondary indexes are created later by `create_secondary_indexes` (after
 /// the bulk insert) so each index is sorted once instead of maintained per row.
 pub fn create_fresh(root: &Path) -> Result<Connection> {
-    ensure_aw_gitignore(root)?;
+    reject_tracked_eg_dir(root)?;
+    ensure_eg_gitignore(root)?;
     let path = db_new_path(root);
     let _ = fs::remove_file(&path);
     reject_symlink(&path, "index.db.new")?;
@@ -371,7 +404,7 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
          PRAGMA locking_mode = EXCLUSIVE;
          PRAGMA cache_size = -32768;",
     )?;
-    conn.execute_batch(include_str!("../schema.sql"))?;
+    conn.execute_batch(include_str!("../schema/index.sql"))?;
     // The version contract lives here alone: schema.sql declares no PRAGMA,
     // and this pragma_update stamps the compiled SCHEMA_VERSION.
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -381,7 +414,7 @@ pub fn create_fresh(root: &Path) -> Result<Connection> {
 /// Create the secondary indexes after every bulk insert. The final schema is
 /// identical to the historical schema.sql layout; only the creation order moves.
 pub fn create_secondary_indexes(conn: &Connection) -> Result<()> {
-    conn.execute_batch(include_str!("../schema_indexes.sql"))?;
+    conn.execute_batch(include_str!("../schema/indexes.sql"))?;
     Ok(())
 }
 
@@ -395,7 +428,7 @@ pub fn publish_new_index(root: &Path) -> Result<()> {
     fs::rename(&new, db_path(root))?;
     // Best-effort directory fsync: makes the rename durable. If it fails, a
     // crash can revert to the previous index, never expose a missing one.
-    if let Ok(dir) = File::open(aw_dir(root)) {
+    if let Ok(dir) = File::open(eg_dir(root)) {
         let _ = dir.sync_all();
     }
     Ok(())
@@ -410,10 +443,10 @@ pub(crate) mod test_support {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    /// Fresh throwaway test root (`aw-{name}-{pid}`), wiped from any previous
+    /// Fresh throwaway test root (`eg-{name}-{pid}`), wiped from any previous
     /// run; shared by journal, doctor, and walk tests via `crate::db::temp_root`.
     pub(crate) fn temp_root(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("aw-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eg-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -449,6 +482,7 @@ mod memory_tests;
 mod memory_write;
 mod meta;
 mod query_state;
+mod security;
 #[cfg(test)]
 mod tests;
 
@@ -458,3 +492,4 @@ pub(crate) use memory_store::*;
 pub(crate) use memory_write::*;
 pub(crate) use meta::*;
 pub(crate) use query_state::*;
+pub(crate) use security::*;

@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 5,
-  "route": ["src/main.rs:37", "src/main.rs:146", "src/build.rs:121", "src/extract.rs:265", "src/extract.rs:379"],
-  "answer": "Yes. kg resolves a 5-hop static call chain: src.main.main -> src.main.run -> src.build.run_build -> src.extract.extract_file -> src.extract.walk_children -> src.extract.walk_node."
-}

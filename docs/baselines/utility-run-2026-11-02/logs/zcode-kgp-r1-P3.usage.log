@@ -1,1 +1,0 @@
-{"ts":1793622266,"surface":"cli","tool":"path","args":{"name":"scripts.build_knowledge_base.main","to":"vihap.cleaners.unicode.normalize_ascii","depth":"10"},"result_count":3,"shown":3,"total":3,"ambiguous":0,"exit_code":0,"latency_us":2913,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

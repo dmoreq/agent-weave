@@ -1,4 +1,4 @@
-// aw Native Rust Dashboard Client (Zero External Dependencies)
+// eg Native Rust Dashboard Client (Zero External Dependencies)
 
 const GRAPH_TOOLS = ['callers', 'callees', 'path', 'context', 'impact', 'symbols', 'imports', 'build'];
 
@@ -16,7 +16,7 @@ let activeReuseDetector = 'ALL';
 
 // Theme Toggle
 function initTheme() {
-  const saved = localStorage.getItem('aw-theme') || 'light';
+  const saved = localStorage.getItem('eg-theme') || 'light';
   document.documentElement.setAttribute('data-theme', saved);
   updateThemeButtonText(saved);
 }
@@ -25,7 +25,7 @@ function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') || 'light';
   const next = current === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('aw-theme', next);
+  localStorage.setItem('eg-theme', next);
   updateThemeButtonText(next);
 }
 
@@ -326,7 +326,7 @@ function updateActionCenter(currentNotes, modifiedCount, brokenCount) {
       : '<span class="badge status-err">[BROKEN REF]</span>';
     const explanation = isModified
       ? 'Target file was modified after note creation. Review note and touch to confirm currency.'
-      : 'Referenced symbol or file path is missing from current code index (.aw/index.db).';
+      : 'Referenced symbol or file path is missing from current code index (.engram/index.db).';
     const touchBtn = isModified
       ? '<button class="btn-touch" onclick="touchMemory(\'' + escapeHtml(m.key) + '\', ' + (m.store === 'global') + ')">Touch Anchor</button>'
       : '';
@@ -1100,7 +1100,7 @@ function renderMemoryList() {
   const filtered = getFilteredMemories();
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>aw mem write --body "..." --kind gotcha &lt;key&gt;</code></span></div>';
+    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>eg mem write --body "..." --kind gotcha &lt;key&gt;</code></span></div>';
     renderMemoryDossier(null);
     return;
   }
@@ -1177,7 +1177,7 @@ function renderMemoryDossier(m) {
 
   let refsHtml = '';
   if (m.resolved_refs && m.resolved_refs.length) {
-    refsHtml = '<div class="dossier-section-title">Guarded Code References (.aw/index.db verified)</div><div class="chips-row">';
+    refsHtml = '<div class="dossier-section-title">Guarded Code References (.engram/index.db verified)</div><div class="chips-row">';
     m.resolved_refs.forEach(r => {
       const verClass = !r.verified ? 'chip-ref broken' : r.modified ? 'chip-ref modified' : 'chip-ref verified';
       const verBadge = !r.verified ? ' [BROKEN REF]' : r.modified ? ' [MODIFIED REF]' : ' [VERIFIED ' + r.type.toUpperCase() + ']';

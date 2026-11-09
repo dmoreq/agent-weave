@@ -94,7 +94,7 @@ where
             r.get::<_, i64>(0)
         })? as usize;
     if total == 0 {
-        return Err(AwError::NoResults(empty_detail()?));
+        return Err(EgError::NoResults(empty_detail()?));
     }
     // Bounded materialization: the closure result is counted above and
     // fetched with LIMIT, never fully collected.
@@ -192,8 +192,8 @@ pub(super) fn callee_empty_reason(conn: &Connection, ids: &[i64]) -> Result<Stri
         String::new()
     };
     let hint = match symbol_file(conn, ids) {
-        Some(path) => format!(" — run aw unresolved --names --path {path}"),
-        None => " — run aw unresolved --names".to_string(),
+        Some(path) => format!(" — run eg unresolved --names --path {path}"),
+        None => " — run eg unresolved --names".to_string(),
     };
     Ok(format!(
         "0 callees found (resolved static call edges only); {} unresolved call site(s) inside the queried symbol: {shown}{more}{hint}",

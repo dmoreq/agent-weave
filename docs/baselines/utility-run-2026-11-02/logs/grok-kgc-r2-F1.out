@@ -1,7 +1,0 @@
-The previous handoff is a similar prompt with a different output path. I will query the code index for this function and write the current deliverable.Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r2-F1.json`.
-
-- **qualname:** `vihap.matching.similarity.pairwise_address_similarity`
-- **callers (5 call sites):** `tests/test_scoring_sklearn_api.py:120`, `:128`, `:137`, `:142`, and `vihap/matching/similarity.py:356`
-- **callees (2 definitions):** `vihap/cleaners/unicode.py:47` (`normalize_ascii`), `vihap/matching/similarity.py:158` (`evaluate_street_similarity`)
-
-`kg callees` repeated those two definition lines (2× and 3×) for multiple calls to the same functions. The JSON lists each definition pointer once.

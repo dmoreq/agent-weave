@@ -15,13 +15,13 @@ class RecallScorerTests(unittest.TestCase):
     def run_scorer(self, script, fake_output, exit_code, input_text):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "aw"
+            binary = root / "eg"
             binary.write_text(f"#!/bin/sh\nprintf '%s\\n' '{fake_output}'\nexit {exit_code}\n")
             binary.chmod(0o700)
             source = root / "input"
             source.write_text(input_text)
             if script == "search_recall.py":
-                args = ["--queries", str(source), str(binary), "--aw-root", directory,
+                args = ["--queries", str(source), str(binary), "--eg-root", directory,
                         "--vihap-root", directory]
             else:
                 args = [directory, str(binary), str(source)]
@@ -29,7 +29,7 @@ class RecallScorerTests(unittest.TestCase):
                                   capture_output=True, text=True, timeout=10)
 
     def test_search_requires_qualified_suffix_and_distinct_results(self):
-        queries = json.dumps({"repo": "aw", "query": "x", "expect": ["pkg.foo", "other.foo"]})
+        queries = json.dumps({"repo": "eg", "query": "x", "expect": ["pkg.foo", "other.foo"]})
         result = self.run_scorer("search_recall.py", "src.py:1 foo", 0, queries)
         self.assertIn("pooled symbol recall: 0/2", result.stdout)
         self.assertEqual(result.returncode, 1)
@@ -37,7 +37,7 @@ class RecallScorerTests(unittest.TestCase):
         self.assertIn("pooled symbol recall: 1/2", result.stdout)
 
     def test_search_fails_on_command_error(self):
-        queries = json.dumps({"repo": "aw", "query": "x", "expect": ["foo"]})
+        queries = json.dumps({"repo": "eg", "query": "x", "expect": ["foo"]})
         result = self.run_scorer("search_recall.py", "", 6, queries)
         self.assertEqual(result.returncode, 1)
         self.assertIn("exit 6", result.stderr)

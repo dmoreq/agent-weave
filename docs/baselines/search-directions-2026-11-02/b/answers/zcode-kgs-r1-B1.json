@@ -1,7 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["pkg/alpha.py:2"],
-  "qualname": "pkg.alpha.process",
-  "answer": "pkg.alpha.process accepts the mercer_street_tolerance keyword-only float parameter (default 0.0). It returns a dict[str, float] with keys \"value\" (the input cast to float) and \"tolerance\" (the supplied mercer_street_tolerance)."
-}

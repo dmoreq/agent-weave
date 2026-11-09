@@ -21,10 +21,10 @@ impl Drop for Server {
     }
 }
 
-pub(crate) fn aw_cmd(repo: &Path) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_aw"));
+pub(crate) fn eg_cmd(repo: &Path) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_eg"));
     c.arg("--root").arg(repo);
-    c.env("AW_GLOBAL_DIR", repo.join(".test_global"));
+    c.env("ENGRAM_GLOBAL_DIR", repo.join(".test_global"));
     c
 }
 
@@ -33,10 +33,10 @@ pub(crate) fn spawn(repo: &Path) -> Server {
 }
 
 pub(crate) fn spawn_with(repo: &Path, all_tools: bool) -> Server {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_eg"))
         .arg("--root")
         .arg(repo)
-        .env("AW_GLOBAL_DIR", repo.join(".test_global"))
+        .env("ENGRAM_GLOBAL_DIR", repo.join(".test_global"))
         .arg("mcp")
         .args(all_tools.then_some("--all-tools"))
         .stdin(Stdio::piped())
@@ -77,7 +77,7 @@ pub(crate) fn init_and_list_tools(server: &mut Server) -> Vec<String> {
         "initialize",
         json!({"protocolVersion": "2025-06-18"}),
     );
-    assert_eq!(init["result"]["serverInfo"]["name"], "agent-weave");
+    assert_eq!(init["result"]["serverInfo"]["name"], "engram");
     assert!(init["result"]["protocolVersion"].is_string());
     notification(server, "notifications/initialized");
     let list = rpc(server, 2, "tools/list", json!({}));
@@ -108,9 +108,9 @@ pub(crate) fn result_text(resp: &Value) -> String {
 }
 
 pub(crate) fn strip_footer(text: &str) -> &str {
-    if let Some(pos) = text.rfind("\n───\n⚡ aw:") {
+    if let Some(pos) = text.rfind("\n───\n⚡ eg:") {
         &text[..=pos]
-    } else if let Some(pos) = text.rfind("⚡ aw:") {
+    } else if let Some(pos) = text.rfind("⚡ eg:") {
         &text[..pos]
     } else {
         text
@@ -118,7 +118,7 @@ pub(crate) fn strip_footer(text: &str) -> &str {
 }
 
 pub(crate) fn fixture(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("aw-mcp-{}-{}", name, std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eg-mcp-{}-{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let tail =
@@ -136,14 +136,14 @@ pub(crate) fn fixture(name: &str) -> PathBuf {
 }
 
 pub(crate) fn mem_fixture(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("aw-mcp-mem-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eg-mcp-mem-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
 }
 
 pub(crate) fn cli_mem(repo: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = aw_cmd(repo).args(["mem"]).args(args).output().unwrap();
+    let out = eg_cmd(repo).args(["mem"]).args(args).output().unwrap();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -152,10 +152,10 @@ pub(crate) fn cli_mem(repo: &Path, args: &[&str]) -> (i32, String, String) {
 }
 
 pub(crate) fn spawn_with_global(repo: &Path, global_dir: &Path) -> Server {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_aw"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_eg"))
         .arg("--root")
         .arg(repo)
-        .env("AW_GLOBAL_DIR", global_dir)
+        .env("ENGRAM_GLOBAL_DIR", global_dir)
         .arg("mcp")
         .arg("--all-tools")
         .stdin(Stdio::piped())

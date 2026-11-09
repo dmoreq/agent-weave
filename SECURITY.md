@@ -15,7 +15,7 @@ We aim to acknowledge reports within 7 days.
 
 ## Security model
 
-- aw runs locally, reads repository files, and writes only inside `.aw/`.
+- eg runs locally, reads repository files, and writes only inside `.engram/`.
 - It performs no network I/O at runtime and spawns no long-lived processes.
 - The MCP server is a stdio JSON-RPC surface; frames are size-capped and tool
   panics are isolated.
@@ -24,9 +24,9 @@ We aim to acknowledge reports within 7 days.
 
 ## Local filesystem assumptions
 
-aw defends against pre-positioned symlinks, non-regular journal targets (such
+eg defends against pre-positioned symlinks, non-regular journal targets (such
 as FIFOs), and hardlinked lock or journal files where it can. Those checks
 reduce accidental and racing replacement, but they are not a sandbox against an
-actively hostile local actor that can rename or replace paths inside `.aw/` in
-synchronized ways while a process is running. Run aw only on repositories and
+actively hostile local actor that can rename or replace paths inside `.engram/` in
+synchronized ways while a process is running. Run eg only on repositories and
 local state you trust; use OS-level isolation for a hostile local actor.

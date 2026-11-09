@@ -96,7 +96,7 @@ pub(super) fn run_mem_export(req: &CommandRequest, root_arg: Option<&Path>) -> R
     let conn = open_mem_conn(root_arg, *global, MemoryMode::Query)?;
     let rows = crate::db::memory_export_rows(&conn, *limit)?;
     if rows.is_empty() {
-        return Err(AwError::NoResults(
+        return Err(EgError::NoResults(
             "memory store has no current notes to export".to_string(),
         ));
     }
@@ -139,8 +139,8 @@ pub(super) fn stale_ref_conn(root_arg: Option<&Path>) -> Option<rusqlite::Connec
 
 /// Caveated empty-result error shared by the mem read commands (stdout keeps
 /// the caveat line, stderr the diagnostic, exit 1).
-pub(super) fn mem_empty(detail: &str) -> AwError {
-    AwError::NoResultsCaveated {
+pub(super) fn mem_empty(detail: &str) -> EgError {
+    EgError::NoResultsCaveated {
         caveat: crate::memory::MEMORY_CAVEAT,
         detail: detail.to_string(),
     }
@@ -148,7 +148,7 @@ pub(super) fn mem_empty(detail: &str) -> AwError {
 
 /// The mem_empty error for a key with no current row: shared by mem get and
 /// mem delete so the message cannot drift.
-fn mem_unknown_key(key: &str) -> AwError {
+fn mem_unknown_key(key: &str) -> EgError {
     mem_empty(&format!("unknown memory key '{key}'"))
 }
 

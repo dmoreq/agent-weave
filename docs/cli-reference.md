@@ -1,8 +1,8 @@
 # CLI Reference
 
-Comprehensive reference for the `agent-weave` (`aw`) command-line interface.
+Comprehensive reference for the `engram` (`eg`) command-line interface.
 
-All commands operate as consultative inspection tools: zero runtime network calls, zero background daemons, zero file watchers, and zero modifications outside `.aw/` (or `~/.aw/` for global memory).
+All commands operate as consultative inspection tools: zero runtime network calls, zero background daemons, zero file watchers, and zero modifications outside `.engram/` (or `~/.engram/` for global memory).
 
 ---
 
@@ -11,13 +11,13 @@ All commands operate as consultative inspection tools: zero runtime network call
 Global options can be specified before or after any subcommand:
 
 ```bash
-aw [GLOBAL_OPTIONS] <SUBCOMMAND> [OPTIONS]
+eg [GLOBAL_OPTIONS] <SUBCOMMAND> [OPTIONS]
 ```
 
 | Option | Description |
 |---|---|
 | `--root <PATH>` | Select repository root (defaults to nearest `.git` ancestor of current directory). |
-| `--no-journal` | Disable invocation logging in `.aw/usage.log` for this execution. |
+| `--no-journal` | Disable invocation logging in `.engram/usage.log` for this execution. |
 | `-h`, `--help` | Print help information and exit. |
 | `-V`, `--version` | Print binary version and exit. |
 
@@ -25,11 +25,11 @@ aw [GLOBAL_OPTIONS] <SUBCOMMAND> [OPTIONS]
 
 ## The 10 Core Commands
 
-### 1. `aw build`
-Compile or incrementally update the local SQLite AST index (`.aw/index.db`). Uses content-addressed hashing to skip unchanged files and atomically swaps the database file upon completion.
+### 1. `eg build`
+Compile or incrementally update the local SQLite AST index (`.engram/index.db`). Uses content-addressed hashing to skip unchanged files and atomically swaps the database file upon completion.
 
 ```bash
-aw build [--force] [--max-parse-error-rate <FRACTION>]
+eg build [--force] [--max-parse-error-rate <FRACTION>]
 ```
 
 | Option | Default | Description |
@@ -41,11 +41,11 @@ aw build [--force] [--max-parse-error-rate <FRACTION>]
 
 ---
 
-### 2. `aw callers`
+### 2. `eg callers`
 Identify inbound call sites that invoke the specified function, method, or class.
 
 ```bash
-aw callers <NAME> [--depth <N>] [--limit <N>]
+eg callers <NAME> [--depth <N>] [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -58,11 +58,11 @@ aw callers <NAME> [--depth <N>] [--limit <N>]
 
 ---
 
-### 3. `aw callees`
+### 3. `eg callees`
 List outgoing function and method calls made by the specified symbol.
 
 ```bash
-aw callees <NAME> [--depth <N>] [--limit <N>]
+eg callees <NAME> [--depth <N>] [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -75,11 +75,11 @@ aw callees <NAME> [--depth <N>] [--limit <N>]
 
 ---
 
-### 4. `aw context`
+### 4. `eg context`
 Single-call consolidated symbol surroundings: definition range, signature, direct callers, and direct callees.
 
 ```bash
-aw context <NAME> [--limit <N>]
+eg context <NAME> [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -91,11 +91,11 @@ aw context <NAME> [--limit <N>]
 
 ---
 
-### 5. `aw path`
+### 5. `eg path`
 Find the shortest directed call route between two symbols over resolved call graph edges.
 
 ```bash
-aw path <FROM> <TO> [--depth <N>]
+eg path <FROM> <TO> [--depth <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -108,11 +108,11 @@ aw path <FROM> <TO> [--depth <N>]
 
 ---
 
-### 6. `aw impact`
+### 6. `eg impact`
 Reverse dependency analysis: identify files that depend on or call into a specified target file.
 
 ```bash
-aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>] [--limit <N>]
+eg impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>] [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -125,11 +125,11 @@ aw impact <FILE> [--sites] [--depth <N>] [--edges <KINDS>] [--limit <N>]
 
 ---
 
-### 7. `aw imports`
+### 7. `eg imports`
 List outbound resolved imports declared by a specific file.
 
 ```bash
-aw imports <FILE> [--limit <N>]
+eg imports <FILE> [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -139,11 +139,11 @@ aw imports <FILE> [--limit <N>]
 
 ---
 
-### 8. `aw search`
+### 8. `eg search`
 Symbol-level discovery using SQLite FTS5 BM25 search across symbol names, qualified names, file paths, and signatures, weighted by inbound caller popularity.
 
 ```bash
-aw search <TERMS> [--limit <N>]
+eg search <TERMS> [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -157,11 +157,11 @@ aw search <TERMS> [--limit <N>]
 
 ---
 
-### 9. `aw symbols`
+### 9. `eg symbols`
 List indexed definitions in a file or directory ordered by line number.
 
 ```bash
-aw symbols <FILE_OR_DIR> [--outline] [--limit <N>]
+eg symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -172,11 +172,11 @@ aw symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 
 ---
 
-### 10. `aw reuse`
+### 10. `eg reuse`
 Real-time anti-reinvention engine. Detects cross-file and intra-file duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
 ```bash
-aw reuse [PATHS]... [--limit <N>]
+eg reuse [PATHS]... [--limit <N>]
 ```
 
 | Option / Argument | Default | Description |
@@ -192,15 +192,15 @@ aw reuse [PATHS]... [--limit <N>]
 
 ---
 
-## Project & Global Memory (`aw mem`)
+## Project & Global Memory (`eg mem`)
 
 Zero-token persistent memory store for architectural decisions, gotchas, session handoffs, and developer preferences.
 
-### `aw mem write`
+### `eg mem write`
 Persist an agent-authored note under a stable key identity.
 
 ```bash
-aw mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
+eg mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 ```
 
 | Option / Argument | Default | Description |
@@ -214,15 +214,15 @@ aw mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 | `--ttl <SECS>` | `604800` (7 days)| Expiration lifetime in seconds (only valid with `--scope session`). |
 | `--supersedes <KEY>`| None | Mark the specified key as superseded by this note in one atomic transaction. |
 | `--touch` | `false` | Refresh timestamp on active revision when content hash matches without revision churn. |
-| `--global` | `false` | Persist to global store (`~/.aw/memory.db`) instead of repository (`.aw/memory.db`). |
+| `--global` | `false` | Persist to global store (`~/.engram/memory.db`) instead of repository (`.engram/memory.db`). |
 
 ---
 
-### `aw mem query`
+### `eg mem query`
 Retrieve and rank memory notes using SQLite FTS5 BM25, reference token overlap, and recency decay.
 
 ```bash
-aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global] [--ref <REFERENCE>]
+eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global] [--ref <REFERENCE>]
 ```
 
 | Option | Default | Description |
@@ -233,11 +233,11 @@ aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 | `--scope <SCOPE>` | None | Filter by scope (`durable` or `session`). |
 | `--limit <N>` | `10` | Maximum results displayed (1 to 100). |
 | `--include-superseded`| `false` | When combined with `--all`, includes superseded note revisions. |
-| `--global` | `false` | Restrict search exclusively to global store (`~/.aw/memory.db`). |
+| `--global` | `false` | Restrict search exclusively to global store (`~/.engram/memory.db`). |
 | `--ref <REFERENCE>` | None | Filter notes referencing target path or symbol. |
 
 - **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
-- **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.aw/index.db`. Broken targets missing from the index are badged with `[stale-ref] [broken-ref]`, while targets modified after note creation are badged with `[stale-ref] [modified-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
+- **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.engram/index.db`. Broken targets missing from the index are badged with `[stale-ref] [broken-ref]`, while targets modified after note creation are badged with `[stale-ref] [modified-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
 
 ---
 
@@ -245,93 +245,94 @@ aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 
 | Subcommand | Syntax | Description |
 |---|---|---|
-| `touch` | `aw mem touch <KEY> [--global]` | Refresh `created_at` timestamp on active revision without creating a new revision. |
-| `get` | `aw mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
-| `delete` | `aw mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
-| `export` | `aw mem export [--limit <N>] [--global]` | Export active notes as JSONL to stdout (pure backup stream). |
-| `gc` | `aw mem gc [--global]` | Purge expired session notes and superseded revisions older than 30 days. |
+| `touch` | `eg mem touch <KEY> [--global]` | Refresh `created_at` timestamp on active revision without creating a new revision. |
+| `get` | `eg mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
+| `delete` | `eg mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
+| `export` | `eg mem export [--limit <N>] [--global]` | Export active notes as JSONL to stdout (pure backup stream). |
+| `gc` | `eg mem gc [--global]` | Purge expired session notes and superseded revisions older than 30 days. |
 
 ---
 
 ## Diagnostics and Maintenance
 
-### `aw doctor`
+### `eg doctor`
 Verify index integrity, versions, parse errors, and changed file ratios.
 
 ```bash
-aw doctor [--invalidate]
+eg doctor [--invalidate]
 ```
 
-- `--invalidate`: Resets derived `.aw/` data (removes `.aw/index.db`, journals, and orphan locks). Primary memory data (`.aw/memory.db`) is safely preserved.
+- `--invalidate`: Resets derived `.engram/` data (removes `.engram/index.db`, journals, and orphan locks). Primary memory data (`.engram/memory.db`) is safely preserved.
 
-### `aw stats`
+### `eg stats`
 Display build-time counts for files, symbols, edges, parse errors, and database bytes.
 
 ```bash
-aw stats [--path <PATH>]
+eg stats [--path <PATH>]
 ```
 
-### `aw unresolved`
+### `eg unresolved`
 Analyze where static resolution could not resolve call targets.
 
 ```bash
-aw unresolved [--names] [--path <PATH>] [--limit <N>]
+eg unresolved [--names] [--path <PATH>] [--limit <N>]
 ```
 
 - `--names`: Lists individual unresolved call sites with file:line pointers instead of aggregated per-file counts. `[internal]` indicates an unresolved call to a symbol that exists in the index.
 
-### `aw usage`
+### `eg usage`
 Display local performance telemetry, query distribution, latency percentiles, and token savings.
 
 ```bash
-aw usage [--global] [--quality]
+eg usage [--global] [--quality]
 ```
 
-- `--global`: Aggregates telemetry across all repositories and worktrees on the machine (`~/.aw/usage.log`), listing active repositories and recent errors for triage.
+- `--global`: Aggregates telemetry across all repositories and worktrees on the machine (`~/.engram/usage.log`), listing active repositories and recent errors for triage.
 - `--quality`: Appends breakdown of empty results (`empty_ok` vs `empty_error`), capped queries, and p50/p95 latency percentiles.
 
-### Global Dashboard (`aw-dashboard`)
-Render and open an interactive HTML telemetry dashboard across all repositories.
+### Dashboard Launcher (`eg-dashboard`)
+Convenience launcher for the native dashboard: it resolves the installed `eg`
+binary (falling back to `cargo run` in a source checkout) and executes
+`eg dashboard --global "$@"`.
 
 ```bash
-aw-dashboard [--open] [--serve [PORT]] [--out <PATH>]
+eg-dashboard [dashboard flags]
 ```
 
-- `--open`: Automatically opens the generated dashboard (`~/.aw/dashboard.html`) in your default browser.
-- `--serve [PORT]`: Starts a live HTTP server with Server-Sent Events (SSE) streaming real-time queries.
-- Includes repository filter dropdown, active repositories overview, tool breakdown charts, and an error triage inspection table.
+- All flags pass through to `eg dashboard`: `--port <PORT>`, `--host <HOST>`, `--open`, `--local`.
+- The launcher adds no binary: `eg dashboard` remains the single native implementation.
 
-### Native Dashboard (`aw dashboard`)
-Serve the interactive 3-tab web dashboard (Telemetry, Anti-Reinvention, Agent Memory) with real-time SSE streaming. Built into the native Rust binary with zero Python dependencies. By default, telemetry is aggregated globally across all repositories (`~/.aw/`).
+### Native Dashboard (`eg dashboard`)
+Serve the interactive 3-tab web dashboard (Telemetry, Anti-Reinvention, Agent Memory) with real-time SSE streaming. Built into the native Rust binary with zero Python dependencies. By default, telemetry is aggregated globally across all repositories (`~/.engram/`).
 
 ```bash
-aw dashboard [--port 7890] [--host 127.0.0.1] [--open] [--local]
+eg dashboard [--port 7890] [--host 127.0.0.1] [--open] [--local]
 ```
 
 - `--port <PORT>`: Port to bind the local dashboard web server (default: 7890).
 - `--host <HOST>`: Loopback interface to bind (default: 127.0.0.1).
 - `--open`: Automatically opens the dashboard in your default browser.
-- `--local`: Scope telemetry exclusively to the current repository (`.aw/usage.log`) instead of global.
+- `--local`: Scope telemetry exclusively to the current repository (`.engram/usage.log`) instead of global.
 
-### Live Query Monitor (`aw monitor`)
+### Live Query Monitor (`eg monitor`)
 Stream real-time query events directly in your terminal with colored ANSI output, agent attribution tags, and zero dependencies. Defaults to global telemetry across all repositories with an initial backlog of recent events.
 
 ```bash
-aw monitor [--repo <NAME>] [--errors-only] [--local]
+eg monitor [--repo <NAME>] [--errors-only] [--local]
 ```
 
 - `--repo <NAME>`: Restrict streaming query output to a specific repository.
 - `--errors-only`: Filter for critical errors (exit code >= 3).
-- `--local`: Scope streaming exclusively to the current repository (`.aw/usage.log`).
+- `--local`: Scope streaming exclusively to the current repository (`.engram/usage.log`).
 
 ---
 
-## Model Context Protocol (`aw mcp`)
+## Model Context Protocol (`eg mcp`)
 
-Serve `aw` as an MCP stdio server over newline-delimited JSON-RPC 2.0.
+Serve `eg` as an MCP stdio server over newline-delimited JSON-RPC 2.0.
 
 ```bash
-aw mcp [--all-tools]
+eg mcp [--all-tools]
 ```
 
 - **Default (Core Surface)**: Exposes 13 high-ROI tools: `build`, `callers`, `callees`, `path`, `context`, `imports`, `impact`, `symbols`, `reuse`, `search`, `usage`, `mem_write`, and `mem_query`.
@@ -344,10 +345,10 @@ aw mcp [--all-tools]
 | Code | Status | Meaning | Recovery Action |
 |---|---|---|---|
 | `0` | Success | Command completed successfully. | Inspect results or continue workflow. |
-| `1` | Empty / Missing | No results found, target missing, or index absent. | Verify name/spelling, run `aw build`, or write note. |
+| `1` | Empty / Missing | No results found, target missing, or index absent. | Verify name/spelling, run `eg build`, or write note. |
 | `2` | Usage / Ambiguous | Invalid arguments or bare name matched multiple symbols. | Correct arguments or copy qualified name from candidate list. |
-| `3` | Corrupt Database | SQLite database corruption detected. | Run `aw build` (for index) or restore memory from JSONL backup. |
+| `3` | Corrupt Database | SQLite database corruption detected. | Run `eg build` (for index) or restore memory from JSONL backup. |
 | `4` | Lock Contention | Build lock held by another process or busy timeout. | Wait for concurrent operation to finish and retry. |
-| `5` | Schema Skew | Index or memory database version mismatch. | Run `aw build` to recreate index; memory provides export path. |
+| `5` | Schema Skew | Index or memory database version mismatch. | Run `eg build` to recreate index; memory provides export path. |
 | `6` | Internal Error | Unexpected I/O error or internal failure. | Inspect stderr diagnostic. |
 | `7` | Parse Abort | File parse failure rate exceeded threshold. | Audit syntax or increase `--max-parse-error-rate`. |

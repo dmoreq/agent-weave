@@ -5,30 +5,30 @@ use std::fs;
 use serde_json::json;
 
 use super::common::{
-    aw_cmd, fixture, init_and_list_tools, result_text, rpc, spawn, spawn_with, strip_footer,
+    eg_cmd, fixture, init_and_list_tools, result_text, rpc, spawn, spawn_with, strip_footer,
 };
 
 #[test]
 fn g10_initialize_tools_list_and_parity() {
     let repo = fixture("parity");
     // Build the index before capturing CLI references.
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     // CLI reference outputs, captured before the server opens the journal.
-    let cli_callers = aw_cmd(&repo)
+    let cli_callers = eg_cmd(&repo)
         .args(["callers", "normalize"])
         .output()
         .unwrap();
     assert_eq!(cli_callers.status.code(), Some(0));
-    let cli_symbols = aw_cmd(&repo)
+    let cli_symbols = eg_cmd(&repo)
         .args(["symbols", "utils.py"])
         .output()
         .unwrap();
-    let cli_symbols_outline = aw_cmd(&repo)
+    let cli_symbols_outline = eg_cmd(&repo)
         .args(["symbols", "utils.py", "--outline"])
         .output()
         .unwrap();
-    let cli_search = aw_cmd(&repo)
+    let cli_search = eg_cmd(&repo)
         .args(["search", "normalize"])
         .output()
         .unwrap();
@@ -75,7 +75,7 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&callers)),
         String::from_utf8_lossy(&cli_callers.stdout).into_owned()
     );
-    assert!(result_text(&callers).contains("⚡ aw:"));
+    assert!(result_text(&callers).contains("⚡ eg:"));
 
     let symbols = rpc(
         &mut srv,
@@ -87,7 +87,7 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&symbols)),
         String::from_utf8_lossy(&cli_symbols.stdout).into_owned()
     );
-    assert!(result_text(&symbols).contains("⚡ aw:"));
+    assert!(result_text(&symbols).contains("⚡ eg:"));
 
     let symbols_outline = rpc(
         &mut srv,
@@ -99,7 +99,7 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&symbols_outline)),
         String::from_utf8_lossy(&cli_symbols_outline.stdout).into_owned()
     );
-    assert!(result_text(&symbols_outline).contains("⚡ aw:"));
+    assert!(result_text(&symbols_outline).contains("⚡ eg:"));
 
     let search = rpc(
         &mut srv,
@@ -111,7 +111,7 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&search)),
         String::from_utf8_lossy(&cli_search.stdout).into_owned()
     );
-    assert!(result_text(&search).contains("⚡ aw:"));
+    assert!(result_text(&search).contains("⚡ eg:"));
 
     // R6e: parity covers every pointer tool that does not depend on
     // wall-clock timings or journal state.
@@ -138,7 +138,7 @@ fn g10_initialize_tools_list_and_parity() {
         ),
         ("reuse", json!({}), vec!["reuse"]),
     ] {
-        let cli = aw_cmd(&repo).args(&cli_args).output().unwrap();
+        let cli = eg_cmd(&repo).args(&cli_args).output().unwrap();
         assert_eq!(cli.status.code(), Some(0), "{tool} CLI failed");
         let via_mcp = rpc(
             &mut srv,
@@ -151,11 +151,11 @@ fn g10_initialize_tools_list_and_parity() {
             String::from_utf8_lossy(&cli.stdout).into_owned(),
             "{tool} byte parity"
         );
-        assert!(result_text(&via_mcp).contains("⚡ aw:"));
+        assert!(result_text(&via_mcp).contains("⚡ eg:"));
     }
 
     // P8 no-result parity: imports on an unknown file (CLI stderr, MCP text).
-    let cli_imports_missing = aw_cmd(&repo).args(["imports", "nope.py"]).output().unwrap();
+    let cli_imports_missing = eg_cmd(&repo).args(["imports", "nope.py"]).output().unwrap();
     assert_eq!(cli_imports_missing.status.code(), Some(1));
     let imports_missing = rpc(
         &mut srv,
@@ -168,10 +168,10 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&imports_missing)).trim_end(),
         String::from_utf8_lossy(&cli_imports_missing.stderr).trim_end()
     );
-    assert!(result_text(&imports_missing).contains("⚡ aw:"));
+    assert!(result_text(&imports_missing).contains("⚡ eg:"));
 
     // G10 parity extends to context (Amendment 17).
-    let cli_context = aw_cmd(&repo)
+    let cli_context = eg_cmd(&repo)
         .args(["context", "normalize"])
         .output()
         .unwrap();
@@ -186,11 +186,11 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&context_call)),
         String::from_utf8_lossy(&cli_context.stdout).into_owned()
     );
-    assert!(result_text(&context_call).contains("⚡ aw:"));
+    assert!(result_text(&context_call).contains("⚡ eg:"));
 
     // G10 parity extends to path (Amendment 13): hop pointers + chain line
     // byte-equal between the surfaces.
-    let cli_path = aw_cmd(&repo)
+    let cli_path = eg_cmd(&repo)
         .args(["path", "caller", "normalize"])
         .output()
         .unwrap();
@@ -205,9 +205,9 @@ fn g10_initialize_tools_list_and_parity() {
         strip_footer(&result_text(&path_call)),
         String::from_utf8_lossy(&cli_path.stdout).into_owned()
     );
-    assert!(result_text(&path_call).contains("⚡ aw:"));
+    assert!(result_text(&path_call).contains("⚡ eg:"));
     assert!(
-        result_text(&path_call).starts_with("aw: path — resolved static edges only;"),
+        result_text(&path_call).starts_with("eg: path — resolved static edges only;"),
         "path caveat first: {}",
         result_text(&path_call)
     );
@@ -223,7 +223,7 @@ fn g10_initialize_tools_list_and_parity() {
         "unregistered tool rejected"
     );
 
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     let mcp_lines = log
         .lines()
         .filter(|l| l.contains("\"surface\":\"mcp\""))
@@ -246,7 +246,7 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
         "class B:\n    def process(self):\n        return 2\n",
     )
     .unwrap();
-    aw_cmd(&repo).arg("build").output().unwrap();
+    eg_cmd(&repo).arg("build").output().unwrap();
 
     let mut srv = spawn(&repo);
     let resp = rpc(
@@ -269,7 +269,7 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 #[test]
 fn reuse_arguments_via_mcp() {
     let repo = fixture("mcp-reuse");
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
     let mut srv = spawn(&repo);
 

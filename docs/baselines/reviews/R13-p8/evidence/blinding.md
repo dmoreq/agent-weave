@@ -3,7 +3,7 @@
 Value lenses L1-L5 must not read:
 - R8-R12 verdicts, finding lists, fix sections, O-items.
 - `docs/baselines/p8-utility-2026-11-03.md` §4 Interpretation and §6 Verdict.
-- `docs/EVALUATION.md` §11 verdict column.
+- `docs/evaluation.md` §11 verdict column.
 - README/CHANGELOG/skill claims as evidence.
 - The old plan file or any removal shortlist.
 - Another reviewer's report.

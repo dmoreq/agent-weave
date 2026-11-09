@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for bench/run.py. Stdlib only; no aw binary required."""
+"""Unit tests for bench/run.py. Stdlib only; no eg binary required."""
 
 import importlib.util
 import unittest
@@ -13,7 +13,7 @@ SPEC.loader.exec_module(BENCH)
 
 class BenchParserTests(unittest.TestCase):
     def test_parse_pointers_skips_headers(self):
-        stdout = "aw: header\nshop/a.py:3 shop.a.f\nshowing 1 of 2\n"
+        stdout = "eg: header\nshop/a.py:3 shop.a.f\nshowing 1 of 2\n"
         self.assertEqual(BENCH.parse_pointers(stdout), [("shop/a.py", "shop.a.f")])
 
     def test_parse_context_definition_line(self):
@@ -23,7 +23,7 @@ class BenchParserTests(unittest.TestCase):
         )
 
     def test_parse_chain(self):
-        stdout = "aw: chain a -> b -> c (2 hops)\n"
+        stdout = "eg: chain a -> b -> c (2 hops)\n"
         self.assertEqual(BENCH.parse_chain(stdout), ["a", "b", "c"])
 
     def test_subset_and_forbid(self):

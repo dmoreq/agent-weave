@@ -18,18 +18,18 @@ pub fn path(ctx: &QueryCtx<'_>, from: &str, to: &str, depth: usize) -> Result<Li
     let (from_id, from_qn) = resolve_endpoint(conn, from, "from")?;
     let (to_id, to_qn) = resolve_endpoint(conn, to, "to")?;
     if from_id == to_id {
-        return Err(AwError::NoResults(format!(
+        return Err(EgError::NoResults(format!(
             "'{from_qn}' and '{to_qn}' resolve to the same symbol"
         )));
     }
     let (chain_ids, hop_sites) = match path_bfs(conn, from_id, to_id, depth)? {
         PathSearch::Exhausted => {
-            return Err(AwError::NoResults(format!(
+            return Err(EgError::NoResults(format!(
                 "no call path from '{from_qn}' to '{to_qn}' at any depth <= {depth} (resolved edges only)"
             )));
         }
         PathSearch::CapTruncated => {
-            return Err(AwError::NoResults(format!(
+            return Err(EgError::NoResults(format!(
                 "no call path from '{from_qn}' to '{to_qn}' within depth {depth}; a longer path may exist (resolved edges only)"
             )));
         }
@@ -61,7 +61,7 @@ fn render_path(ctx: &QueryCtx<'_>, chain_ids: &[i64], hop_sites: &[i64]) -> Resu
     for (i, &site) in hop_sites.iter().enumerate() {
         let caller = chain_ids[i];
         let Some(f) = file.get(&caller) else {
-            return Err(AwError::Internal("path hop file missing".to_string()));
+            return Err(EgError::Internal("path hop file missing".to_string()));
         };
         pointers.push(format!("{f}:{site}"));
         hop_files.insert(f.clone());
@@ -77,12 +77,12 @@ fn render_path(ctx: &QueryCtx<'_>, chain_ids: &[i64], hop_sites: &[i64]) -> Resu
     let mut chain_names: Vec<&str> = Vec::with_capacity(chain_ids.len());
     for id in chain_ids {
         let Some(q) = qn.get(id) else {
-            return Err(AwError::Internal("path chain qualname missing".to_string()));
+            return Err(EgError::Internal("path chain qualname missing".to_string()));
         };
         chain_names.push(q.as_str());
     }
     out.push(format!(
-        "aw: chain {} ({hops} hops)",
+        "eg: chain {} ({hops} hops)",
         chain_names.join(" -> ")
     ));
     Ok(LineQuery {
@@ -244,7 +244,7 @@ fn reconstruct_chain(
     let mut cur = to_id;
     while cur != from_id {
         let Some(&(p, site)) = parent.get(&cur) else {
-            return Err(AwError::Internal(
+            return Err(EgError::Internal(
                 "path reconstruction lost a parent link".to_string(),
             ));
         };

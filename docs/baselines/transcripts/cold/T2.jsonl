@@ -1,2 +1,0 @@
-{"task": "T2", "seq": 1, "tool": "rg", "cmd": "rg -n \"get_knowledge_base\" -g \"*.py\" -g \"!tests/**\" .", "in_bytes": 53, "out_bytes": 1733, "err_bytes": 0, "out_file": "out/T2-003.txt"}
-{"task": "T2", "seq": 2, "tool": "rg", "cmd": "rg -n \"GsoIndex\" vihap/parsers/hierarchical_parser.py vihap/formatters/osm.py | head -8", "in_bytes": 87, "out_bytes": 235, "err_bytes": 0, "out_file": "out/T2-004.txt"}

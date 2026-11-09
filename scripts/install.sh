@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Production build, symlink installation, and 5-agent configuration for agent-weave (aw)
+# install.sh — Production build, symlink installation, and 5-agent configuration for engram (eg)
 # Supports: Antigravity, Grok Build, Zcode, OpenCode, Zed, Claude Desktop, Cursor.
 set -euo pipefail
 
@@ -20,10 +20,10 @@ CYAN="\033[0;36m"
 RED="\033[0;31m"
 RESET="\033[0m"
 
-log_info() { echo -e "${CYAN}[aw-install]${RESET} $1"; }
-log_ok() { echo -e "${GREEN}[aw-install]${RESET} $1"; }
-log_warn() { echo -e "${YELLOW}[aw-install]${RESET} $1"; }
-log_err() { echo -e "${RED}[aw-install]${RESET} $1" >&2; }
+log_info() { echo -e "${CYAN}[eg-install]${RESET} $1"; }
+log_ok() { echo -e "${GREEN}[eg-install]${RESET} $1"; }
+log_warn() { echo -e "${YELLOW}[eg-install]${RESET} $1"; }
+log_err() { echo -e "${RED}[eg-install]${RESET} $1" >&2; }
 
 BIN_ONLY=0
 SKIP_BUILD=0
@@ -34,7 +34,7 @@ Usage: ./scripts/install.sh [OPTIONS]
 
 Options:
   --bin-only     Compile and install binary/scripts only; do not modify agent configurations.
-  --skip-build   Skip cargo release compilation (use existing target/release/aw).
+  --skip-build   Skip cargo release compilation (use existing target/release/eg).
   -h, --help     Show this help message.
 EOF
   exit 0
@@ -72,7 +72,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   cargo build --release --locked
 fi
 
-RELEASE_BIN="$REPO_ROOT/target/release/aw"
+RELEASE_BIN="$REPO_ROOT/target/release/eg"
 if [[ ! -f "$RELEASE_BIN" ]]; then
   log_err "Release binary not found at $RELEASE_BIN"
   exit 1
@@ -83,31 +83,43 @@ log_info "Installing binaries and scripts into ~/.cargo/bin and ~/.local/bin..."
 mkdir -p "$HOME/.cargo/bin" "$HOME/.local/bin"
 
 # Atomic replacement of binary to avoid macOS in-place inode execution kill (SIGKILL 9)
-rm -f "$HOME/.cargo/bin/aw"
-cp "$RELEASE_BIN" "$HOME/.cargo/bin/aw.tmp"
-chmod +x "$HOME/.cargo/bin/aw.tmp"
-mv -f "$HOME/.cargo/bin/aw.tmp" "$HOME/.cargo/bin/aw"
+rm -f "$HOME/.cargo/bin/eg"
+cp "$RELEASE_BIN" "$HOME/.cargo/bin/eg.tmp"
+chmod +x "$HOME/.cargo/bin/eg.tmp"
+mv -f "$HOME/.cargo/bin/eg.tmp" "$HOME/.cargo/bin/eg"
 if command -v codesign >/dev/null 2>&1; then
-  codesign -s - -f "$HOME/.cargo/bin/aw" >/dev/null 2>&1 || true
+  codesign -s - -f "$HOME/.cargo/bin/eg" >/dev/null 2>&1 || true
 fi
-ln -sf "$HOME/.cargo/bin/aw" "$HOME/.local/bin/aw"
+ln -sf "$HOME/.cargo/bin/eg" "$HOME/.local/bin/eg"
+
+# Transitional aliases: running agent hosts and shell history still call `aw`.
+# Both are symlinks to the single `eg` binary, so the architecture stays one
+# compiled executable.
+ln -sf "$HOME/.cargo/bin/eg" "$HOME/.cargo/bin/aw"
+ln -sf "$HOME/.cargo/bin/eg" "$HOME/.local/bin/aw"
 
 # Symlink dashboard utility (native Rust launcher)
-DASHBOARD_SRC="$REPO_ROOT/scripts/aw-dashboard"
-rm -f "$HOME/.local/bin/aw-monitor"
+DASHBOARD_SRC="$REPO_ROOT/scripts/eg-dashboard"
+rm -f "$HOME/.local/bin/eg-monitor"
 
 if [[ -f "$DASHBOARD_SRC" ]]; then
   chmod +x "$DASHBOARD_SRC"
+  ln -sf "$DASHBOARD_SRC" "$HOME/.local/bin/eg-dashboard"
   ln -sf "$DASHBOARD_SRC" "$HOME/.local/bin/aw-dashboard"
 fi
 
-# Ensure ~/.aw exists for global telemetry and memory
-mkdir -p "$HOME/.aw"
+# Ensure ~/.engram exists for global telemetry and memory. A pre-rename
+# ~/.aw store is migrated by the binary on first use, not by this script.
+mkdir -p "$HOME/.engram"
+chmod 700 "$HOME/.engram" 2>/dev/null || true
 
 log_ok "Binaries and scripts installed:"
-echo "  ├─ ~/.cargo/bin/aw"
-echo "  ├─ ~/.local/bin/aw -> ~/.cargo/bin/aw"
-echo "  └─ ~/.local/bin/aw-dashboard -> $DASHBOARD_SRC"
+echo "  ├─ ~/.cargo/bin/eg"
+echo "  ├─ ~/.local/bin/eg -> ~/.cargo/bin/eg"
+echo "  ├─ ~/.cargo/bin/aw -> ~/.cargo/bin/eg (transitional)"
+echo "  ├─ ~/.local/bin/aw -> ~/.cargo/bin/eg (transitional)"
+echo "  ├─ ~/.local/bin/eg-dashboard -> $DASHBOARD_SRC"
+echo "  └─ ~/.local/bin/aw-dashboard -> $DASHBOARD_SRC (transitional)"
 
 # Check PATH
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]]; then
@@ -117,8 +129,8 @@ if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && [[ ":$PATH:" != *":$HOME/.cargo/
 fi
 
 # Verify version
-AW_VERSION="$("$HOME/.cargo/bin/aw" --version 2>/dev/null || echo 'aw unknown')"
-log_ok "Verified CLI: $AW_VERSION"
+ENGRAM_VERSION="$("$HOME/.cargo/bin/eg" --version 2>/dev/null || echo 'eg unknown')"
+log_ok "Verified CLI: $ENGRAM_VERSION"
 
 if [[ $BIN_ONLY -eq 1 ]]; then
   log_ok "Completed binary-only installation."
@@ -133,19 +145,19 @@ import os
 import json
 import re
 
-aw_bin = os.path.expanduser("~/.cargo/bin/aw")
+eg_bin = os.path.expanduser("~/.cargo/bin/eg")
 repo_root = os.getcwd()
-skill_source = os.path.join(repo_root, "skills", "aw-first", "SKILL.md")
+skill_source = os.path.join(repo_root, "skills", "engram-first", "SKILL.md")
 
 rule_marker = "- **Code Navigation Invariant**:"
 rule_text = (
     "- **Code Navigation Invariant**:\n"
     "  When locating callers, callees, the impact of a change, the call route between two symbols, "
-    "a symbol's surroundings, a file's imports, or searching existing helpers, query `aw` (CLI or MCP `agent-weave`) "
+    "a symbol's surroundings, a file's imports, or searching existing helpers, query `eg` (CLI or MCP `engram`) "
     "first before reading entire source files or running broad greps. Verify pointed lines directly.\n"
-    "  - **Pre-Task**: Run `aw mem query` to inspect prior architectural decisions, gotchas, and conventions.\n"
-    "  - **Pre-Write / Post-Edit**: Run `aw search '<terms>'` before implementing helpers; run `aw reuse <paths>` to prevent duplicate functions.\n"
-    "  - **Post-Fix**: Run `aw mem write <key> --kind gotcha|decision --body ... --refs <paths>` to persist durable learnings before task completion.\n"
+    "  - **Pre-Task**: Run `eg mem query` to inspect prior architectural decisions, gotchas, and conventions.\n"
+    "  - **Pre-Write / Post-Edit**: Run `eg search '<terms>'` before implementing helpers; run `eg reuse <paths>` to prevent duplicate functions.\n"
+    "  - **Post-Fix**: Run `eg mem write <key> --kind gotcha|decision --body ... --refs <paths>` to persist durable learnings before task completion.\n"
 )
 
 def update_json_file(path, updater_fn):
@@ -200,8 +212,8 @@ print("1. Antigravity:")
 gemini_config = os.path.expanduser("~/.gemini/config/mcp_config.json")
 def update_gemini(data):
     servers = data.setdefault("mcpServers", {})
-    if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
-        servers["agent-weave"] = {"command": aw_bin, "args": ["mcp", "--all-tools"]}
+    if "engram" not in servers or servers["engram"].get("args") != ["mcp", "--all-tools"]:
+        servers["engram"] = {"command": eg_bin, "args": ["mcp", "--all-tools"]}
         return True
     return False
 if update_json_file(gemini_config, update_gemini):
@@ -215,12 +227,12 @@ if os.path.exists(os.path.dirname(anti_mcp)):
     update_json_file(anti_mcp, update_gemini)
     print("  ├─ Synced ~/.gemini/antigravity/mcp_config.json")
 
-# Generate Antigravity lazy-loaded MCP schemas in ~/.gemini/antigravity/mcp/agent-weave
-anti_mcp_schemas = os.path.expanduser("~/.gemini/antigravity/mcp/agent-weave")
+# Generate Antigravity lazy-loaded MCP schemas in ~/.gemini/antigravity/mcp/engram
+anti_mcp_schemas = os.path.expanduser("~/.gemini/antigravity/mcp/engram")
 try:
     import subprocess
     proc = subprocess.Popen(
-        [aw_bin, "mcp", "--all-tools"],
+        [eg_bin, "mcp", "--all-tools"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -244,15 +256,15 @@ try:
             with open(os.path.join(anti_mcp_schemas, f"{t['name']}.json"), "w", encoding="utf-8") as f:
                 json.dump({"name": t["name"], "description": t.get("description", ""), "parameters": params}, f, indent=2)
         with open(os.path.join(anti_mcp_schemas, "instructions.md"), "w", encoding="utf-8") as f:
-            f.write("# agent-weave (aw) Best Practices\n\nQuery aw for code graph navigation before reading files or grepping.\n")
-        print(f"  ├─ Generated {len(tools_data)} MCP tool schemas in ~/.gemini/antigravity/mcp/agent-weave/")
+            f.write("# engram (eg) Best Practices\n\nQuery eg for code graph navigation before reading files or grepping.\n")
+        print(f"  ├─ Generated {len(tools_data)} MCP tool schemas in ~/.gemini/antigravity/mcp/engram/")
 
         # Grant Antigravity MCP execution permissions in ~/.gemini/config/config.json
         anti_config_json = os.path.expanduser("~/.gemini/config/config.json")
         if os.path.exists(anti_config_json):
             def update_grants(data):
                 grants = data.setdefault("userSettings", {}).setdefault("globalPermissionGrants", {}).setdefault("allow", [])
-                needed = ["mcp(agent-weave/*)"] + [f"mcp(agent-weave/{t['name']})" for t in tools_data]
+                needed = ["mcp(engram/*)"] + [f"mcp(engram/{t['name']})" for t in tools_data]
                 mod = False
                 for g in needed:
                     if g not in grants:
@@ -264,8 +276,8 @@ try:
 except Exception as e:
     print(f"  [warn] Could not generate Antigravity MCP schemas: {e}")
 
-if deploy_skill(os.path.expanduser("~/.gemini/config/skills/aw-first")):
-    print("  ├─ Deployed aw-first skill to ~/.gemini/config/skills/aw-first/")
+if deploy_skill(os.path.expanduser("~/.gemini/config/skills/engram-first")):
+    print("  ├─ Deployed engram-first skill to ~/.gemini/config/skills/engram-first/")
 
 if inject_rule(os.path.expanduser("~/.gemini/GEMINI.md")):
     print("  └─ Injected Code Navigation Invariant into ~/.gemini/GEMINI.md")
@@ -277,21 +289,21 @@ if os.path.exists(grok_dir):
     grok_toml = os.path.join(grok_dir, "config.toml")
     if os.path.exists(grok_toml):
         toml_content = open(grok_toml, "r", encoding="utf-8").read()
-        if "[mcp_servers.agent-weave]" not in toml_content:
+        if "[mcp_servers.engram]" not in toml_content:
             mcp_block = (
-                "\n[mcp_servers.agent-weave]\n"
-                f'command = "{aw_bin}"\n'
+                "\n[mcp_servers.engram]\n"
+                f'command = "{eg_bin}"\n'
                 'args = ["mcp", "--all-tools"]\n'
                 "enabled = true\n"
             )
             with open(grok_toml, "a", encoding="utf-8") as f:
                 f.write(mcp_block)
-            print("  ├─ Added agent-weave to ~/.grok/config.toml")
+            print("  ├─ Added engram to ~/.grok/config.toml")
         else:
             print("  ├─ ~/.grok/config.toml already configured")
     if os.path.exists(os.path.join(grok_dir, "skills")):
-        deploy_skill(os.path.join(grok_dir, "skills", "aw-first"))
-        print("  ├─ Deployed aw-first skill to ~/.grok/skills/aw-first/")
+        deploy_skill(os.path.join(grok_dir, "skills", "engram-first"))
+        print("  ├─ Deployed engram-first skill to ~/.grok/skills/engram-first/")
     if inject_rule(os.path.join(grok_dir, "AGENTS.md")):
         print("  └─ Injected Code Navigation Invariant into ~/.grok/AGENTS.md")
 
@@ -303,10 +315,10 @@ if os.path.exists(zcode_dir):
     def update_zcode(data):
         mcp = data.setdefault("mcp", {})
         servers = mcp.setdefault("servers", {})
-        if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
-            servers["agent-weave"] = {
+        if "engram" not in servers or servers["engram"].get("args") != ["mcp", "--all-tools"]:
+            servers["engram"] = {
                 "type": "process",
-                "command": aw_bin,
+                "command": eg_bin,
                 "args": ["mcp", "--all-tools"]
             }
             return True
@@ -315,8 +327,8 @@ if os.path.exists(zcode_dir):
         update_json_file(zcode_cfg, update_zcode)
         print("  ├─ Updated ~/.zcode/cli/config.json")
     if os.path.exists(os.path.join(zcode_dir, "skills")):
-        deploy_skill(os.path.join(zcode_dir, "skills", "aw-first"))
-        print("  ├─ Deployed aw-first skill to ~/.zcode/skills/aw-first/")
+        deploy_skill(os.path.join(zcode_dir, "skills", "engram-first"))
+        print("  ├─ Deployed engram-first skill to ~/.zcode/skills/engram-first/")
     if inject_rule(os.path.join(zcode_dir, "AGENTS.md")):
         print("  └─ Injected Code Navigation Invariant into ~/.zcode/AGENTS.md")
 
@@ -328,10 +340,10 @@ if os.path.exists(opencode_dir):
     def update_opencode(data):
         mcp = data.setdefault("mcp", {})
         servers = mcp.setdefault("servers", {})
-        if "agent-weave" not in servers or servers["agent-weave"].get("command") != [aw_bin, "mcp", "--all-tools"]:
-            servers["agent-weave"] = {
+        if "engram" not in servers or servers["engram"].get("command") != [eg_bin, "mcp", "--all-tools"]:
+            servers["engram"] = {
                 "type": "local",
-                "command": [aw_bin, "mcp", "--all-tools"]
+                "command": [eg_bin, "mcp", "--all-tools"]
             }
             return True
         return False
@@ -349,21 +361,21 @@ if os.path.exists(zed_dir):
     zed_settings = os.path.join(zed_dir, "settings.json")
     if os.path.exists(zed_settings):
         content = open(zed_settings, "r", encoding="utf-8").read()
-        if '"agent-weave"' not in content:
+        if '"engram"' not in content:
             if '"context_servers": {' in content:
                 replacement = (
                     '"context_servers": {\n'
-                    '    "agent-weave": {\n'
-                    f'      "command": "{aw_bin}",\n'
+                    '    "engram": {\n'
+                    f'      "command": "{eg_bin}",\n'
                     '      "args": ["mcp", "--all-tools"],\n'
                     '    },'
                 )
                 content = content.replace('"context_servers": {', replacement, 1)
                 with open(zed_settings, "w", encoding="utf-8") as f:
                     f.write(content)
-                print("  └─ Added agent-weave context_server to ~/.config/zed/settings.json")
+                print("  └─ Added engram context_server to ~/.config/zed/settings.json")
             else:
-                print("  └─ Note: Add agent-weave to context_servers in ~/.config/zed/settings.json")
+                print("  └─ Note: Add engram to context_servers in ~/.config/zed/settings.json")
         else:
             print("  └─ ~/.config/zed/settings.json already configured")
 
@@ -373,17 +385,17 @@ if os.path.exists(claude_json):
     print("6. Claude Code (CLI):")
     def update_claude_cli(data):
         servers = data.setdefault("mcpServers", {})
-        if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
-            servers["agent-weave"] = {"command": aw_bin, "args": ["mcp", "--all-tools"]}
+        if "engram" not in servers or servers["engram"].get("args") != ["mcp", "--all-tools"]:
+            servers["engram"] = {"command": eg_bin, "args": ["mcp", "--all-tools"]}
             return True
         return False
     if update_json_file(claude_json, update_claude_cli):
-        print("  ├─ Configured agent-weave in ~/.claude.json")
+        print("  ├─ Configured engram in ~/.claude.json")
     else:
         print("  ├─ ~/.claude.json already up-to-date")
     claude_dir = os.path.expanduser("~/.claude")
-    deploy_skill(os.path.join(claude_dir, "skills", "aw-first"))
-    print("  ├─ Deployed aw-first skill to ~/.claude/skills/aw-first/")
+    deploy_skill(os.path.join(claude_dir, "skills", "engram-first"))
+    print("  ├─ Deployed engram-first skill to ~/.claude/skills/engram-first/")
     inject_rule(os.path.join(claude_dir, "CLAUDE.md"))
     print("  └─ Injected Code Navigation Invariant into ~/.claude/CLAUDE.md")
 
@@ -392,8 +404,8 @@ if os.path.exists(claude_desktop_dir):
     claude_cfg = os.path.join(claude_desktop_dir, "claude_desktop_config.json")
     def update_claude_desktop(data):
         servers = data.setdefault("mcpServers", {})
-        if "agent-weave" not in servers or servers["agent-weave"].get("args") != ["mcp", "--all-tools"]:
-            servers["agent-weave"] = {"command": aw_bin, "args": ["mcp", "--all-tools"]}
+        if "engram" not in servers or servers["engram"].get("args") != ["mcp", "--all-tools"]:
+            servers["engram"] = {"command": eg_bin, "args": ["mcp", "--all-tools"]}
             return True
         return False
     update_json_file(claude_cfg, update_claude_desktop)
@@ -406,38 +418,108 @@ if os.path.exists(codex_dir):
     codex_toml = os.path.join(codex_dir, "config.toml")
     if os.path.exists(codex_toml):
         content = open(codex_toml, "r", encoding="utf-8").read()
-        if "[mcp_servers.agent-weave]" not in content:
+        if "[mcp_servers.engram]" not in content:
             mcp_block = (
-                "\n[mcp_servers.agent-weave]\n"
-                f'command = "{aw_bin}"\n'
+                "\n[mcp_servers.engram]\n"
+                f'command = "{eg_bin}"\n'
                 'args = ["mcp", "--all-tools"]\n'
                 "enabled = true\n"
             )
             with open(codex_toml, "a", encoding="utf-8") as f:
                 f.write(mcp_block)
-            print("  ├─ Added agent-weave to ~/.codex/config.toml")
+            print("  ├─ Added engram to ~/.codex/config.toml")
         else:
             print("  ├─ ~/.codex/config.toml already configured")
-    deploy_skill(os.path.join(codex_dir, "skills", "aw-first"))
-    print("  ├─ Deployed aw-first skill to ~/.codex/skills/aw-first/")
+    deploy_skill(os.path.join(codex_dir, "skills", "engram-first"))
+    print("  ├─ Deployed engram-first skill to ~/.codex/skills/engram-first/")
     inject_rule(os.path.join(codex_dir, "AGENTS.md"))
     print("  └─ Injected Code Navigation Invariant into ~/.codex/AGENTS.md")
+
+# --- Transitional MCP aliases ---
+# Agent hosts that cached the pre-rename server key keep working: mirror every
+# "engram" server entry under the legacy "agent-weave" key. The primary key is
+# never rewritten, so new hosts read the canonical name.
+LEGACY_MCP_NAME = "agent-weave"
+
+def _servers_node(data, path_keys):
+    node = data
+    for key in path_keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node if isinstance(node, dict) else None
+
+def mirror_legacy_json(path):
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    changed = False
+    for path_keys in (("mcpServers",), ("mcp", "servers"), ("context_servers",)):
+        servers = _servers_node(data, path_keys)
+        if servers is None:
+            continue
+        if isinstance(servers.get("engram"), dict) and LEGACY_MCP_NAME not in servers:
+            servers[LEGACY_MCP_NAME] = dict(servers["engram"])
+            changed = True
+    if changed:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+    return changed
+
+for cfg in (
+    gemini_config,
+    anti_mcp,
+    os.path.expanduser("~/.zcode/cli/config.json"),
+    os.path.expanduser("~/.config/opencode/opencode.json"),
+    os.path.expanduser("~/.config/zed/settings.json"),
+    claude_json,
+):
+    if mirror_legacy_json(cfg):
+        print(f"  ├─ Mirrored engram MCP entry as {LEGACY_MCP_NAME} in {cfg}")
+
+def mirror_legacy_toml(path):
+    if not os.path.exists(path):
+        return False
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    if f"[mcp_servers.{LEGACY_MCP_NAME}]" in content:
+        return False
+    if "[mcp_servers.engram]" not in content:
+        return False
+    legacy = (
+        f"\n[mcp_servers.{LEGACY_MCP_NAME}]\n"
+        f'command = "{eg_bin}"\n'
+        'args = ["mcp", "--all-tools"]\n'
+        "enabled = true\n"
+    )
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(legacy)
+    return True
+
+for cfg in (os.path.expanduser("~/.grok/config.toml"), os.path.expanduser("~/.codex/config.toml")):
+    if mirror_legacy_toml(cfg):
+        print(f"  ├─ Added {LEGACY_MCP_NAME} alias entry to {cfg}")
 PYEOF
 
 # 4. Local Workspace Index
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  log_info "Building local repository index (.aw/index.db)..."
-  "$HOME/.cargo/bin/aw" build
+  log_info "Building local repository index (.engram/index.db)..."
+  "$HOME/.cargo/bin/eg" build
 fi
 
 # 5. Global Telemetry Sanity Check
-log_info "Verifying global telemetry (~/.aw/usage.log)..."
-"$HOME/.cargo/bin/aw" usage --global
+log_info "Verifying global telemetry (~/.engram/usage.log)..."
+"$HOME/.cargo/bin/eg" usage --global
 
 echo ""
 log_ok "Installation and agent configuration completed successfully!"
 echo -e "${BOLD}Operational Commands:${RESET}"
-echo "  • aw dashboard         Launch native live streaming Web SSE dashboard (http://localhost:7890)"
-echo "  • aw monitor           Stream live query events in terminal (ANSI stream)"
-echo "  • aw-dashboard         Shortcut to launch native web dashboard"
-echo "  • aw usage --global    Print machine-wide telemetry & token savings summary"
+echo "  • eg dashboard         Launch native live streaming Web SSE dashboard (http://localhost:7890)"
+echo "  • eg monitor           Stream live query events in terminal (ANSI stream)"
+echo "  • eg-dashboard         Shortcut to launch native web dashboard"
+echo "  • eg usage --global    Print machine-wide telemetry & token savings summary"
