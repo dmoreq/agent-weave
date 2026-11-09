@@ -21,6 +21,8 @@ use crate::error::Result;
 
 enum InputEvent {
     Tab(MonitorTab),
+    NextTab,
+    PrevTab,
     Refresh,
     Quit,
 }
@@ -103,22 +105,38 @@ fn run_interactive(
         let mut buf = [0u8; 1];
         while stdin.read_exact(&mut buf).is_ok() {
             let evt = match buf[0] {
-                b'1' => InputEvent::Tab(MonitorTab::Graph),
-                b'2' => InputEvent::Tab(MonitorTab::Reuse),
-                b'3' => InputEvent::Tab(MonitorTab::Memory),
-                b'4' => InputEvent::Tab(MonitorTab::Stream),
-                b'r' | b'R' => InputEvent::Refresh,
-                b'q' | b'Q' | 3 | 4 | 27 => InputEvent::Quit,
-                _ => continue,
+                b'1' => Some(InputEvent::Tab(MonitorTab::Graph)),
+                b'2' => Some(InputEvent::Tab(MonitorTab::Reuse)),
+                b'3' => Some(InputEvent::Tab(MonitorTab::Memory)),
+                b'4' => Some(InputEvent::Tab(MonitorTab::Stream)),
+                b'\t' => Some(InputEvent::NextTab),
+                b'r' | b'R' => Some(InputEvent::Refresh),
+                b'q' | b'Q' | 3 => Some(InputEvent::Quit),
+                27 => {
+                    let mut seq = [0u8; 2];
+                    if stdin.read_exact(&mut seq).is_ok() && seq[0] == b'[' {
+                        match seq[1] {
+                            b'C' | b'B' => Some(InputEvent::NextTab),
+                            b'D' | b'A' => Some(InputEvent::PrevTab),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
             };
-            if tx.send(evt).is_err() {
-                break;
+            if let Some(e) = evt {
+                if tx.send(e).is_err() {
+                    break;
+                }
             }
         }
     });
 
     let mut last_pos = file_len(&log_path);
     let mut last_refresh = std::time::Instant::now();
+    let mut last_size_check = std::time::Instant::now();
     let root_path = root.map(Path::to_path_buf);
 
     let (mut cols, mut rows) = get_terminal_size();
@@ -136,6 +154,14 @@ fn run_interactive(
                         state.active_tab = tab;
                         need_render = true;
                     }
+                }
+                InputEvent::NextTab => {
+                    state.active_tab = state.active_tab.next();
+                    need_render = true;
+                }
+                InputEvent::PrevTab => {
+                    state.active_tab = state.active_tab.prev();
+                    need_render = true;
                 }
                 InputEvent::Refresh => {
                     state.refresh(root_path.as_deref());
@@ -156,11 +182,14 @@ fn run_interactive(
             need_render = true;
         }
 
-        let (new_cols, new_rows) = get_terminal_size();
-        if new_cols != cols || new_rows != rows {
-            cols = new_cols;
-            rows = new_rows;
-            need_render = true;
+        if last_size_check.elapsed() >= Duration::from_secs(2) {
+            let (new_cols, new_rows) = get_terminal_size();
+            if new_cols != cols || new_rows != rows {
+                cols = new_cols;
+                rows = new_rows;
+                need_render = true;
+            }
+            last_size_check = std::time::Instant::now();
         }
 
         if need_render {
@@ -219,7 +248,11 @@ fn poll_log_new_events(file: File, last_pos: &mut u64, state: &mut TuiState) -> 
 }
 
 fn get_terminal_size() -> (usize, usize) {
-    if let Ok(out) = Command::new("stty").arg("size").output() {
+    if let Ok(out) = Command::new("stty")
+        .arg("size")
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
         if out.status.success() {
             let text = String::from_utf8_lossy(&out.stdout);
             let mut parts = text.split_whitespace();

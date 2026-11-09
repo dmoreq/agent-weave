@@ -264,6 +264,23 @@ fn monitor_tui_render_all_tabs_coverage() {
     assert_eq!(state.total_repos, 1);
     assert_eq!(state.recent_events.len(), 3);
 
+    // Also test with real global log if it exists!
+    let global_log = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".aw/usage.log");
+    if global_log.is_file() {
+        let mut real_state = TuiState::new(None, global_log, None, false);
+        real_state.refresh(None);
+        for tab in [
+            MonitorTab::Graph,
+            MonitorTab::Reuse,
+            MonitorTab::Memory,
+            MonitorTab::Stream,
+        ] {
+            real_state.active_tab = tab;
+            let mut buf = Vec::new();
+            render_screen(&mut buf, &real_state, 80, 24).unwrap();
+        }
+    }
+
     for tab in [
         MonitorTab::Graph,
         MonitorTab::Reuse,

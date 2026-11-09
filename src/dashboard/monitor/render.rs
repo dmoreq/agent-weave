@@ -70,7 +70,7 @@ fn render_header<W: Write>(w: &mut W, state: &TuiState, safe_cols: usize) -> io:
 fn render_footer<W: Write>(w: &mut W, rows: usize) -> io::Result<()> {
     write!(
         w,
-        "\x1b[{rows};1H\r\x1b[2K\x1b[90mKeys: \x1b[37m1-4\x1b[90m Tabs | \x1b[37mr\x1b[90m Refresh | \x1b[37mq\x1b[90m Exit\x1b[0m"
+        "\x1b[{rows};1H\r\x1b[2K\x1b[90mKeys: \x1b[37m1-4/Arrows/Tab\x1b[90m Tabs | \x1b[37mr\x1b[90m Refresh | \x1b[37mq\x1b[90m Exit\x1b[0m"
     )
 }
 

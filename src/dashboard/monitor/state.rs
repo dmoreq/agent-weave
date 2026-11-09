@@ -32,6 +32,24 @@ impl MonitorTab {
             Self::Stream => "4 Stream",
         }
     }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Graph => Self::Reuse,
+            Self::Reuse => Self::Memory,
+            Self::Memory => Self::Stream,
+            Self::Stream => Self::Graph,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Graph => Self::Stream,
+            Self::Reuse => Self::Graph,
+            Self::Memory => Self::Reuse,
+            Self::Stream => Self::Memory,
+        }
+    }
 }
 
 pub struct TuiState {
