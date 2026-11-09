@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to agent-weave are documented here. Format follows
+All notable changes to engram are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [Calm SemVer](https://calver.org) 0.x — breaking contract
 changes bump the minor while 0.x is unstable.
@@ -11,10 +11,96 @@ changes bump the minor while 0.x is unstable.
 - Entries describe their dated implementation snapshot. Later entries can supersede earlier schemas, limits, and output formats.
 - Historical measurements and review verdicts below are internally reported, not new verification of this checkout.
   Original internal evidence is unavailable in the public distribution; this history does not make it publicly reproducible.
-- Read [evaluation](docs/EVALUATION.md) for the public evidence summary and its limitations, not replacement original evidence.
+- Read [evaluation](docs/evaluation.md) for the public evidence summary and its limitations, not replacement original evidence.
 - Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
-## [Unreleased]
+## [1.0.2] - 2026-11-09
+
+### Fixed
+- Fixed clippy `unneeded_wildcard_pattern` warning in `src/query/analysis/unresolved.rs`.
+
+### Documentation
+- Grounded canonical specs and guides in peer-reviewed research papers (RepoReuse, Zero-Mem, Agent Zero Memory, Agent-Native Memory Systems).
+- Removed 185 non-shipping historical baseline snapshots and archive drafts from `docs/archive/` and `docs/baselines/`.
+- Updated cross-references across `CONTRIBUTING.md`, `AGENTS.md`, and GitHub templates to canonical architecture paths.
+
+## [1.0.1] - 2026-11-09
+
+### Added
+- `eg reuse --deep-callee`: extends the D1 callee footprint to second-hop
+  callees (weight `0.5`), catching wrappers that forward through an
+  intermediate helper.
+- `eg mem write` near-duplicate guard: at 80% Jaccard token similarity the
+  write appends an advisory hint naming the existing key and suggesting
+  `--supersedes`. The note is still written.
+- `eg mem query` call-graph expansion: when `.engram/index.db` is readable,
+  query terms seed a bounded `calls` traversal (depth <= 3, decay
+  `0.5^depth`) so notes anchored to downstream callees surface. A missing
+  index falls back to plain FTS5 ranking.
+
+### Changed
+- `eg reuse` builds inverted posting lists for callees, token pairs, and raw
+  clients above 1,000 symbols, replacing the per-target corpus scan with
+  posting-list candidates. Output is unchanged; a parity unit test compares
+  the indexed and flat detector results.
+- `eg reuse` folds caller counts from the call edges it already loads instead
+  of running a correlated count subquery per symbol.
+- `eg reuse` skips the unresolved-call span index when the index has no
+  unresolved call rows.
+
+## [1.0.0] - 2026-11-09
+
+### Highlights & Official Release
+
+- **Official Open-Source Release**: `engram` (`eg`) reaches v1.0.0 with unified single native binary architecture.
+- **USP 1: Sub-2ms Deterministic Graph Navigation**: Tree-sitter AST indexing for Python, TypeScript, JavaScript, and Rust with SQLite FTS5 search and content-addressed incremental builds.
+- **USP 2: Real-Time Anti-Reinvention Engine**: Pre-write interface discovery with caller weighting and post-edit duplicate detection across 4 calibrated detectors.
+- **USP 3: Zero-Token Layered Memory**: Code-anchored persistent project and global memory with SQLite BM25 + recency/ref fusion.
+- **Native Web Dashboard & TUI Monitor**: In-process HTTP SSE dashboard and terminal streaming monitor with zero Python dependencies.
+- **Model Context Protocol (MCP)**: Conforming stdio server for Claude, Cursor, Antigravity, Grok, Zcode, and OpenCode.
+- **Security & Confinement**: Strict write confinement to `.engram/` and `~/.engram/`, rejection of Git-tracked repository state, POSIX 0700/0600 modes.
+
+### Changed — project rename: `engram` / `eg` (2026-11-09)
+
+- The package is now `engram` and the installed command is `eg`. The crate
+  compiles into one native binary with every subcommand, including
+  `eg dashboard` and `eg monitor`.
+- Confinement directories move to `.engram/` and `~/.engram/`. A pre-rename
+  `.aw/memory.db` or `~/.aw/memory.db` is migrated automatically on the first
+  memory read or write when the new store is absent; the legacy file is copied,
+  never moved, so a downgrade keeps working. Indexes are not migrated: `eg build`
+  rebuilds them.
+- Environment variables use the `ENGRAM_` prefix. `ENGRAM_NO_JOURNAL`,
+  `ENGRAM_SESSION`, `ENGRAM_GLOBAL_DIR`, and `ENGRAM_AGENT` resolve the legacy
+  `AW_*` spelling as a fallback, so existing privacy opt-outs and global-store
+  overrides keep applying.
+- The MCP server identifies itself as `engram`, the KPI footer reads `⚡ eg:`,
+  and CLI output prefixes read `eg: ...`. The routing skill moves to
+  `skills/engram-first`, and the installer provides clean configuration for all running agent hosts.
+- Security hardening: repo-local `.engram/` state that is tracked in Git is
+  rejected with exit 2 (`eg: security: ...`) to block committed memory
+  injection, `~/.engram/` is created `0700` with `0600` stores and journals on
+  Unix, and `eg doctor --invalidate` unlinks symlinked entries instead of
+  traversing them.
+
+### Added — portable memory exchange (2026-11-09)
+
+- **`eg mem export --format markdown`**: renders current notes as fenced
+  Markdown (`@@ engram-note <slug> @@`, one-line JSON front-matter, body,
+  matching closer) so durable memory can be reviewed in pull requests and
+  versioned in Git. JSONL stays the default and keeps its restore contract.
+- **`eg mem import <path>`**: symmetric restore from a Markdown or JSONL export,
+  or stdin (`-`). The command parses at the service boundary, validates every
+  note, and writes the batch in one transaction. Imported rows carry
+  `source=import` and render `[imported]`.
+- **Reject-on-conflict import**: a key whose local content differs is skipped
+  and the command exits 2 unless `--force` (alias `--overwrite`) opens a new
+  revision. Identical content is a no-op.
+- **`procedure` note kind**: the closed taxonomy is now `decision | gotcha |
+  fact | task | procedure`, with dashboard badge/filter support.
+- **MCP**: `mem_import` joins the `--all-tools` surface (repo-relative path,
+  project store only); `mem_export` gains a `format` argument. CLI and MCP
+  success payloads stay byte-identical.
 
 ## [0.5.3] - 2026-11-09
 
@@ -100,7 +186,7 @@ changes bump the minor while 0.x is unstable.
   (BM25 + ref/token overlap + recency fusion). Notes are candidates, never
   proof: every mem command opens with the caveat line. Bodies cap at 8 KiB;
   the journal carries `body_len`, never body text. Design:
-  `docs/designs/2026-11-05_agent-weave-memory-retrieval.md`.
+  `docs/architecture/memory-store.md`.
 - **`aw mem export` JSONL backup.** stdout is pure JSONL (the caveat goes to
   stderr); restore = `mem write` replay, idempotent by content hash. This is
   the recovery path for the primary memory store.
@@ -123,7 +209,7 @@ changes bump the minor while 0.x is unstable.
   oracle `tests/fixtures/memory/oracle-v2.json` with a Wilson 95% interval
   and a seeded negative control (gate: recall >= 0.8, shuffled mapping below
   the gate). First run: recall@5 = 1.000 [0.839, 1.000], negative control
-  0.050 — see [Evaluation](docs/EVALUATION.md). Weight tuning stays gated on
+  0.050 — see [Evaluation](docs/evaluation.md). Weight tuning stays gated on
   a sub-threshold oracle run.
 
 ### Changed (breaking)
@@ -665,7 +751,7 @@ Review the output-contract changes below if scripts consume query text.
 
 ### Added — agent-tooling design companion (docs)
 
-- `docs/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
+- `docs/archive/designs/2026-11-01_p4-agent-tooling_amendment.md`: four agent-tooling
   features distilled from the pi-sherlock reference analysis — F1
   `aw symbols --outline` (signature column), F2 `aw search` (FTS5 symbol
   lookup), F3 skill hardening + drift gate, F4 `aw clones` (shingle
@@ -791,7 +877,7 @@ precision/recall PASS.
 
 ### Added — docs
 
-- In-repo canonical spec + concepts brief under `docs/designs/` (cross-repo
+- In-repo canonical spec + concepts brief under `docs/archive/designs/` (cross-repo
   references retired); GitHub community health files.
 
 ### Fixed — post-review

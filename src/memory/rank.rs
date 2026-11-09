@@ -7,14 +7,21 @@
 const W_LEX: f64 = 0.5;
 const W_REF: f64 = 0.3;
 const W_REC: f64 = 0.2;
+/// Weight of the call-graph expansion signal. Adding a fourth feature leaves
+/// the lexical/ref/recency ordering untouched when no graph candidate exists:
+/// an all-zero feature min-max-normalizes to the design's all-equal 1.0, which
+/// is a constant score offset for every row.
+const W_GRAPH: f64 = 0.25;
 
 /// One candidate row with its raw signals. `lex_raw` is the FTS5 bm25 rank
 /// (smaller is better); `ref_raw` is the token-overlap fraction in [0,1];
+/// `graph_raw` is the call-graph decay `0.5^depth` (0 when not reachable);
 /// `age_days` feeds the bounded recency decay.
 pub struct Candidate {
     pub row: crate::db::MemRow,
     pub lex_raw: f64,
     pub ref_raw: f64,
+    pub graph_raw: f64,
     pub age_days: f64,
     /// Fused score, filled by [`fuse`].
     pub score: f64,
@@ -55,9 +62,13 @@ pub fn fuse(mut candidates: Vec<Candidate>) -> Vec<Candidate> {
         &candidates.iter().map(|c| c.ref_raw).collect::<Vec<_>>(),
         false,
     );
+    let graph = minmax(
+        &candidates.iter().map(|c| c.graph_raw).collect::<Vec<_>>(),
+        false,
+    );
     for (i, c) in candidates.iter_mut().enumerate() {
         let rec = 1.0 / (1.0 + c.age_days);
-        c.score = W_LEX * lex[i] + W_REF * reference[i] + W_REC * rec;
+        c.score = W_LEX * lex[i] + W_REF * reference[i] + W_REC * rec + W_GRAPH * graph[i];
     }
     candidates.sort_by(|a, b| {
         b.score

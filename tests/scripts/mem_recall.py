@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Phase 3 — `aw mem query` recall against the frozen project-memory oracle.
+"""Phase 3 — `eg mem query` recall against the frozen project-memory oracle.
 
 The fixture (tests/fixtures/memory/oracle-v2.json) freezes 30 notes and 20
 queries with their expected keys, plus the fixed seed for the negative
-control. The script seeds a throwaway repo through `aw mem write`, runs every
+control. The script seeds a throwaway repo through `eg mem write`, runs every
 frozen query, and reports:
 
 - recall@limit with a Wilson 95% interval (the shared `wilson` helper);
@@ -19,7 +19,7 @@ stdlib-only, no new dependencies).
 
 Usage:
     python3 -I tests/scripts/mem_recall.py \
-        --aw target/release/aw \
+        --eg target/release/eg \
         --fixture tests/fixtures/memory/oracle-v2.json \
         --json docs/baselines/memory-phase3.json
 """
@@ -34,9 +34,9 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from precision_recall import run_aw, wilson
+from precision_recall import run_eg, wilson
 
-CAVEAT_PREFIX = "aw: memory"
+CAVEAT_PREFIX = "eg: memory"
 SHOWING_PREFIX = "showing "
 
 
@@ -51,10 +51,10 @@ def parse_query_keys(stdout: str) -> list[str]:
     return keys
 
 
-def seed_notes(aw: str, root: Path, notes: list[dict]) -> None:
+def seed_notes(eg: str, root: Path, notes: list[dict]) -> None:
     for note in notes:
-        proc = run_aw(
-            aw,
+        proc = run_eg(
+            eg,
             root,
             [
                 "mem", "write", note["key"],
@@ -80,7 +80,7 @@ def score(retrievals: list[list[str]], expectations: list[list[str]]) -> tuple[i
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--aw", required=True, help="Path to the aw binary")
+    ap.add_argument("--eg", required=True, help="Path to the eg binary")
     ap.add_argument(
         "--fixture",
         default=str(Path(__file__).resolve().parents[1] / "fixtures" / "memory" / "oracle-v2.json"),
@@ -96,12 +96,12 @@ def main() -> int:
     threshold = args.threshold if args.threshold is not None else float(fixture.get("threshold", 0.8))
     seed = int(fixture["seed"])
 
-    root = Path(tempfile.mkdtemp(prefix="aw-mem-recall-"))
+    root = Path(tempfile.mkdtemp(prefix="eg-mem-recall-"))
     try:
-        seed_notes(args.aw, root, fixture["notes"])
+        seed_notes(args.eg, root, fixture["notes"])
         retrievals: list[list[str]] = []
         for query in fixture["queries"]:
-            proc = run_aw(args.aw, root, ["mem", "query", query["terms"], "--limit", str(limit)])
+            proc = run_eg(args.eg, root, ["mem", "query", query["terms"], "--limit", str(limit)])
             if proc.returncode != 0:
                 raise RuntimeError(
                     f"query '{query['terms']}' failed ({proc.returncode}): {proc.stderr.strip()}"
@@ -145,7 +145,7 @@ def main() -> int:
     }
 
     print(
-        f"aw mem recall@{limit}: {k}/{n} = {recall:.3f} "
+        f"eg mem recall@{limit}: {k}/{n} = {recall:.3f} "
         f"(Wilson 95% [{lo:.3f}, {hi:.3f}]), threshold {threshold:.2f}"
     )
     print(

@@ -1,6 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "answer": "No route exists: src.parse (src/parse.rs:1) has no resolved outbound calls, and its only internal edge, src.parse.parse_source to src.parse.count_error_nodes (src/parse.rs:68), stays inside parse.rs. record_ts_arrow_function is reached only from src.extract.walk_node (src/extract.rs:415), so no call chain connects the two."
-}

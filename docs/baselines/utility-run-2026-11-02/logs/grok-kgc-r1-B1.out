@@ -1,3 +1,0 @@
-The pending handoff is a different prompt. I am answering this question: the helper that turns a sequence into `list[Any]` and is called by `_raw_items_from_sklearn_input`.`vihap.adapters.sklearn._to_list` at `vihap/adapters/sklearn.py:79` converts a sequence to `list[Any]` and is called by `_raw_items_from_sklearn_input`.
-
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-B1.json`.

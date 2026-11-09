@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crate::dashboard::data;
 use crate::db;
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 
 static INDEX_HTML: &str = include_str!("assets/index.html");
 static STYLE_CSS: &str = include_str!("assets/style.css");
@@ -27,13 +27,13 @@ pub fn serve_dashboard(
 ) -> Result<()> {
     let bind_addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&bind_addr).map_err(|e| {
-        AwError::Internal(format!(
+        EgError::Internal(format!(
             "could not bind dashboard server to {bind_addr}: {e}"
         ))
     })?;
 
     let url = format!("http://{host}:{port}/");
-    println!("aw: live dashboard running at {url}");
+    println!("eg: live dashboard running at {url}");
     println!("Press Ctrl+C to stop.");
 
     if open {

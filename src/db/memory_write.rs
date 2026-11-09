@@ -126,10 +126,70 @@ pub fn memory_write(
     }
     match last_error {
         Some(e) => Err(map_memory_err(e)),
-        None => Err(AwError::Internal(
+        None => Err(EgError::Internal(
             "memory write: no attempt completed".to_string(),
         )),
     }
+}
+
+/// Aggregate outcome of one import batch.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BatchImportStats {
+    pub imported: usize,
+    pub skipped: usize,
+    pub conflicts: usize,
+    pub expired: usize,
+}
+
+/// Write many imported notes under ONE `BEGIN IMMEDIATE` and one commit.
+/// Conflict policy: identical content (same hash) is a no-op; differing
+/// content is skipped unless `force` opens a new revision; an already-expired
+/// session note is counted and skipped. Any SQL error rolls the batch back.
+pub fn memory_write_batch(
+    conn: &mut Connection,
+    notes: &[MemNoteInput<'_>],
+    now: i64,
+    force: bool,
+) -> Result<BatchImportStats> {
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(map_memory_err)?;
+    let mut stats = BatchImportStats::default();
+    for note in notes {
+        if note.expires_at != 0 && note.expires_at <= now {
+            stats.expired += 1;
+            continue;
+        }
+        let hash =
+            crate::memory::mem_content_hash(note.kind, note.body, note.tags, note.refs, note.scope)
+                as i64;
+        let fts_text = crate::memory::mem_fts_text(note.key, note.tags, note.body);
+        let current = current_revision(&tx, note.key)?;
+        if let Some(row) = &current {
+            if row.content_hash == hash {
+                stats.skipped += 1;
+                continue;
+            }
+            if !force {
+                stats.conflicts += 1;
+                continue;
+            }
+        }
+        let rev = current.as_ref().map_or(1, |row| row.rev + 1);
+        insert_revision(&tx, note, now, hash, rev).map_err(map_memory_err)?;
+        let new_id = tx.last_insert_rowid();
+        if let Some(row) = &current {
+            supersede_current(&tx, new_id, now, row.id)?;
+        }
+        tx.execute(
+            "INSERT INTO memories_fts(rowid, text) VALUES (?1, ?2)",
+            rusqlite::params![new_id, fts_text],
+        )
+        .map_err(map_memory_err)?;
+        stats.imported += 1;
+    }
+    tx.commit().map_err(map_memory_err)?;
+    Ok(stats)
 }
 
 enum WriteAttempt {
@@ -291,7 +351,7 @@ fn supersede_cross_key(
         .optional()
         .map_err(map_memory_err)?;
     let Some(target_id) = target_id else {
-        return Err(AwError::NoResults(format!(
+        return Err(EgError::NoResults(format!(
             "unknown memory key '{target}' — nothing superseded, write rolled back"
         )));
     };

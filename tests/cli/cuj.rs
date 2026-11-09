@@ -10,15 +10,15 @@ fn cuj1_build_happy_path_and_readonly_tree() {
     assert_eq!(code, 0);
     let line = stdout
         .lines()
-        .find(|l| l.starts_with("aw: built index"))
+        .find(|l| l.starts_with("eg: built index"))
         .unwrap();
     for key in ["files=3", "parse_errors=0", "wall="] {
         assert!(line.contains(key), "stats line missing {key}: {line}");
     }
-    assert!(repo.join(".aw/index.db").exists());
-    assert!(repo.join(".aw/.gitignore").exists());
+    assert!(repo.join(".engram/index.db").exists());
+    assert!(repo.join(".engram/.gitignore").exists());
     let after = snapshot(&repo);
-    assert_eq!(before, after, "tree changed outside .aw/ (invariant 3)");
+    assert_eq!(before, after, "tree changed outside .engram/ (invariant 3)");
 }
 
 #[test]
@@ -33,19 +33,19 @@ fn cuj2_callers_with_cap_and_pointer_format() {
     write(&repo, "big.py", &big);
     build(&repo);
 
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     let pointers: Vec<&str> = stdout
         .lines()
-        .filter(|l| l.contains(':') && !l.starts_with("aw:"))
+        .filter(|l| l.contains(':') && !l.starts_with("eg:"))
         .collect();
     assert_eq!(pointers.len(), 50, "cap default 50");
     assert!(pointers.iter().all(|l| l.split(':').count() >= 2));
     assert!(stdout.contains("showing 50 of 60"), "stdout: {stdout}");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("[aw] capped at 50 results (60 total)"),
+        stderr.contains("[eg] capped at 50 results (60 total)"),
         "stderr: {stderr}"
     );
 }
@@ -54,11 +54,11 @@ fn cuj2_callers_with_cap_and_pointer_format() {
 fn cuj3_corrupt_index_exit3() {
     let repo = fixture("cuj3");
     build(&repo);
-    fs::write(repo.join(".aw/index.db"), b"garbage").unwrap();
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    fs::write(repo.join(".engram/index.db"), b"garbage").unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(3));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("aw: corrupt-index:"), "{stderr}");
+    assert!(stderr.contains("eg: corrupt-index:"), "{stderr}");
     assert!(stdout_is_clean(&out.stdout));
 }
 
@@ -81,7 +81,7 @@ fn cuj4_ambiguous_name_exit2_with_candidates() {
         "class B:\n    def process(self):\n        return 2\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["callers", "process"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "process"]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -100,17 +100,17 @@ fn cuj5_schema_skew_exit5() {
     let out = Command::new("python3")
         .arg("-c")
         .arg(format!(
-            "import sqlite3; c = sqlite3.connect('{}/.aw/index.db'); c.execute('PRAGMA user_version = 99'); c.commit()",
+            "import sqlite3; c = sqlite3.connect('{}/.engram/index.db'); c.execute('PRAGMA user_version = 99'); c.commit()",
             repo.display()
         ))
         .output()
         .unwrap();
     assert!(out.status.success());
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(5));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("schema v99, binary expects v10 — run aw build"),
+        stderr.contains("schema v99, binary expects v10 — run eg build"),
         "{stderr}"
     );
 }
@@ -119,8 +119,8 @@ fn cuj5_schema_skew_exit5() {
 fn cuj6_concurrent_build_lock_exit4() {
     let repo = fixture("cuj6");
     // Hold the lock from this process; the child build must exit 4.
-    let lock_path = repo.join(".aw/build.lock");
-    fs::create_dir_all(repo.join(".aw")).unwrap();
+    let lock_path = repo.join(".engram/build.lock");
+    fs::create_dir_all(repo.join(".engram")).unwrap();
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -129,10 +129,10 @@ fn cuj6_concurrent_build_lock_exit4() {
         .open(&lock_path)
         .unwrap();
     file.try_lock().unwrap();
-    let out = aw(&repo).args(["build"]).output().unwrap();
+    let out = eg(&repo).args(["build"]).output().unwrap();
     assert_eq!(out.status.code(), Some(4));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("aw: locked:"), "{stderr}");
+    assert!(stderr.contains("eg: locked:"), "{stderr}");
     drop(file);
 }
 
@@ -140,11 +140,12 @@ fn cuj6_concurrent_build_lock_exit4() {
 fn cuj7_query_without_index_exit1() {
     let repo = temp_repo("cuj7");
     write(&repo, "a.py", "def f():\n    pass\n");
-    let out = aw(&repo).args(["callers", "f"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "f"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("aw: no-results: no .aw/index.db under") && stderr.contains("run aw build"),
+        stderr.contains("eg: no-results: no .engram/index.db under")
+            && stderr.contains("run eg build"),
         "{stderr}"
     );
 }
@@ -154,15 +155,15 @@ fn cuj8_parse_quality_abort_exit7() {
     let repo = fixture("cuj8");
     write(&repo, "broken.py", BROKEN);
     // 1/4 files broken = 25% > default 5%.
-    let out = aw(&repo).args(["build"]).output().unwrap();
+    let out = eg(&repo).args(["build"]).output().unwrap();
     assert_eq!(out.status.code(), Some(7));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("aw: parse-quality: 25% of 4 files"),
+        stderr.contains("eg: parse-quality: 25% of 4 files"),
         "{stderr}"
     );
     // --force proceeds.
-    let out = aw(&repo).args(["build", "--force"]).output().unwrap();
+    let out = eg(&repo).args(["build", "--force"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("parse_errors=1"), "{stdout}");
@@ -174,23 +175,23 @@ fn g4_staleness_header_after_edit() {
     build(&repo);
     // Edit a result file after build (mtime + size change).
     write(&repo, "app.py", &format!("{APP}\n# trailing comment\n"));
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.starts_with("aw: 1 of "),
+        stdout.starts_with("eg: 1 of "),
         "staleness header first line: {stdout}"
     );
-    assert!(stdout.contains("result files changed since build — run aw build"));
+    assert!(stdout.contains("result files changed since build — run eg build"));
     // FNV-1a re-hash path: same size, different content -> still stale.
     // Nanosecond mtimes make the mtime mismatch (and thus the re-hash)
     // deterministic; both result files now report changed.
     let original = fs::read_to_string(repo.join("utils.py")).unwrap();
     let swapped: String = original.chars().rev().collect();
     fs::write(repo.join("utils.py"), &swapped).unwrap();
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.starts_with("aw: 2 of "),
+        stdout.starts_with("eg: 2 of "),
         "re-hash staleness: {stdout}"
     );
 }
@@ -201,7 +202,7 @@ fn symbols_directory_unknown_reports_zero_symbols() {
     write(&repo, "pkg/a.py", "def a():\n    pass\n");
     build(&repo);
 
-    let out = aw(&repo).args(["symbols", "nosuchdir"]).output().unwrap();
+    let out = eg(&repo).args(["symbols", "nosuchdir"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let combined = format!(
         "{}{}",
@@ -225,7 +226,7 @@ fn context_limit_is_capped_at_50() {
     write(&repo, "b.py", &callers);
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["context", "target", "--limit", "10000"])
         .output()
         .unwrap();
@@ -263,7 +264,7 @@ fn path_scope_rejects_embedded_dotdot_and_api_root() {
         vec!["api", ""],
         vec!["api", "."],
     ] {
-        let out = aw(&repo).args(&args).output().unwrap();
+        let out = eg(&repo).args(&args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");
     }
 }
@@ -284,7 +285,7 @@ fn cleanup_removed_features_are_unrecognized() {
         vec!["hotspots", "--exclude-generated"],
         vec!["report", "--exclude-generated"],
     ] {
-        let out = aw(&repo).args(&args).output().unwrap();
+        let out = eg(&repo).args(&args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");
     }
 }
@@ -294,7 +295,7 @@ fn impact_sites_empty_reason_keeps_edge_suffix() {
     let repo = temp_repo("impact-empty-sites");
     write(&repo, "a.py", "def f():\n    pass\n");
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "a.py", "--edges", "imports", "--sites"])
         .output()
         .unwrap();
@@ -315,7 +316,7 @@ fn impact_default_empty_names_importers() {
     write(&repo, "a.py", "def only():\n    return 1\n");
     write(&repo, "b.py", "import a\n");
     build(&repo);
-    let out = aw(&repo).args(["impact", "a.py"]).output().unwrap();
+    let out = eg(&repo).args(["impact", "a.py"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -328,11 +329,11 @@ fn impact_default_empty_names_importers() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.starts_with("aw: impact — resolved static call edges only"),
+        stdout.starts_with("eg: impact — resolved static call edges only"),
         "{stdout}"
     );
     // The named relationship is real: --edges imports finds the importer.
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "a.py", "--edges", "imports"])
         .output()
         .unwrap();
@@ -356,7 +357,7 @@ fn incremental_carries_trait_and_qualified_impl_targets() {
         "use crate::Greet;\npub struct Thing;\nimpl Greet for Thing {\n    fn hello(&self) {}\n}\n",
     );
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "src/lib.rs", "--edges", "inherits"])
         .output()
         .unwrap();
@@ -370,7 +371,7 @@ fn incremental_carries_trait_and_qualified_impl_targets() {
         "use crate::Greet;\npub struct Other;\nimpl crate::Greet for Other {\n    fn hello(&self) {}\n}\n",
     );
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "src/lib.rs", "--edges", "inherits"])
         .output()
         .unwrap();
@@ -396,17 +397,17 @@ fn root_ts_index_and_python_root_parent_imports_resolve() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "rootidx.ts"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "rootidx.ts"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("rootidx.ts:1 root"), "{stdout}");
     assert!(stdout.contains("rootidx.ts:1 root.idx"), "{stdout}");
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["imports", "pkg/relinner.py"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("pkg/relinner.py:1 app"), "{stdout}");
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "no unresolved expected");
 }
 
@@ -414,12 +415,12 @@ fn root_ts_index_and_python_root_parent_imports_resolve() {
 fn response_contract_limit_clamps() {
     let repo = fixture("limit");
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["callers", "normalize", "--limit", "0"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["callers", "normalize", "--limit", "999999"])
         .output()
         .unwrap();

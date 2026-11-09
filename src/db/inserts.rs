@@ -9,7 +9,7 @@ pub fn insert_unresolved_calls(
     rows: &[(i64, &str, EdgeSiteKind, usize)],
 ) -> Result<()> {
     if rows.iter().any(|(_, _, _, site_line)| *site_line == 0) {
-        return Err(crate::error::AwError::Internal(
+        return Err(crate::error::EgError::Internal(
             "unresolved edge row has site_line 0".to_string(),
         ));
     }

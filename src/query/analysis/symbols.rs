@@ -1,8 +1,8 @@
-//! `aw symbols`: single-file and directory symbol listings.
+//! `eg symbols`: single-file and directory symbol listings.
 
 use super::*;
 
-/// Display knobs for `aw symbols` (mirrors `ImpactOpts`): `--outline` adds the
+/// Display knobs for `eg symbols` (mirrors `ImpactOpts`): `--outline` adds the
 /// stored one-line signature.
 pub struct SymbolsOpts {
     pub outline: bool,
@@ -35,7 +35,7 @@ pub fn symbols(
             .next()
             .is_some_and(crate::parse::is_source_ext)
         {
-            return Err(AwError::not_indexed(file));
+            return Err(EgError::not_indexed(file));
         }
         return symbols_directory(ctx, &rel, limit, SymbolsOpts { outline });
     };
@@ -56,7 +56,7 @@ fn symbols_file(
     let QueryCtx { conn, .. } = *ctx;
     let rows = file_symbol_rows(conn, rel, outline)?;
     if rows.is_empty() {
-        return Err(AwError::not_indexed(file));
+        return Err(EgError::not_indexed(file));
     }
     let files = BTreeSet::from([rel.to_string()]);
     let (header, stale) = staleness_header(ctx, &files);
@@ -137,7 +137,7 @@ fn dir_line_query(
     }
 }
 
-/// Directory mode for `aw symbols <dir>` (Amendment 19): indexed prefix only,
+/// Directory mode for `eg symbols <dir>` (Amendment 19): indexed prefix only,
 /// grouped per file, cap counts symbol data lines.
 fn symbols_directory(
     ctx: &QueryCtx<'_>,
@@ -162,7 +162,7 @@ fn symbols_directory(
     };
     let total = count("symbols s JOIN files f ON f.id = s.file_id")?;
     if total == 0 {
-        return Err(AwError::NoResults(format!(
+        return Err(EgError::NoResults(format!(
             "0 symbols in '{dir}' (indexed)"
         )));
     }
@@ -175,7 +175,7 @@ fn symbols_directory(
         out.push(header);
     }
     out.push(format!(
-        "aw: dir {display} — {n_files} files, {total} symbols"
+        "eg: dir {display} — {n_files} files, {total} symbols"
     ));
     Ok(dir_line_query(out, &rows, total as usize, stale))
 }

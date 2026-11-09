@@ -30,7 +30,7 @@ pub(crate) fn parse_edge_kinds(spec: &str) -> Result<Vec<EdgeKind>> {
                     EDGE_CLI_KINDS.iter().map(|kind| kind.as_str()).collect();
                 names.push("all");
                 let accepted = names.join(",");
-                return Err(AwError::Usage(match part {
+                return Err(EgError::Usage(match part {
                     "" => format!("--edges requires {accepted}"),
                     other => format!("unknown --edges value '{other}' ({accepted})"),
                 }));
@@ -38,7 +38,7 @@ pub(crate) fn parse_edge_kinds(spec: &str) -> Result<Vec<EdgeKind>> {
         }
     }
     if saw_all && spec.split(',').any(|p| p.trim() != "all") {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "--edges all cannot be combined with explicit kinds".to_string(),
         ));
     }
@@ -70,8 +70,8 @@ fn impact_empty_detail(kinds: &[EdgeKind]) -> String {
     .to_string()
 }
 
-fn impact_no_results(ctx: &ImpactCtx<'_>) -> AwError {
-    AwError::NoResultsCaveated {
+fn impact_no_results(ctx: &ImpactCtx<'_>) -> EgError {
+    EgError::NoResultsCaveated {
         caveat: ctx.caveat,
         detail: impact_empty_detail(ctx.kinds),
     }
@@ -111,7 +111,7 @@ pub fn impact(
         ""
     };
     if depth > 1 && sites {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "--sites is only valid with --depth 1".to_string(),
         ));
     }

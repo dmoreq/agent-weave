@@ -1,12 +1,13 @@
-//! AwError taxonomy: stable stderr prefix `aw: <class>: <detail>` and the
-//! exit-code contract (0 ok; 1 no results / no index; 2 usage or ambiguous;
-//! 3 corrupt index; 4 locked; 5 schema mismatch; 6 internal; 7 parse-quality).
+//! EgError taxonomy: stable stderr prefix `eg: <class>: <detail>` and the
+//! exit-code contract (0 ok; 1 no results / no index; 2 usage, ambiguous, or
+//! security; 3 corrupt index; 4 locked; 5 schema mismatch; 6 internal;
+//! 7 parse-quality).
 
 use std::fmt;
 
 /// Contract stderr text for a corrupt index (CUJ3, Amendment 11a). Single
 /// source: open_for_query and the rusqlite corruption mapping both emit it.
-pub const CORRUPT_INDEX_MSG: &str = "index.db failed integrity check — run aw build";
+pub const CORRUPT_INDEX_MSG: &str = "index.db failed integrity check — run eg build";
 
 /// SQLite reports corruption as SQLITE_NOTADB (header unreadable at open) or
 /// SQLITE_CORRUPT (malformed page hit during a statement). Either maps to the
@@ -30,7 +31,7 @@ pub(crate) fn is_sqlite_corruption(e: &rusqlite::Error) -> bool {
 pub type NameCandidate = (String, i64, String);
 
 #[derive(Debug)]
-pub enum AwError {
+pub enum EgError {
     NoResults(String),
     /// Empty result for a tool whose contract requires a first-line caveat
     /// on stdout even when nothing is found (dead).
@@ -55,7 +56,7 @@ pub enum AwError {
         role: Option<&'static str>,
     },
     CorruptIndex(String),
-    /// Missing `.aw/memory.db` on a read path (companion design exit contract:
+    /// Missing `.engram/memory.db` on a read path (companion design exit contract:
     /// 1 = no results / unknown key / no memory store).
     NoMemory(String),
     /// `memory.db` reported corruption (SQLITE_NOTADB / SQLITE_CORRUPT): exit 3,
@@ -65,7 +66,7 @@ pub enum AwError {
     MemoryLocked,
     /// Memory schema skew: newer than the binary, or older but failing the
     /// compiled required-structure manifest. `detail` carries the message body
-    /// after the `aw: memory-schema-mismatch:` class prefix.
+    /// after the `eg: memory-schema-mismatch:` class prefix.
     MemorySchema {
         detail: String,
     },
@@ -79,11 +80,15 @@ pub enum AwError {
         files: usize,
         threshold: f64,
     },
+    /// Untrusted repo-local state: `.engram/` carries git-tracked files, so a
+    /// repository could ship attacker-authored memories or index rows. Exit 2
+    /// (`eg: security: ...`), never a silent read.
+    Security(String),
     Internal(String),
 }
 
 /// The journal-facing classification of a raw process exit code (the 0-7
-/// contract; [`AwError::code_class`] is the error-to-code direction). One
+/// contract; [`EgError::code_class`] is the error-to-code direction). One
 /// home for the thresholds so telemetry surfaces bucket outcomes identically:
 /// 0 ok, 1 empty result, 2 ambiguous usage, 3+ operational errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,21 +111,22 @@ impl ExitClass {
     }
 }
 
-impl AwError {
+impl EgError {
     fn code_class(&self) -> (i32, &'static str) {
         match self {
-            AwError::NoResults(_) | AwError::NoResultsCaveated { .. } => (1, "no-results"),
-            AwError::Usage(_) => (2, "usage"),
-            AwError::Ambiguous { .. } => (2, "usage"),
-            AwError::CorruptIndex(_) => (3, "corrupt-index"),
-            AwError::NoMemory(_) => (1, "no-memory"),
-            AwError::CorruptMemory(_) => (3, "corrupt-memory"),
-            AwError::MemoryLocked => (4, "locked"),
-            AwError::MemorySchema { .. } => (5, "memory-schema-mismatch"),
-            AwError::Locked(_) => (4, "locked"),
-            AwError::SchemaMismatch { .. } => (5, "schema-mismatch"),
-            AwError::Internal(_) => (6, "internal"),
-            AwError::ParseQuality { .. } => (7, "parse-quality"),
+            EgError::NoResults(_) | EgError::NoResultsCaveated { .. } => (1, "no-results"),
+            EgError::Usage(_) => (2, "usage"),
+            EgError::Ambiguous { .. } => (2, "usage"),
+            EgError::CorruptIndex(_) => (3, "corrupt-index"),
+            EgError::NoMemory(_) => (1, "no-memory"),
+            EgError::CorruptMemory(_) => (3, "corrupt-memory"),
+            EgError::MemoryLocked => (4, "locked"),
+            EgError::MemorySchema { .. } => (5, "memory-schema-mismatch"),
+            EgError::Locked(_) => (4, "locked"),
+            EgError::SchemaMismatch { .. } => (5, "schema-mismatch"),
+            EgError::Security(_) => (2, "security"),
+            EgError::Internal(_) => (6, "internal"),
+            EgError::ParseQuality { .. } => (7, "parse-quality"),
         }
     }
 
@@ -128,8 +134,8 @@ impl AwError {
     /// `path '<file>' not indexed` string: the file gate in `query::indexed_file`
     /// and the `symbols` fall-through both construct it here, so the contract
     /// text cannot drift between surfaces.
-    pub(crate) fn not_indexed(file: &str) -> AwError {
-        AwError::NoResults(format!("path '{file}' not indexed"))
+    pub(crate) fn not_indexed(file: &str) -> EgError {
+        EgError::NoResults(format!("path '{file}' not indexed"))
     }
 
     pub fn exit_code(&self) -> i32 {
@@ -141,40 +147,41 @@ impl AwError {
     }
 }
 
-impl fmt::Display for AwError {
+impl fmt::Display for EgError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AwError::NoResults(detail)
-            | AwError::NoResultsCaveated { detail, .. }
-            | AwError::Usage(detail)
-            | AwError::CorruptIndex(detail)
-            | AwError::NoMemory(detail)
-            | AwError::CorruptMemory(detail)
-            | AwError::MemorySchema { detail }
-            | AwError::Internal(detail) => write!(f, "aw: {}: {}", self.class(), detail),
-            AwError::Ambiguous { name, total, role, .. } => write!(
+            EgError::NoResults(detail)
+            | EgError::NoResultsCaveated { detail, .. }
+            | EgError::Usage(detail)
+            | EgError::CorruptIndex(detail)
+            | EgError::NoMemory(detail)
+            | EgError::CorruptMemory(detail)
+            | EgError::MemorySchema { detail }
+            | EgError::Security(detail)
+            | EgError::Internal(detail) => write!(f, "eg: {}: {}", self.class(), detail),
+            EgError::Ambiguous { name, total, role, .. } => write!(
                 f,
-                "aw: {}: ambiguous name '{name}' — {total} candidates{}; use the Class.method qualname form",
+                "eg: {}: ambiguous name '{name}' — {total} candidates{}; use the Class.method qualname form",
                 self.class(),
                 match role {
                     Some(r) => format!(" as the {r} endpoint"),
                     None => String::new(),
                 }
             ),
-            AwError::MemoryLocked => write!(
+            EgError::MemoryLocked => write!(
                 f,
-                "aw: locked: memory write in progress — retry"
+                "eg: locked: memory write in progress — retry"
             ),
-            AwError::Locked(pid) => {
-                write!(f, "aw: locked: build in progress (pid {pid}) — retry after it exits")
+            EgError::Locked(pid) => {
+                write!(f, "eg: locked: build in progress (pid {pid}) — retry after it exits")
             }
-            AwError::SchemaMismatch { have, want } => write!(
+            EgError::SchemaMismatch { have, want } => write!(
                 f,
-                "aw: schema-mismatch: index schema v{have}, binary expects v{want} — run aw build"
+                "eg: schema-mismatch: index schema v{have}, binary expects v{want} — run eg build"
             ),
-            AwError::ParseQuality { rate, files, threshold } => write!(
+            EgError::ParseQuality { rate, files, threshold } => write!(
                 f,
-                "aw: parse-quality: {:.0}% of {files} files failed to parse (threshold {:.0}%) — inspect with aw doctor or override with --force",
+                "eg: parse-quality: {:.0}% of {files} files failed to parse (threshold {:.0}%) — inspect with eg doctor or override with --force",
                 rate * 100.0,
                 threshold * 100.0
             ),
@@ -182,24 +189,28 @@ impl fmt::Display for AwError {
     }
 }
 
-impl std::error::Error for AwError {}
+impl std::error::Error for EgError {}
 
-impl From<rusqlite::Error> for AwError {
+impl From<rusqlite::Error> for EgError {
     fn from(e: rusqlite::Error) -> Self {
         // Amendment 11a: corruption is detected where SQLite reports it (open
         // or any statement), replacing the per-open quick_check scan.
         if is_sqlite_corruption(&e) {
-            AwError::CorruptIndex(CORRUPT_INDEX_MSG.to_string())
+            EgError::CorruptIndex(CORRUPT_INDEX_MSG.to_string())
         } else {
-            AwError::Internal(format!("database error: {e}"))
+            EgError::Internal(format!("database error: {e}"))
         }
     }
 }
 
-impl From<std::io::Error> for AwError {
+impl From<std::io::Error> for EgError {
     fn from(e: std::io::Error) -> Self {
-        AwError::Internal(format!("io error: {e}"))
+        EgError::Internal(format!("io error: {e}"))
     }
 }
 
-pub type Result<T> = std::result::Result<T, AwError>;
+pub type Result<T> = std::result::Result<T, EgError>;
+
+/// Transitional spelling kept for downstream callers compiled against the
+/// pre-rename crate identity.
+pub type AwError = EgError;

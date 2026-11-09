@@ -10,12 +10,12 @@
 
 ## Specification and compatibility
 
-- [ ] No spec deviation, or an Amendment entry exists in
-      `docs/designs/2026-10-31_agent-weave-rust-code-index.md` before implementation
+- [ ] Matches architectural constraints defined in `docs/architecture/code-index.md`
+      and `docs/architecture/memory-store.md`
 - [ ] Output formats and exit codes unchanged, or specification contract-bump
       note and affected integration updates included
 - [ ] Runtime safety preserved: no network, long-lived child processes, writes
-      outside `.aw/`, or agent-configuration writes; enforcement tests not weakened
+      outside `.engram/`, or agent-configuration writes; enforcement tests not weakened
 - [ ] Schema changes are additive, if applicable
 
 ## Verification

@@ -1,4 +1,0 @@
-{"ts":1793627845,"surface":"cli","tool":"stats","args":{},"result_count":0,"shown":0,"total":0,"ambiguous":0,"exit_code":0,"latency_us":6749,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
-{"ts":1793627850,"surface":"cli","tool":"symbols","args":{"file":"pkg/beta.py","outline":"true","metrics":"false","limit":"50"},"result_count":5,"shown":5,"total":5,"ambiguous":0,"exit_code":0,"latency_us":5493,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
-{"ts":1793627852,"surface":"cli","tool":"callers","args":{"name":"pkg.beta.coerce","limit":"50"},"result_count":1,"shown":1,"total":1,"ambiguous":0,"exit_code":0,"latency_us":1713,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
-{"ts":1793627852,"surface":"cli","tool":"callees","args":{"name":"pkg.beta.bootstrap","depth":"1","limit":"50"},"result_count":1,"shown":1,"total":1,"ambiguous":0,"exit_code":0,"latency_us":1481,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

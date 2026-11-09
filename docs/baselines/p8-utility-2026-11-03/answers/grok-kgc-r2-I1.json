@@ -1,1 +1,0 @@
-{"task": "I1", "items": ["10 src.db", "11 src.error", "12 src.hash"], "answer": "src/query.rs directly imports three crate-internal modules: src.db on line 10, src.error on line 11, and src.hash on line 12."}

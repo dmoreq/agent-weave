@@ -9,7 +9,7 @@ fn impact_depth_footer_only_when_frontier_extended() {
     write(&repo, "b.py", "from c import h\n\ndef g():\n    h()\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "c.py", "--depth", "5", "--edges", "calls"])
         .output()
         .unwrap();
@@ -30,14 +30,14 @@ fn callers_depth_two_reaches_transitive_callers() {
     build(&repo);
 
     // Depth 1 keeps the existing direct-caller format and does not add tags.
-    let direct = aw(&repo).args(["callers", "h"]).output().unwrap();
+    let direct = eg(&repo).args(["callers", "h"]).output().unwrap();
     let d1 = String::from_utf8_lossy(&direct.stdout);
     assert_eq!(direct.status.code(), Some(0), "{d1}");
     assert!(d1.contains("b.g"), "{d1}");
     assert!(!d1.contains("a.f"), "{d1}");
     assert!(!d1.contains("[depth="), "{d1}");
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["callers", "h", "--depth", "2"])
         .output()
         .unwrap();
@@ -56,7 +56,7 @@ fn p8a_impact_depth_two_reaches_transitive_callers() {
     write(&repo, "a.py", "from b import g\n\ndef f():\n    g()\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "c.py", "--depth", "2", "--edges", "calls"])
         .output()
         .unwrap();
@@ -75,7 +75,7 @@ fn impact_depth_two_includes_module_level_caller() {
     write(&repo, "top.py", "from mid import g\n\ng()\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "m1.py", "--depth", "2"])
         .output()
         .unwrap();
@@ -95,13 +95,13 @@ fn p8a_symbols_directory_groups_files_and_counts_symbols() {
     write(&repo, "pkg/b.py", "def b():\n    pass\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["symbols", "pkg", "--outline"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("aw: dir pkg — 2 files"), "{stdout}");
+    assert!(stdout.contains("eg: dir pkg — 2 files"), "{stdout}");
     assert!(stdout.contains("pkg/a.py"), "{stdout}");
     assert!(stdout.contains("pkg/b.py"), "{stdout}");
     assert!(stdout.contains("function pkg.a.a"), "{stdout}");
@@ -120,7 +120,7 @@ fn import_edges_cover_plain_and_from_imports() {
     write(&repo, "d.py", "from a import only\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "a.py", "--edges", "imports"])
         .output()
         .unwrap();
@@ -142,10 +142,10 @@ fn imports_lists_outbound_resolved_edges() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "b.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "b.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.starts_with("aw: imports —"), "{stdout}");
+    assert!(stdout.starts_with("eg: imports —"), "{stdout}");
     assert!(stdout.contains("b.py:1 a.only"), "{stdout}");
 }
 
@@ -165,7 +165,7 @@ fn import_ts_relative_imports_collapse_extensions_and_index() {
     write(&repo, "src/legacy.cts", "export function legacy() {}\n");
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "src/app.ts"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "src/app.ts"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     for row in [
@@ -184,7 +184,7 @@ fn import_ts_relative_imports_collapse_extensions_and_index() {
         "default import leaked a symbol edge: {stdout}"
     );
 
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -202,7 +202,7 @@ fn import_python_from_import_module_suppresses_redundant_parent_edge() {
     write(&repo, "app2.py", "from pkg import mod, b\n");
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "app.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let rows: Vec<&str> = stdout
         .lines()
@@ -214,7 +214,7 @@ fn import_python_from_import_module_suppresses_redundant_parent_edge() {
         "module-only import keeps only the child edge: {stdout}"
     );
 
-    let out = aw(&repo).args(["imports", "app2.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app2.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("app2.py:1 pkg"),
@@ -244,7 +244,7 @@ fn import_rust_use_tree_and_module_mapping_resolve() {
     write(&repo, "src/use_tree/child.rs", "pub fn c() {}\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["imports", "src/use_tree.rs"])
         .output()
         .unwrap();
@@ -264,7 +264,7 @@ fn import_rust_use_tree_and_module_mapping_resolve() {
     }
     assert!(!stdout.contains("std"), "external crate leaked: {stdout}");
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["imports", "src/a/mod.rs"])
         .output()
         .unwrap();
@@ -274,7 +274,7 @@ fn import_rust_use_tree_and_module_mapping_resolve() {
         "mod.rs child mapping: {stdout}"
     );
 
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -294,7 +294,7 @@ fn import_star_suppression_is_per_import_statement() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "app.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
@@ -305,7 +305,7 @@ fn import_star_suppression_is_per_import_statement() {
         stdout.contains("app.py:2 pkg"),
         "star edge missing: {stdout}"
     );
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "star must resolve pkg.mod.f");
 }
 
@@ -317,7 +317,7 @@ fn import_deleted_destination_heals_unresolved_and_restore() {
     write(&repo, "app.py", "from pkg.later import gone\n");
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "app.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("app.py:1 pkg.later.gone"),
@@ -326,7 +326,7 @@ fn import_deleted_destination_heals_unresolved_and_restore() {
 
     fs::remove_file(repo.join("pkg/later.py")).unwrap();
     build(&repo);
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("app.py:1 import pkg.later"),
@@ -335,13 +335,13 @@ fn import_deleted_destination_heals_unresolved_and_restore() {
 
     write(&repo, "pkg/later.py", "def gone():\n    pass\n");
     build(&repo);
-    let out = aw(&repo).args(["imports", "app.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("app.py:1 pkg.later.gone"),
         "restored destination must heal: {stdout}"
     );
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -355,10 +355,10 @@ fn p8c_unresolved_names_lists_sites_with_kind() {
     write(&repo, "app.py", "def f():\n    missing_thing()\n");
     build(&repo);
 
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("aw: unresolved=1 rows"), "{stdout}");
+    assert!(stdout.contains("eg: unresolved=1 rows"), "{stdout}");
     assert!(stdout.contains("app.py:2 call missing_thing"), "{stdout}");
 }
 
@@ -370,13 +370,13 @@ fn import_edges_dedup_and_resolved_imports_are_not_unresolved() {
     write(&repo, "c.py", "from pkg.mod import b\n");
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "c.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "c.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert_eq!(stdout.matches("c.py:1 pkg.mod.b").count(), 1, "{stdout}");
     assert!(stdout.contains("c.py:1 pkg.mod"), "{stdout}");
 
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -395,17 +395,17 @@ fn nested_function_calls_resolve_and_dead_keeps_inner_alive() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["callers", "inner"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "inner"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("app.py:4 app.outer"), "{stdout}");
 
-    let out = aw(&repo).args(["callees", "outer"]).output().unwrap();
+    let out = eg(&repo).args(["callees", "outer"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("app.py:2 app.outer.inner"), "{stdout}");
 
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -413,7 +413,7 @@ fn nested_function_calls_resolve_and_dead_keeps_inner_alive() {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    let out = aw(&repo).args(["dead"]).output().unwrap();
+    let out = eg(&repo).args(["dead"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.lines().any(|line| line == "app.py:2"), "{stdout}");
 }
@@ -429,7 +429,7 @@ fn inheritance_ts_path_alias_is_pinned_unresolved() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("src/child.ts:2 inherit Base"), "{stdout}");
 }
@@ -449,7 +449,7 @@ fn inheritance_ignores_generic_arguments_and_external_paths() {
     );
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "lib.rs", "--edges", "inherits"])
         .output()
         .unwrap();
@@ -461,11 +461,11 @@ fn unresolved_reports_counts_and_zero_is_exit1() {
     let repo = temp_repo("unresolved");
     write(&repo, "m.py", "def go():\n    return ghost()\n");
     build(&repo);
-    let out = aw(&repo).args(["unresolved"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     assert!(
-        stdout.contains("aw: unresolved=1 callees in 1 files"),
+        stdout.contains("eg: unresolved=1 callees in 1 files"),
         "{stdout}"
     );
     assert!(stdout.contains("m.py unresolved=1"), "{stdout}");
@@ -477,7 +477,7 @@ fn unresolved_reports_counts_and_zero_is_exit1() {
         "def g():\n    return 1\n\ndef go():\n    return g()\n",
     );
     build(&clean);
-    let out = aw(&clean).args(["unresolved"]).output().unwrap();
+    let out = eg(&clean).args(["unresolved"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("0 unresolved in indexed scope"), "{stderr}");

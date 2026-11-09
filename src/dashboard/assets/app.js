@@ -1,4 +1,4 @@
-// aw Native Rust Dashboard Client (Zero External Dependencies)
+// eg Native Rust Dashboard Client (Zero External Dependencies)
 
 const GRAPH_TOOLS = ['callers', 'callees', 'path', 'context', 'impact', 'symbols', 'imports', 'build'];
 
@@ -16,7 +16,7 @@ let activeReuseDetector = 'ALL';
 
 // Theme Toggle
 function initTheme() {
-  const saved = localStorage.getItem('aw-theme') || 'light';
+  const saved = localStorage.getItem('eg-theme') || 'light';
   document.documentElement.setAttribute('data-theme', saved);
   updateThemeButtonText(saved);
 }
@@ -25,7 +25,7 @@ function toggleTheme() {
   const current = document.documentElement.getAttribute('data-theme') || 'light';
   const next = current === 'light' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('aw-theme', next);
+  localStorage.setItem('eg-theme', next);
   updateThemeButtonText(next);
 }
 
@@ -285,6 +285,7 @@ function updateMemoryKpis() {
   const decisions = currentNotes.filter(m => m.kind === 'decision').length;
   const facts = currentNotes.filter(m => m.kind === 'fact').length;
   const tasks = currentNotes.filter(m => m.kind === 'task').length;
+  const procedures = currentNotes.filter(m => m.kind === 'procedure').length;
   const guardedEl = document.getElementById('mem-kpi-guarded');
   if (guardedEl) guardedEl.textContent = currentNotes.length;
   const guardedSub = document.getElementById('mem-kpi-guarded-sub');
@@ -294,6 +295,7 @@ function updateMemoryKpis() {
     if (decisions > 0) details.push(decisions + ' decisions');
     if (facts > 0) details.push(facts + ' facts');
     if (tasks > 0) details.push(tasks + ' tasks');
+    if (procedures > 0) details.push(procedures + ' procedures');
     guardedSub.textContent = details.length > 0 ? details.join(' · ') : currentNotes.length + ' active notes';
   }
 
@@ -326,7 +328,7 @@ function updateActionCenter(currentNotes, modifiedCount, brokenCount) {
       : '<span class="badge status-err">[BROKEN REF]</span>';
     const explanation = isModified
       ? 'Target file was modified after note creation. Review note and touch to confirm currency.'
-      : 'Referenced symbol or file path is missing from current code index (.aw/index.db).';
+      : 'Referenced symbol or file path is missing from current code index (.engram/index.db).';
     const touchBtn = isModified
       ? '<button class="btn-touch" onclick="touchMemory(\'' + escapeHtml(m.key) + '\', ' + (m.store === 'global') + ')">Touch Anchor</button>'
       : '';
@@ -1100,7 +1102,7 @@ function renderMemoryList() {
   const filtered = getFilteredMemories();
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>aw mem write --body "..." --kind gotcha &lt;key&gt;</code></span></div>';
+    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>eg mem write --body "..." --kind gotcha &lt;key&gt;</code></span></div>';
     renderMemoryDossier(null);
     return;
   }
@@ -1115,7 +1117,7 @@ function renderMemoryList() {
       renderMemoryList();
     };
 
-    const kindClass = 'badge status-' + (m.kind === 'decision' ? 'ambig' : m.kind === 'gotcha' ? 'warn' : m.kind === 'fact' ? 'ok' : 'err');
+    const kindClass = 'badge status-' + (m.kind === 'decision' ? 'ambig' : m.kind === 'gotcha' ? 'warn' : m.kind === 'fact' ? 'ok' : m.kind === 'procedure' ? 'neutral' : 'err');
     const timeStr = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString() : '—';
     const storeBadge = '<span class="badge badge-repo">' + escapeHtml(m.store) + '</span>';
     const revPill = '<span class="badge" style="background: var(--bg-subtle);">r' + m.rev + '</span>';
@@ -1177,7 +1179,7 @@ function renderMemoryDossier(m) {
 
   let refsHtml = '';
   if (m.resolved_refs && m.resolved_refs.length) {
-    refsHtml = '<div class="dossier-section-title">Guarded Code References (.aw/index.db verified)</div><div class="chips-row">';
+    refsHtml = '<div class="dossier-section-title">Guarded Code References (.engram/index.db verified)</div><div class="chips-row">';
     m.resolved_refs.forEach(r => {
       const verClass = !r.verified ? 'chip-ref broken' : r.modified ? 'chip-ref modified' : 'chip-ref verified';
       const verBadge = !r.verified ? ' [BROKEN REF]' : r.modified ? ' [MODIFIED REF]' : ' [VERIFIED ' + r.type.toUpperCase() + ']';

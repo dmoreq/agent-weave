@@ -7,7 +7,7 @@ fn reuse_empty_reports_zero_candidates() {
     let repo = temp_repo("reuse-empty");
     write(&repo, "a.py", "def unique_one():\n    return 1\n");
     build(&repo);
-    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let out = eg(&repo).args(["reuse"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("0 reuse candidates found"), "{stdout}");
@@ -27,7 +27,7 @@ fn reuse_detects_candidate_duplicates() {
         "def parse_token(token: str):\n    return token.strip()\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let out = eg(&repo).args(["reuse"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
@@ -36,7 +36,7 @@ fn reuse_detects_candidate_duplicates() {
     );
     assert!(stdout.contains("parse_token"), "{stdout}");
     // Verify telemetry recorded the duplication warning
-    let usage = aw(&repo).args(["usage", "--quality"]).output().unwrap();
+    let usage = eg(&repo).args(["usage", "--quality"]).output().unwrap();
     let usage_stdout = String::from_utf8_lossy(&usage.stdout);
     assert!(
         usage_stdout.contains("Anti-Reinvention: 1 duplication warnings caught"),
@@ -58,7 +58,7 @@ fn search_outputs_interface_cards_and_callers_ranking() {
         "from util import popular_helper\ndef run():\n    return popular_helper(1) + popular_helper(2)\n",
     );
     build(&repo);
-    let out = aw(&repo).args(["search", "helper"]).output().unwrap();
+    let out = eg(&repo).args(["search", "helper"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
@@ -99,7 +99,7 @@ fn incremental_build_emits_reuse_hint_on_stderr() {
     let (code, _stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stderr}");
     assert!(
-        stderr.contains("aw: reuse-hint:"),
+        stderr.contains("eg: reuse-hint:"),
         "expected reuse hint on stderr: {stderr}"
     );
     assert!(stderr.contains("transform_data"), "{stderr}");
@@ -121,25 +121,25 @@ fn reuse_scoped_path_filters_targets_and_no_duplicate_pairs() {
     build(&repo);
 
     // Unscoped: exactly 1 candidate found (not duplicated as A->B and B->A)
-    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let out = eg(&repo).args(["reuse"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
-        stdout.contains("aw: reuse — 1 duplication candidate(s) found"),
+        stdout.contains("eg: reuse — 1 duplication candidate(s) found"),
         "must report exactly 1 candidate pair: {stdout}"
     );
 
     // Scoped to duplicate file b.py: reports candidate
-    let out_b = aw(&repo).args(["reuse", "b.py"]).output().unwrap();
+    let out_b = eg(&repo).args(["reuse", "b.py"]).output().unwrap();
     let stdout_b = String::from_utf8_lossy(&out_b.stdout);
     assert_eq!(out_b.status.code(), Some(0), "{stdout_b}");
     assert!(
-        stdout_b.contains("aw: reuse — 1 duplication candidate(s) found"),
+        stdout_b.contains("eg: reuse — 1 duplication candidate(s) found"),
         "must report b.py duplicate: {stdout_b}"
     );
 
     // Scoped to canonical file a.py: zero candidates (a.py is not duplicating anything)
-    let out_a = aw(&repo).args(["reuse", "a.py"]).output().unwrap();
+    let out_a = eg(&repo).args(["reuse", "a.py"]).output().unwrap();
     let stdout_a = String::from_utf8_lossy(&out_a.stdout);
     assert_eq!(out_a.status.code(), Some(0), "{stdout_a}");
     assert!(
@@ -168,7 +168,7 @@ fn reuse_d1_callee_footprint_requires_resolved_callees() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let out = eg(&repo).args(["reuse"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
@@ -186,8 +186,8 @@ fn reuse_d1_callee_footprint_requires_resolved_callees() {
 }
 
 fn mem_out_global(repo: &Path, global_dir: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = aw(repo)
-        .env("AW_GLOBAL_DIR", global_dir)
+    let out = eg(repo)
+        .env("ENGRAM_GLOBAL_DIR", global_dir)
         .args(["mem"])
         .args(args)
         .output()
@@ -202,7 +202,7 @@ fn mem_out_global(repo: &Path, global_dir: &Path, args: &[&str]) -> (i32, String
 #[test]
 fn global_memory_write_and_local_layered_query_with_global_tag() {
     let repo = temp_repo("mem-global-layered");
-    let global_dir = temp_repo("global-aw-store");
+    let global_dir = temp_repo("global-eg-store");
 
     // 1. Write a global note
     let (code, stdout, stderr) = mem_out_global(
@@ -221,8 +221,8 @@ fn global_memory_write_and_local_layered_query_with_global_tag() {
     assert_eq!(code, 0, "{stdout}{stderr}");
     assert!(stdout.contains("ok: 'developer_profile' rev 1 written"));
 
-    // Verify .aw/memory.db was NOT created in repo root, but memory.db WAS created in global_dir
-    assert!(!repo.join(".aw/memory.db").exists());
+    // Verify .engram/memory.db was NOT created in repo root, but memory.db WAS created in global_dir
+    assert!(!repo.join(".engram/memory.db").exists());
     assert!(global_dir.join("memory.db").exists());
 
     // 2. Query from inside repo without flags: layered search finds global note and tags it [global]
@@ -259,7 +259,7 @@ fn global_memory_write_and_local_layered_query_with_global_tag() {
         ],
     );
     assert_eq!(code, 0, "{stdout}{stderr}");
-    assert!(repo.join(".aw/memory.db").exists());
+    assert!(repo.join(".engram/memory.db").exists());
 
     // 6. Query from repo without flags: local shadows global!
     let (code, stdout, stderr) = mem_out_global(&repo, &global_dir, &["query", "--all"]);
@@ -310,7 +310,7 @@ fn global_memory_write_and_local_layered_query_with_global_tag() {
 #[test]
 fn global_memory_export_and_gc() {
     let repo = temp_repo("mem-global-export-gc");
-    let global_dir = temp_repo("global-aw-store-export");
+    let global_dir = temp_repo("global-eg-store-export");
 
     let (code, stdout, stderr) = mem_out_global(
         &repo,
@@ -370,7 +370,7 @@ fn global_memory_read_never_creates_missing_directory() {
 #[test]
 fn global_memory_expired_local_does_not_shadow_global() {
     let repo = temp_repo("mem-expired-shadow");
-    let global_dir = temp_repo("global-aw-expired-shadow");
+    let global_dir = temp_repo("global-eg-expired-shadow");
 
     // Global note
     let (code, _, _) = mem_out_global(
@@ -450,7 +450,7 @@ fn reuse_d3_raw_client_bypass_detects_matching_canonical_wrapper() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let out = eg(&repo).args(["reuse"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(

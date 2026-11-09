@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: A new capability for aw
+about: A new capability for eg
 labels: enhancement
 ---
 
@@ -18,7 +18,7 @@ labels: enhancement
 <!-- Read CONTRIBUTING.md and the linked specification. Note known conflicts or
      questions below; leave unknown implementation details for discussion. -->
 
-- Runtime safety: no daemon, network access, LLM calls, writes outside `.aw/`,
+- Runtime safety: no daemon, network access, LLM calls, writes outside `.engram/`,
   or agent-configuration writes.
 - Scope: no verbatim source bodies or promises to resolve dynamic dispatch.
 - Compatibility: schema changes must be additive. Output-format or exit-code
@@ -29,4 +29,4 @@ Known conflicts or open questions:
 
 ## Alternatives tried
 
-<!-- grep/ctags/ast-grep or an existing aw command. -->
+<!-- grep/ctags/ast-grep or an existing eg command. -->

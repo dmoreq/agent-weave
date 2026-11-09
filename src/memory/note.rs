@@ -50,7 +50,7 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
     } = input;
     let key = validate_key(key)?;
     let kind = MemKind::parse(kind).ok_or_else(|| {
-        AwError::Usage(format!(
+        EgError::Usage(format!(
             "mem write: kind must be one of {} (got '{kind}')",
             MEM_KINDS.map(MemKind::as_str).join("|")
         ))
@@ -59,7 +59,7 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
     if contains_suspected_secret(tags.unwrap_or(""))
         || contains_suspected_secret(refs.unwrap_or(""))
     {
-        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     // Keep the original validation order: tags, refs, then scope/ttl last, so
     // a multi-field error reports the same field as before the enum split.
@@ -87,20 +87,20 @@ fn contains_suspected_secret(text: &str) -> bool {
 fn validate_key(key: &str) -> Result<&str> {
     let key = key.trim();
     if key.is_empty() {
-        return Err(AwError::Usage("mem write: key must not be empty".into()));
+        return Err(EgError::Usage("mem write: key must not be empty".into()));
     }
     if key.len() > MAX_KEY_BYTES {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: key exceeds {MAX_KEY_BYTES} bytes"
         )));
     }
     if key.chars().any(|c| c.is_control()) {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem write: key must not contain control characters".into(),
         ));
     }
     if contains_suspected_secret(key) {
-        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     Ok(key)
 }
@@ -108,15 +108,15 @@ fn validate_key(key: &str) -> Result<&str> {
 fn validate_body(body: &str) -> Result<()> {
     let body_len = body.len();
     if body.trim().is_empty() {
-        return Err(AwError::Usage("mem write: body must not be empty".into()));
+        return Err(EgError::Usage("mem write: body must not be empty".into()));
     }
     if body_len > MAX_BODY_BYTES {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: body exceeds {MAX_BODY_BYTES} bytes (got {body_len})"
         )));
     }
     if contains_suspected_secret(body) {
-        return Err(AwError::Usage(SUSPECTED_SECRET_MSG.into()));
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
     }
     Ok(())
 }
@@ -124,12 +124,12 @@ fn validate_body(body: &str) -> Result<()> {
 fn normalize_token_set(raw: &str, max: usize, max_len: usize, label: &str) -> Result<String> {
     let tokens: Vec<String> = raw.split_whitespace().map(str::to_string).collect();
     if tokens.len() > max {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: more than {max} {label}"
         )));
     }
     if let Some(t) = tokens.iter().find(|t| t.len() > max_len) {
-        return Err(AwError::Usage(format!(
+        return Err(EgError::Usage(format!(
             "mem write: {label} token exceeds {max_len} bytes: '{t}'"
         )));
     }
@@ -162,7 +162,7 @@ fn normalize_refs(raw: &str) -> Result<String> {
 /// parsed variant so the note carries the enum, not the string.
 fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
     let scope = MemScope::parse(scope).ok_or_else(|| {
-        AwError::Usage(format!(
+        EgError::Usage(format!(
             "mem write: scope must be '{}' or '{}' (got '{scope}')",
             MemScope::Durable.as_str(),
             MemScope::Session.as_str()
@@ -171,7 +171,7 @@ fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
     let ttl_secs = match scope {
         MemScope::Durable => {
             if ttl.is_some() {
-                return Err(AwError::Usage(
+                return Err(EgError::Usage(
                     "mem write: --ttl is only valid with --scope session".to_string(),
                 ));
             }
@@ -180,7 +180,7 @@ fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
         MemScope::Session => match ttl {
             None => DEFAULT_SESSION_TTL_SECS,
             Some(t) if t == 0 || t > MAX_SESSION_TTL_SECS => {
-                return Err(AwError::Usage(format!(
+                return Err(EgError::Usage(format!(
                     "mem write: --ttl must be in 1..={MAX_SESSION_TTL_SECS} seconds"
                 )));
             }
@@ -188,6 +188,156 @@ fn normalize_ttl(scope: &str, ttl: Option<u64>) -> Result<(MemScope, i64)> {
         },
     };
     Ok((scope, ttl_secs))
+}
+
+/// Wire format version for the Markdown note envelope. A future incompatible
+/// field change bumps this string; import rejects anything else.
+pub const IMPORT_FORMAT: &str = "engram-note/1";
+
+/// Single-line Markdown front-matter for one exported note. Parsed by hand
+/// from `serde_json::Value`: the crate deliberately ships `serde_json` only
+/// (no derive macros), so this DTO owns its own field mapping.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteFrontmatter {
+    pub format: String,
+    pub key: String,
+    pub kind: MemKind,
+    pub scope: MemScope,
+    pub tags: Vec<String>,
+    pub refs: Vec<String>,
+    pub expires_at: i64,
+}
+
+impl NoteFrontmatter {
+    /// Parse one front-matter JSON object at the import trust boundary. A
+    /// missing/unknown `format`, kind, or scope is a usage error (exit 2).
+    pub fn from_json(value: &serde_json::Value) -> Result<Self> {
+        let format = value
+            .get("format")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| EgError::Usage("mem import: front-matter is missing 'format'".into()))?;
+        if format != IMPORT_FORMAT {
+            return Err(EgError::Usage(format!(
+                "mem import: unsupported note format '{format}' (expected {IMPORT_FORMAT})"
+            )));
+        }
+        let key = value
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let kind_raw = value.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = MemKind::parse(kind_raw).ok_or_else(|| {
+            EgError::Usage(format!(
+                "mem import: kind must be one of {} (got '{kind_raw}')",
+                MEM_KINDS.map(MemKind::as_str).join("|")
+            ))
+        })?;
+        let scope_raw = value
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("durable");
+        let scope = MemScope::parse(scope_raw).ok_or_else(|| {
+            EgError::Usage(format!(
+                "mem import: scope must be 'durable' or 'session' (got '{scope_raw}')"
+            ))
+        })?;
+        let expires_at = value
+            .get("expires_at")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        Ok(Self {
+            format: format.to_string(),
+            key,
+            kind,
+            scope,
+            tags: string_list(value.get("tags")),
+            refs: string_list(value.get("refs")),
+            expires_at,
+        })
+    }
+}
+
+/// Accept both the Markdown array form and the JSONL whitespace-string form.
+fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::to_string)
+            .collect(),
+        Some(serde_json::Value::String(s)) => s.split_whitespace().map(str::to_string).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A validated imported note, with the expiry already resolved to an absolute
+/// unix deadline (never a relative TTL, so replay cannot drift the clock).
+#[derive(Debug)]
+pub struct NormalizedImport {
+    pub key: String,
+    pub kind: MemKind,
+    pub tags: String,
+    pub refs: String,
+    pub scope: MemScope,
+    pub body: String,
+    pub expires_at: i64,
+    /// The deadline is already past: the caller skips this note and counts it.
+    pub expired: bool,
+}
+
+/// Validate and normalize one imported note. Field validation is the same as
+/// `mem write` (key/body caps, control characters, secret screening, tag/ref
+/// caps); the difference is the deadline: the front-matter carries an absolute
+/// `expires_at`, which is clamped to `now + MAX_SESSION_TTL_SECS` so a crafted
+/// export cannot pin a session note far into the future. Counter-TTL drift:
+/// the relative `ttl_secs` is never used on this path.
+pub fn normalize_import_note(
+    fm: &NoteFrontmatter,
+    body: &str,
+    now: i64,
+) -> Result<NormalizedImport> {
+    let key = validate_key(&fm.key)?.to_string();
+    validate_body(body)?;
+    let raw_tags = fm.tags.join(" ");
+    let raw_refs = fm.refs.join(" ");
+    if contains_suspected_secret(&raw_tags) || contains_suspected_secret(&raw_refs) {
+        return Err(EgError::Usage(SUSPECTED_SECRET_MSG.into()));
+    }
+    let tags = normalize_tags(&raw_tags)?;
+    let refs = normalize_refs(&raw_refs)?;
+    let expires_at = resolve_import_expiry(fm.scope, fm.expires_at, now)?;
+    Ok(NormalizedImport {
+        key,
+        kind: fm.kind,
+        tags,
+        refs,
+        scope: fm.scope,
+        body: body.to_string(),
+        expires_at,
+        expired: expires_at != 0 && expires_at <= now,
+    })
+}
+
+/// Resolve the absolute import deadline. `durable` never expires; `session`
+/// keeps the exported deadline, defaulting to the 7-day OQ2 constant when the
+/// export carries 0, and clamping to the 10-year ceiling.
+fn resolve_import_expiry(scope: MemScope, expires_at: i64, now: i64) -> Result<i64> {
+    match scope {
+        MemScope::Durable => Ok(0),
+        MemScope::Session => {
+            if expires_at < 0 {
+                return Err(EgError::Usage(
+                    "mem import: session expires_at must not be negative".into(),
+                ));
+            }
+            if expires_at == 0 {
+                Ok(now + DEFAULT_SESSION_TTL_SECS)
+            } else {
+                Ok(expires_at.min(now + MAX_SESSION_TTL_SECS as i64))
+            }
+        }
+    }
 }
 
 /// Content hash over the normalized (kind, body, tags, refs, scope) tuple with

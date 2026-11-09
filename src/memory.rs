@@ -1,10 +1,10 @@
 //! Project memory: pure presentation and scoring over rows `db.rs` returns.
 //! No write primitives, no connection opening — everything here is a pure
 //! function of its inputs, so CLI and MCP render byte-identical output by
-//! construction (companion design: docs/designs/2026-11-05_agent-weave-
-//! memory-retrieval.md; resolver constants follow its Decision D4-A).
+//! construction (companion design: docs/architecture/memory-store.md;
+//! resolver constants follow its Decision D4-A).
 
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 
 // ---------------------------------------------------------------------------
 // Tuning constants (one module, compile-in only — no config surface).
@@ -13,7 +13,7 @@ use crate::error::{AwError, Result};
 /// Honesty caveat, stdout first line of every mem command except `mem export`
 /// (whose stdout must stay pure JSONL; the caveat goes to stderr there).
 pub const MEMORY_CAVEAT: &str =
-    "aw: memory — agent-authored notes, candidates only, never proof of current behavior";
+    "eg: memory — agent-authored notes, candidates only, never proof of current behavior";
 
 /// Single source of the `mem write` secret-rejection usage text: key, body,
 /// and tags/refs validation all emit this exact message so the bytes cannot
@@ -32,6 +32,11 @@ pub const MAX_TAGS: usize = 16;
 pub const MAX_TAG_BYTES: usize = 32;
 pub const MAX_REFS: usize = 16;
 pub const MAX_REF_BYTES: usize = 256;
+/// Import input cap: one Markdown/JSONL file larger than this is rejected
+/// (exit 2) before parsing, so a hostile export cannot exhaust memory.
+pub const MAX_IMPORT_FILE_BYTES: usize = 16 * 1024 * 1024;
+/// Import note cap: a single import may carry at most this many notes.
+pub const MAX_IMPORT_NOTES: usize = 5000;
 /// Closed `kind` taxonomy (OQ3 keeps the design default until the owner says
 /// otherwise); anything else is a usage error (exit 2). Stored rows spell the
 /// kind through `as_str()` at the bind boundary and validation parses the raw
@@ -43,15 +48,17 @@ pub enum MemKind {
     Gotcha,
     Fact,
     Task,
+    Procedure,
 }
 
 /// The taxonomy as a list, kept under the `MEM_KINDS` name as the single
 /// source the usage-error render and the parser both derive from.
-pub const MEM_KINDS: [MemKind; 4] = [
+pub const MEM_KINDS: [MemKind; 5] = [
     MemKind::Decision,
     MemKind::Gotcha,
     MemKind::Fact,
     MemKind::Task,
+    MemKind::Procedure,
 ];
 
 impl MemKind {
@@ -61,6 +68,7 @@ impl MemKind {
             MemKind::Gotcha => "gotcha",
             MemKind::Fact => "fact",
             MemKind::Task => "task",
+            MemKind::Procedure => "procedure",
         }
     }
 
@@ -100,7 +108,7 @@ impl MemScope {
 pub fn parse_kind_filter(command: &str, raw: Option<&str>) -> Result<Option<MemKind>> {
     raw.map(|k| {
         MemKind::parse(k).ok_or_else(|| {
-            AwError::Usage(format!(
+            EgError::Usage(format!(
                 "{command}: kind must be one of {} (got '{k}')",
                 MEM_KINDS.map(MemKind::as_str).join("|")
             ))
@@ -114,7 +122,7 @@ pub fn parse_kind_filter(command: &str, raw: Option<&str>) -> Result<Option<MemK
 pub fn parse_scope_filter(command: &str, raw: Option<&str>) -> Result<Option<MemScope>> {
     raw.map(|s| {
         MemScope::parse(s).ok_or_else(|| {
-            AwError::Usage(format!(
+            EgError::Usage(format!(
                 "{command}: scope must be one of durable|session (got '{s}')"
             ))
         })
@@ -138,11 +146,13 @@ pub const RETENTION_DAYS: i64 = 30;
 // through `mem_tokens`, so query and stored text can never disagree.
 // ---------------------------------------------------------------------------
 
+mod graph;
 mod guard;
 mod note;
 mod rank;
 mod tokens;
 
+pub(crate) use graph::*;
 pub(crate) use guard::*;
 pub(crate) use note::*;
 pub(crate) use rank::*;
@@ -297,6 +307,7 @@ mod tests {
             },
             lex_raw: lex,
             ref_raw: r#ref,
+            graph_raw: 0.0,
             age_days: age,
             score: 0.0,
             is_global: false,

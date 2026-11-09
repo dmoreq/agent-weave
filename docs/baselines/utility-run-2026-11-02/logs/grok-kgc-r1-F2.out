@@ -1,3 +1,0 @@
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-F2.json`.
-
-`vihap.cleaners.abbreviation_engine.AbbreviationEngine.resolve_street` has 4 direct call sites and 5 direct callee definitions, all taken from `kg callers` and `kg callees`.

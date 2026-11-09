@@ -1,1 +1,0 @@
-{"task": "I1", "items": ["10 src.db", "11 src.error", "12 src.hash"], "answer": "src/query.rs has three crate-internal use imports: db at line 10, error at line 11 (importing KgError and Result), and hash at line 12 (importing fnv1a64). Later crate::journal, crate::extract, and crate::clones references are fully qualified inline paths, not imports, so they are omitted."}

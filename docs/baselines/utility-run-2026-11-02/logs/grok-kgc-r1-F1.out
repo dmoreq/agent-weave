@@ -1,5 +1,0 @@
-I'll look up the pending handoff first, then resolve the similarity function's callers and callees from the code index.The pending handoff is a different question. I'll resolve `pairwise_address_similarity` from the code index.Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-F1.json`.
-
-- **qualname:** `vihap.matching.similarity.pairwise_address_similarity`
-- **callers:** 5 call sites (`tests/test_scoring_sklearn_api.py` lines 120, 128, 137, 142, and `vihap/matching/similarity.py:356`)
-- **callees:** `vihap/cleaners/unicode.py:47` (`normalize_ascii`) and `vihap/matching/similarity.py:158` (`evaluate_street_similarity`)

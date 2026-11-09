@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 5,
-  "route": ["src/main.rs:37", "src/main.rs:146", "src/build.rs:121", "src/extract.rs:265", "src/extract.rs:379"],
-  "answer": "src.main.main reaches src.extract.walk_node in 5 resolved call hops: main calls run at src/main.rs:37, run calls run_build at src/main.rs:146, run_build calls extract_file at src/build.rs:121, extract_file calls walk_children at src/extract.rs:265, and walk_children calls walk_node at src/extract.rs:379."
-}

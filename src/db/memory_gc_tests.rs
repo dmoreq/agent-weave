@@ -7,7 +7,7 @@ use super::*;
 #[test]
 fn memory_corrupt_file_is_exit3_and_missing_is_exit1() {
     let root = temp_root("mem-corrupt");
-    make_dir_all(aw_dir(&root)).unwrap();
+    make_dir_all(eg_dir(&root)).unwrap();
     write_file(memory_db_path(&root), b"definitely not a sqlite header").unwrap();
     let err = open_memory_query(&root).unwrap_err();
     assert_eq!(err.exit_code(), 3, "{err}");
@@ -72,6 +72,7 @@ fn gc_purges_expired_rows_and_their_fts_entries() {
             now: now + 10,
             include_superseded: false,
         },
+        None,
     )
     .unwrap();
     assert_eq!(current.len(), 1);
@@ -187,9 +188,9 @@ static GLOBAL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn global_memory_creates_dir_and_schema_safely() {
     let _guard = GLOBAL_ENV_LOCK.lock().unwrap();
     let base = temp_root("global-mem-schema");
-    let tmp = base.join("sub-global-aw");
-    let prev = std::env::var("AW_GLOBAL_DIR").ok();
-    std::env::set_var("AW_GLOBAL_DIR", &tmp);
+    let tmp = base.join("sub-global-eg");
+    let prev = std::env::var("ENGRAM_GLOBAL_DIR").ok();
+    std::env::set_var("ENGRAM_GLOBAL_DIR", &tmp);
 
     let path = global_memory_db_path().unwrap();
     assert_eq!(path, tmp.join("memory.db"));
@@ -204,24 +205,52 @@ fn global_memory_creates_dir_and_schema_safely() {
     drop(conn);
 
     if let Some(val) = prev {
-        std::env::set_var("AW_GLOBAL_DIR", val);
+        std::env::set_var("ENGRAM_GLOBAL_DIR", val);
     } else {
-        std::env::remove_var("AW_GLOBAL_DIR");
+        std::env::remove_var("ENGRAM_GLOBAL_DIR");
     }
     remove_tree(&base);
+}
+
+#[cfg(unix)]
+#[test]
+fn global_store_is_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = GLOBAL_ENV_LOCK.lock().unwrap();
+    let tmp = temp_root("global-mem-modes");
+    let prev = std::env::var("ENGRAM_GLOBAL_DIR").ok();
+    std::env::set_var("ENGRAM_GLOBAL_DIR", &tmp);
+
+    let conn = open_global_memory_store().unwrap();
+    drop(conn);
+    let dir_mode = std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777;
+    assert_eq!(dir_mode, 0o700, "global directory must be owner-only");
+    let file_mode = std::fs::metadata(tmp.join("memory.db"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(file_mode, 0o600, "global store must be owner-only");
+
+    if let Some(val) = prev {
+        std::env::set_var("ENGRAM_GLOBAL_DIR", val);
+    } else {
+        std::env::remove_var("ENGRAM_GLOBAL_DIR");
+    }
+    remove_tree(&tmp);
 }
 
 #[test]
 fn global_memory_write_and_query_roundtrip() {
     let _guard = GLOBAL_ENV_LOCK.lock().unwrap();
     let tmp = temp_root("global-mem-roundtrip");
-    let prev = std::env::var("AW_GLOBAL_DIR").ok();
-    std::env::set_var("AW_GLOBAL_DIR", &tmp);
+    let prev = std::env::var("ENGRAM_GLOBAL_DIR").ok();
+    std::env::set_var("ENGRAM_GLOBAL_DIR", &tmp);
 
     // Before creation, query returns NoMemory
     assert!(matches!(
         open_global_memory_query().unwrap_err(),
-        AwError::NoMemory(_)
+        EgError::NoMemory(_)
     ));
 
     let mut conn = open_global_memory_store().unwrap();
@@ -244,9 +273,9 @@ fn global_memory_write_and_query_roundtrip() {
     drop(q_conn);
 
     if let Some(val) = prev {
-        std::env::set_var("AW_GLOBAL_DIR", val);
+        std::env::set_var("ENGRAM_GLOBAL_DIR", val);
     } else {
-        std::env::remove_var("AW_GLOBAL_DIR");
+        std::env::remove_var("ENGRAM_GLOBAL_DIR");
     }
     remove_tree(&tmp);
 }

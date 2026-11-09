@@ -1,3 +1,0 @@
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-B2.json`.
-
-`vihap.adapters.sklearn._coerce_string_sequence` is defined at `vihap/adapters/sklearn.py:117` as `def _coerce_string_sequence(X: Any) -> list[str]`. `_fit_string_sequence` calls it at line 225.

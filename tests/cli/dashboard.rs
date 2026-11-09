@@ -6,7 +6,7 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::Instant;
 
-use agent_weave::dashboard::server::{handle_client, poll_sse_file};
+use engram::dashboard::server::{handle_client, poll_sse_file};
 
 #[test]
 fn dashboard_query_string_stripped_and_head_method_suppresses_body() {
@@ -245,8 +245,8 @@ fn dashboard_api_summary_returns_reuse_and_memory_aggs() {
 
 #[test]
 fn monitor_tui_render_all_tabs_coverage() {
-    use agent_weave::dashboard::monitor::render::render_screen;
-    use agent_weave::dashboard::monitor::state::{MonitorTab, TuiState};
+    use engram::dashboard::monitor::render::render_screen;
+    use engram::dashboard::monitor::state::{MonitorTab, TuiState};
 
     let temp_dir = std::env::temp_dir().join(format!("test_tui_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&temp_dir);
@@ -265,7 +265,8 @@ fn monitor_tui_render_all_tabs_coverage() {
     assert_eq!(state.recent_events.len(), 3);
 
     // Also test with real global log if it exists!
-    let global_log = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".aw/usage.log");
+    let global_log =
+        std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".engram/usage.log");
     if global_log.is_file() {
         let mut real_state = TuiState::new(None, global_log, None, false);
         real_state.refresh(None);
@@ -292,7 +293,7 @@ fn monitor_tui_render_all_tabs_coverage() {
         render_screen(&mut buf, &state, 80, 24).unwrap();
         let rendered = String::from_utf8_lossy(&buf);
         assert!(
-            rendered.contains("aw monitor v0.5.3"),
+            rendered.contains("eg monitor v0.5.3"),
             "Header missing in tab {tab:?}"
         );
         assert!(rendered.contains("Keys:"), "Footer missing in tab {tab:?}");

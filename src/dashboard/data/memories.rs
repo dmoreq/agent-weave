@@ -36,7 +36,7 @@ fn discover_memory_stores(
 ) -> HashMap<String, (PathBuf, PathBuf)> {
     let mut stores: HashMap<String, (PathBuf, PathBuf)> = HashMap::new();
 
-    if let Ok(g_dir) = db::global_aw_dir() {
+    if let Ok(g_dir) = db::global_eg_dir() {
         let g_db = g_dir.join("memory.db");
         if g_db.is_file() {
             stores.insert("global".to_string(), (g_dir, g_db));
@@ -46,7 +46,7 @@ fn discover_memory_stores(
     let mut locals: HashMap<String, PathBuf> = HashMap::new();
     super::discover_repos(root, entries, "memory.db", &mut locals);
     let store_pair = |r: PathBuf| {
-        let l_db = r.join(".aw").join("memory.db");
+        let l_db = r.join(".engram").join("memory.db");
         (r, l_db)
     };
     for (name, r) in locals {
@@ -102,6 +102,11 @@ fn kind_prevention_card(kind: &str, key: &str) -> (&'static str, &'static str, S
             "EXPLORATION SHORTCUT",
             "Verified Fact Shortcut",
             format!("Avoids costly multi-file grep scans by caching verified system truth for '{key}'."),
+        ),
+        Some(crate::memory::MemKind::Procedure) => (
+            "OPERATIONAL PLAYBOOK",
+            "Reusable Procedure",
+            format!("Provides a verified runbook for '{key}' that the agent can rehearse at task start."),
         ),
         Some(crate::memory::MemKind::Task) | None => (
             "HANDOFF CONTEXT",
@@ -342,7 +347,7 @@ fn collect_store_notes(
             Err(_) => return,
         };
     let index_conn = Connection::open_with_flags(
-        repo_root.join(".aw").join("index.db"),
+        repo_root.join(".engram").join("index.db"),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .ok();

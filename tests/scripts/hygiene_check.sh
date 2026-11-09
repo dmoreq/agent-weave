@@ -3,7 +3,7 @@
 # Repository Hygiene & Anti-Smell Verification Gate
 # Enforces:
 # 1. Zero personal paths (/Users/, /home/<user>/, /Workspace/) & secret patterns in tracked text files.
-# 2. Zero Unicode emojis & sparkline/bar characters (except deliberate '⚡ aw:' MCP KPI footer token).
+# 2. Zero Unicode emojis & sparkline/bar characters (except deliberate '⚡ eg:' MCP KPI footer token).
 # 3. Rust Code-Smells Gate:
 #    - Hard fail on ANY .rs file > 500 lines (Zero exception / Zero allowlist).
 #    - Forbids 'unsafe { ... }', 'unsafe fn', 'unsafe trait', 'unsafe impl' blocks in src/.
@@ -32,7 +32,7 @@ LEAK_PATTERNS='(/Users/|/home/[A-Za-z0-9._-]+/|/Workspace/|quy\.doan@|@be\.com\.
 for f in "${FILES[@]}"; do
   [ -f "$f" ] || continue
   case "$f" in
-    docs/baselines/*|docs/reports/*|docs/designs/*|tests/scripts/public_export.py|tests/scripts/test_public_export.py|tests/scripts/hygiene_check.sh)
+    docs/baselines/*|docs/archive/*|tests/scripts/public_export.py|tests/scripts/test_public_export.py|tests/scripts/hygiene_check.sh)
       continue
       ;;
   esac
@@ -51,7 +51,7 @@ for f in "${FILES[@]}"; do
   fi
 done
 
-# 2. Zero-Emoji & Sparkline Discipline (allowing deliberate '⚡ aw:' MCP footer token)
+# 2. Zero-Emoji & Sparkline Discipline (allowing deliberate '⚡ eg:' MCP footer token)
 python3 - "${FILES[@]}" <<'PY' || ERRORS=$((ERRORS + 1))
 import re, sys
 emoji_re = re.compile(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\U0001F1E6-\U0001F1FF\u2581-\u258F]')
@@ -64,7 +64,7 @@ for arg in sys.argv[1:]:
         with open(p, "r", encoding="utf-8", errors="replace") as fh:
             for i, line in enumerate(fh, 1):
                 if emoji_re.search(line):
-                    if "⚡" in line and "aw:" in line:
+                    if "⚡" in line and "eg:" in line:
                         continue
                     print(f"HYGIENE ERROR [zero-emoji]: Forbidden emoji or sparkline in {p}:{i}:\n  {line.strip()}", file=sys.stderr)
                     failed = True

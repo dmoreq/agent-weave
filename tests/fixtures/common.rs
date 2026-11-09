@@ -1,7 +1,7 @@
 //! Shared extraction helpers for the fixture corpus tests.
 
-use agent_weave::extract::{extract_file, resolve, EdgeKind};
-use agent_weave::parse::{parse_source, Lang};
+use engram::extract::{extract_file, resolve, EdgeKind};
+use engram::parse::{parse_source, Lang};
 
 pub(crate) fn edges_for(src: &str) -> Vec<(String, String, String)> {
     // (kind, confidence, dst_name) of all calls edges, single-file project.

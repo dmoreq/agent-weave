@@ -16,7 +16,11 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
             None => Err(mem_unknown_key(key)),
             Some((row, revs)) => {
                 let status = check_note_ref_status(index_conn.as_ref(), &row);
-                Ok(render_mem_hit(&row, &store_tags(true, status), revs))
+                Ok(render_mem_hit(
+                    &row,
+                    &store_tags(true, status, &row.source),
+                    revs,
+                ))
             }
         };
     }
@@ -25,13 +29,21 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
     if let Some(local) = &stores.local {
         if let Some((row, revs)) = crate::db::memory_get(local, key)? {
             let status = check_note_ref_status(index_conn.as_ref(), &row);
-            return Ok(render_mem_hit(&row, &store_tags(false, status), revs));
+            return Ok(render_mem_hit(
+                &row,
+                &store_tags(false, status, &row.source),
+                revs,
+            ));
         }
     }
     if let Some(global) = &stores.global {
         if let Some((row, revs)) = crate::db::memory_get(global, key)? {
             let status = check_note_ref_status(index_conn.as_ref(), &row);
-            return Ok(render_mem_hit(&row, &store_tags(true, status), revs));
+            return Ok(render_mem_hit(
+                &row,
+                &store_tags(true, status, &row.source),
+                revs,
+            ));
         }
     }
 
@@ -88,43 +100,130 @@ pub(super) fn run_mem_touch(req: &CommandRequest, root_arg: Option<&Path>) -> Re
     }
 }
 
-/// Current notes as JSONL on stdout; the caveat goes to stderr.
+/// Export wire format selected by `--format`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportFormat {
+    Jsonl,
+    Markdown,
+}
+
+/// Validate the `--format` value at the shared service boundary, so CLI and
+/// MCP reject an unknown format identically (exit 2).
+fn parse_export_format(raw: Option<&str>) -> Result<ExportFormat> {
+    match raw.unwrap_or("jsonl") {
+        "jsonl" => Ok(ExportFormat::Jsonl),
+        "markdown" => Ok(ExportFormat::Markdown),
+        other => Err(EgError::Usage(format!(
+            "mem export: --format must be 'jsonl' or 'markdown' (got '{other}')"
+        ))),
+    }
+}
+
+/// Current notes as JSONL or fenced Markdown on stdout; the caveat goes to
+/// stderr. Both formats read the same expiry-filtered current-row query, so
+/// an expired session note is never exported by either.
 pub(super) fn run_mem_export(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
-    let CommandRequest::MemExport { limit, global } = req else {
+    let CommandRequest::MemExport {
+        format,
+        limit,
+        global,
+    } = req
+    else {
         unreachable!("run_mem_export called with a non-export request")
     };
+    let format = parse_export_format(format.as_deref())?;
+    if matches!(limit, Some(0)) {
+        return Err(EgError::Usage(
+            "mem export: --limit must be at least 1".to_string(),
+        ));
+    }
     let conn = open_mem_conn(root_arg, *global, MemoryMode::Query)?;
-    let rows = crate::db::memory_export_rows(&conn, *limit)?;
+    let rows = crate::db::memory_current_rows(
+        &conn,
+        &crate::db::MemFilter {
+            kind: None,
+            scope: None,
+            now: crate::db::unix_now(),
+            include_superseded: false,
+        },
+        *limit,
+    )?;
     if rows.is_empty() {
-        return Err(AwError::NoResults(
+        return Err(EgError::NoResults(
             "memory store has no current notes to export".to_string(),
         ));
     }
     crate::journal::record_result(crate::journal::OutcomeCounts::uniform(rows.len()), false, 0);
-    // stdout carries ONLY the JSONL; the caveat goes to stderr so
-    // restore pipelines parse stdout directly (stream contract).
+    // stdout carries ONLY the payload; the caveat goes to stderr so restore
+    // pipelines parse stdout directly (stream contract).
     let mut stdout = String::new();
     for row in &rows {
-        let line = serde_json::json!({
-            "key": row.key,
-            "rev": row.rev,
-            "kind": row.kind,
-            "scope": row.scope,
-            "session": row.session,
-            "body": row.body,
-            "tags": row.tags,
-            "refs": row.refs,
-            "source": row.source,
-            "created_at": row.created_at,
-            "expires_at": row.expires_at,
-        });
-        stdout.push_str(&line.to_string());
-        stdout.push('\n');
+        match format {
+            ExportFormat::Jsonl => stdout.push_str(&render_jsonl_row(row)),
+            ExportFormat::Markdown => stdout.push_str(&render_markdown_document(row)),
+        }
     }
     Ok(ArmOut::plain(
         stdout,
         format!("{}\n", crate::memory::MEMORY_CAVEAT),
     ))
+}
+
+/// One JSONL export line (the shipped restore format).
+fn render_jsonl_row(row: &crate::db::MemRow) -> String {
+    let line = serde_json::json!({
+        "key": row.key,
+        "rev": row.rev,
+        "kind": row.kind,
+        "scope": row.scope,
+        "session": row.session,
+        "body": row.body,
+        "tags": row.tags,
+        "refs": row.refs,
+        "source": row.source,
+        "created_at": row.created_at,
+        "expires_at": row.expires_at,
+    });
+    format!("{line}\n")
+}
+
+/// One fenced Markdown document: a delimiter line, one-line JSON
+/// front-matter, the verbatim body, and the matching closer. The slug is
+/// display-only; import matches the closer by the opener's slug.
+fn render_markdown_document(row: &crate::db::MemRow) -> String {
+    let slug = note_slug(&row.key);
+    let tags: Vec<&str> = row.tags.split_whitespace().collect();
+    let refs: Vec<&str> = row.refs.split_whitespace().collect();
+    let front = serde_json::json!({
+        "format": crate::memory::IMPORT_FORMAT,
+        "key": row.key,
+        "kind": row.kind,
+        "scope": row.scope,
+        "tags": tags,
+        "refs": refs,
+        "expires_at": row.expires_at,
+    });
+    format!(
+        "@@ engram-note {slug} @@\n{front}\n{}\n@@ end engram-note {slug} @@\n",
+        row.body
+    )
+}
+
+/// Display slug for a note key: lowercase ASCII alphanumeric runs joined by
+/// `-`, with an 8-hex key hash so two keys cannot share a document marker.
+fn note_slug(key: &str) -> String {
+    let mut slug = String::new();
+    for c in key.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    let prefix = slug.trim_end_matches('-');
+    let prefix = if prefix.is_empty() { "note" } else { prefix };
+    let hash = crate::hash::fnv1a64(key.as_bytes());
+    format!("{prefix}-{hash:016x}")
 }
 
 /// Best-effort index connection for stale-ref verification: resolved from
@@ -139,8 +238,8 @@ pub(super) fn stale_ref_conn(root_arg: Option<&Path>) -> Option<rusqlite::Connec
 
 /// Caveated empty-result error shared by the mem read commands (stdout keeps
 /// the caveat line, stderr the diagnostic, exit 1).
-pub(super) fn mem_empty(detail: &str) -> AwError {
-    AwError::NoResultsCaveated {
+pub(super) fn mem_empty(detail: &str) -> EgError {
+    EgError::NoResultsCaveated {
         caveat: crate::memory::MEMORY_CAVEAT,
         detail: detail.to_string(),
     }
@@ -148,7 +247,7 @@ pub(super) fn mem_empty(detail: &str) -> AwError {
 
 /// The mem_empty error for a key with no current row: shared by mem get and
 /// mem delete so the message cannot drift.
-fn mem_unknown_key(key: &str) -> AwError {
+fn mem_unknown_key(key: &str) -> EgError {
     mem_empty(&format!("unknown memory key '{key}'"))
 }
 
@@ -163,6 +262,7 @@ pub(super) fn mem_ranked(
     joined_terms: &str,
     filter: &crate::db::MemFilter,
     is_global: bool,
+    index_conn: Option<&rusqlite::Connection>,
 ) -> Result<Vec<crate::memory::Candidate>> {
     let query = crate::memory::mem_query_terms(joined_terms);
     let hits = crate::db::memory_fts_candidates(conn, &query, crate::memory::CANDIDATE_CAP)?;
@@ -184,7 +284,7 @@ pub(super) fn mem_ranked(
         by_id.insert(row.id, row);
     }
 
-    if hit_map.is_empty() {
+    if hit_map.is_empty() && index_conn.is_none() {
         return Ok(Vec::new());
     }
 
@@ -199,12 +299,47 @@ pub(super) fn mem_ranked(
         }
     }
 
-    let candidates = hit_map
+    let mut candidates: Vec<crate::memory::Candidate> = hit_map
         .into_iter()
         .filter_map(|(id, lex_raw)| {
             mem_candidate(by_id.get(&id)?, lex_raw, &query_tokens, filter, is_global)
         })
         .collect();
+
+    // Graph expansion is best-effort: any index error already degraded to an
+    // empty expansion inside `graph_expand`, so the lexical ranking survives.
+    if let Some(index) = index_conn {
+        let known_ids: std::collections::HashSet<i64> =
+            candidates.iter().map(|c| c.row.id).collect();
+        let expansion = crate::memory::graph_expand(
+            index,
+            conn,
+            &query_tokens,
+            filter,
+            &known_ids,
+            crate::memory::CANDIDATE_CAP,
+        );
+        for candidate in &mut candidates {
+            candidate.graph_raw = expansion
+                .scores
+                .get(&candidate.row.id)
+                .copied()
+                .unwrap_or(0.0);
+        }
+        for (row, decay) in expansion.extra {
+            let Some(mut candidate) = mem_candidate(
+                &row,
+                crate::memory::GRAPH_LEX_RAW,
+                &query_tokens,
+                filter,
+                is_global,
+            ) else {
+                continue;
+            };
+            candidate.graph_raw = decay;
+            candidates.push(candidate);
+        }
+    }
     Ok(candidates)
 }
 
@@ -236,6 +371,7 @@ fn mem_candidate(
         row: row.clone(),
         lex_raw,
         ref_raw,
+        graph_raw: 0.0,
         age_days,
         score: 0.0,
         is_global,

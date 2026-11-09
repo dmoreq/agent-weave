@@ -4,7 +4,7 @@
 
 use tree_sitter::{Language, Node, Parser, Tree};
 
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 
 /// Source language, derived from the file extension (P2: TS/TSX/JSX added).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,12 +120,12 @@ impl ParserSlot {
         if self.lang != Some(lang) {
             self.parser
                 .set_language(&lang.grammar()?)
-                .map_err(|e| AwError::Internal(format!("grammar load failed: {e}")))?;
+                .map_err(|e| EgError::Internal(format!("grammar load failed: {e}")))?;
             self.lang = Some(lang);
         }
         self.parser
             .parse(src, None)
-            .ok_or_else(|| AwError::Internal("tree-sitter returned no tree".to_string()))
+            .ok_or_else(|| EgError::Internal("tree-sitter returned no tree".to_string()))
     }
 }
 

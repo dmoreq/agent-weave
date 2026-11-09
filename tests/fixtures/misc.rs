@@ -1,8 +1,8 @@
 //! Language-agnostic checks: signatures, identifier splitting, FTS5
 //! availability, and deep-nesting stack safety.
 
-use agent_weave::extract::{extract_file, SymbolKind};
-use agent_weave::parse::{parse_source, Lang};
+use engram::extract::{extract_file, SymbolKind};
+use engram::parse::{parse_source, Lang};
 
 #[test]
 fn fts5_is_compiled_into_bundled_sqlite() {
@@ -20,19 +20,19 @@ fn fts5_is_compiled_into_bundled_sqlite() {
 #[test]
 fn split_ident_splits_camel_snake_and_dotted_idents() {
     assert_eq!(
-        agent_weave::extract::split_ident("HierarchicalAddressParser.parse"),
+        engram::extract::split_ident("HierarchicalAddressParser.parse"),
         "hierarchical address parser parse"
     );
     assert_eq!(
-        agent_weave::extract::split_ident("get_knowledge_base"),
+        engram::extract::split_ident("get_knowledge_base"),
         "get knowledge base"
     );
-    assert_eq!(agent_weave::extract::split_ident("FNV-1a"), "fnv 1a");
+    assert_eq!(engram::extract::split_ident("FNV-1a"), "fnv 1a");
     assert_eq!(
-        agent_weave::extract::split_ident("normalize_ascii"),
+        engram::extract::split_ident("normalize_ascii"),
         "normalize ascii"
     );
-    assert_eq!(agent_weave::extract::split_ident(""), "");
+    assert_eq!(engram::extract::split_ident(""), "");
 }
 
 #[test]
@@ -72,7 +72,7 @@ fn signatures_span_multiline_parameters_and_stop_before_body() {
 
 #[test]
 fn acronym_identifiers_split_at_the_case_boundary() {
-    use agent_weave::extract::split_ident;
+    use engram::extract::split_ident;
     assert_eq!(split_ident("HTTPServer"), "http server");
     assert_eq!(split_ident("getHTTPResponse"), "get http response");
     assert_eq!(split_ident("parseS3Uploader"), "parse s3 uploader");

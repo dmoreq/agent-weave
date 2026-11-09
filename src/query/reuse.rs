@@ -4,6 +4,7 @@
 
 mod corpus;
 mod detectors;
+mod index;
 mod tokens;
 
 use std::collections::HashSet;
@@ -13,8 +14,9 @@ use rusqlite::Connection;
 use crate::error::Result;
 use crate::query::{clamp_limit, QueryCtx};
 
-use corpus::{load_callees, load_symbols, select_targets};
-use detectors::DETECTORS;
+use corpus::{load_callees, load_deep_weights, load_symbols, select_targets};
+use detectors::{Corpus, DETECTORS};
+use index::{CorpusIndex, INVERTED_INDEX_MIN_SYMBOLS};
 
 pub(crate) use detectors::is_raw_client;
 pub use detectors::DetectorId;
@@ -90,24 +92,25 @@ pub fn detect_hints(conn: &Connection, new_names: &HashSet<String>) -> Result<Ve
     if new_names.is_empty() {
         return Ok(Vec::new());
     }
-    let (candidates, _) = analyze_corpus(conn, None, Some(new_names), 3)?;
+    let (candidates, _) = analyze_corpus(conn, None, Some(new_names), 3, false)?;
     let mut hints = Vec::new();
     for c in candidates.iter().take(3) {
-        hints.push(format!("aw: reuse-hint: {}", c.hint_line()));
+        hints.push(format!("eg: reuse-hint: {}", c.hint_line()));
     }
     Ok(hints)
 }
 
-/// Run `aw reuse` across the whole repository or specified paths.
+/// Run `eg reuse` across the whole repository or specified paths.
 pub fn run_reuse(
     ctx: &QueryCtx<'_>,
     paths: &[String],
     limit: usize,
+    deep_callee: bool,
 ) -> Result<crate::query::LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
     let limit = clamp_limit(limit)?;
     let path_filter = if paths.is_empty() { None } else { Some(paths) };
-    let (candidates, total) = analyze_corpus(conn, path_filter, None, limit)?;
+    let (candidates, total) = analyze_corpus(conn, path_filter, None, limit, deep_callee)?;
 
     if candidates.is_empty() {
         crate::journal::record_result(crate::journal::OutcomeCounts::of(0, 0), false, 0);
@@ -119,7 +122,7 @@ pub fn run_reuse(
     }
 
     let mut out = vec![format!(
-        "aw: reuse — {} duplication candidate(s) found",
+        "eg: reuse — {} duplication candidate(s) found",
         candidates.len()
     )];
     for c in &candidates {
@@ -141,6 +144,7 @@ pub(crate) fn analyze_corpus(
     path_filter: Option<&[String]>,
     target_names: Option<&HashSet<String>>,
     limit: usize,
+    deep_callee: bool,
 ) -> Result<(Vec<ReuseCandidate>, usize)> {
     let mut symbols = load_symbols(conn)?;
     if symbols.len() < 2 {
@@ -155,14 +159,23 @@ pub(crate) fn analyze_corpus(
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
     }
+    if deep_callee {
+        load_deep_weights(&mut symbols);
+    }
 
     let targets = select_targets(&symbols, path_filter, target_names);
+    let index = (symbols.len() > INVERTED_INDEX_MIN_SYMBOLS).then(|| CorpusIndex::build(&symbols));
+    let corpus = Corpus {
+        symbols: &symbols,
+        index: index.as_ref(),
+        deep_callee,
+    };
     let mut candidates = Vec::new();
     let mut seen_pairs = HashSet::new();
 
     for target in &targets {
         for detect in DETECTORS {
-            if let Some(c) = detect(target, &symbols) {
+            if let Some(c) = detect(target, &corpus) {
                 accept_candidate(c, &mut seen_pairs, &mut candidates);
                 break;
             }

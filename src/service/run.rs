@@ -54,15 +54,15 @@ pub(super) fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) ->
     let root = match crate::walk::discover_root(root_arg) {
         Ok(r) => r,
         Err(e) => {
-            return Err(AwError::NoResults(format!(
-                "{e}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+            return Err(EgError::NoResults(format!(
+                "{e}\n(hint: to view machine-wide telemetry across all repos, run: eg usage --global)"
             )));
         }
     };
     match crate::journal::summary(&root, quality) {
         Ok(lines) => Ok(ArmOut::plain(join_lines(lines), String::new())),
-        Err(AwError::NoResults(msg)) => Err(AwError::NoResults(format!(
-            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: aw usage --global)"
+        Err(EgError::NoResults(msg)) => Err(EgError::NoResults(format!(
+            "{msg}\n(hint: to view machine-wide telemetry across all repos, run: eg usage --global)"
         ))),
         Err(e) => Err(e),
     }
@@ -192,7 +192,11 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
             *limit,
             crate::query::SymbolsOpts { outline: *outline },
         )?,
-        CommandRequest::Reuse { paths, limit } => crate::query::run_reuse(ctx, paths, *limit)?,
+        CommandRequest::Reuse {
+            paths,
+            limit,
+            deep_callee,
+        } => crate::query::run_reuse(ctx, paths, *limit, *deep_callee)?,
         CommandRequest::Search { terms, limit } => crate::query::search(ctx, terms, *limit)?,
         _ => unreachable!("run_line_query called with a non-line request"),
     };
@@ -210,6 +214,7 @@ fn run_memory(req: &CommandRequest, root_arg: Option<&Path>, surface: Surface) -
         CommandRequest::MemDelete { .. } => run_mem_delete(req, root_arg),
         CommandRequest::MemGc { .. } => run_mem_gc(req, root_arg),
         CommandRequest::MemExport { .. } => run_mem_export(req, root_arg),
+        CommandRequest::MemImport { .. } => run_mem_import(req, root_arg, surface),
         _ => unreachable!("run_memory called with a non-memory request"),
     }
 }

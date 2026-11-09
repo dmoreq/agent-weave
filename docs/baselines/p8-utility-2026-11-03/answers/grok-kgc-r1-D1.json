@@ -1,1 +1,0 @@
-{"task": "D1", "items": ["tests/test_temporal_dag.py", "tests/test_temporal_dag_benchmark.py", "vihap/reform/__init__.py"], "answer": "Three files import vihap/reform/temporal.py directly: vihap/reform/__init__.py, tests/test_temporal_dag.py, and tests/test_temporal_dag_benchmark.py. Callers that only import symbols re-exported from vihap.reform are omitted."}

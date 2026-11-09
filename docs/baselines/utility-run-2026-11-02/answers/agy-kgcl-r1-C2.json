@@ -1,7 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "pairs": [],
-  "answer": "No. The tool `kg clones` reports no duplicate blocks for near.py because its identifiers differ, meaning it does not share an identical normalized-text block of 5+ lines with any file."
-}

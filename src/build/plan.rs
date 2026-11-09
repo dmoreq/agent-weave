@@ -57,7 +57,7 @@ fn incremental_memory_hints(prep: &BuildPrep, is_incremental: bool) -> String {
     let mut out = String::new();
     for g in guards.iter().take(3) {
         out.push_str(&format!(
-            "aw: note: modified file '{}' is guarded by {} '{}'\n",
+            "eg: note: modified file '{}' is guarded by {} '{}'\n",
             g.target, g.kind, g.key
         ));
     }
@@ -167,7 +167,7 @@ pub(super) fn write_index(
     )?;
     conn.execute_batch("COMMIT")?;
     conn.close()
-        .map_err(|(_, e)| crate::error::AwError::from(e))?;
+        .map_err(|(_, e)| crate::error::EgError::from(e))?;
     crate::db::publish_new_index(&prep.root)?;
     Ok((totals, t0.elapsed().as_secs_f64()))
 }

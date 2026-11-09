@@ -102,7 +102,7 @@ fn mem_gc_cli_purges_seeded_expired_and_reports_counts() {
         ],
     );
     // Inject an expired deadline for the session note (injected clock).
-    let conn = Connection::open(repo.join(".aw/memory.db")).unwrap();
+    let conn = Connection::open(repo.join(".engram/memory.db")).unwrap();
     conn.execute(
         "UPDATE memories SET expires_at = 1 WHERE key = 'session-note'",
         [],
@@ -125,7 +125,7 @@ fn mem_gc_cli_purges_seeded_expired_and_reports_counts() {
     let (code, _stdout, stderr) = mem_out(&bare, &["gc"]);
     assert_eq!(code, 1);
     assert!(stderr.contains("no-memory"), "{stderr}");
-    assert!(!bare.join(".aw/memory.db").exists());
+    assert!(!bare.join(".engram/memory.db").exists());
 }
 
 #[test]

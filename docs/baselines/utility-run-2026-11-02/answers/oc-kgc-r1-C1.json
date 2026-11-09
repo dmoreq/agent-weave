@@ -1,1 +1,0 @@
-{"exists": true, "hops": 0, "route": [], "pairs": ["pair01_a.py:3-11 pair01_b.py:3-11", "pair02_a.py:3-11 pair02_b.py:3-11", "pair03_a.py:3-11 pair03_b.py:3-11", "pair04_a.py:3-11 pair04_b.py:3-11"], "answer": "Four identical normalized-text function blocks occur in the four matching pair files. near.py differs in identifiers and is not an identical block match."}

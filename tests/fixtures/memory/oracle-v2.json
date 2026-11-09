@@ -15,7 +15,7 @@
       "kind": "gotcha",
       "tags": "schema migration",
       "refs": "src/db.rs",
-      "body": "never migrate in place; schema skew exits 5 in both directions and aw build replaces the database"
+      "body": "never migrate in place; schema skew exits 5 in both directions and eg build replaces the database"
     },
     {
       "key": "incremental-fast-path",
@@ -36,7 +36,7 @@
       "kind": "decision",
       "tags": "build durability",
       "refs": "src/db.rs",
-      "body": "aw build writes index.db.new then fsyncs and renames so a concurrent reader sees old or new"
+      "body": "eg build writes index.db.new then fsyncs and renames so a concurrent reader sees old or new"
     },
     {
       "key": "write-confinement",
@@ -182,7 +182,7 @@
       "key": "distractor-fts-unicode61",
       "kind": "fact",
       "tags": "fts tokenizer",
-      "refs": "schema_memory.sql",
+      "refs": "schema/memory.sql",
       "body": "the fts virtual table uses the unicode61 tokenizer because stored text is pre tokenized"
     },
     {

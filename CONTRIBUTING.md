@@ -1,16 +1,18 @@
-# Contributing to aw
+# Contributing to eg
 
 Contributions are welcome under the project's dual MIT/Apache-2.0 license.
 Start with a focused issue or pull request that explains the user problem.
 
 ## Ground rules
 
-1. **Read the [specification](docs/designs/2026-10-31_agent-weave-rust-code-index.md) first.**
-   It defines component layout, additive-only schema changes, resolution behavior,
-   output formats, exit codes, and safety requirements. Add a specification
-   amendment before implementing a deviation.
+1. **Read the architecture specifications first:**
+   [`docs/architecture/code-index.md`](docs/architecture/code-index.md) and
+   [`docs/architecture/memory-store.md`](docs/architecture/memory-store.md)
+   define component layout, additive-only schema changes, resolution behavior,
+   output formats, exit codes, and safety requirements. Ensure any proposed
+   change aligns with these specifications.
 2. **Preserve runtime safety:** no network access, no long-lived child processes,
-   no writes outside `.aw/`, and no agent-configuration writes. Do not weaken
+   no writes outside `.engram/`, and no agent-configuration writes. Do not weaken
    safety enforcement tests.
 3. **Report measurements honestly.** Attach commands, revision, environment, and
    inputs to accuracy or performance results. Identify the binary measured;

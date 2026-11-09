@@ -30,7 +30,7 @@ pub struct ToolSpec {
     pub name: &'static str,
     pub description: &'static str,
     pub params: &'static [ParamSpec],
-    /// Default `aw mcp` surface (without `--all-tools`): the eight core
+    /// Default `eg mcp` surface (without `--all-tools`): the eight core
     /// navigation tools plus mem_write/mem_query (OQ1 owner decision,
     /// 2026-11-05). One source of truth — a spec without this flag stays
     /// behind `--all-tools` and cannot silently drop off the default set.
@@ -81,7 +81,7 @@ const KEY_PARAM: ParamSpec = ParamSpec {
 pub const TOOL_SPECS: &[ToolSpec] = &[
     ToolSpec {
         name: "build",
-        description: "Index the repository into .aw/index.db (full atomic replacement)",
+        description: "Index the repository into .engram/index.db (full atomic replacement)",
         params: &[
             ParamSpec {
                 name: "force",
@@ -187,6 +187,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 required: false,
                 description: "Maximum candidates shown (default 10)",
             },
+            ParamSpec {
+                name: "deep_callee",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Extend the callee footprint to second-hop callees (weight 0.5)",
+            },
         ],
         core: true,
     },
@@ -213,7 +219,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "global",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Aggregate telemetry globally across all repositories (~/.aw/usage.log) (default false)",
+                description: "Aggregate telemetry globally across all repositories (~/.engram/usage.log) (default false)",
             },
         ],
         core: true,
@@ -238,7 +244,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "kind",
                 kind: ParamKind::Str,
                 required: true,
-                description: "One of: decision, gotcha, fact, task",
+                description: "One of: decision, gotcha, fact, task, procedure",
             },
             ParamSpec {
                 name: "tags",
@@ -277,7 +283,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "global",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Write to the cross-project global memory store (~/.aw/memory.db) instead of the local repo",
+                description: "Write to the cross-project global memory store (~/.engram/memory.db) instead of the local repo",
             },
             ParamSpec {
                 name: "touch",
@@ -314,7 +320,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "kind",
                 kind: ParamKind::Str,
                 required: false,
-                description: "Restrict to one kind: decision, gotcha, fact, task",
+                description: "Restrict to one kind: decision, gotcha, fact, task, procedure",
             },
             ParamSpec {
                 name: "scope",
@@ -401,8 +407,14 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "mem_export",
-        description: "Write current project-memory notes as JSONL to the result text (restore = mem_write replay); the caveat is reported separately so the JSONL parses cleanly",
+        description: "Write current project-memory notes to the result text as JSONL (default) or fenced Markdown; the caveat is reported separately so the payload parses cleanly",
         params: &[
+            ParamSpec {
+                name: "format",
+                kind: ParamKind::Str,
+                required: false,
+                description: "Output format: jsonl (default) or markdown",
+            },
             ParamSpec {
                 name: "limit",
                 kind: ParamKind::Int {
@@ -417,6 +429,31 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 kind: ParamKind::Bool,
                 required: false,
                 description: "Export from global memory store",
+            },
+        ],
+        core: false,
+    },
+    ToolSpec {
+        name: "mem_import",
+        description: "Restore project-memory notes from a JSONL or fenced-Markdown file (path, or '-' for stdin); conflicting keys are skipped unless force overwrites them. MCP writes are confined to the project store",
+        params: &[
+            ParamSpec {
+                name: "path",
+                kind: ParamKind::Str,
+                required: true,
+                description: "Input file path, or '-' to read stdin (repo-relative over MCP)",
+            },
+            ParamSpec {
+                name: "format",
+                kind: ParamKind::Str,
+                required: false,
+                description: "Input format: jsonl or markdown (default: detect from path/first line)",
+            },
+            ParamSpec {
+                name: "force",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Overwrite a key whose local content differs (default: reject and skip)",
             },
         ],
         core: false,

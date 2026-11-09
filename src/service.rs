@@ -7,11 +7,11 @@
 use std::path::Path;
 use std::time::Instant;
 
-use crate::error::{AwError, Result};
+use crate::error::{EgError, Result};
 use crate::journal::JournalArgs;
 
-/// Which surface is dispatching; journaled as `surface` in `.aw/usage.log`.
-#[derive(Clone, Copy)]
+/// Which surface is dispatching; journaled as `surface` in `.engram/usage.log`.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Cli,
     Mcp,
@@ -78,6 +78,7 @@ pub enum CommandRequest {
     Reuse {
         paths: Vec<String>,
         limit: usize,
+        deep_callee: bool,
     },
     Search {
         terms: String,
@@ -131,7 +132,14 @@ pub enum CommandRequest {
         global: bool,
     },
     MemExport {
+        format: Option<String>,
         limit: Option<usize>,
+        global: bool,
+    },
+    MemImport {
+        path: String,
+        format: Option<String>,
+        force: bool,
         global: bool,
     },
 }
@@ -170,7 +178,7 @@ fn join_lines(lines: Vec<String>) -> String {
 }
 
 /// Dispatch one command. Journaling (begin/record/finalize) is owned here so
-/// both surfaces produce the same `.aw/usage.log` line. On the error path the
+/// both surfaces produce the same `.engram/usage.log` line. On the error path the
 /// caveat and ambiguous candidates land on stdout (the dead caveat contract
 /// and CUJ4) and the diagnostic on stderr.
 pub fn execute(
@@ -197,11 +205,11 @@ pub fn execute(
         }
         Err(e) => {
             let mut stdout = String::new();
-            if let AwError::NoResultsCaveated { caveat, .. } = &e {
+            if let EgError::NoResultsCaveated { caveat, .. } = &e {
                 stdout.push_str(caveat);
                 stdout.push('\n');
             }
-            if let AwError::Ambiguous { candidates, .. } = &e {
+            if let EgError::Ambiguous { candidates, .. } = &e {
                 for (path, line, qualname) in candidates {
                     stdout.push_str(&format!("{path}:{line} {qualname}\n"));
                 }
@@ -255,6 +263,7 @@ impl ArmOut {
 
 mod args;
 mod from_cli;
+mod mem_import;
 mod mem_ops;
 mod mem_query;
 mod mem_write;
@@ -262,6 +271,7 @@ mod run;
 mod tools;
 
 use from_cli::*;
+use mem_import::*;
 use mem_ops::*;
 use mem_query::*;
 use mem_write::*;
@@ -323,6 +333,7 @@ mod tests {
             CommandRequest::Reuse {
                 paths: vec!["f".into()],
                 limit: 10,
+                deep_callee: false,
             },
             CommandRequest::Search {
                 terms: "x".into(),
@@ -369,7 +380,14 @@ mod tests {
             },
             CommandRequest::MemGc { global: false },
             CommandRequest::MemExport {
+                format: None,
                 limit: None,
+                global: false,
+            },
+            CommandRequest::MemImport {
+                path: "memory.md".into(),
+                format: None,
+                force: false,
                 global: false,
             },
         ]

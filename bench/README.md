@@ -1,6 +1,6 @@
 # Public navigation benchmark
 
-This directory holds a small, self-contained regression corpus for `aw`'s
+This directory holds a small, self-contained regression corpus for `eg`'s
 static navigation output. It is designed to run without a model, network
 access, or private repository.
 
@@ -8,7 +8,7 @@ access, or private repository.
 
 ```sh
 cargo build --release
-python3 -I bench/run.py target/release/aw
+python3 -I bench/run.py target/release/eg
 python3 -I bench/test_run.py
 ```
 
@@ -29,7 +29,7 @@ bench/
 └── test_run.py      parser/scorer unit tests
 ```
 
-Each corpus is a separate `aw` root. The query record names its corpus:
+Each corpus is a separate `eg` root. The query record names its corpus:
 
 ```json
 {"id":"py-callers-order-total","corpus":"python","command":"callers",
@@ -42,7 +42,7 @@ Each corpus is a separate `aw` root. The query record names its corpus:
   detail after the pointer. Line numbers are not compared, so adding a blank
   line does not break the benchmark.
 - `forbid` entries fail the query when a matching pointer appears.
-- `expect_chain` compares the qualname chain from `aw: chain ...`.
+- `expect_chain` compares the qualname chain from `eg: chain ...`.
 - `exit` is the required exit code. Negative queries use `exit: 1`.
 
 ## What this benchmark checks
@@ -55,9 +55,9 @@ Each corpus is a separate `aw` root. The query record names its corpus:
 ## What it does not check
 
 - Agent utility, token savings, or tool-call reduction. Those measurements live
-  in [the evaluation summary](../docs/EVALUATION.md) and have separate limits.
+  in [the evaluation summary](../docs/evaluation.md) and have separate limits.
 - Dynamic dispatch, reflection, or external-library resolution.
 - Behavior on large or private repositories.
 
 This is a regression gate for the public corpus, not a replacement for the
-private historical evidence described in `docs/EVALUATION.md`.
+private historical evidence described in `docs/evaluation.md`.

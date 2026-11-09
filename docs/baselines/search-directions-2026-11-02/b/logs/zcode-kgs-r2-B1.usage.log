@@ -1,2 +1,0 @@
-{"ts":1793627776,"surface":"cli","tool":"search","args":{"terms":"mercer street tolerance","kind":"","path":"","exact":"false","limit":"10"},"result_count":10,"shown":10,"total":2001,"ambiguous":0,"exit_code":0,"latency_us":4199,"stale":false,"kg_version":"0.2.1","session":"","arm":""}
-{"ts":1793627781,"surface":"cli","tool":"context","args":{"name":"pkg.alpha.process","limit":"10"},"result_count":0,"shown":0,"total":0,"ambiguous":0,"exit_code":0,"latency_us":3385,"stale":false,"kg_version":"0.2.1","session":"","arm":""}

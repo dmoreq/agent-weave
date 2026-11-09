@@ -1,1 +1,0 @@
-{"exists": false, "hops": 0, "route": [], "pairs": [], "answer": "No. Comparing near.py with every other Python file after stripping whitespace and ignoring blank lines found at most one consecutive identical line, below the five-line threshold."}

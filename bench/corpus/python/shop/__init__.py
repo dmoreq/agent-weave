@@ -1,1 +1,1 @@
-"""Synthetic shop package for the aw benchmark."""
+"""Synthetic shop package for the eg benchmark."""

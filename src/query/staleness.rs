@@ -18,7 +18,7 @@ pub(super) fn staleness_header(
     let stale = changed > 0;
     let header = stale.then(|| {
         format!(
-            "aw: {changed} of {} result files changed since build — run aw build",
+            "eg: {changed} of {} result files changed since build — run eg build",
             files.len()
         )
     });

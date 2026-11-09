@@ -101,7 +101,7 @@ pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> 
     Ok(render_summary(&aggs, quality))
 }
 
-/// Summarize machine-wide global journal (~/.aw/usage.log): cross-repo calls,
+/// Summarize machine-wide global journal (~/.engram/usage.log): cross-repo calls,
 /// per-repository breakdown, error rate, token savings, and recent errors.
 pub fn global_summary(quality: bool) -> crate::error::Result<Vec<String>> {
     let lines = load_global_usage_lines()?;
@@ -129,7 +129,7 @@ fn load_usage_lines_from_path(base_log: &Path) -> crate::error::Result<String> {
         }
     }
     if lines.trim().is_empty() {
-        return Err(crate::error::AwError::NoResults(
+        return Err(crate::error::EgError::NoResults(
             "no journal entries — usage.log is empty or absent".to_string(),
         ));
     }
@@ -141,7 +141,7 @@ fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
     load_usage_lines_from_path(&usage_log_path(root))
 }
 
-/// Read both global journal generations from ~/.aw/usage.log.
+/// Read both global journal generations from ~/.engram/usage.log.
 fn load_global_usage_lines() -> crate::error::Result<String> {
     let path = crate::db::global_usage_log_path()?;
     load_usage_lines_from_path(&path)
@@ -241,7 +241,7 @@ fn render_summary(
     quality: bool,
 ) -> Vec<String> {
     let total: usize = aggs.values().map(|a| a.calls).sum();
-    let mut out = vec![format!("aw usage: {total} journaled calls")];
+    let mut out = vec![format!("eg usage: {total} journaled calls")];
     out.extend(kpi_section(aggs, ""));
 
     let mut rows: Vec<(&String, &ToolAgg)> = aggs.iter().collect();
@@ -311,7 +311,7 @@ fn render_global_summary(
     let total: usize = aggs.values().map(|a| a.calls).sum();
     let repo_count = repo_aggs.len();
     let mut out = vec![format!(
-        "aw global usage: {total} journaled calls across {repo_count} repositories"
+        "eg global usage: {total} journaled calls across {repo_count} repositories"
     )];
     out.extend(kpi_section(aggs, " across all repos"));
 

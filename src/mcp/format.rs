@@ -55,7 +55,7 @@ fn price_footer(
     const CHARS_PER_TOKEN: usize = 4;
     let output_tokens = text.len() / CHARS_PER_TOKEN;
 
-    // One shared estimator with `aw usage` (journal::estimated_tokens_saved);
+    // One shared estimator with `eg usage` (journal::estimated_tokens_saved);
     // this footer prices the single call, so it subtracts the response payload
     // the agent would not have had to emit either way.
     let saved_tokens = if shown == 0 {
@@ -66,7 +66,7 @@ fn price_footer(
     (shown, (saved_tokens > 0).then_some(saved_tokens))
 }
 
-/// The shared KPI footer line: `⚡ aw: {latency}ms | {N} items[ | ~{T} tokens
+/// The shared KPI footer line: `⚡ eg: {latency}ms | {N} items[ | ~{T} tokens
 /// saved vs file reads]`. The `\n───\n` separator is pushed by the caller only
 /// when there is text above the footer.
 fn format_footer(shown: usize, latency_ms: f64, saved: Option<usize>) -> String {
@@ -78,7 +78,7 @@ fn format_footer(shown: usize, latency_ms: f64, saved: Option<usize>) -> String 
             )
         })
         .unwrap_or_default();
-    format!("⚡ aw: {latency_ms:.1}ms | {shown} items{saved_part}\n")
+    format!("⚡ eg: {latency_ms:.1}ms | {shown} items{saved_part}\n")
 }
 
 fn format_token_count(tokens: usize) -> String {

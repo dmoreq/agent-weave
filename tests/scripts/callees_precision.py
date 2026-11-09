@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E1.2 — `aw callees` precision/recall and empty-answer semantics.
+"""E1.2 — `eg callees` precision/recall and empty-answer semantics.
 
 The fixture has 20 known symbols: 10 with resolved callee sets, 5 with only
 unresolved call sites, and 5 with ambiguous diamond receivers. The script
@@ -11,7 +11,7 @@ copies the fixture, builds it, queries every symbol, and reports:
 
 Usage:
     python3 -I tests/scripts/callees_precision.py \
-        --aw target/release/aw \
+        --eg target/release/eg \
         --json docs/baselines/2026-11-05_0.4.0/e1.2.json
 
 Exit 0 after a completed measurement; with --strict, exit 1 when the gate
@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from precision_recall import run_aw, wilson
+from precision_recall import run_eg, wilson
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests" / "fixtures" / "callees"
@@ -42,7 +42,7 @@ def parse_callees(stdout: str) -> tuple[list[str], list[str]]:
     ambiguous: list[str] = []
     for raw in stdout.splitlines():
         line = raw.strip()
-        if not line or line.startswith(("aw:", "showing ")):
+        if not line or line.startswith(("eg:", "showing ")):
             continue
         match = POINTER_RE.match(line)
         if not match:
@@ -65,7 +65,7 @@ def load_oracle(path: Path) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--aw", required=True)
+    parser.add_argument("--eg", required=True)
     parser.add_argument("--json", required=True)
     parser.add_argument("--fixture", default=str(FIXTURE))
     parser.add_argument("--strict", action="store_true")
@@ -75,18 +75,18 @@ def main() -> int:
     oracle_path = fixture / "oracle.jsonl"
     oracle = load_oracle(oracle_path)
     version = subprocess.run(
-        [args.aw, "--version"], capture_output=True, text=True, encoding="utf-8", timeout=30
+        [args.eg, "--version"], capture_output=True, text=True, encoding="utf-8", timeout=30
     )
 
-    with tempfile.TemporaryDirectory(prefix="aw-callees-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="eg-callees-") as tmp:
         corpus = Path(tmp) / "corpus"
-        shutil.copytree(fixture, corpus, ignore=shutil.ignore_patterns(".aw", "oracle.jsonl"))
-        build = run_aw(args.aw, corpus, ["build"])
+        shutil.copytree(fixture, corpus, ignore=shutil.ignore_patterns(".engram", "oracle.jsonl"))
+        build = run_eg(args.eg, corpus, ["build"])
         if build.returncode != 0:
             print(f"build failed: {build.stderr[-500:]}", file=sys.stderr)
             return 2
 
-        unresolved_names_proc = run_aw(args.aw, corpus, ["unresolved", "--names", "--limit", "10000"])
+        unresolved_names_proc = run_eg(args.eg, corpus, ["unresolved", "--names", "--limit", "10000"])
         unresolved_names_text = unresolved_names_proc.stdout
 
         resolved_rows: list[dict] = []
@@ -96,7 +96,7 @@ def main() -> int:
         for row in oracle:
             symbol = row["symbol"]
             kind = row["kind"]
-            proc = run_aw(args.aw, corpus, ["callees", symbol, "--limit", "1000"])
+            proc = run_eg(args.eg, corpus, ["callees", symbol, "--limit", "1000"])
             resolved, ambiguous = parse_callees(proc.stdout)
 
             if kind == "resolved":
@@ -168,7 +168,7 @@ def main() -> int:
 
         payload = {
             "experiment": "E1.2",
-            "aw_version": version.stdout.strip(),
+            "engram_version": version.stdout.strip(),
             "fixture": str(fixture),
             "resolved": {
                 "rows": resolved_rows,

@@ -8,20 +8,20 @@ fn mem_doctor_invalidate_preserves_memory() {
     let _ = mem_write(&repo, "keeper", "memory survives the reset", "decision");
     let (code, _stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stderr}");
-    let out = aw(&repo).args(["doctor", "--invalidate"]).output().unwrap();
+    let out = eg(&repo).args(["doctor", "--invalidate"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("kept primary memory.db"), "{text}");
     assert!(
-        repo.join(".aw/memory.db").exists(),
+        repo.join(".engram/memory.db").exists(),
         "memory.db must survive --invalidate"
     );
     assert!(
-        !repo.join(".aw/index.db").exists(),
+        !repo.join(".engram/index.db").exists(),
         "the derived index is reset"
     );
     // --help documents the new reset scope (contract bump).
-    let help = aw(&repo).args(["doctor", "--help"]).output().unwrap();
+    let help = eg(&repo).args(["doctor", "--help"]).output().unwrap();
     let help_text = String::from_utf8_lossy(&help.stdout);
     assert!(
         help_text.contains("memory.db") && help_text.contains("primary data"),
@@ -35,7 +35,7 @@ fn mem_doctor_invalidate_preserves_memory() {
     // rebuild first — the report opens the index).
     let (code, _stdout, stderr) = build(&repo);
     assert_eq!(code, 0, "{stderr}");
-    let out = aw(&repo).args(["doctor"]).output().unwrap();
+    let out = eg(&repo).args(["doctor"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("memory: integrity ok, 1 notes"), "{text}");
@@ -167,10 +167,10 @@ fn mem_export_round_trip_restores_the_note_set() {
     assert_eq!(code, 0, "{stderr}");
     // stdout is PURE JSONL: the caveat travels on stderr.
     assert!(
-        !stdout.contains("aw: memory"),
+        !stdout.contains("eg: memory"),
         "export stdout must not carry the caveat: {stdout:?}"
     );
-    assert!(stderr.starts_with("aw: memory — "), "{stderr:?}");
+    assert!(stderr.starts_with("eg: memory — "), "{stderr:?}");
     let lines: Vec<serde_json::Value> = stdout
         .lines()
         .map(|l| serde_json::from_str(l).expect("pure JSONL"))
@@ -252,7 +252,7 @@ fn mem_journal_records_len_never_body() {
     let (code, _stdout, stderr) = mem_write(&repo, "secret-check", secret_body, "decision");
     assert_eq!(code, 0, "{stderr}");
     let _ = mem_out(&repo, &["query", "confidence"]);
-    let log = std::fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let log = std::fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     assert!(log.contains("\"tool\":\"mem_write\""), "{log}");
     assert!(log.contains("\"tool\":\"mem_query\""), "{log}");
     assert!(
@@ -264,7 +264,7 @@ fn mem_journal_records_len_never_body() {
         "journal must never carry the body: {log}"
     );
     // usage --quality shows the mem tools and the query empty rate.
-    let out = aw(&repo).args(["usage", "--quality"]).output().unwrap();
+    let out = eg(&repo).args(["usage", "--quality"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("mem_write:"), "{text}");

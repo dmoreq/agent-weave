@@ -26,7 +26,7 @@ pub(super) fn run_mem_write(
     };
     if let Some(target) = supersedes {
         if target.trim() == key.trim() {
-            return Err(AwError::Usage(
+            return Err(EgError::Usage(
                 "mem write: --supersedes must name a different key (same-key updates go through the revision chain)"
                     .to_string(),
             ));
@@ -41,6 +41,15 @@ pub(super) fn run_mem_write(
         body,
         ttl: *ttl,
     })?;
+    // Advisory only: a near-duplicate under another key suggests --supersedes.
+    // Same-key updates and explicit --supersedes already express intent.
+    let consolidation = if supersedes.is_none() {
+        open_mem_conn(root_arg, *global, MemoryMode::Query)
+            .ok()
+            .and_then(|conn| crate::memory::find_consolidation_match(&conn, &note))
+    } else {
+        None
+    };
     let outcome = write_note(
         root_arg,
         &note,
@@ -51,10 +60,12 @@ pub(super) fn run_mem_write(
     )?;
     crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
     let line = outcome_line(&outcome, &note.key);
-    Ok(ArmOut::plain(
-        format!("{}\n{line}\n", crate::memory::MEMORY_CAVEAT),
-        String::new(),
-    ))
+    let mut stdout = format!("{}\n{line}\n", crate::memory::MEMORY_CAVEAT);
+    if let Some(m) = consolidation {
+        stdout.push_str(&m.hint_line(&note.key));
+        stdout.push('\n');
+    }
+    Ok(ArmOut::plain(stdout, String::new()))
 }
 
 fn write_note(
@@ -121,6 +132,67 @@ pub(super) struct MemQueryArgs<'a> {
     pub(super) reference: Option<&'a str>,
 }
 
+/// Journal fields for `mem write` (key/kind/scope/ttl/supersedes/body_len —
+/// never the body text).
+pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
+    let CommandRequest::MemWrite {
+        key,
+        body,
+        kind,
+        scope,
+        ttl,
+        supersedes,
+        global,
+        touch,
+        ..
+    } = req
+    else {
+        unreachable!("mem_write_args called with a non-write request")
+    };
+    vec![
+        ("key", key.clone()),
+        ("kind", kind.clone()),
+        ("scope", scope.clone()),
+        ("ttl", ttl.map_or_else(String::new, |t| t.to_string())),
+        ("supersedes", supersedes.clone().unwrap_or_default()),
+        ("body_len", body.len().to_string()),
+        ("global", global.to_string()),
+        ("touch", touch.to_string()),
+    ]
+}
+
+/// Journal fields for `mem query` (terms/ref/kind/scope/limit/...).
+pub(super) fn mem_query_args(req: &CommandRequest) -> JournalArgs {
+    let CommandRequest::MemQuery {
+        terms,
+        kind,
+        scope,
+        limit,
+        include_superseded,
+        global,
+        reference,
+        ..
+    } = req
+    else {
+        unreachable!("mem_query_args called with a non-query request")
+    };
+    vec![
+        ("terms", terms.join(" ")),
+        ("ref", reference.clone().unwrap_or_default()),
+        (
+            "kind",
+            kind.map_or_else(String::new, |k| k.as_str().to_string()),
+        ),
+        (
+            "scope",
+            scope.map_or_else(String::new, |s| s.as_str().to_string()),
+        ),
+        ("limit", limit.to_string()),
+        ("include_superseded", include_superseded.to_string()),
+        ("global", global.to_string()),
+    ]
+}
+
 /// The local and global memory stores a read command resolves once: `None`
 /// means the store is absent (open errors other than "no store" propagate).
 pub(super) struct MemoryStores {
@@ -134,14 +206,14 @@ pub(super) fn resolve_memory_stores(root_arg: Option<&Path>) -> Result<MemorySto
     let local = match crate::walk::discover_root(root_arg) {
         Ok(root) => match crate::db::open_memory_query(&root) {
             Ok(conn) => Some(conn),
-            Err(AwError::NoMemory(_)) => None,
+            Err(EgError::NoMemory(_)) => None,
             Err(e) => return Err(e),
         },
         Err(_) => None,
     };
     let global = match crate::db::open_global_memory_query() {
         Ok(conn) => Some(conn),
-        Err(AwError::NoMemory(_)) => None,
+        Err(EgError::NoMemory(_)) => None,
         Err(e) => return Err(e),
     };
     Ok(MemoryStores { local, global })
@@ -149,10 +221,10 @@ pub(super) fn resolve_memory_stores(root_arg: Option<&Path>) -> Result<MemorySto
 
 /// The shared "no memory store anywhere" error: name the local root when
 /// discovery worked, the generic write hint otherwise.
-pub(super) fn no_memory_store_error(root_arg: Option<&Path>) -> AwError {
+pub(super) fn no_memory_store_error(root_arg: Option<&Path>) -> EgError {
     if let Ok(root) = crate::walk::discover_root(root_arg) {
         crate::db::no_memory_error(&root)
     } else {
-        AwError::NoMemory("no memory store found — write with aw mem write".to_string())
+        EgError::NoMemory("no memory store found — write with eg mem write".to_string())
     }
 }

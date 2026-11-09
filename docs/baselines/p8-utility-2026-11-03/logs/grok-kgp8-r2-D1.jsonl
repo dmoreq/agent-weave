@@ -1,9 +1,0 @@
-I'll run the direct-import impact query first, then resolve only ambiguous edges from source.The impact query needs a repository root. I'll locate that root and rerun the same command.Three files directly import `vihap/reform/temporal.py`. The result is in `/tmp/p8-utility-answers-2026-11-03/grok-kgp8-r2-D1.json`.
-
-| File | Import |
-| --- | --- |
-| `tests/test_temporal_dag.py` | `from vihap.reform.temporal import` |
-| `tests/test_temporal_dag_benchmark.py` | `from vihap.reform.temporal import` |
-| `vihap/reform/__init__.py` | `from .temporal import` |
-
-`kg impact` needed `--root .` because this tree has no git root. Depth was 1 and the edge kind was `imports`. The same three files are the only source matches.

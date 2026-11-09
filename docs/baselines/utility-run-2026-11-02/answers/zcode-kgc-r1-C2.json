@@ -1,7 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "pairs": [],
-  "answer": "No. near.py shares at most 1 consecutive normalized (whitespace-trimmed, blank lines ignored) line with any other file, below the 5-line threshold; every identifier in its body differs from the pairNN fixtures, and the only 5+ line normalized blocks are pair01_a/pair01_b through pair04_a/pair04_b at lines 3-11."
-}

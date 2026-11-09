@@ -40,11 +40,12 @@ pub const UNPRICED_TOOLS: &[&str] = &[
     "mem_delete",
     "mem_gc",
     "mem_export",
+    "mem_import",
 ];
 
 /// Estimated tokens one tool call saves the agent versus reading the same
 /// result out of source files. The single coefficient table for BOTH telemetry
-/// surfaces: `aw usage` aggregates journaled calls with it, and the MCP KPI
+/// surfaces: `eg usage` aggregates journaled calls with it, and the MCP KPI
 /// footer prices the single call it just rendered (subtracting that call's own
 /// payload) — so the two surfaces cannot report contradictory numbers.
 pub fn estimated_tokens_saved(

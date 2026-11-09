@@ -1,1 +1,0 @@
-{"exists": true, "hops": 0, "route": ["vihap/adapters/sklearn.py:79"], "answer": "vihap.adapters.sklearn._to_list accepts seq: Any and returns list[Any]; _raw_items_from_sklearn_input calls it for tabular address columns and other non-string inputs."}

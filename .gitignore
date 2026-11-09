@@ -1,5 +1,7 @@
 target/
+.engram/
 .aw/
+.kg/
 dist/
 *.tar.gz
 .DS_Store

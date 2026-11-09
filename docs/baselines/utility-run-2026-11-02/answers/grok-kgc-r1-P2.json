@@ -1,6 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "answer": "No route exists from src.parse to src.extract.record_ts_arrow_function in the resolved call graph. src.parse has zero outgoing call edges, and the only resolved caller of record_ts_arrow_function is src/extract.rs:415."
-}

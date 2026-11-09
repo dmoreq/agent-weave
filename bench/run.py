@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Public navigation regression benchmark for aw.
+"""Public navigation regression benchmark for eg.
 
 Usage:
-    python3 -I bench/run.py target/release/aw
+    python3 -I bench/run.py target/release/eg
 
 The benchmark copies each corpus root to a temporary directory, builds the
-index with the given aw binary, runs the committed queries, and checks that
+index with the given eg binary, runs the committed queries, and checks that
 expected pointers are present and forbidden pointers are absent. It is a
 regression corpus for static navigation output; it does not measure agent
 utility, token savings, or dynamic-dispatch coverage.
@@ -28,7 +28,7 @@ QUERIES = HERE / "queries.jsonl"
 # A pointer line starts with path:line (optionally a line range) followed by
 # an optional detail. Headers and section labels are filtered separately.
 POINTER_RE = re.compile(r"^(\S+?):(\d+)(?:-\d+)?\s*(.*)$")
-SKIP_PREFIXES = ("aw:", "showing ", "callers (", "callees (")
+SKIP_PREFIXES = ("eg:", "showing ", "callers (", "callees (")
 
 
 def parse_pointers(stdout: str) -> list[tuple[str, str]]:
@@ -45,10 +45,10 @@ def parse_pointers(stdout: str) -> list[tuple[str, str]]:
 
 
 def parse_chain(stdout: str) -> list[str]:
-    """Return the qualnames from the final `aw: chain ...` line, if present."""
+    """Return the qualnames from the final `eg: chain ...` line, if present."""
     for line in stdout.splitlines():
-        if line.startswith("aw: chain "):
-            body = line[len("aw: chain ") :]
+        if line.startswith("eg: chain "):
+            body = line[len("eg: chain ") :]
             body = body.rsplit(" (", 1)[0]
             return [part.strip() for part in body.split(" -> ")]
     return []
@@ -90,9 +90,9 @@ def check_query(
     return problems, len(pointers)
 
 
-def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
+def run_eg(eg: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [aw, "--root", str(root), "--no-journal", *args],
+        [eg, "--root", str(root), "--no-journal", *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -101,26 +101,26 @@ def run_aw(aw: str, root: Path, args: list[str]) -> subprocess.CompletedProcess:
 
 
 def main(argv: list[str]) -> int:
-    aw = argv[1] if len(argv) > 1 else "aw"
+    eg = argv[1] if len(argv) > 1 else "eg"
     records = [
         json.loads(line)
         for line in QUERIES.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     if not records:
-        print("aw bench: no queries found", file=sys.stderr)
+        print("eg bench: no queries found", file=sys.stderr)
         return 1
 
-    with tempfile.TemporaryDirectory(prefix="aw-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="eg-bench-") as tmp:
         roots: dict[str, Path] = {}
         for corpus in sorted({record["corpus"] for record in records}):
             source = CORPUS / corpus
             destination = Path(tmp) / corpus
-            shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".aw"))
-            build = run_aw(aw, destination, ["build"])
+            shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".engram"))
+            build = run_eg(eg, destination, ["build"])
             if build.returncode != 0:
                 print(
-                    f"aw bench: build failed for {corpus} (exit {build.returncode})",
+                    f"eg bench: build failed for {corpus} (exit {build.returncode})",
                     file=sys.stderr,
                 )
                 print(build.stdout, end="", file=sys.stderr)
@@ -131,8 +131,8 @@ def main(argv: list[str]) -> int:
         failures = 0
         print(f"{'id':<32} {'command':<10} {'pointers':>8}  verdict")
         for record in records:
-            result = run_aw(
-                aw, roots[record["corpus"]], [record["command"], *record.get("args", [])]
+            result = run_eg(
+                eg, roots[record["corpus"]], [record["command"], *record.get("args", [])]
             )
             problems, pointer_count = check_query(
                 record, result.stdout, result.stderr, result.returncode
@@ -151,7 +151,7 @@ def main(argv: list[str]) -> int:
                     print(f"    stderr: {stderr}")
 
         total = len(records)
-        print(f"aw bench: {total - failures}/{total} queries passed")
+        print(f"eg bench: {total - failures}/{total} queries passed")
         return 0 if failures == 0 else 1
 
 

@@ -4,7 +4,7 @@ use std::fs;
 
 use serde_json::json;
 
-use super::common::{aw_cmd, fixture, init_and_list_tools, result_text, rpc, spawn};
+use super::common::{eg_cmd, fixture, init_and_list_tools, result_text, rpc, spawn};
 
 #[test]
 fn g10_build_via_mcp_journals_and_returns_stats_line() {
@@ -18,9 +18,9 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
     );
     assert_eq!(resp["result"]["isError"], false);
     let text = result_text(&resp);
-    assert!(text.starts_with("aw: built index: files=2"), "{text}");
+    assert!(text.starts_with("eg: built index: files=2"), "{text}");
     assert!(text.contains("parse_errors=0"), "{text}");
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     assert!(
         log.contains("\"tool\":\"build\"") && log.contains("\"surface\":\"mcp\""),
         "{log}"
@@ -30,16 +30,16 @@ fn g10_build_via_mcp_journals_and_returns_stats_line() {
 
 #[cfg(unix)]
 #[test]
-fn mcp_build_rejects_symlinked_aw_directory() {
+fn mcp_build_rejects_symlinked_eg_directory() {
     use std::os::unix::fs::symlink;
-    let repo = fixture("mcp-symlink-aw");
-    let ext = std::env::temp_dir().join(format!("aw-ext-mcp-aw-{}", std::process::id()));
+    let repo = fixture("mcp-symlink-eg");
+    let ext = std::env::temp_dir().join(format!("eg-ext-mcp-eg-{}", std::process::id()));
     let _ = fs::remove_dir_all(&ext);
     fs::create_dir_all(&ext).unwrap();
     let sentinel = ext.join("sentinel.txt");
     fs::write(&sentinel, "keep").unwrap();
-    let _ = fs::remove_dir_all(repo.join(".aw"));
-    symlink(&ext, repo.join(".aw")).unwrap();
+    let _ = fs::remove_dir_all(repo.join(".engram"));
+    symlink(&ext, repo.join(".engram")).unwrap();
 
     let mut srv = spawn(&repo);
     let build = rpc(
@@ -57,7 +57,7 @@ fn mcp_build_rejects_symlinked_aw_directory() {
 #[test]
 fn mcp_response_includes_kpi_footer() {
     let repo = fixture("kpi-footer");
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
 
     let mut srv = spawn(&repo);
@@ -72,7 +72,7 @@ fn mcp_response_includes_kpi_footer() {
     );
     assert_eq!(ctx["result"]["isError"], false);
     let text = result_text(&ctx);
-    assert!(text.contains("\n───\n⚡ aw:"), "context footer: {text}");
+    assert!(text.contains("\n───\n⚡ eg:"), "context footer: {text}");
     assert!(
         text.contains("tokens saved vs file reads"),
         "context tokens: {text}"
@@ -87,7 +87,7 @@ fn mcp_response_includes_kpi_footer() {
     );
     assert_eq!(search["result"]["isError"], false);
     let text = result_text(&search);
-    assert!(text.contains("\n───\n⚡ aw:"), "search footer: {text}");
+    assert!(text.contains("\n───\n⚡ eg:"), "search footer: {text}");
     assert!(
         text.contains("tokens saved vs file reads"),
         "search tokens: {text}"
@@ -102,7 +102,7 @@ fn mcp_response_includes_kpi_footer() {
     );
     assert_eq!(reuse["result"]["isError"], false);
     let text = result_text(&reuse);
-    assert!(text.contains("\n───\n⚡ aw:"), "reuse footer: {text}");
+    assert!(text.contains("\n───\n⚡ eg:"), "reuse footer: {text}");
     assert!(
         text.contains("tokens saved vs file reads"),
         "reuse tokens: {text}"
@@ -118,7 +118,7 @@ fn mcp_response_includes_kpi_footer() {
     assert_eq!(leaf["result"]["isError"], true);
     let leaf_text = result_text(&leaf);
     assert!(
-        leaf_text.contains("\n───\n⚡ aw:"),
+        leaf_text.contains("\n───\n⚡ eg:"),
         "leaf footer: {leaf_text}"
     );
     assert!(
@@ -136,7 +136,7 @@ fn mcp_response_includes_kpi_footer() {
 #[test]
 fn mcp_usage_tool_returns_telemetry() {
     let repo = fixture("mcp-usage");
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
 
     let mut srv = spawn(&repo);
@@ -165,7 +165,7 @@ fn mcp_usage_tool_returns_telemetry() {
     );
     assert_eq!(usage["result"]["isError"], false, "{usage}");
     let text = result_text(&usage);
-    assert!(text.contains("aw usage:"), "header: {text}");
+    assert!(text.contains("eg usage:"), "header: {text}");
     assert!(text.contains("Speed: p50 ="), "speed: {text}");
     assert!(text.contains("Reliability:"), "reliability: {text}");
     assert!(text.contains("Estimated Token Savings:"), "savings: {text}");
@@ -176,7 +176,7 @@ fn mcp_usage_tool_returns_telemetry() {
     assert!(text.contains("callers:"), "callers: {text}");
     // usage is an on-demand telemetry card; it must not append a redundant footer
     assert!(
-        !text.contains("⚡ aw:"),
+        !text.contains("⚡ eg:"),
         "usage has no redundant footer: {text}"
     );
 
@@ -191,7 +191,7 @@ fn mcp_build_emits_incremental_reuse_hints() {
         "def transform_data(data: str):\n    return data.strip().lower()\n",
     )
     .unwrap();
-    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
     assert_eq!(build.status.code(), Some(0));
 
     fs::write(
@@ -210,7 +210,7 @@ fn mcp_build_emits_incremental_reuse_hints() {
     assert_eq!(resp["result"]["isError"], false);
     let text = result_text(&resp);
     assert!(
-        text.contains("aw: reuse-hint:"),
+        text.contains("eg: reuse-hint:"),
         "MCP build output must include reuse hints on stderr: {text}"
     );
     assert!(text.contains("transform_data"), "{text}");

@@ -1,9 +1,0 @@
-`kg imports` lists three crate-internal modules in `src/query.rs`. I am writing that result to the answer file.Wrote `/tmp/p8-utility-answers-2026-11-03/grok-kgp8-r1-I1.json`.
-
-`kg imports` reports three crate-internal modules in `src/query.rs`:
-
-- `10 src.db`
-- `11 src.error`
-- `12 src.hash`
-
-Symbol rows `src.error.KgError` and `src.hash.fnv1a64` are omitted. Source lines 10–12 match those module rows.

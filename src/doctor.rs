@@ -1,5 +1,5 @@
-//! `aw doctor`: 3 AM diagnosability — integrity, versions, parse coverage,
-//! stale ratio, orphan `.aw/` files, lock leftovers, DB size vs target (CUJ3).
+//! `eg doctor`: 3 AM diagnosability — integrity, versions, parse coverage,
+//! stale ratio, orphan `.engram/` files, lock leftovers, DB size vs target (CUJ3).
 
 use std::path::Path;
 
@@ -9,20 +9,20 @@ use crate::db;
 use crate::error::Result;
 
 pub fn invalidate(root: &Path) -> Result<Vec<String>> {
-    // Serialize with builds through the same `.aw/build.lock` flock a build
+    // Serialize with builds through the same `.engram/build.lock` flock a build
     // holds, so an invalidate cannot start while a build is running.
     let lock = db::BuildLock::acquire(root)?;
-    let dir = db::aw_dir(root);
-    db::reject_symlink(&dir, ".aw directory")?;
+    let dir = db::eg_dir(root);
+    db::reject_symlink(&dir, ".engram directory")?;
     if dir.exists() {
         // Companion-design disposition (memory retrieval design, Risks):
         // memory.db is primary data, not a rebuildable index, so the reset
         // keeps every memory.db* file (the store plus any crash-recovery
         // sidecar — deleting a live -journal would corrupt the store) and
         // removes the derived index, journals, and orphans.
-        if clear_aw_dir(&dir, |name| name.starts_with("memory.db"))? {
+        if clear_eg_dir(&dir, |name| name.starts_with("memory.db"))? {
             return Ok(vec![format!(
-                "aw: reset {} (kept primary memory.db)",
+                "eg: reset {} (kept primary memory.db)",
                 dir.display()
             )]);
         }
@@ -32,19 +32,19 @@ pub fn invalidate(root: &Path) -> Result<Vec<String>> {
         drop(lock);
         let _ = std::fs::remove_file(dir.join("build.lock"));
         return Ok(vec![match std::fs::remove_dir(&dir) {
-            Ok(()) => format!("aw: removed {}", dir.display()),
-            Err(_) => format!("aw: reset {}", dir.display()),
+            Ok(()) => format!("eg: removed {}", dir.display()),
+            Err(_) => format!("eg: reset {}", dir.display()),
         }]);
     }
-    Ok(vec![format!("aw: no {} present", dir.display())])
+    Ok(vec![format!("eg: no {} present", dir.display())])
 }
 
-/// Remove every entry of `.aw/` the `keep` predicate does not protect, and
+/// Remove every entry of `.engram/` the `keep` predicate does not protect, and
 /// report whether any entry was kept. `build.lock` is always skipped: never
 /// unlink the lock the caller holds while the directory survives, or a
 /// concurrent build would open a fresh inode and acquire it immediately,
 /// defeating the serialization the caller's guard exists to provide.
-fn clear_aw_dir(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<bool> {
+fn clear_eg_dir(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<bool> {
     let mut kept_any = false;
     for entry in std::fs::read_dir(dir)?.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -60,10 +60,13 @@ fn clear_aw_dir(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<bool> {
             continue;
         }
         let path = entry.path();
-        if path.is_dir() {
-            std::fs::remove_dir_all(&path)?;
-        } else {
-            std::fs::remove_file(&path)?;
+        // Match on the link itself: a symlink is unlinked, never followed into
+        // a directory tree outside the confinement root.
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(&path)?,
+            Ok(_) => std::fs::remove_file(&path)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
     }
     Ok(kept_any)
@@ -71,7 +74,7 @@ fn clear_aw_dir(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<bool> {
 
 pub fn report(root: &Path) -> Result<Vec<String>> {
     let conn = db::open_for_query(root)?;
-    let mut out = vec![format!("aw: doctor report for {}", root.display())];
+    let mut out = vec![format!("eg: doctor report for {}", root.display())];
 
     let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
     out.push(format!("  integrity: {integrity}"));
@@ -101,13 +104,13 @@ pub fn report(root: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// The schema-version row and the four meta rows (`aw version`, grammar,
+/// The schema-version row and the four meta rows (`eg version`, grammar,
 /// built-at, source rev).
 fn push_meta_lines(conn: &Connection, out: &mut Vec<String>) -> Result<()> {
     let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     out.push(format!("  schema version: {user_version}"));
     for (key, label) in [
-        (db::meta_keys::AW_VERSION, "aw version"),
+        (db::meta_keys::ENGRAM_VERSION, "eg version"),
         (db::meta_keys::GRAMMAR_VERSION, "grammar version"),
         (db::meta_keys::BUILT_AT, "built at"),
         (db::meta_keys::SOURCE_REV, "source rev"),
@@ -146,7 +149,7 @@ fn push_parse_coverage(conn: &Connection, out: &mut Vec<String>) -> Result<()> {
 fn memory_report_line(root: &Path) -> String {
     let path = db::memory_db_path(root);
     if !path.exists() {
-        return "  memory: absent (aw mem write creates it)".to_string();
+        return "  memory: absent (eg mem write creates it)".to_string();
     }
     let size = db::file_size(&path);
     // Fold the open and integrity-check failures into one Err arm so the
@@ -186,11 +189,11 @@ fn stale_ratio(conn: &Connection, root: &Path) -> Result<f64> {
 }
 
 fn report_orphans(root: &Path, out: &mut Vec<String>) {
-    let dir = db::aw_dir(root);
+    let dir = db::eg_dir(root);
     let new = db::db_new_path(root);
     if new.exists() {
         out.push(format!(
-            "  orphan: {} (leftover build — rerun aw build or delete)",
+            "  orphan: {} (leftover build — rerun eg build or delete)",
             new.display()
         ));
     }
@@ -223,15 +226,41 @@ mod tests {
     #[test]
     fn invalidate_keeps_the_lock_it_holds() {
         let root = crate::db::temp_root("doctor");
-        std::fs::create_dir_all(root.join(".aw")).unwrap();
-        std::fs::write(root.join(".aw/index.db"), b"x").unwrap();
-        std::fs::write(root.join(".aw/build.lock"), b"").unwrap();
-        std::fs::write(root.join(".aw/memory.db"), b"x").unwrap();
+        std::fs::create_dir_all(root.join(".engram")).unwrap();
+        std::fs::write(root.join(".engram/index.db"), b"x").unwrap();
+        std::fs::write(root.join(".engram/build.lock"), b"").unwrap();
+        std::fs::write(root.join(".engram/memory.db"), b"x").unwrap();
         let out = invalidate(&root).unwrap();
-        assert!(root.join(".aw/build.lock").exists(), "lock was unlinked");
-        assert!(!root.join(".aw/index.db").exists());
-        assert!(root.join(".aw/memory.db").exists());
+        assert!(
+            root.join(".engram/build.lock").exists(),
+            "lock was unlinked"
+        );
+        assert!(!root.join(".engram/index.db").exists());
+        assert!(root.join(".engram/memory.db").exists());
         assert!(out[0].contains("kept primary memory.db"), "{out:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn invalidate_unlinks_symlink_without_traversing_it() {
+        let root = crate::db::temp_root("doctor-symlink");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(root.join(".engram")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".engram/leak")).unwrap();
+
+        invalidate(&root).unwrap();
+
+        assert!(
+            outside.join("keep.txt").exists(),
+            "a symlinked entry must be unlinked, never traversed"
+        );
+        assert!(
+            !root.join(".engram").exists(),
+            "the reset drops the confinement directory"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

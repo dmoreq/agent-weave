@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E1.1 — incremental/forced edge-set equivalence for aw.
+"""E1.1 — incremental/forced edge-set equivalence for eg.
 
 For each case the script builds a fixture, applies one mutation, rebuilds
 incrementally, dumps the normalized edge and unresolved-site sets, force
@@ -9,7 +9,7 @@ comparator to notice.
 
 Usage:
     python3 -I tests/scripts/incremental_equivalence.py \
-        --aw target/release/aw \
+        --eg target/release/eg \
         --json docs/baselines/2026-11-05_0.4.0/e1.1.json
 
 Exit 0 when every case matches and the negative control fires; 1 otherwise.
@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from precision_recall import run_aw
+from precision_recall import run_eg
 
 FLAT = {
     "a.py": "def entry():\n    return helper()\n\n\ndef helper():\n    return 1\n",
@@ -185,13 +185,13 @@ def write_tree(root: Path, files: dict[str, str | None]) -> None:
         path.write_text(content, encoding="utf-8")
 
 
-def build(aw: str, root: Path, force: bool) -> subprocess.CompletedProcess:
+def build(eg: str, root: Path, force: bool) -> subprocess.CompletedProcess:
     args = ["build"] + (["--force"] if force else [])
-    return run_aw(aw, root, args)
+    return run_eg(eg, root, args)
 
 
 def dump(root: Path) -> tuple[frozenset, frozenset]:
-    db = root / ".aw" / "index.db"
+    db = root / ".engram" / "index.db"
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     edges = frozenset(
         conn.execute(
@@ -221,11 +221,11 @@ def first_diff(left: frozenset, limit: int = 5) -> list[str]:
     return [repr(item) for item in sorted(left, key=repr)[:limit]]
 
 
-def run_case(aw: str, case: dict) -> dict:
-    with tempfile.TemporaryDirectory(prefix=f"aw-eq-{case['name']}-") as tmp:
+def run_case(eg: str, case: dict) -> dict:
+    with tempfile.TemporaryDirectory(prefix=f"eg-eq-{case['name']}-") as tmp:
         root = Path(tmp)
         write_tree(root, case["initial"])
-        initial = build(aw, root, force=False)
+        initial = build(eg, root, force=False)
         if initial.returncode != 0:
             return {"name": case["name"], "error": f"initial build exit {initial.returncode}",
                     "stderr": initial.stderr[-500:], "equal": False}
@@ -234,7 +234,7 @@ def run_case(aw: str, case: dict) -> dict:
 
         write_tree(root, case["mutated"])
         started = time.perf_counter()
-        incremental = build(aw, root, force=False)
+        incremental = build(eg, root, force=False)
         incremental_ms = (time.perf_counter() - started) * 1000
         if incremental.returncode != 0:
             return {"name": case["name"], "error": f"incremental build exit {incremental.returncode}",
@@ -243,7 +243,7 @@ def run_case(aw: str, case: dict) -> dict:
         incremental_sets = dump(root)
 
         started = time.perf_counter()
-        forced = build(aw, root, force=True)
+        forced = build(eg, root, force=True)
         force_ms = (time.perf_counter() - started) * 1000
         if forced.returncode != 0:
             return {"name": case["name"], "error": f"forced build exit {forced.returncode}",
@@ -273,14 +273,14 @@ def run_case(aw: str, case: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--aw", required=True)
+    parser.add_argument("--eg", required=True)
     parser.add_argument("--json", required=True)
     args = parser.parse_args()
 
     version = subprocess.run(
-        [args.aw, "--version"], capture_output=True, text=True, encoding="utf-8", timeout=30
+        [args.eg, "--version"], capture_output=True, text=True, encoding="utf-8", timeout=30
     )
-    results = [run_case(args.aw, case) for case in cases()]
+    results = [run_case(args.eg, case) for case in cases()]
     all_equal = all(case.get("equal", False) for case in results)
 
     synthetic = frozenset(
@@ -290,7 +290,7 @@ def main() -> int:
 
     payload = {
         "experiment": "E1.1",
-        "aw_version": version.stdout.strip(),
+        "engram_version": version.stdout.strip(),
         "cases": results,
         "case_count": len(results),
         "all_equal": all_equal,

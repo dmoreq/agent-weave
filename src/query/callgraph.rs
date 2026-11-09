@@ -27,7 +27,7 @@ pub fn imports(ctx: &QueryCtx<'_>, file: &str, limit: usize) -> Result<QueryOutp
         |r| r.get::<_, i64>(0),
     )? as usize;
     if total == 0 {
-        return Err(AwError::NoResultsCaveated {
+        return Err(EgError::NoResultsCaveated {
             caveat: IMPORTS_CAVEAT,
             detail: "0 imports found (external and unresolved imports are omitted)".to_string(),
         });
@@ -62,12 +62,12 @@ fn resolve_targets(
 ) -> Result<(Vec<i64>, Vec<NameCandidate>)> {
     let (ids, cands) = target_ids(conn, name)?;
     if ids.is_empty() {
-        return Err(AwError::NoResults(format!("symbol '{name}' not in index")));
+        return Err(EgError::NoResults(format!("symbol '{name}' not in index")));
     }
     if cands.len() > 1 {
         // CUJ4: no merged-silent result; name the Class.method form. The
         // candidate list travels IN the error so non-CLI surfaces render it.
-        return Err(AwError::Ambiguous {
+        return Err(EgError::Ambiguous {
             name: name.to_string(),
             total: ids.len(),
             candidates: cands,

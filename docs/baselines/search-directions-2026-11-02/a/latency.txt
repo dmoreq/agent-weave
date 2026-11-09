@@ -1,2 +1,0 @@
-false 20 mean=0.95ms p95=1.52ms
-true 20 mean=0.79ms p95=1.18ms

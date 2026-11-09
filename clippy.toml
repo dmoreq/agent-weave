@@ -1,5 +1,5 @@
 # clippy.toml
-# Rust Anti-Smell & Complexity Thresholds for agent-weave (aw)
+# Rust Anti-Smell & Complexity Thresholds for engram (eg)
 
 # Maximum effective lines per function/method
 too-many-lines-threshold = 80

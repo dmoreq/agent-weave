@@ -6,7 +6,7 @@ use super::common::*;
 fn symbols_lists_file_symbols_and_unknown_exit1() {
     let repo = fixture("symbols");
     build(&repo);
-    let out = aw(&repo).args(["symbols", "utils.py"]).output().unwrap();
+    let out = eg(&repo).args(["symbols", "utils.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     assert!(stdout.contains("utils.py:1 module utils"), "{stdout}");
@@ -19,7 +19,7 @@ fn symbols_lists_file_symbols_and_unknown_exit1() {
         "{stdout}"
     );
 
-    let out = aw(&repo).args(["symbols", "nope.py"]).output().unwrap();
+    let out = eg(&repo).args(["symbols", "nope.py"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not indexed"), "{stderr}");
@@ -29,10 +29,10 @@ fn symbols_lists_file_symbols_and_unknown_exit1() {
 fn symbols_outline_adds_signature_and_default_stays_byte_identical() {
     let repo = fixture("symbols-outline");
     build(&repo);
-    let base = aw(&repo).args(["symbols", "utils.py"]).output().unwrap();
+    let base = eg(&repo).args(["symbols", "utils.py"]).output().unwrap();
     assert_eq!(base.status.code(), Some(0));
     let plain = String::from_utf8_lossy(&base.stdout).into_owned();
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["symbols", "utils.py", "--outline"])
         .output()
         .unwrap();
@@ -76,7 +76,7 @@ fn search_limit_counts_union_by_identity() {
     write(&repo, "b.py", "def run(): pass\n");
     write(&repo, "c.py", "def run(): pass\ndef run_build(): pass\n");
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["search", "run", "--limit", "1"])
         .output()
         .unwrap();
@@ -92,7 +92,7 @@ fn search_exact_first_merge_and_union_count_characterization() {
     write(&repo, "b.py", "def run(): pass\n");
     write(&repo, "c.py", "def run_build(): pass\n");
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["search", "run", "--limit", "10"])
         .output()
         .unwrap();
@@ -109,7 +109,7 @@ fn search_exact_first_merge_and_union_count_characterization() {
         .expect("prefix run_build row");
     assert!(exact < prefix, "exact-first merge order broken: {lines:?}");
 
-    let capped = aw(&repo)
+    let capped = eg(&repo)
         .args(["search", "run", "--limit", "1"])
         .output()
         .unwrap();
@@ -125,11 +125,11 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     let repo = fixture("search");
     build(&repo);
     // Hit: bm25-ranked pointers, tier position empty (symbol identities).
-    let _ = fs::remove_file(repo.join(".aw/usage.log"));
-    let out = aw(&repo).args(["search", "normalize"]).output().unwrap();
+    let _ = fs::remove_file(repo.join(".engram/usage.log"));
+    let out = eg(&repo).args(["search", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     // Every search exit path journals, including the exact-name fast path.
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     let rec = log.lines().last().unwrap();
     assert!(
         rec.contains("\"tool\":\"search\"") && !rec.contains("\"result_count\":0"),
@@ -148,7 +148,7 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     );
     // Amendment 14a: signature-only vocabulary is searchable (no symbol
     // name contains the `def` token; every signature does).
-    let out = aw(&repo).args(["search", "def"]).output().unwrap();
+    let out = eg(&repo).args(["search", "def"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -157,44 +157,44 @@ fn search_finds_symbols_ranked_and_empty_or_nomatch_exit_codes() {
     );
 
     // No match: exit 1 with the documented reason line.
-    let out = aw(&repo).args(["search", "zzzqqqxyz"]).output().unwrap();
+    let out = eg(&repo).args(["search", "zzzqqqxyz"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("0 symbols matched"), "{stderr}");
 
     // Empty terms: usage error, exit 2.
-    let out = aw(&repo).args(["search", "   "]).output().unwrap();
+    let out = eg(&repo).args(["search", "   "]).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]
 fn journal_written_and_usage_summarizes() {
-    // Amendment 6: build + callers journal entries; aw usage aggregates them.
+    // Amendment 6: build + callers journal entries; eg usage aggregates them.
     let repo = fixture("journal");
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
+    eg(&repo)
+        .env_remove("ENGRAM_NO_JOURNAL")
         .args(["build"])
         .output()
         .unwrap();
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
+    eg(&repo)
+        .env_remove("ENGRAM_NO_JOURNAL")
         .args(["callers", "normalize"])
         .output()
         .unwrap();
-    let log = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let log = fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     assert_eq!(log.lines().count(), 2, "one entry per invocation: {log}");
     assert!(log.contains("\"tool\":\"build\""), "{log}");
     assert!(log.contains("\"tool\":\"callers\""), "{log}");
     assert!(log.contains("\"surface\":\"cli\""), "{log}");
 
-    let out = aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
+    let out = eg(&repo)
+        .env_remove("ENGRAM_NO_JOURNAL")
         .args(["usage"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
-    assert!(stdout.contains("aw usage: 2 journaled calls"), "{stdout}");
+    assert!(stdout.contains("eg usage: 2 journaled calls"), "{stdout}");
     assert!(stdout.contains("callers: 1 calls"), "{stdout}");
     assert!(stdout.contains("build: 1 calls"), "{stdout}");
 }
@@ -202,10 +202,10 @@ fn journal_written_and_usage_summarizes() {
 #[test]
 fn usage_quality_adds_empty_split_and_keeps_default_summary() {
     let repo = fixture("usage-quality");
-    aw(&repo).args(["build"]).output().unwrap();
-    aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    eg(&repo).args(["build"]).output().unwrap();
+    eg(&repo).args(["callers", "normalize"]).output().unwrap();
 
-    let default = aw(&repo).args(["usage"]).output().unwrap();
+    let default = eg(&repo).args(["usage"]).output().unwrap();
     assert_eq!(default.status.code(), Some(0));
     let default_stdout = String::from_utf8_lossy(&default.stdout);
     assert!(
@@ -214,7 +214,7 @@ fn usage_quality_adds_empty_split_and_keeps_default_summary() {
     );
     assert!(!default_stdout.contains("empty_ok="), "{default_stdout}");
 
-    let quality = aw(&repo).args(["usage", "--quality"]).output().unwrap();
+    let quality = eg(&repo).args(["usage", "--quality"]).output().unwrap();
     assert_eq!(quality.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&quality.stdout);
     assert!(stdout.contains("empty_ok="), "{stdout}");
@@ -226,25 +226,25 @@ fn usage_quality_adds_empty_split_and_keeps_default_summary() {
 #[test]
 fn journal_opt_out_via_env_and_flag() {
     let repo = fixture("journal-env");
-    aw(&repo)
-        .env("AW_NO_JOURNAL", "1")
+    eg(&repo)
+        .env("ENGRAM_NO_JOURNAL", "1")
         .args(["build"])
         .output()
         .unwrap();
     assert!(
-        !repo.join(".aw/usage.log").exists(),
+        !repo.join(".engram/usage.log").exists(),
         "env opt-out must suppress the journal"
     );
 
     let repo = fixture("journal-flag");
-    aw(&repo).args(["--no-journal", "build"]).output().unwrap();
+    eg(&repo).args(["--no-journal", "build"]).output().unwrap();
     assert!(
-        !repo.join(".aw/usage.log").exists(),
+        !repo.join(".engram/usage.log").exists(),
         "--no-journal must suppress the journal"
     );
 
     // usage on an empty journal: exit 1 with a reason.
-    let out = aw(&repo).args(["usage"]).output().unwrap();
+    let out = eg(&repo).args(["usage"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("no journal entries"), "{stderr}");
@@ -252,12 +252,12 @@ fn journal_opt_out_via_env_and_flag() {
 
 #[test]
 fn usage_journal_creates_gitignore_marker() {
-    // The journal self-creates `.aw` on the first write; the tool-owned
+    // The journal self-creates `.engram` on the first write; the tool-owned
     // gitignore marker must exist so the directory never leaks into git status.
     let repo = temp_repo("journal-gitignore");
     write(&repo, "a.py", "def f(): pass\n");
     // Baseline commit: `git status --porcelain` must be empty before the
-    // journal writes anything, so only `.aw` leakage could dirty it.
+    // journal writes anything, so only `.engram` leakage could dirty it.
     git(&repo, &["init", "-q"]);
     git(&repo, &["add", "-A"]);
     git(
@@ -274,10 +274,13 @@ fn usage_journal_creates_gitignore_marker() {
     );
 
     // `callers` fails with no index (exit 1) but still journals.
-    let out = aw(&repo).args(["callers", "f"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "f"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(repo.join(".aw/usage.log").exists(), "journal file written");
-    let marker = fs::read_to_string(repo.join(".aw/.gitignore")).unwrap();
+    assert!(
+        repo.join(".engram/usage.log").exists(),
+        "journal file written"
+    );
+    let marker = fs::read_to_string(repo.join(".engram/.gitignore")).unwrap();
     assert_eq!(marker, "*\n", "tool-owned gitignore marker");
     let status = Command::new("git")
         .arg("-C")
@@ -287,7 +290,7 @@ fn usage_journal_creates_gitignore_marker() {
         .unwrap();
     assert!(
         String::from_utf8_lossy(&status.stdout).trim().is_empty(),
-        ".aw must be invisible to git: {:?}",
+        ".engram must be invisible to git: {:?}",
         String::from_utf8_lossy(&status.stdout)
     );
 }
@@ -295,33 +298,34 @@ fn usage_journal_creates_gitignore_marker() {
 #[cfg(unix)]
 #[test]
 fn fifo_gitignore_marker_fails_closed_without_hanging() {
-    // A FIFO at .aw/.gitignore is fail-closed: rejected before any open (no
+    // A FIFO at .engram/.gitignore is fail-closed: rejected before any open (no
     // hang), left in place, and never written through.
     use std::os::unix::fs::FileTypeExt;
     let repo = temp_repo("fifo-gitignore");
     write(&repo, "a.py", "def f(): pass\n");
-    fs::create_dir_all(repo.join(".aw")).unwrap();
+    fs::create_dir_all(repo.join(".engram")).unwrap();
     assert!(
         Command::new("mkfifo")
-            .arg(repo.join(".aw/.gitignore"))
+            .arg(repo.join(".engram/.gitignore"))
             .status()
             .unwrap()
             .success(),
         "mkfifo failed"
     );
 
-    let mut cmd = aw(&repo);
+    let mut cmd = eg(&repo);
     cmd.arg("build");
     // The budget only bounds the wait; a true FIFO hang is killed and still
     // fails via None. Sized for a loaded host, where a sub-second fail-closed
     // exit can inflate past a 20 s wall clock.
-    let out = output_with_timeout(cmd, 60).expect("build must not hang on a FIFO .aw/.gitignore");
+    let out =
+        output_with_timeout(cmd, 60).expect("build must not hang on a FIFO .engram/.gitignore");
     assert_eq!(
         out.status.code(),
         Some(6),
         "FIFO marker must fail closed: {out:?}"
     );
-    let meta = fs::symlink_metadata(repo.join(".aw/.gitignore")).unwrap();
+    let meta = fs::symlink_metadata(repo.join(".engram/.gitignore")).unwrap();
     assert!(
         meta.file_type().is_fifo(),
         "marker must be left untouched, not replaced"
@@ -354,7 +358,7 @@ fn fifo_indexed_file_does_not_hang_doctor() {
     let meta = fs::symlink_metadata(&fifo).unwrap();
     assert!(meta.file_type().is_fifo(), "fixture must be a FIFO");
 
-    let mut cmd = aw(&repo);
+    let mut cmd = eg(&repo);
     cmd.args(["doctor"]);
     let out = output_with_timeout(cmd, 10)
         .expect("doctor must not hang on an indexed file replaced by a FIFO");
@@ -368,34 +372,34 @@ fn fifo_indexed_file_does_not_hang_doctor() {
 
 #[test]
 fn session_and_arm_tags_recorded_in_usage_log() {
-    // AW_SESSION/AW_ARM tags, sanitized, land in the usage log.
+    // ENGRAM_SESSION/ENGRAM_ARM tags, sanitized, land in the usage log.
     let repo = fixture("session-tags");
     build(&repo);
-    aw(&repo)
-        .env_remove("AW_NO_JOURNAL")
-        .env("AW_SESSION", "  r1-task-1  ")
-        .env("AW_ARM", "aw")
+    eg(&repo)
+        .env_remove("ENGRAM_NO_JOURNAL")
+        .env("ENGRAM_SESSION", "  r1-task-1  ")
+        .env("ENGRAM_ARM", "eg")
         .args(["callers", "normalize"])
         .output()
         .unwrap();
-    let usage = fs::read_to_string(repo.join(".aw/usage.log")).unwrap();
+    let usage = fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
     assert!(usage.contains("\"session\":\"r1-task-1\""), "{usage}");
-    assert!(usage.contains("\"arm\":\"aw\""), "{usage}");
+    assert!(usage.contains("\"arm\":\"eg\""), "{usage}");
 }
 
 #[test]
 fn g5_no_child_processes_survive() {
-    // Invariant 2: aw spawns only short-lived git commands and leaves no
+    // Invariant 2: eg spawns only short-lived git commands and leaves no
     // descendants. Poll the child tree during the build (the previous test
     // only looked after exit, R6e finding), then assert nothing tagged with
     // the fixture token survives.
     let repo = fixture("proc");
-    let marker = format!("aw-proc-{}", std::process::id());
+    let marker = format!("eg-proc-{}", std::process::id());
     write(&repo, &format!("{marker}.py"), "def f():\n    pass\n");
     for i in 0..200 {
         write(&repo, &format!("pad{i}.py"), "def p():\n    return 1\n");
     }
-    let mut child = aw(&repo).arg("build").spawn().unwrap();
+    let mut child = eg(&repo).arg("build").spawn().unwrap();
     let pid = child.id().to_string();
     let mut seen: std::collections::HashSet<String> = Default::default();
     let mut pgrep_ok = 0usize;
@@ -454,7 +458,7 @@ fn g5_no_child_processes_survive() {
 fn g5_process_inspection_detects_seeded_child() {
     // Guard the guard: pgrep must see a live descendant whose command line
     // carries the marker. Without this, an empty result could pass vacuously.
-    let marker = format!("aw-seed-{}", std::process::id());
+    let marker = format!("eg-seed-{}", std::process::id());
     let script = format!("sleep 30; : {marker}");
     let mut child = Command::new("sh").args(["-c", &script]).spawn().unwrap();
     let mut found = false;
@@ -479,7 +483,7 @@ fn g5_process_inspection_detects_seeded_child() {
 fn p15_stats_line() {
     let repo = fixture("p15");
     build(&repo);
-    let out = aw(&repo).args(["stats"]).output().unwrap();
+    let out = eg(&repo).args(["stats"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     assert!(

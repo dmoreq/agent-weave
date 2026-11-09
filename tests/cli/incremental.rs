@@ -17,7 +17,7 @@ fn fast_path_preserves_callers_of_changed_file() {
     // must be re-extracted, or `callers`/`impact` silently lose results.
     let repo = fixture("closure");
     build(&repo);
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("app.py:6"),
@@ -30,7 +30,7 @@ fn fast_path_preserves_callers_of_changed_file() {
         &format!("{UTILS}\n\ndef extra():\n    return 1\n"),
     );
     build(&repo);
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         out.status.code(),
@@ -45,7 +45,7 @@ fn fast_path_preserves_callers_of_changed_file() {
         stdout.contains("utils.py:5"),
         "utils.py caller survived: {stdout}"
     );
-    let out = aw(&repo).args(["impact", "utils.py"]).output().unwrap();
+    let out = eg(&repo).args(["impact", "utils.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "impact must survive: {stdout}");
     assert!(
@@ -60,7 +60,7 @@ fn pre_signature_version_index_rebuilds_once() {
     // re-extract once (meta marker absent), not carry truncated signatures.
     let repo = fixture("signature-upgrade");
     build(&repo);
-    let db = repo.join(".aw/index.db");
+    let db = repo.join(".engram/index.db");
     let out = Command::new("python3")
         .arg("-c")
         .arg(format!(
@@ -72,7 +72,7 @@ fn pre_signature_version_index_rebuilds_once() {
     assert!(out.status.success());
     let (_, out2, _) = build(&repo);
     assert!(out2.contains("carried=0"), "full re-extract: {out2}");
-    let out = aw(&repo).args(["search", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["search", "normalize"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("def normalize(text)"));
 }
@@ -81,7 +81,7 @@ fn pre_signature_version_index_rebuilds_once() {
 fn older_extraction_revision_rebuilds_once() {
     let repo = fixture("extraction-upgrade");
     assert_eq!(build(&repo).0, 0);
-    let db = repo.join(".aw/index.db");
+    let db = repo.join(".engram/index.db");
     let status = Command::new("python3")
         .arg("-c")
         .arg("import sqlite3, sys; c=sqlite3.connect(sys.argv[1]); c.execute(\"UPDATE meta SET value='2' WHERE key='signature_version'\"); c.commit()")
@@ -104,7 +104,7 @@ fn noop_build_leaves_the_index_untouched() {
     let repo = fixture("noop-build");
     let (_, out1, _) = build(&repo);
     assert!(out1.contains("carried=0"), "{out1}");
-    let db = repo.join(".aw/index.db");
+    let db = repo.join(".engram/index.db");
     let stamp = |p: &Path| -> (u64, std::time::SystemTime) {
         let m = fs::metadata(p).unwrap();
         (m.len(), m.modified().unwrap())
@@ -131,15 +131,15 @@ fn prebuilt_index_restore_carries_on_hash_match() {
     // Cache the index artifact.
     let cache = temp_repo("m4-cache");
     fs::create_dir_all(&cache).unwrap();
-    fs::copy(repo.join(".aw/index.db"), cache.join("index.db")).unwrap();
+    fs::copy(repo.join(".engram/index.db"), cache.join("index.db")).unwrap();
 
-    // Fresh checkout: same content, new mtimes; drop .aw; restore the artifact.
+    // Fresh checkout: same content, new mtimes; drop .engram; restore the artifact.
     fs::write(repo.join("utils.py"), UTILS).unwrap();
     fs::write(repo.join("widget.py"), WIDGET).unwrap();
     fs::write(repo.join("app.py"), APP).unwrap();
-    fs::remove_dir_all(repo.join(".aw")).unwrap();
-    fs::create_dir_all(repo.join(".aw")).unwrap();
-    fs::copy(cache.join("index.db"), repo.join(".aw/index.db")).unwrap();
+    fs::remove_dir_all(repo.join(".engram")).unwrap();
+    fs::create_dir_all(repo.join(".engram")).unwrap();
+    fs::copy(cache.join("index.db"), repo.join(".engram/index.db")).unwrap();
 
     let (_, out2, _) = build(&repo);
     assert!(
@@ -148,12 +148,12 @@ fn prebuilt_index_restore_carries_on_hash_match() {
     );
 
     // Queries correct after restore; no staleness flag (mtime refreshed).
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0));
     assert!(stdout.contains("app.py:6"), "{stdout}");
     assert!(
-        !stdout.starts_with("aw: 1 of "),
+        !stdout.starts_with("eg: 1 of "),
         "carried rows must not read as stale: {stdout}"
     );
 
@@ -164,7 +164,7 @@ fn prebuilt_index_restore_carries_on_hash_match() {
         &format!("{UTILS}\n\ndef extra():\n    return 1\n"),
     );
     let (_, _, _) = build(&repo);
-    let out = aw(&repo).args(["callers", "normalize"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "normalize"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("app.py:6"),
@@ -182,7 +182,7 @@ fn unresolved_path_scope_binds_params() {
     );
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["unresolved", "--path", "src"])
         .output()
         .unwrap();
@@ -190,7 +190,7 @@ fn unresolved_path_scope_binds_params() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("src/sample.py unresolved=1"), "{stdout}");
 
-    let names = aw(&repo)
+    let names = eg(&repo)
         .args(["unresolved", "--names", "--path", "src"])
         .output()
         .unwrap();
@@ -225,7 +225,7 @@ fn callees_depth_two_is_transitive() {
         "def base():\n    return 0\n\ndef leaf():\n    return base()\n\ndef mid():\n    return leaf()\n\ndef top():\n    return mid()\n",
     );
     build(&repo);
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["callees", "top", "--depth", "2"])
         .output()
         .unwrap();
@@ -247,7 +247,7 @@ fn callees_empty_names_unresolved_sites() {
     let repo = temp_repo("callees-empty-unresolved");
     write(&repo, "a.py", "def entry():\n    return missing.run()\n");
     assert_eq!(build(&repo).0, 0);
-    let out = aw(&repo).args(["callees", "entry"]).output().unwrap();
+    let out = eg(&repo).args(["callees", "entry"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let combined = format!(
         "{}{}",
@@ -256,7 +256,7 @@ fn callees_empty_names_unresolved_sites() {
     );
     assert!(combined.contains("unresolved call site"), "{combined}");
     assert!(combined.contains("missing.run"), "{combined}");
-    assert!(combined.contains("aw unresolved --names"), "{combined}");
+    assert!(combined.contains("eg unresolved --names"), "{combined}");
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn callees_empty_without_unresolved_stays_plain() {
     let repo = temp_repo("callees-empty-plain");
     write(&repo, "a.py", "def empty():\n    return 1\n");
     assert_eq!(build(&repo).0, 0);
-    let out = aw(&repo).args(["callees", "empty"]).output().unwrap();
+    let out = eg(&repo).args(["callees", "empty"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let combined = format!(
         "{}{}",
@@ -279,7 +279,7 @@ fn callees_empty_without_unresolved_stays_plain() {
 fn impact_unknown_path_exit1() {
     let repo = fixture("impact-neg");
     build(&repo);
-    let out = aw(&repo).args(["impact", "nope.py"]).output().unwrap();
+    let out = eg(&repo).args(["impact", "nope.py"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("not indexed"), "{stderr}");
@@ -296,7 +296,7 @@ fn p8a_impact_edges_include_importers_and_inheritors() {
     write(&repo, "imports.py", "from hier import Base\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "hier.py", "--edges", "imports"])
         .output()
         .unwrap();
@@ -304,11 +304,11 @@ fn p8a_impact_edges_include_importers_and_inheritors() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(stdout.contains("imports.py:1"), "{stdout}");
     assert!(
-        stdout.starts_with("aw: impact — resolved static edges only"),
+        stdout.starts_with("eg: impact — resolved static edges only"),
         "caveat first: {stdout}"
     );
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "hier.py", "--edges", "inherits"])
         .output()
         .unwrap();
@@ -326,7 +326,7 @@ fn import_python_dotted_import_keeps_parent_module_edges() {
     write(&repo, "app.py", "import pkg.sub.b\n");
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "app.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     for row in ["app.py:1 pkg", "app.py:1 pkg.sub", "app.py:1 pkg.sub.b"] {
         assert!(stdout.contains(row), "missing {row}: {stdout}");
@@ -347,17 +347,17 @@ fn import_rust_root_modules_wildcard_and_single_segment_resolve() {
     write(&repo, "a.rs", "pub fn f() {}\n");
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "src/main.rs"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "src/main.rs"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("src/main.rs:1 src.a"), "{stdout}");
     assert!(stdout.contains("src/main.rs:2 src.rootfn"), "{stdout}");
 
-    let out = aw(&repo).args(["imports", "lib.rs"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "lib.rs"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("lib.rs:1 a"), "root mod mapping: {stdout}");
     assert!(stdout.contains("lib.rs:2 a.f"), "root crate use: {stdout}");
 
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     assert!(
         out.status.code() == Some(1),
         "root/wildcard/single-segment left unresolved: {}",
@@ -377,10 +377,10 @@ fn import_rust_wildcard_import_emits_ambiguous_module_edge() {
     );
     build(&repo);
 
-    let out = aw(&repo).args(["imports", "src/b.rs"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "src/b.rs"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("src/b.rs:1 src.a"), "star edge: {stdout}");
-    let out = aw(&repo).args(["callers", "shared"]).output().unwrap();
+    let out = eg(&repo).args(["callers", "shared"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("src/b.rs:4"),
@@ -397,7 +397,7 @@ fn import_python_star_import_heals_after_restore() {
     build(&repo);
     fs::remove_file(repo.join("pkg/later.py")).unwrap();
     build(&repo);
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("app.py:1 import pkg.later"),
         "star deletion must leave an unresolved site: {}",
@@ -405,7 +405,7 @@ fn import_python_star_import_heals_after_restore() {
     );
     write(&repo, "pkg/later.py", "def gone():\n    pass\n");
     build(&repo);
-    let out = aw(&repo).args(["imports", "app.py"]).output().unwrap();
+    let out = eg(&repo).args(["imports", "app.py"]).output().unwrap();
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("app.py:1 pkg.later"),
         "star restore must heal: {}",
@@ -430,7 +430,7 @@ fn unresolved_inherit_reports_cross_file_and_mixin_calls() {
     write(&repo, "web/a.ts", "class Bad extends mixin(1) {}\n");
     build(&repo);
 
-    let out = aw(&repo).args(["unresolved", "--names"]).output().unwrap();
+    let out = eg(&repo).args(["unresolved", "--names"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("src/use.rs:4 inherit Shape"),
@@ -449,7 +449,7 @@ fn impact_import_site_counts_one_per_statement() {
     write(&repo, "b.py", "from a import target\n");
     build(&repo);
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "a.py", "--edges", "imports"])
         .output()
         .unwrap();
@@ -460,7 +460,7 @@ fn impact_import_site_counts_one_per_statement() {
         "module+symbol edges counted twice: {stdout}"
     );
 
-    let out = aw(&repo)
+    let out = eg(&repo)
         .args(["impact", "a.py", "--edges", "imports", "--sites"])
         .output()
         .unwrap();

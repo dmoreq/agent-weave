@@ -3,21 +3,6 @@
 version = 4
 
 [[package]]
-name = "agent-weave"
-version = "0.5.3"
-dependencies = [
- "clap",
- "ignore",
- "rusqlite",
- "serde_json",
- "tree-sitter",
- "tree-sitter-javascript",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -172,6 +157,21 @@ name = "crossbeam-utils"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
+
+[[package]]
+name = "engram"
+version = "1.0.2"
+dependencies = [
+ "clap",
+ "ignore",
+ "rusqlite",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-javascript",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+]
 
 [[package]]
 name = "equivalent"

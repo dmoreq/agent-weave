@@ -1,7 +1,7 @@
 //! Rust resolution fixtures: impl methods, inline mods, and path resolution.
 
-use agent_weave::extract::{extract_file, resolve, Confidence, EdgeKind, SymbolKind};
-use agent_weave::parse::{parse_source, Lang};
+use engram::extract::{extract_file, resolve, Confidence, EdgeKind, SymbolKind};
+use engram::parse::{parse_source, Lang};
 
 use super::common::rust_call_edges;
 
@@ -12,12 +12,10 @@ fn rust_crate_three_segment_call_resolves() {
     // modules (src/ layout without mod.rs) — the G2-self G01 gap.
     let src1 = "pub fn file_changed() -> bool {\n    true\n}\n";
     let src2 = "pub fn check() -> bool {\n    crate::query::file_changed()\n}\n";
-    let parsed1 =
-        agent_weave::parse::parse_source(src1.as_bytes(), agent_weave::parse::Lang::Rust).unwrap();
-    let parsed2 =
-        agent_weave::parse::parse_source(src2.as_bytes(), agent_weave::parse::Lang::Rust).unwrap();
-    let fx1 = agent_weave::extract::extract_file(0, "src/query.rs", src1.as_bytes(), &parsed1);
-    let fx2 = agent_weave::extract::extract_file(1, "src/doctor.rs", src2.as_bytes(), &parsed2);
+    let parsed1 = engram::parse::parse_source(src1.as_bytes(), engram::parse::Lang::Rust).unwrap();
+    let parsed2 = engram::parse::parse_source(src2.as_bytes(), engram::parse::Lang::Rust).unwrap();
+    let fx1 = engram::extract::extract_file(0, "src/query.rs", src1.as_bytes(), &parsed1);
+    let fx2 = engram::extract::extract_file(1, "src/doctor.rs", src2.as_bytes(), &parsed2);
     let resolution = resolve(vec![fx1, fx2], Default::default());
     assert!(
         resolution.edges.iter().any(|e| {
@@ -36,9 +34,8 @@ fn rust_impl_methods_scope_to_the_impl_type() {
     // m.Bar.make; `impl Bar { fn go(&self, other: Foo) -> Foo }` must yield
     // m.Bar.go, not m.Foo.go.
     let src = "struct Foo;\nstruct Bar;\n\nimpl Foo {\n    fn make() -> Bar {\n        Bar\n    }\n    fn plain() {}\n}\n\nimpl Bar {\n    fn go(&self, other: Foo) -> Foo {\n        other\n    }\n}\n";
-    let parsed =
-        agent_weave::parse::parse_source(src.as_bytes(), agent_weave::parse::Lang::Rust).unwrap();
-    let fx = agent_weave::extract::extract_file(0, "src/m.rs", src.as_bytes(), &parsed);
+    let parsed = engram::parse::parse_source(src.as_bytes(), engram::parse::Lang::Rust).unwrap();
+    let fx = engram::extract::extract_file(0, "src/m.rs", src.as_bytes(), &parsed);
     let quals: Vec<&str> = fx.symbols.iter().map(|s| s.qualname.as_str()).collect();
     assert!(quals.contains(&"src.m.Foo.make"), "{quals:?}");
     assert!(quals.contains(&"src.m.Foo.plain"), "{quals:?}");

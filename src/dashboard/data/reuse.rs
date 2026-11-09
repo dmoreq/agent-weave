@@ -91,7 +91,7 @@ pub fn collect_reuse_candidates(
 }
 
 fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
-    let db_path = r_root.join(".aw").join("index.db");
+    let db_path = r_root.join(".engram").join("index.db");
     if !db_path.is_file() {
         return 0;
     }
@@ -100,10 +100,11 @@ fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) ->
             Ok(c) => c,
             Err(_) => return 0,
         };
-    let (candidates, total) = match crate::query::reuse::analyze_corpus(&conn, None, None, 25) {
-        Ok(res) => res,
-        Err(_) => return 0,
-    };
+    let (candidates, total) =
+        match crate::query::reuse::analyze_corpus(&conn, None, None, 25, false) {
+            Ok(res) => res,
+            Err(_) => return 0,
+        };
     for c in candidates {
         out.push(format_candidate_json(r_name, r_root, &conn, &c));
     }

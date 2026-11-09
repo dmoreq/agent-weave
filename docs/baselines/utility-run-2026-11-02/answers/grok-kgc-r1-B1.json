@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["vihap/adapters/sklearn.py:79"],
-  "answer": "vihap.adapters.sklearn._to_list is defined as def _to_list(seq: Any) -> list[Any] and is called by _raw_items_from_sklearn_input through return _to_list(_tabular_address_column(X)) and return _to_list(X)."
-}

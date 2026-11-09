@@ -119,8 +119,11 @@ pub(super) fn check_note_ref_status(
 
 /// The `[global] [stale-ref]` store markers shared by `mem get` output and
 /// the listing tag builder, so the suffix order cannot drift.
-pub(super) fn store_tags(is_global: bool, status: RefStatus) -> String {
+pub(super) fn store_tags(is_global: bool, status: RefStatus, source: &str) -> String {
     let mut tag = String::new();
+    if source == "import" {
+        tag.push_str(" [imported]");
+    }
     if is_global {
         tag.push_str(" [global]");
     }
@@ -139,13 +142,13 @@ fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, status: RefStatus) -> S
     if row.superseded_by.is_some() {
         tag.push_str(" [superseded]");
     }
-    tag.push_str(&store_tags(is_global, status));
+    tag.push_str(&store_tags(is_global, status, &row.source));
     tag
 }
 
 /// The caveated empty error for the `--all` listing, keyed on whether the
 /// listing extended to superseded revisions.
-fn mem_all_empty(include_superseded: bool) -> AwError {
+fn mem_all_empty(include_superseded: bool) -> EgError {
     mem_empty(if include_superseded {
         "memory store has no notes"
     } else {
@@ -159,7 +162,7 @@ fn mem_all_empty(include_superseded: bool) -> AwError {
 fn render_mem_rows(
     rows: Vec<(crate::db::MemRow, bool)>,
     args: &MemQueryArgs<'_>,
-    empty_error: impl FnOnce() -> AwError,
+    empty_error: impl FnOnce() -> EgError,
 ) -> Result<ArmOut> {
     let rows: Vec<_> = if let Some(target_ref) = args.reference {
         rows.into_iter()
@@ -216,11 +219,11 @@ fn query_single_store(
     is_global: bool,
 ) -> Result<ArmOut> {
     if args.all {
-        let rows = crate::db::memory_current_rows(conn, &args.filter)?;
+        let rows = crate::db::memory_current_rows(conn, &args.filter, None)?;
         return render_all_rows(rows.into_iter().map(|row| (row, is_global)).collect(), args);
     }
     let joined = args.terms.join(" ");
-    let candidates = mem_ranked(conn, &joined, &args.filter, is_global)?;
+    let candidates = mem_ranked(conn, &joined, &args.filter, is_global, args.index_conn)?;
     render_ranked(candidates, args)
 }
 
@@ -232,8 +235,8 @@ fn merge_all_rows(
     global_conn: &rusqlite::Connection,
     filter: &crate::db::MemFilter,
 ) -> Result<Vec<(crate::db::MemRow, bool)>> {
-    let local_rows = crate::db::memory_current_rows(local_conn, filter)?;
-    let global_rows = crate::db::memory_current_rows(global_conn, filter)?;
+    let local_rows = crate::db::memory_current_rows(local_conn, filter, None)?;
+    let global_rows = crate::db::memory_current_rows(global_conn, filter, None)?;
     let mut seen_keys = std::collections::HashSet::new();
     let mut combined = Vec::new();
     for row in local_rows {
@@ -263,10 +266,10 @@ fn query_merged_stores(
         return render_all_rows(combined, args);
     }
     let joined = args.terms.join(" ");
-    let mut combined = mem_ranked(local_conn, &joined, &args.filter, false)?;
+    let mut combined = mem_ranked(local_conn, &joined, &args.filter, false, args.index_conn)?;
     let seen_keys: std::collections::HashSet<String> =
         combined.iter().map(|c| c.row.key.clone()).collect();
-    let global = mem_ranked(global_conn, &joined, &args.filter, true)?;
+    let global = mem_ranked(global_conn, &joined, &args.filter, true, args.index_conn)?;
     // One batched existence probe replaces the per-candidate `memory_get`
     // (N+1 with a revision COUNT per key): only keys the local ranking has
     // not already surfaced need the shadowing check.
@@ -296,19 +299,19 @@ fn validate_mem_query(
     include_superseded: bool,
 ) -> Result<()> {
     if explicit_all && !terms.is_empty() {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem query: --all and terms are mutually exclusive".to_string(),
         ));
     }
     if !terms.is_empty() && terms.iter().all(|t| !t.is_empty() && t.trim().is_empty()) {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem query: provide terms or --all".to_string(),
         ));
     }
     // Superseded rows participate in the explicit listing only; the
     // ranked resolver keeps supersession-at-result-time exclusion.
     if include_superseded && !effective_all {
-        return Err(AwError::Usage(
+        return Err(EgError::Usage(
             "mem query: --include-superseded requires --all".to_string(),
         ));
     }

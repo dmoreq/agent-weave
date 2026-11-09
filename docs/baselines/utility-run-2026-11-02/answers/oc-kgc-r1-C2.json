@@ -1,7 +1,0 @@
-{
-  "exists": false,
-  "hops": 0,
-  "route": [],
-  "pairs": [],
-  "answer": "No. Comparing every 5-line window in near.py against every other Python file after ignoring blank lines found zero identical windows; its identifiers differ from the similar pair files."
-}

@@ -28,7 +28,7 @@ jobs:
       - run: cargo test --locked
       - run: python3 -I tests/scripts/test_recall_scorers.py
       - run: python3 -I -B bench/test_run.py
-      - run: python3 -I bench/run.py target/release/aw
+      - run: python3 -I bench/run.py target/release/eg
       - run: bash tests/scripts/allowlist_check.sh Cargo.lock
       - run: bash tests/scripts/write_path_check.sh
       - run: bash tests/scripts/hygiene_check.sh
@@ -49,8 +49,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - run: cargo install --path . --locked --root "$RUNNER_TEMP/aw-install"
-      - run: $RUNNER_TEMP/aw-install/bin/aw --version
+      - run: cargo install --path . --locked --root "$RUNNER_TEMP/eg-install"
+      - run: $RUNNER_TEMP/eg-install/bin/eg --version
 
   audit:
     runs-on: ubuntu-latest
@@ -71,9 +71,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - run: cargo build --locked --release
       - run: |
-          mkdir -p "$RUNNER_TEMP/aw-fixture"
-          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/aw-fixture/a.py"
-          bash tests/scripts/seatbelt-build.sh target/release/aw "$RUNNER_TEMP/aw-fixture"
+          mkdir -p "$RUNNER_TEMP/eg-fixture"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/eg-fixture/a.py"
+          bash tests/scripts/seatbelt-build.sh target/release/eg "$RUNNER_TEMP/eg-fixture"
 
   network-deny-linux:
     runs-on: ubuntu-latest
@@ -85,9 +85,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - name: network namespace denies egress (positive control + build)
         run: |
-          mkdir -p "$RUNNER_TEMP/aw-fixture"
-          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/aw-fixture/a.py"
-          bash tests/scripts/linux-netns-build.sh target/release/aw "$RUNNER_TEMP/aw-fixture"
+          mkdir -p "$RUNNER_TEMP/eg-fixture"
+          printf 'def f():\n    return 1\n' > "$RUNNER_TEMP/eg-fixture/a.py"
+          bash tests/scripts/linux-netns-build.sh target/release/eg "$RUNNER_TEMP/eg-fixture"
 
   self-gt:
     runs-on: ubuntu-latest
@@ -102,5 +102,5 @@ jobs:
             echo "no evidence vault in this tree — skipped"; exit 0
           fi
           cargo build --locked --release
-          target/release/aw build --force
-          python3 -I tests/scripts/precision_recall.py . target/release/aw "$gt"
+          target/release/eg build --force
+          python3 -I tests/scripts/precision_recall.py . target/release/eg "$gt"

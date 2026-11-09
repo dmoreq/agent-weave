@@ -1,3 +1,0 @@
-`vihap.models.ParserConfig.to_dict` at `vihap/models.py:127` serializes configuration to a dictionary. Its docstring is "Serialize configuration to a dictionary."
-
-Wrote `/tmp/utility-answers-2026-11-02/grok-kgc-r1-E3.json`.

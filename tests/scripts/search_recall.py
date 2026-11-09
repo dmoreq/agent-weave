@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""G14 — symbol-search recall gate (aw Amendment 12b).
+"""G14 — symbol-search recall gate (eg Amendment 12b).
 
 Reads docs/baselines/search-gt.jsonl (frozen BEFORE implementation) and runs
-`aw search <query> --limit 10` against the ground-truth repos. A query line
-carries: repo ("aw" -> --root <aw-repo>, "vihap" -> --root <vihap-repo>),
+`eg search <query> --limit 10` against the ground-truth repos. A query line
+carries: repo ("eg" -> --root <eg-repo>, "vihap" -> --root <vihap-repo>),
 query (space-separated NL/identifier terms), expect (qualname suffixes that
 must appear in the top-10 results).
 
 Scoring: per-query recall = matched expects / total expects; reported as the
 mean over queries plus the pooled symbol-level rate with a Wilson 95%
 interval. Gate: mean recall >= 0.70. Usage:
-    python3 tests/scripts/search_recall.py --queries <gt.jsonl> <aw-binary> \
-        --aw-root <path> --vihap-root <path>
+    python3 tests/scripts/search_recall.py --queries <gt.jsonl> <eg-binary> \
+        --eg-root <path> --vihap-root <path>
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def count_matches(expected: list[str], stdout: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--queries", required=True)
-    ap.add_argument("--aw-root", required=True)
+    ap.add_argument("--eg-root", required=True)
     ap.add_argument("--vihap-root", required=True)
     ap.add_argument("binary")
     ap.add_argument("--limit", type=int, default=10)
@@ -59,7 +59,7 @@ def main() -> int:
     rows = [json.loads(l) for l in Path(args.queries).read_text().splitlines() if l.strip()]
     if not rows or any(not row.get("expect") for row in rows):
         ap.error("queries and expected symbol lists must not be empty")
-    roots = {"aw": args.aw_root, "vihap": args.vihap_root}
+    roots = {"eg": args.eg_root, "aw": args.eg_root, "vihap": args.vihap_root}
 
     print("| query | hits | expects | recall |")
     print("|-------|------|---------|--------|")

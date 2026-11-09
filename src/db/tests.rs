@@ -26,7 +26,7 @@ fn missing_index_is_exit1_not_panic() {
 #[test]
 fn corrupted_index_is_exit3() {
     let dir = temp_root("db-corrupt");
-    make_dir_all(dir.join(".aw")).unwrap();
+    make_dir_all(dir.join(".engram")).unwrap();
     write_file(db_path(&dir), b"this is not sqlite at all").unwrap();
     let err = open_for_query(&dir).unwrap_err();
     assert_eq!(err.exit_code(), 3);

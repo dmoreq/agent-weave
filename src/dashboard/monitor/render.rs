@@ -41,7 +41,7 @@ fn render_header<W: Write>(w: &mut W, state: &TuiState, safe_cols: usize) -> io:
     };
 
     let title = format!(
-        "aw monitor v0.5.3 | Repos: {}{}{}",
+        "eg monitor v0.5.3 | Repos: {}{}{}",
         state.total_repos, filter_str, mode_str
     );
     let title_trunc = truncate_chars(&title, safe_cols);

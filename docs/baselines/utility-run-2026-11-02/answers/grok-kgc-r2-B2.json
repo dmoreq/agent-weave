@@ -1,6 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": ["vihap/adapters/sklearn.py:117"],
-  "answer": "vihap.adapters.sklearn._coerce_string_sequence is defined as def _coerce_string_sequence(X: Any) -> list[str] at vihap/adapters/sklearn.py:117 and is called by _fit_string_sequence at line 225 as clean_items = _coerce_string_sequence(X) if X is not None else []."
-}

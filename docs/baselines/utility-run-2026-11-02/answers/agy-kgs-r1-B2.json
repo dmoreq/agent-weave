@@ -1,8 +1,0 @@
-{
-  "exists": true,
-  "hops": 0,
-  "route": [
-    "vihap/adapters/sklearn.py:117"
-  ],
-  "answer": "vihap.adapters.sklearn._coerce_string_sequence defines `_coerce_string_sequence(X: Any) -> list[str]` at vihap/adapters/sklearn.py:117 and is called directly in `_fit_string_sequence` at line 225 to normalize `X` into `clean_items`."
-}

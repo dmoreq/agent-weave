@@ -40,15 +40,15 @@ jobs:
       - run: cargo build --locked --release --target ${{ matrix.target }}
       - name: package
         run: |
-          name="aw-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="eg-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/aw" "dist/$name/"
+          cp "target/${{ matrix.target }}/release/eg" "dist/$name/"
           cp README.md LICENSE LICENSE-MIT LICENSE-APACHE NOTICE "dist/$name/"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aw-${{ matrix.target }}
+          name: eg-${{ matrix.target }}
           path: dist/*.tar.gz*
   publish:
     needs: build

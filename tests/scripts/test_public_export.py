@@ -39,12 +39,12 @@ class PublicExportTests(unittest.TestCase):
                 public_export.scrub(output)
             self.assertEqual(sentinel.read_text(), "keep\n")
 
-    def test_export_excludes_reports_and_baselines(self):
+    def test_export_excludes_archive_and_baselines(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source"
             source.mkdir()
-            for directory in ("reports", "baselines"):
+            for directory in ("archive", "baselines"):
                 path = source / "docs" / directory
                 path.mkdir(parents=True)
                 (path / "private.md").write_text("internal evidence\n")
@@ -60,10 +60,10 @@ class PublicExportTests(unittest.TestCase):
             output = root / "export"
             public_export.export(source, output)
             self.assertTrue((output / "README.md").is_file())
-            self.assertFalse((output / "docs/reports").exists())
+            self.assertFalse((output / "docs/archive").exists())
             self.assertFalse((output / "docs/baselines").exists())
 
-    def test_gate_rejects_reports_reintroduced_after_export(self):
+    def test_gate_rejects_archive_reintroduced_after_export(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             (output / "Cargo.toml").write_text(
@@ -71,13 +71,13 @@ class PublicExportTests(unittest.TestCase):
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(public_export.gate(output), 0)
-            reports = output / "docs/reports"
-            reports.mkdir(parents=True)
-            (reports / "private.md").write_text("internal report\n")
+            archive = output / "docs/archive"
+            archive.mkdir(parents=True)
+            (archive / "private.md").write_text("internal report\n")
             captured = io.StringIO()
             with contextlib.redirect_stdout(captured):
                 self.assertEqual(public_export.gate(output), 1)
-            self.assertIn("forbidden path present: docs/reports", captured.getvalue())
+            self.assertIn("forbidden path present: docs/archive", captured.getvalue())
 
     def test_gate_rejects_private_export_scripts(self):
         with tempfile.TemporaryDirectory() as temporary:
