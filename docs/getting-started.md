@@ -37,14 +37,6 @@ eg --help
 
 *Note*: `eg` is built entirely with offline-capable bundled sources. Runtime execution requires zero network access.
 
-### Upgrading from `agent-weave` (`aw`)
-State now lives in `.engram/` and `~/.engram/`. On first use, `eg` copies a
-pre-rename `.aw/memory.db` or `~/.aw/memory.db` into the new location when the
-new store is absent, so project memory survives the rename. Indexes are not
-migrated: `eg build` rebuilds them. The legacy `AW_*` environment variables
-(`AW_NO_JOURNAL`, `AW_GLOBAL_DIR`, `AW_SESSION`, `AW_AGENT`) keep resolving as
-fallbacks, and the installer leaves a transitional `aw -> eg` symlink.
-
 ---
 
 ## 2. The First 5 Minutes: Core USPs in Action

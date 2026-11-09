@@ -1,8 +1,8 @@
 //! Project memory: pure presentation and scoring over rows `db.rs` returns.
 //! No write primitives, no connection opening — everything here is a pure
 //! function of its inputs, so CLI and MCP render byte-identical output by
-//! construction (companion design: docs/archive/designs/2026-11-05_agent-weave-
-//! memory-retrieval.md; resolver constants follow its Decision D4-A).
+//! construction (companion design: docs/architecture/memory-store.md;
+//! resolver constants follow its Decision D4-A).
 
 use crate::error::{EgError, Result};
 

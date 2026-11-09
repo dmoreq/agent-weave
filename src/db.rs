@@ -74,11 +74,6 @@ pub fn eg_dir(root: &Path) -> PathBuf {
     root.join(".engram")
 }
 
-/// Compatibility alias for the pre-rename confinement helper: downstream
-/// code compiled against the old crate identity keeps resolving.
-#[doc(hidden)]
-pub use eg_dir as aw_dir;
-
 /// Copy one confinement file into place atomically: private temp file beside
 /// the target, fsync, then rename. The source is left untouched, so a downgrade
 /// to the pre-rename binary keeps reading its own store.

@@ -76,8 +76,7 @@ changes bump the minor while 0.x is unstable.
   overrides keep applying.
 - The MCP server identifies itself as `engram`, the KPI footer reads `⚡ eg:`,
   and CLI output prefixes read `eg: ...`. The routing skill moves to
-  `skills/engram-first`, and the installer keeps a transitional `aw -> eg`
-  symlink plus a legacy `agent-weave` MCP entry for running agent hosts.
+  `skills/engram-first`, and the installer provides clean configuration for all running agent hosts.
 - Security hardening: repo-local `.engram/` state that is tracked in Git is
   rejected with exit 2 (`eg: security: ...`) to block committed memory
   injection, `~/.engram/` is created `0700` with `0600` stores and journals on
@@ -187,7 +186,7 @@ changes bump the minor while 0.x is unstable.
   (BM25 + ref/token overlap + recency fusion). Notes are candidates, never
   proof: every mem command opens with the caveat line. Bodies cap at 8 KiB;
   the journal carries `body_len`, never body text. Design:
-  `docs/archive/designs/2026-11-05_agent-weave-memory-retrieval.md`.
+  `docs/architecture/memory-store.md`.
 - **`aw mem export` JSONL backup.** stdout is pure JSONL (the caveat goes to
   stderr); restore = `mem write` replay, idempotent by content hash. This is
   the recovery path for the primary memory store.

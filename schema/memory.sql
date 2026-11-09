@@ -1,5 +1,5 @@
 -- eg memory schema v1 — the project-memory store `.engram/memory.db` (companion
--- design: docs/archive/designs/2026-11-05_agent-weave-memory-retrieval.md). Separate
+-- design: docs/architecture/memory-store.md). Separate
 -- file from index.db on purpose: memory is primary data, the index is derived.
 -- The binary gates this store on its own compiled MEMORY_SCHEMA_VERSION
 -- (src/db.rs stamps PRAGMA user_version; this file declares no PRAGMA, the

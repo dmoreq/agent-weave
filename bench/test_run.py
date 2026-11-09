@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 RUN = Path(__file__).with_name("run.py")
-SPEC = importlib.util.spec_from_file_location("aw_bench_run", RUN)
+SPEC = importlib.util.spec_from_file_location("eg_bench_run", RUN)
 BENCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BENCH)
 

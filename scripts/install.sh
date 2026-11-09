@@ -92,34 +92,25 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 ln -sf "$HOME/.cargo/bin/eg" "$HOME/.local/bin/eg"
 
-# Transitional aliases: running agent hosts and shell history still call `aw`.
-# Both are symlinks to the single `eg` binary, so the architecture stays one
-# compiled executable.
-ln -sf "$HOME/.cargo/bin/eg" "$HOME/.cargo/bin/aw"
-ln -sf "$HOME/.cargo/bin/eg" "$HOME/.local/bin/aw"
+# Clean up legacy transitional symlinks
+rm -f "$HOME/.cargo/bin/aw" "$HOME/.local/bin/aw" "$HOME/.local/bin/aw-dashboard" "$HOME/.local/bin/eg-monitor"
 
 # Symlink dashboard utility (native Rust launcher)
 DASHBOARD_SRC="$REPO_ROOT/scripts/eg-dashboard"
-rm -f "$HOME/.local/bin/eg-monitor"
 
 if [[ -f "$DASHBOARD_SRC" ]]; then
   chmod +x "$DASHBOARD_SRC"
   ln -sf "$DASHBOARD_SRC" "$HOME/.local/bin/eg-dashboard"
-  ln -sf "$DASHBOARD_SRC" "$HOME/.local/bin/aw-dashboard"
 fi
 
-# Ensure ~/.engram exists for global telemetry and memory. A pre-rename
-# ~/.aw store is migrated by the binary on first use, not by this script.
+# Ensure ~/.engram exists for global telemetry and memory.
 mkdir -p "$HOME/.engram"
 chmod 700 "$HOME/.engram" 2>/dev/null || true
 
 log_ok "Binaries and scripts installed:"
 echo "  ├─ ~/.cargo/bin/eg"
 echo "  ├─ ~/.local/bin/eg -> ~/.cargo/bin/eg"
-echo "  ├─ ~/.cargo/bin/aw -> ~/.cargo/bin/eg (transitional)"
-echo "  ├─ ~/.local/bin/aw -> ~/.cargo/bin/eg (transitional)"
-echo "  ├─ ~/.local/bin/eg-dashboard -> $DASHBOARD_SRC"
-echo "  └─ ~/.local/bin/aw-dashboard -> $DASHBOARD_SRC (transitional)"
+echo "  └─ ~/.local/bin/eg-dashboard -> $DASHBOARD_SRC"
 
 # Check PATH
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]] && [[ ":$PATH:" != *":$HOME/.cargo/bin:"* ]]; then
@@ -435,10 +426,7 @@ if os.path.exists(codex_dir):
     inject_rule(os.path.join(codex_dir, "AGENTS.md"))
     print("  └─ Injected Code Navigation Invariant into ~/.codex/AGENTS.md")
 
-# --- Transitional MCP aliases ---
-# Agent hosts that cached the pre-rename server key keep working: mirror every
-# "engram" server entry under the legacy "agent-weave" key. The primary key is
-# never rewritten, so new hosts read the canonical name.
+# --- Purge legacy MCP entries ---
 LEGACY_MCP_NAME = "agent-weave"
 
 def _servers_node(data, path_keys):
@@ -449,7 +437,7 @@ def _servers_node(data, path_keys):
         node = node.get(key)
     return node if isinstance(node, dict) else None
 
-def mirror_legacy_json(path):
+def purge_legacy_json(path):
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return False
     try:
@@ -462,8 +450,8 @@ def mirror_legacy_json(path):
         servers = _servers_node(data, path_keys)
         if servers is None:
             continue
-        if isinstance(servers.get("engram"), dict) and LEGACY_MCP_NAME not in servers:
-            servers[LEGACY_MCP_NAME] = dict(servers["engram"])
+        if LEGACY_MCP_NAME in servers:
+            del servers[LEGACY_MCP_NAME]
             changed = True
     if changed:
         with open(path, "w", encoding="utf-8") as f:
@@ -479,31 +467,39 @@ for cfg in (
     os.path.expanduser("~/.config/zed/settings.json"),
     claude_json,
 ):
-    if mirror_legacy_json(cfg):
-        print(f"  ├─ Mirrored engram MCP entry as {LEGACY_MCP_NAME} in {cfg}")
+    if purge_legacy_json(cfg):
+        print(f"  ├─ Purged legacy {LEGACY_MCP_NAME} entry from {cfg}")
 
-def mirror_legacy_toml(path):
+def purge_legacy_toml(path):
     if not os.path.exists(path):
         return False
-    with open(path, "r", encoding="utf-8") as f:
-        content = f.read()
-    if f"[mcp_servers.{LEGACY_MCP_NAME}]" in content:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
         return False
-    if "[mcp_servers.engram]" not in content:
-        return False
-    legacy = (
-        f"\n[mcp_servers.{LEGACY_MCP_NAME}]\n"
-        f'command = "{eg_bin}"\n'
-        'args = ["mcp", "--all-tools"]\n'
-        "enabled = true\n"
-    )
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(legacy)
-    return True
+    new_lines = []
+    skip = False
+    changed = False
+    for line in lines:
+        if line.strip() == f"[mcp_servers.{LEGACY_MCP_NAME}]":
+            skip = True
+            changed = True
+            continue
+        if skip:
+            if line.startswith("["):
+                skip = False
+                new_lines.append(line)
+            continue
+        new_lines.append(line)
+    if changed:
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+    return changed
 
 for cfg in (os.path.expanduser("~/.grok/config.toml"), os.path.expanduser("~/.codex/config.toml")):
-    if mirror_legacy_toml(cfg):
-        print(f"  ├─ Added {LEGACY_MCP_NAME} alias entry to {cfg}")
+    if purge_legacy_toml(cfg):
+        print(f"  ├─ Purged legacy {LEGACY_MCP_NAME} entry from {cfg}")
 PYEOF
 
 # 4. Local Workspace Index

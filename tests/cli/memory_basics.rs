@@ -3,7 +3,7 @@
 use super::common::*;
 
 // ---------------------------------------------------------------------------
-// Project memory (companion design: 2026-11-05_agent-weave-memory-retrieval).
+// Project memory (companion design: docs/architecture/memory-store.md).
 // Phase 1 acceptance: byte-exact shapes, exit contracts, idempotent replay,
 // revision supersession, version/corruption gates, doctor disposition,
 // concurrent writers, export round-trip, journal privacy, recall smoke.

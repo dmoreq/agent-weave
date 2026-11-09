@@ -154,7 +154,7 @@ pub fn stat_size(path: &Path) -> Option<i64> {
 
 // ---------------------------------------------------------------------------
 // Project memory store (`.engram/memory.db`) — companion design:
-// docs/archive/designs/2026-11-05_agent-weave-memory-retrieval.md. All memory.db
+// docs/architecture/memory-store.md. All memory.db
 // lifecycle lives here so the write-confinement allowlist stays unchanged.
 // Pragma regime (deliberately NOT the index build's OFF/OFF/EXCLUSIVE — the
 // design's Storage note): default rollback journal, synchronous = FULL, and a

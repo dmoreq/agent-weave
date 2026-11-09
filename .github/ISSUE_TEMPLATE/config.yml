@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Usage questions
-    url: https://github.com/quy-doan/engram#usage
+    url: https://github.com/dmoreq/engram#usage
     about: README covers commands, response contract, and exit codes.
