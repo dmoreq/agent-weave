@@ -104,7 +104,7 @@ By default, `eg mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 | `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?` | Zero-token layered memory search |
 
 ### Extended Surface (`--all-tools`)
-Passing `--all-tools` exposes 5 additional memory maintenance tools (18 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
+Passing `--all-tools` exposes 6 additional memory maintenance tools (19 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, `mem_export` (JSONL or Markdown), and `mem_import` (reject-on-conflict restore; confined to the project store).
 
 *Note*: `doctor`, `stats`, and `unresolved` are intentionally reserved for human CLI inspection and omitted from MCP stdio dispatch.
 

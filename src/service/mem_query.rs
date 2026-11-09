@@ -119,8 +119,11 @@ pub(super) fn check_note_ref_status(
 
 /// The `[global] [stale-ref]` store markers shared by `mem get` output and
 /// the listing tag builder, so the suffix order cannot drift.
-pub(super) fn store_tags(is_global: bool, status: RefStatus) -> String {
+pub(super) fn store_tags(is_global: bool, status: RefStatus, source: &str) -> String {
     let mut tag = String::new();
+    if source == "import" {
+        tag.push_str(" [imported]");
+    }
     if is_global {
         tag.push_str(" [global]");
     }
@@ -139,7 +142,7 @@ fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, status: RefStatus) -> S
     if row.superseded_by.is_some() {
         tag.push_str(" [superseded]");
     }
-    tag.push_str(&store_tags(is_global, status));
+    tag.push_str(&store_tags(is_global, status, &row.source));
     tag
 }
 
@@ -216,7 +219,7 @@ fn query_single_store(
     is_global: bool,
 ) -> Result<ArmOut> {
     if args.all {
-        let rows = crate::db::memory_current_rows(conn, &args.filter)?;
+        let rows = crate::db::memory_current_rows(conn, &args.filter, None)?;
         return render_all_rows(rows.into_iter().map(|row| (row, is_global)).collect(), args);
     }
     let joined = args.terms.join(" ");
@@ -232,8 +235,8 @@ fn merge_all_rows(
     global_conn: &rusqlite::Connection,
     filter: &crate::db::MemFilter,
 ) -> Result<Vec<(crate::db::MemRow, bool)>> {
-    let local_rows = crate::db::memory_current_rows(local_conn, filter)?;
-    let global_rows = crate::db::memory_current_rows(global_conn, filter)?;
+    let local_rows = crate::db::memory_current_rows(local_conn, filter, None)?;
+    let global_rows = crate::db::memory_current_rows(global_conn, filter, None)?;
     let mut seen_keys = std::collections::HashSet::new();
     let mut combined = Vec::new();
     for row in local_rows {

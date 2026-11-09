@@ -41,6 +41,7 @@ fn memories_fts_is_pure_function_of_memories() {
             now,
             include_superseded: false,
         },
+        None,
     )
     .unwrap();
     let mut fts: Vec<(i64, String)> = {
@@ -136,7 +137,7 @@ fn memory_current_rows_matches_is_current_predicate() {
                     .map(|row| row.id)
                     .collect();
                 expected.sort();
-                let mut got: Vec<i64> = memory_current_rows(&conn, &filter)
+                let mut got: Vec<i64> = memory_current_rows(&conn, &filter, None)
                     .unwrap()
                     .iter()
                     .map(|row| row.id)

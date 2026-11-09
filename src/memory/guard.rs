@@ -94,7 +94,7 @@ fn collect_guards(
     seen_keys: &mut HashSet<String>,
     out: &mut Vec<GuardedNote>,
 ) {
-    let Ok(rows) = crate::db::memory_current_rows(conn, filter) else {
+    let Ok(rows) = crate::db::memory_current_rows(conn, filter, None) else {
         return;
     };
     for row in rows {

@@ -285,6 +285,7 @@ function updateMemoryKpis() {
   const decisions = currentNotes.filter(m => m.kind === 'decision').length;
   const facts = currentNotes.filter(m => m.kind === 'fact').length;
   const tasks = currentNotes.filter(m => m.kind === 'task').length;
+  const procedures = currentNotes.filter(m => m.kind === 'procedure').length;
   const guardedEl = document.getElementById('mem-kpi-guarded');
   if (guardedEl) guardedEl.textContent = currentNotes.length;
   const guardedSub = document.getElementById('mem-kpi-guarded-sub');
@@ -294,6 +295,7 @@ function updateMemoryKpis() {
     if (decisions > 0) details.push(decisions + ' decisions');
     if (facts > 0) details.push(facts + ' facts');
     if (tasks > 0) details.push(tasks + ' tasks');
+    if (procedures > 0) details.push(procedures + ' procedures');
     guardedSub.textContent = details.length > 0 ? details.join(' · ') : currentNotes.length + ' active notes';
   }
 
@@ -1115,7 +1117,7 @@ function renderMemoryList() {
       renderMemoryList();
     };
 
-    const kindClass = 'badge status-' + (m.kind === 'decision' ? 'ambig' : m.kind === 'gotcha' ? 'warn' : m.kind === 'fact' ? 'ok' : 'err');
+    const kindClass = 'badge status-' + (m.kind === 'decision' ? 'ambig' : m.kind === 'gotcha' ? 'warn' : m.kind === 'fact' ? 'ok' : m.kind === 'procedure' ? 'neutral' : 'err');
     const timeStr = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString() : '—';
     const storeBadge = '<span class="badge badge-repo">' + escapeHtml(m.store) + '</span>';
     const revPill = '<span class="badge" style="background: var(--bg-subtle);">r' + m.rev + '</span>';

@@ -207,7 +207,7 @@ eg mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 |---|---|---|
 | `<KEY>` | Required | Stable note identifier ($\le 200$ chars, alphanumeric/dashes). |
 | `--body <TEXT>` | Required | Note body prose ($\le 8192$ bytes, never verbatim source dumps). |
-| `--kind <KIND>` | Required | Note category: `decision`, `gotcha`, `fact`, or `task`. |
+| `--kind <KIND>` | Required | Note category: `decision`, `gotcha`, `fact`, `task`, or `procedure`. |
 | `--tags <TOKENS>` | None | Whitespace-separated tags ($\le 16$ tags, $\le 32$ chars each). |
 | `--refs <NAMES>` | None | Whitespace-separated AST qualnames or paths ($\le 16$ refs, $\le 256$ chars each). |
 | `--scope <SCOPE>` | `durable` | `durable` (never expires) or `session` (expires after TTL). |
@@ -229,7 +229,7 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 |---|---|---|
 | `[TERMS]` | Optional | Search query terms (mutually exclusive with `--all`; empty/whitespace defaults to `--all`). |
 | `--all` | `false` | List all active notes ordered by recency. |
-| `--kind <KIND>` | None | Filter by note kind (`decision`, `gotcha`, `fact`, `task`). |
+| `--kind <KIND>` | None | Filter by note kind (`decision`, `gotcha`, `fact`, `task`, `procedure`). |
 | `--scope <SCOPE>` | None | Filter by scope (`durable` or `session`). |
 | `--limit <N>` | `10` | Maximum results displayed (1 to 100). |
 | `--include-superseded`| `false` | When combined with `--all`, includes superseded note revisions. |
@@ -248,7 +248,8 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 | `touch` | `eg mem touch <KEY> [--global]` | Refresh `created_at` timestamp on active revision without creating a new revision. |
 | `get` | `eg mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
 | `delete` | `eg mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
-| `export` | `eg mem export [--limit <N>] [--global]` | Export active notes as JSONL to stdout (pure backup stream). |
+| `export` | `eg mem export [--format jsonl\|markdown] [--limit <N>] [--global]` | Export active notes as JSONL (default) or fenced Markdown to stdout. |
+| `import` | `eg mem import <PATH> [--format jsonl\|markdown] [--force] [--global]` | Restore a JSONL/Markdown export (use `-` for stdin). Conflicting keys are skipped unless `--force` overwrites; imported rows carry `[imported]`. MCP import is confined to the project store. |
 | `gc` | `eg mem gc [--global]` | Purge expired session notes and superseded revisions older than 30 days. |
 
 ---

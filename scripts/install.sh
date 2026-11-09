@@ -157,7 +157,7 @@ rule_text = (
     "first before reading entire source files or running broad greps. Verify pointed lines directly.\n"
     "  - **Pre-Task**: Run `eg mem query` to inspect prior architectural decisions, gotchas, and conventions.\n"
     "  - **Pre-Write / Post-Edit**: Run `eg search '<terms>'` before implementing helpers; run `eg reuse <paths>` to prevent duplicate functions.\n"
-    "  - **Post-Fix**: Run `eg mem write <key> --kind gotcha|decision --body ... --refs <paths>` to persist durable learnings before task completion.\n"
+    "  - **Post-Fix**: Run `eg mem write <key> --kind gotcha|decision|procedure --body ... --refs <paths>` to persist durable learnings before task completion.\n"
 )
 
 def update_json_file(path, updater_fn):

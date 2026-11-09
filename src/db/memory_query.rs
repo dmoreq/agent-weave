@@ -48,9 +48,15 @@ pub(crate) fn memory_row_is_current(row: &MemRow, filter: &MemFilter) -> bool {
 /// parameters, never string interpolation. The WHERE clause mirrors
 /// `memory_row_is_current` (same rule set, SQL spelling; a unit test holds
 /// the two row-by-row equal).
-pub fn memory_current_rows(conn: &Connection, filter: &MemFilter) -> Result<Vec<MemRow>> {
+pub fn memory_current_rows(
+    conn: &Connection,
+    filter: &MemFilter,
+    limit: Option<usize>,
+) -> Result<Vec<MemRow>> {
     // include_superseded=0 keeps only current rows; =1 lists everything
-    // (superseded rows included, tagged at render time).
+    // (superseded rows included, tagged at render time). `limit` is the
+    // export-side cap; -1 (`None`) means no SQL LIMIT, which the listing paths
+    // use because they cap at render time.
     let superseded_clause = "AND (superseded_by IS NULL OR ?4 = 1)";
     let mut stmt = conn
         .prepare(&format!(
@@ -59,7 +65,8 @@ pub fn memory_current_rows(conn: &Connection, filter: &MemFilter) -> Result<Vec<
                {superseded_clause}
                AND (?2 = '' OR kind = ?2)
                AND (?3 = '' OR scope = ?3)
-             ORDER BY created_at DESC, key ASC, rev DESC"
+             ORDER BY created_at DESC, key ASC, rev DESC
+             LIMIT ?5"
         ))
         .map_err(map_memory_err)?;
     let rows = stmt
@@ -75,6 +82,7 @@ pub fn memory_current_rows(conn: &Connection, filter: &MemFilter) -> Result<Vec<
                     .map(crate::memory::MemScope::as_str)
                     .unwrap_or(""),
                 i64::from(filter.include_superseded),
+                limit.map_or(-1, |n| n as i64),
             ],
             mem_row,
         )
@@ -243,24 +251,6 @@ pub fn memory_delete(conn: &mut Connection, key: &str) -> Result<Option<i64>> {
     let removed = ids.len() as i64;
     tx.commit().map_err(map_memory_err)?;
     Ok(Some(removed))
-}
-
-/// Export rows: current revs, newest first, optionally limited to the N most
-/// recent by created_at (deterministic; `None` = all).
-pub fn memory_export_rows(conn: &Connection, limit: Option<usize>) -> Result<Vec<MemRow>> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {MEM_ROW_SQL} FROM memories
-             WHERE superseded_by IS NULL
-             ORDER BY created_at DESC, key ASC, rev DESC
-             LIMIT ?1"
-        ))
-        .map_err(map_memory_err)?;
-    let rows = stmt
-        .query_map(rusqlite::params![limit.map_or(-1, |n| n as i64)], mem_row)
-        .map_err(map_memory_err)?;
-    rows.collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(map_memory_err)
 }
 
 /// Durable (non-superseded) memory note count. Single source of the

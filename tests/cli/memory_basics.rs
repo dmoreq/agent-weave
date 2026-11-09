@@ -226,7 +226,7 @@ fn mem_query_rejects_unknown_kind_and_scope_exit2() {
             .unwrap();
         assert_eq!(code, 2, "flag {flag}: {stderr}");
         let expected = if flag == "--kind" {
-            "kind must be one of decision|gotcha|fact|task"
+            "kind must be one of decision|gotcha|fact|task|procedure"
         } else {
             "scope must be one of durable|session"
         };
@@ -241,7 +241,7 @@ fn mem_write_usage_rejections_are_exit2() {
     let (code, _stdout, stderr) = mem_write(&repo, "k", "body", "mood");
     assert_eq!(code, 2);
     assert!(
-        stderr.contains("kind must be one of decision|gotcha|fact|task"),
+        stderr.contains("kind must be one of decision|gotcha|fact|task|procedure"),
         "{stderr}"
     );
     // Phase 2: session scope is now accepted; unknown scope still exits 2.

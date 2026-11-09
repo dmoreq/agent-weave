@@ -210,6 +210,7 @@ fn run_memory(req: &CommandRequest, root_arg: Option<&Path>, surface: Surface) -
         CommandRequest::MemDelete { .. } => run_mem_delete(req, root_arg),
         CommandRequest::MemGc { .. } => run_mem_gc(req, root_arg),
         CommandRequest::MemExport { .. } => run_mem_export(req, root_arg),
+        CommandRequest::MemImport { .. } => run_mem_import(req, root_arg, surface),
         _ => unreachable!("run_memory called with a non-memory request"),
     }
 }

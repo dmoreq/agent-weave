@@ -12,6 +12,7 @@ mod invalidation;
 mod memory_basics;
 mod memory_doctor;
 mod memory_enhancements;
+mod memory_import;
 mod memory_session;
 mod p8_impact;
 mod rename_migration;

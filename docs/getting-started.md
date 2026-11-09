@@ -199,6 +199,13 @@ eg doctor --invalidate
 eg mem export > memory_backup.jsonl
 ```
 
+Restore a backup with `eg mem import memory_backup.jsonl`. For a Git-versionable, reviewable form, export fenced Markdown instead:
+
+```bash
+eg mem export --format markdown > docs/memory.md
+eg mem import docs/memory.md
+```
+
 ---
 
 ## Next Steps

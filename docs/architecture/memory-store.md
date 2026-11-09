@@ -29,7 +29,7 @@ one FTS5 table:
 - `key` — caller-chosen stable identity; a rewrite appends a revision.
 - `rev` — 1-based revision, unique per key; the current row is the highest
   non-superseded revision.
-- `kind` — closed set: `decision`, `gotcha`, `fact`, `task`.
+- `kind` — closed set: `decision`, `gotcha`, `fact`, `task`, `procedure`.
 - `scope` — `durable`, or `session` with a TTL deadline in `expires_at`.
 - `body` — prose, capped at 8192 bytes; secrets and credentials are rejected at
   the trust boundary.
@@ -88,8 +88,12 @@ areas.
   records the replacement without deleting history.
 - **GC** — `eg mem gc` purges expired session notes and superseded revisions
   older than the 30-day retention window.
-- **Export** — `eg mem export` writes JSONL, one current note per line; replay
-  through `eg mem write` restores a store.
+- **Export** — `eg mem export` writes JSONL (default) or fenced Markdown
+  (`--format markdown`) for the current notes. Both formats read the same
+  expiry-filtered current-row query.
+- **Import** — `eg mem import <path>` restores either format (or stdin, `-`) in
+  one transaction. Imported rows carry `source=import`. A key whose local
+  content differs is skipped (exit 2) unless `--force` opens a new revision.
 
 ## Concurrency and failure classes
 

@@ -14,14 +14,14 @@ CREATE TABLE memories(
     id INTEGER PRIMARY KEY,
     key TEXT NOT NULL,              -- caller-chosen stable identity, <= 200 chars, no control chars
     rev INTEGER NOT NULL,           -- 1-based; new rev = old rev + 1 under one transaction
-    kind TEXT NOT NULL,             -- closed set: decision | gotcha | fact | task
+    kind TEXT NOT NULL,             -- closed set: decision | gotcha | fact | task | procedure
     scope TEXT NOT NULL DEFAULT 'durable',   -- durable | session (session accepted from Phase 2)
     session TEXT NOT NULL DEFAULT '',        -- ENGRAM_SESSION attribution (env, trimmed/capped 64)
     body TEXT NOT NULL,             -- agent-authored prose, hard cap 8192 bytes
     tags TEXT NOT NULL DEFAULT '',  -- whitespace-separated lowercase tokens, <= 16 tags x 32 chars
     refs TEXT NOT NULL DEFAULT '',  -- whitespace-separated qualnames / repo paths, <= 16 x 256 chars
     content_hash INTEGER NOT NULL,  -- FNV-1a 64 over (kind, body, tags, refs, scope) — idempotent replay
-    source TEXT NOT NULL,           -- cli | mcp
+    source TEXT NOT NULL,           -- cli | mcp | import
     created_at INTEGER NOT NULL,    -- unix seconds
     expires_at INTEGER NOT NULL DEFAULT 0,   -- 0 = never; session rows carry the TTL deadline
     superseded_by INTEGER,          -- id of the replacing rev; NULL = current row

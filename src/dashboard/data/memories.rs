@@ -103,6 +103,11 @@ fn kind_prevention_card(kind: &str, key: &str) -> (&'static str, &'static str, S
             "Verified Fact Shortcut",
             format!("Avoids costly multi-file grep scans by caching verified system truth for '{key}'."),
         ),
+        Some(crate::memory::MemKind::Procedure) => (
+            "OPERATIONAL PLAYBOOK",
+            "Reusable Procedure",
+            format!("Provides a verified runbook for '{key}' that the agent can rehearse at task start."),
+        ),
         Some(crate::memory::MemKind::Task) | None => (
             "HANDOFF CONTEXT",
             "Cross-Session Handoff Guard",

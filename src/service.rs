@@ -11,7 +11,7 @@ use crate::error::{EgError, Result};
 use crate::journal::JournalArgs;
 
 /// Which surface is dispatching; journaled as `surface` in `.engram/usage.log`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
     Cli,
     Mcp,
@@ -131,7 +131,14 @@ pub enum CommandRequest {
         global: bool,
     },
     MemExport {
+        format: Option<String>,
         limit: Option<usize>,
+        global: bool,
+    },
+    MemImport {
+        path: String,
+        format: Option<String>,
+        force: bool,
         global: bool,
     },
 }
@@ -255,6 +262,7 @@ impl ArmOut {
 
 mod args;
 mod from_cli;
+mod mem_import;
 mod mem_ops;
 mod mem_query;
 mod mem_write;
@@ -262,6 +270,7 @@ mod run;
 mod tools;
 
 use from_cli::*;
+use mem_import::*;
 use mem_ops::*;
 use mem_query::*;
 use mem_write::*;
@@ -369,7 +378,14 @@ mod tests {
             },
             CommandRequest::MemGc { global: false },
             CommandRequest::MemExport {
+                format: None,
                 limit: None,
+                global: false,
+            },
+            CommandRequest::MemImport {
+                path: "memory.md".into(),
+                format: None,
+                force: false,
                 global: false,
             },
         ]

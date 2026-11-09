@@ -264,6 +264,7 @@ tr:hover td { background: var(--bg-subtle); }
 .status-warn { background: var(--intent-warning-soft); color: var(--intent-warning); }
 .status-ambig { background: var(--intent-info-soft); color: var(--intent-info); }
 .status-err { background: var(--intent-danger-soft); color: var(--intent-danger); }
+.status-neutral { background: var(--bg-subtle); color: var(--text-muted); }
 .badge-repo { background: var(--bg-subtle); color: var(--text-secondary); }
 .badge-wt { background: var(--intent-primary-soft); color: var(--intent-primary); }
 

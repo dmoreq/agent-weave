@@ -72,6 +72,7 @@ fn gc_purges_expired_rows_and_their_fts_entries() {
             now: now + 10,
             include_superseded: false,
         },
+        None,
     )
     .unwrap();
     assert_eq!(current.len(), 1);

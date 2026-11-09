@@ -32,6 +32,11 @@ pub const MAX_TAGS: usize = 16;
 pub const MAX_TAG_BYTES: usize = 32;
 pub const MAX_REFS: usize = 16;
 pub const MAX_REF_BYTES: usize = 256;
+/// Import input cap: one Markdown/JSONL file larger than this is rejected
+/// (exit 2) before parsing, so a hostile export cannot exhaust memory.
+pub const MAX_IMPORT_FILE_BYTES: usize = 16 * 1024 * 1024;
+/// Import note cap: a single import may carry at most this many notes.
+pub const MAX_IMPORT_NOTES: usize = 5000;
 /// Closed `kind` taxonomy (OQ3 keeps the design default until the owner says
 /// otherwise); anything else is a usage error (exit 2). Stored rows spell the
 /// kind through `as_str()` at the bind boundary and validation parses the raw
@@ -43,15 +48,17 @@ pub enum MemKind {
     Gotcha,
     Fact,
     Task,
+    Procedure,
 }
 
 /// The taxonomy as a list, kept under the `MEM_KINDS` name as the single
 /// source the usage-error render and the parser both derive from.
-pub const MEM_KINDS: [MemKind; 4] = [
+pub const MEM_KINDS: [MemKind; 5] = [
     MemKind::Decision,
     MemKind::Gotcha,
     MemKind::Fact,
     MemKind::Task,
+    MemKind::Procedure,
 ];
 
 impl MemKind {
@@ -61,6 +68,7 @@ impl MemKind {
             MemKind::Gotcha => "gotcha",
             MemKind::Fact => "fact",
             MemKind::Task => "task",
+            MemKind::Procedure => "procedure",
         }
     }
 

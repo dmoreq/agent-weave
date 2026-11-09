@@ -238,7 +238,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "kind",
                 kind: ParamKind::Str,
                 required: true,
-                description: "One of: decision, gotcha, fact, task",
+                description: "One of: decision, gotcha, fact, task, procedure",
             },
             ParamSpec {
                 name: "tags",
@@ -314,7 +314,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "kind",
                 kind: ParamKind::Str,
                 required: false,
-                description: "Restrict to one kind: decision, gotcha, fact, task",
+                description: "Restrict to one kind: decision, gotcha, fact, task, procedure",
             },
             ParamSpec {
                 name: "scope",
@@ -401,8 +401,14 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "mem_export",
-        description: "Write current project-memory notes as JSONL to the result text (restore = mem_write replay); the caveat is reported separately so the JSONL parses cleanly",
+        description: "Write current project-memory notes to the result text as JSONL (default) or fenced Markdown; the caveat is reported separately so the payload parses cleanly",
         params: &[
+            ParamSpec {
+                name: "format",
+                kind: ParamKind::Str,
+                required: false,
+                description: "Output format: jsonl (default) or markdown",
+            },
             ParamSpec {
                 name: "limit",
                 kind: ParamKind::Int {
@@ -417,6 +423,31 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 kind: ParamKind::Bool,
                 required: false,
                 description: "Export from global memory store",
+            },
+        ],
+        core: false,
+    },
+    ToolSpec {
+        name: "mem_import",
+        description: "Restore project-memory notes from a JSONL or fenced-Markdown file (path, or '-' for stdin); conflicting keys are skipped unless force overwrites them. MCP writes are confined to the project store",
+        params: &[
+            ParamSpec {
+                name: "path",
+                kind: ParamKind::Str,
+                required: true,
+                description: "Input file path, or '-' to read stdin (repo-relative over MCP)",
+            },
+            ParamSpec {
+                name: "format",
+                kind: ParamKind::Str,
+                required: false,
+                description: "Input format: jsonl or markdown (default: detect from path/first line)",
+            },
+            ParamSpec {
+                name: "force",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Overwrite a key whose local content differs (default: reject and skip)",
             },
         ],
         core: false,

@@ -138,7 +138,7 @@ The 10 core command surfaces cover complete code navigation, anti-reinvention, a
 
 ### Platform & Maintenance Commands
 
-- `eg mem write|query|get|delete|export|gc`: Zero-token project and global memory management.
+- `eg mem write|query|get|delete|export|import|gc`: Zero-token project and global memory management (Markdown/JSONL export and reject-on-conflict import).
 - `eg doctor [--invalidate]`: Verify index integrity, staleness, or reset derived data.
 - `eg stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
 - `eg unresolved [--names]`: Inspect where static resolution could not resolve call sites.

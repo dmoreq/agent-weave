@@ -54,7 +54,8 @@ fn g10_initialize_tools_list_and_parity() {
             "mem_get",
             "mem_delete",
             "mem_gc",
-            "mem_export"
+            "mem_export",
+            "mem_import"
         ]
         .map(str::to_string)
     );

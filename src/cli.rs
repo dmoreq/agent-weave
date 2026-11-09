@@ -224,7 +224,7 @@ pub enum MemAction {
         /// Note body, agent-authored prose (<= 8192 bytes)
         #[arg(long)]
         body: String,
-        /// One of: decision, gotcha, fact, task
+        /// One of: decision, gotcha, fact, task, procedure
         #[arg(long)]
         kind: String,
         /// Whitespace-separated lowercase tags (<= 16 x 32 chars)
@@ -262,7 +262,7 @@ pub enum MemAction {
         /// Restrict search to notes referencing this path or symbol
         #[arg(long = "ref")]
         reference: Option<String>,
-        /// Restrict to one kind: decision, gotcha, fact, task
+        /// Restrict to one kind: decision, gotcha, fact, task, procedure
         #[arg(long)]
         kind: Option<String>,
         /// Restrict to one scope: durable or session
@@ -302,13 +302,31 @@ pub enum MemAction {
         #[arg(long)]
         global: bool,
     },
-    /// Write current notes as JSONL to stdout (restore = mem write replay);
-    /// the caveat goes to stderr so restore pipelines parse stdout directly
+    /// Write current notes to stdout as JSONL (default) or fenced Markdown
+    /// (Git-versionable); the caveat goes to stderr so pipelines parse stdout
     Export {
+        /// Output format: jsonl (default, restore format) or markdown
+        #[arg(long)]
+        format: Option<String>,
         /// Take the N most recent notes instead of all of them
         #[arg(long)]
         limit: Option<usize>,
         /// Export from the cross-project global memory store (~/.engram/memory.db)
+        #[arg(long)]
+        global: bool,
+    },
+    /// Restore notes from a JSONL or fenced-Markdown export (use '-' for stdin).
+    /// Conflicting keys are skipped unless --force overwrites them.
+    Import {
+        /// Input file path, or '-' to read stdin
+        path: String,
+        /// Input format: jsonl or markdown (default: detect from path/first line)
+        #[arg(long)]
+        format: Option<String>,
+        /// Overwrite a key whose local content differs (default: reject and skip)
+        #[arg(long, alias = "overwrite")]
+        force: bool,
+        /// Import into the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },

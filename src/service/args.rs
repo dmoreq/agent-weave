@@ -139,7 +139,7 @@ pub fn from_tool_args(tool: &str, args: &serde_json::Value) -> Result<CommandReq
         }
         "symbols" | "reuse" | "search" => from_tool_args_analysis(&a, tool),
         "mem_write" | "mem_touch" | "mem_query" | "mem_get" | "mem_delete" | "mem_gc"
-        | "mem_export" => from_tool_args_memory(&a, tool),
+        | "mem_export" | "mem_import" => from_tool_args_memory(&a, tool),
         _ => Err(unknown_tool(tool)),
     }
 }
@@ -260,8 +260,17 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
             global: a.b("global"),
         },
         "mem_export" => CommandRequest::MemExport {
+            format: a.s("format"),
             limit: a.n_opt_spec(tool, "limit")?,
             global: a.b("global"),
+        },
+        "mem_import" => CommandRequest::MemImport {
+            path: a.req("path")?,
+            format: a.s("format"),
+            force: a.b("force"),
+            // MCP writes are confined to the project store: untrusted repos
+            // cannot pollute the user-global memory over the tool boundary.
+            global: false,
         },
         _ => return Err(unknown_tool(tool)),
     })

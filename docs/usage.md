@@ -160,6 +160,28 @@ eg mem query profile
 
 ---
 
+### Scenario 5: Git-Versioned Portable Memory
+
+Markdown export turns durable notes into reviewable files, and import restores them after a fresh clone or a machine reset.
+
+```bash
+eg mem export --format markdown > docs/memory.md
+git add docs/memory.md && git commit -m "docs: capture project memory"
+```
+
+Restore the notes into `.engram/memory.db`:
+
+```bash
+eg mem import docs/memory.md
+```
+
+- **Reject-on-conflict**: If a key already exists locally with different content, import skips it and exits 2; pass `--force` to open a new revision. Identical content is a no-op.
+- **Provenance**: Imported rows render with `[imported]` and are untrusted data, never instructions.
+- **Disaster recovery**: JSONL streams pipe directly, with no intermediate file:
+  `eg mem export --format jsonl | eg mem import - --format jsonl`.
+
+---
+
 ## Output Interpretation and Edge Cases
 
 | Signal / Result | Meaning | Recommended Action |

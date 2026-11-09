@@ -14,7 +14,17 @@ changes bump the minor while 0.x is unstable.
 - Read [evaluation](docs/evaluation.md) for the public evidence summary and its limitations, not replacement original evidence.
 - Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
-## [Unreleased]
+## [1.0.0] - 2026-11-09
+
+### Highlights & Official Release
+
+- **Official Open-Source Release**: `engram` (`eg`) reaches v1.0.0 with unified single native binary architecture.
+- **USP 1: Sub-2ms Deterministic Graph Navigation**: Tree-sitter AST indexing for Python, TypeScript, JavaScript, and Rust with SQLite FTS5 search and content-addressed incremental builds.
+- **USP 2: Real-Time Anti-Reinvention Engine**: Pre-write interface discovery with caller weighting and post-edit duplicate detection across 4 calibrated detectors.
+- **USP 3: Zero-Token Layered Memory**: Code-anchored persistent project and global memory with SQLite BM25 + recency/ref fusion.
+- **Native Web Dashboard & TUI Monitor**: In-process HTTP SSE dashboard and terminal streaming monitor with zero Python dependencies.
+- **Model Context Protocol (MCP)**: Conforming stdio server for Claude, Cursor, Antigravity, Grok, Zcode, and OpenCode.
+- **Security & Confinement**: Strict write confinement to `.engram/` and `~/.engram/`, rejection of Git-tracked repository state, POSIX 0700/0600 modes.
 
 ### Changed — project rename: `engram` / `eg` (2026-11-09)
 
@@ -39,6 +49,25 @@ changes bump the minor while 0.x is unstable.
   injection, `~/.engram/` is created `0700` with `0600` stores and journals on
   Unix, and `eg doctor --invalidate` unlinks symlinked entries instead of
   traversing them.
+
+### Added — portable memory exchange (2026-11-09)
+
+- **`eg mem export --format markdown`**: renders current notes as fenced
+  Markdown (`@@ engram-note <slug> @@`, one-line JSON front-matter, body,
+  matching closer) so durable memory can be reviewed in pull requests and
+  versioned in Git. JSONL stays the default and keeps its restore contract.
+- **`eg mem import <path>`**: symmetric restore from a Markdown or JSONL export,
+  or stdin (`-`). The command parses at the service boundary, validates every
+  note, and writes the batch in one transaction. Imported rows carry
+  `source=import` and render `[imported]`.
+- **Reject-on-conflict import**: a key whose local content differs is skipped
+  and the command exits 2 unless `--force` (alias `--overwrite`) opens a new
+  revision. Identical content is a no-op.
+- **`procedure` note kind**: the closed taxonomy is now `decision | gotcha |
+  fact | task | procedure`, with dashboard badge/filter support.
+- **MCP**: `mem_import` joins the `--all-tools` surface (repo-relative path,
+  project store only); `mem_export` gains a `format` argument. CLI and MCP
+  success payloads stay byte-identical.
 
 ## [0.5.3] - 2026-11-09
 

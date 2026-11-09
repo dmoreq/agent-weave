@@ -183,9 +183,26 @@ impl CommandRequest {
             crate::cli::MemAction::Delete { key, global } => {
                 Ok(CommandRequest::MemDelete { key, global })
             }
-            crate::cli::MemAction::Export { limit, global } => {
-                Ok(CommandRequest::MemExport { limit, global })
-            }
+            crate::cli::MemAction::Export {
+                format,
+                limit,
+                global,
+            } => Ok(CommandRequest::MemExport {
+                format,
+                limit,
+                global,
+            }),
+            crate::cli::MemAction::Import {
+                path,
+                format,
+                force,
+                global,
+            } => Ok(CommandRequest::MemImport {
+                path,
+                format,
+                force,
+                global,
+            }),
             crate::cli::MemAction::Gc { global } => Ok(CommandRequest::MemGc { global }),
         }
     }
@@ -272,7 +289,8 @@ impl CommandRequest {
             | CommandRequest::MemGet { .. }
             | CommandRequest::MemDelete { .. }
             | CommandRequest::MemGc { .. }
-            | CommandRequest::MemExport { .. } => Family::Memory,
+            | CommandRequest::MemExport { .. }
+            | CommandRequest::MemImport { .. } => Family::Memory,
         }
     }
 
@@ -300,6 +318,7 @@ impl CommandRequest {
             CommandRequest::MemDelete { .. } => "mem_delete",
             CommandRequest::MemGc { .. } => "mem_gc",
             CommandRequest::MemExport { .. } => "mem_export",
+            CommandRequest::MemImport { .. } => "mem_import",
         }
     }
 
@@ -398,11 +417,11 @@ impl CommandRequest {
     /// destructure through their own helpers so each function stays small.
     fn journal_args_memory(&self) -> JournalArgs {
         match self {
-            CommandRequest::MemWrite { .. } => self.mem_write_args(),
+            CommandRequest::MemWrite { .. } => mem_write_args(self),
             CommandRequest::MemTouch { key, global } => {
                 vec![("key", key.clone()), ("global", global.to_string())]
             }
-            CommandRequest::MemQuery { .. } => self.mem_query_args(),
+            CommandRequest::MemQuery { .. } => mem_query_args(self),
             CommandRequest::MemGet { key, global } => {
                 vec![("key", key.clone()), ("global", global.to_string())]
             }
@@ -410,73 +429,26 @@ impl CommandRequest {
                 vec![("key", key.clone()), ("global", global.to_string())]
             }
             CommandRequest::MemGc { global } => vec![("global", global.to_string())],
-            CommandRequest::MemExport { limit, global } => {
-                vec![
-                    ("limit", limit.map_or_else(String::new, |n| n.to_string())),
-                    ("global", global.to_string()),
-                ]
-            }
+            CommandRequest::MemExport {
+                format,
+                limit,
+                global,
+            } => vec![
+                ("format", format.clone().unwrap_or_default()),
+                ("limit", limit.map_or_else(String::new, |n| n.to_string())),
+                ("global", global.to_string()),
+            ],
+            CommandRequest::MemImport {
+                format,
+                force,
+                global,
+                ..
+            } => vec![
+                ("format", format.clone().unwrap_or_default()),
+                ("force", force.to_string()),
+                ("global", global.to_string()),
+            ],
             _ => unreachable!("journal_args_memory called with a non-matching request"),
         }
-    }
-
-    /// Journal fields for `mem write`.
-    fn mem_write_args(&self) -> JournalArgs {
-        let CommandRequest::MemWrite {
-            key,
-            body,
-            kind,
-            scope,
-            ttl,
-            supersedes,
-            global,
-            touch,
-            ..
-        } = self
-        else {
-            unreachable!("mem_write_args called with a non-write request")
-        };
-        vec![
-            ("key", key.clone()),
-            ("kind", kind.clone()),
-            ("scope", scope.clone()),
-            ("ttl", ttl.map_or_else(String::new, |t| t.to_string())),
-            ("supersedes", supersedes.clone().unwrap_or_default()),
-            ("body_len", body.len().to_string()),
-            ("global", global.to_string()),
-            ("touch", touch.to_string()),
-        ]
-    }
-
-    /// Journal fields for `mem query`.
-    fn mem_query_args(&self) -> JournalArgs {
-        let CommandRequest::MemQuery {
-            terms,
-            kind,
-            scope,
-            limit,
-            include_superseded,
-            global,
-            reference,
-            ..
-        } = self
-        else {
-            unreachable!("mem_query_args called with a non-query request")
-        };
-        vec![
-            ("terms", terms.join(" ")),
-            ("ref", reference.clone().unwrap_or_default()),
-            (
-                "kind",
-                kind.map_or_else(String::new, |k| k.as_str().to_string()),
-            ),
-            (
-                "scope",
-                scope.map_or_else(String::new, |s| s.as_str().to_string()),
-            ),
-            ("limit", limit.to_string()),
-            ("include_superseded", include_superseded.to_string()),
-            ("global", global.to_string()),
-        ]
     }
 }
