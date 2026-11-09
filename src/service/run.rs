@@ -196,7 +196,8 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
             paths,
             limit,
             deep_callee,
-        } => crate::query::run_reuse(ctx, paths, *limit, *deep_callee)?,
+            judge,
+        } => crate::query::run_reuse(ctx, paths, *limit, *deep_callee, *judge)?,
         CommandRequest::Search { terms, limit } => crate::query::search(ctx, terms, *limit)?,
         _ => unreachable!("run_line_query called with a non-line request"),
     };

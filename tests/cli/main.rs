@@ -18,6 +18,7 @@ mod p8_impact;
 mod rename_migration;
 mod reuse;
 mod reuse_deep;
+mod reuse_judge;
 mod robustness;
 mod stats;
 mod symbols;

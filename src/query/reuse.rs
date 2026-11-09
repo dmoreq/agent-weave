@@ -34,6 +34,8 @@ pub struct ReuseCandidate {
     pub canonical_callers: i64,
     pub overlap_pct: u64,
     pub shared_items: Vec<String>,
+    /// Semantic verdict from `eg-laya`, present only with `--judge`.
+    pub verdict: Option<crate::query::judge::Verdict>,
 }
 
 impl ReuseCandidate {
@@ -70,6 +72,12 @@ impl ReuseCandidate {
 
     pub fn format_text(&self) -> String {
         let mut line = self.hint_line();
+        if let Some(verdict) = &self.verdict {
+            line.push_str(&format!(
+                "\n  judge ({}): {} p={:.2}",
+                verdict.mode, verdict.decision, verdict.probability
+            ));
+        }
         if !self.shared_items.is_empty() {
             let label = match self.detector {
                 DetectorId::D1 => "shared callees",
@@ -106,17 +114,25 @@ pub fn run_reuse(
     paths: &[String],
     limit: usize,
     deep_callee: bool,
+    judge: bool,
 ) -> Result<crate::query::LineQuery> {
     let QueryCtx { conn, .. } = *ctx;
     let limit = clamp_limit(limit)?;
     let path_filter = if paths.is_empty() { None } else { Some(paths) };
-    let (candidates, total) = analyze_corpus(conn, path_filter, None, limit, deep_callee)?;
+    let (mut candidates, total) = analyze_corpus(conn, path_filter, None, limit, deep_callee)?;
+    let mut stderr = String::new();
+
+    // Arbitrate before the empty-result early return so `--judge` reports why it could not run
+    // even when the static detectors found nothing.
+    if judge {
+        stderr = arbitrate(ctx, &mut candidates);
+    }
 
     if candidates.is_empty() {
         crate::journal::record_result(crate::journal::OutcomeCounts::of(0, 0), false, 0);
         return Ok(crate::query::LineQuery {
             lines: vec!["0 reuse candidates found".to_string()],
-            stderr: String::new(),
+            stderr,
             shown: 0,
         });
     }
@@ -134,9 +150,44 @@ pub fn run_reuse(
     crate::journal::record_result(crate::journal::OutcomeCounts::of(shown, total), false, 0);
     Ok(crate::query::LineQuery {
         lines: out,
-        stderr: String::new(),
+        stderr,
         shown,
     })
+}
+
+/// Fill `verdict` for gray-zone candidates and return the one stderr note (if any).
+fn arbitrate(ctx: &QueryCtx<'_>, candidates: &mut [ReuseCandidate]) -> String {
+    use crate::query::judge;
+    let setup = match judge::detect_setup() {
+        Ok(setup) => setup,
+        Err(note) => return format!("eg: judge: {note}\n"),
+    };
+    let mut judged = 0usize;
+    let mut gray = 0usize;
+    for candidate in candidates.iter_mut() {
+        if !judge::is_gray(candidate.overlap_pct) {
+            continue;
+        }
+        gray += 1;
+        if judged >= judge::MAX_JUDGED {
+            continue;
+        }
+        if let Some(verdict) = judge::arbitrate(&setup, ctx.conn, ctx.root, candidate) {
+            candidate.verdict = Some(verdict);
+            judged += 1;
+        }
+    }
+    if gray > 0 && judged == 0 {
+        return "eg: judge: eg-laya returned no verdict (timeout or model error)\n".to_string();
+    }
+    if gray > judged {
+        return format!(
+            "eg: judge: {} gray-zone candidate(s) left unjudged (cap {})\n",
+            gray - judged,
+            judge::MAX_JUDGED
+        );
+    }
+    String::new()
 }
 
 pub(crate) fn analyze_corpus(

@@ -43,7 +43,7 @@ Large Language Models waste context windows dumping whole source files to find c
 ### 2. Real-Time Anti-Reinvention Engine (Prevents Duplicate Code & Exploration Collapse)
 Unguided AI coding agents duplicate existing logic at alarming rates (up to 50.8% duplicate code by Turn 5 under multi-turn benchmarks, as documented in RepoReuse, [arXiv:2609.35357](https://arxiv.org/abs/2609.35357)). Furthermore, RepoReuse proved the **Historical Memory Paradox**: dumping full source code into the agent's context window increases duplicate logic ($C_{dup}$ jumps to 70.7%–94.7%) because models copy-paste instead of importing. Conversely, providing structured **Interface Memory** (signatures, types, and caller counts) maintains clean reuse and minimizes duplication ($C_{dup} = 46.7\%$). `eg` provides two-moment protection:
 - **Pre-write Discovery**: `eg search` returns zero-body Concise Interface Cards ranked by `BM25 + log(1 + callers)` to surface canonical functions before agents author new code, closing the exploration gap without context bloat.
-- **Post-edit Defense**: Incremental `eg build` emits instant stderr hints (< 1ms), while `eg reuse` executes four calibrated detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, raw client bypass, and 1-caller wrappers). Powered by an in-memory inverted posting index (< 3ms scan on 5,000 symbols) and an opt-in transitive 2-hop footprint (`--deep-callee`) to catch indirect wrappers.
+- **Post-edit Defense**: Incremental `eg build` emits instant stderr hints (< 1ms), while `eg reuse` executes four calibrated detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, raw client bypass, and 1-caller wrappers). Powered by an in-memory inverted posting index (< 3ms scan on 5,000 symbols) an opt-in transitive 2-hop footprint (`--deep-callee`) to catch indirect wrappers, and an opt-in semantic judge (`--judge`) that asks a local `eg-laya` model to arbitrate the 45-75% overlap band.
 
 ### 3. Zero-Token Code-Anchored Project & Global Memory (Unified Single Binary)
 External memory MCP servers introduce an expensive "Memory Tax" through prompt-injected summaries and LLM-based extractions. Furthermore, benchmark auditing by Zhou et al. ([arXiv:2606.24775](https://arxiv.org/abs/2606.24775)) proves that write-time LLM summarization causes irrecoverable information loss, while local deterministic maintenance sits on the Pareto efficiency frontier ($30\text{--}40\times$ faster than global LLM graph rebuilding). Based on Zero-Mem ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377)) and Agent Zero Memory ([arXiv:2608.29606](https://arxiv.org/abs/2608.29606)), `eg` implements zero-token persistent memory:
@@ -109,6 +109,7 @@ eg callers read_bounded --depth 2
 eg reuse
 # Optional: extend D1 to second-hop callees for wrappers through a helper
 eg reuse --deep-callee
+EG_LAYA_BIN=eg-laya EG_LAYA_MODEL=~/.engram/laya/model eg reuse --judge
 
 # 5. USP 3: Persist cross-project developer preferences (0 tokens)
 eg mem write dev-profile --kind decision --global \

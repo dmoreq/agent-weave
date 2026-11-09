@@ -193,6 +193,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 required: false,
                 description: "Extend the callee footprint to second-hop callees (weight 0.5)",
             },
+            ParamSpec {
+                name: "judge",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Ask the local eg-laya model to arbitrate 45-75% overlap candidates",
+            },
         ],
         core: true,
     },

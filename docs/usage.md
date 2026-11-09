@@ -93,7 +93,7 @@ eg reuse --deep-callee
 ```
 
 Powered by an in-memory inverted posting index (< 3ms scan on 5,000 symbols), `eg reuse` executes four calibrated detectors across files and within the same file:
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper.
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper. Add `--judge` to send the 45-75% band to a local `eg-laya` model, which answers with a proposition head or a bi-encoder cosine; point `EG_LAYA_BIN` at the binary and `EG_LAYA_MODEL` at a checkpoint directory. Without both, the flag degrades to the static output and prints one note to stderr.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
 - **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
 - **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.

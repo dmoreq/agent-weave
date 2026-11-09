@@ -210,6 +210,7 @@ fn from_tool_args_analysis(a: &ArgReader<'_>, tool: &str) -> Result<CommandReque
             paths: a.str_array("paths")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_REUSE_LIMIT)?,
             deep_callee: a.b("deep_callee"),
+            judge: a.b("judge"),
         },
         "search" => CommandRequest::Search {
             terms: a.req("terms")?,

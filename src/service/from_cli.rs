@@ -163,10 +163,12 @@ impl CommandRequest {
                 paths,
                 limit,
                 deep_callee,
+                judge,
             } => CommandRequest::Reuse {
                 paths,
                 limit,
                 deep_callee,
+                judge,
             },
             crate::cli::Cmd::Search { terms, limit } => CommandRequest::Search { terms, limit },
             crate::cli::Cmd::Stats { path } => CommandRequest::Stats { path },
@@ -412,10 +414,12 @@ impl CommandRequest {
                 paths,
                 limit,
                 deep_callee,
+                judge,
             } => vec![
                 ("paths", paths.join(",")),
                 ("limit", limit.to_string()),
                 ("deep_callee", deep_callee.to_string()),
+                ("judge", judge.to_string()),
             ],
             CommandRequest::Search { terms, limit } => {
                 vec![("terms", terms.clone()), ("limit", limit.to_string())]
