@@ -34,8 +34,11 @@ function updateThemeButtonText(theme) {
   if (btn) btn.textContent = 'Theme: ' + (theme === 'dark' ? 'Dark' : 'Light');
 }
 
+let activeTab = 'telemetry';
+
 // Tab Switching
 function switchTab(tab) {
+  activeTab = tab;
   const tabs = ['telemetry', 'reuse', 'memory'];
   tabs.forEach(t => {
     const btn = document.getElementById('tab-' + t + '-btn');
@@ -57,6 +60,8 @@ function switchTab(tab) {
       renderReuseReposTable(latestSummaryData.repo_aggs || {});
       renderReuseAgentsTable(latestSummaryData.agent_aggs || {});
     }
+    loadReuseData();
+    loadSummaryData();
   } else if (tab === 'memory') {
     populateMemoryStoreFilter();
     renderMemoryList();
@@ -64,6 +69,10 @@ function switchTab(tab) {
       renderMemoryReposTable(latestSummaryData.repo_aggs || {});
       renderMemoryAgentsTable(latestSummaryData.agent_aggs || {});
     }
+    loadMemoriesData();
+    loadSummaryData();
+  } else {
+    loadSummaryData();
   }
 }
 
@@ -1185,6 +1194,12 @@ function renderMemoryDossier(m) {
 let liveEventCount = 0;
 
 // Live Server-Sent Events (SSE)
+let summaryDebounceTimer = null;
+function triggerSummaryRefresh() {
+  if (summaryDebounceTimer) clearTimeout(summaryDebounceTimer);
+  summaryDebounceTimer = setTimeout(loadSummaryData, 300);
+}
+
 function initEventSource() {
   const liveBadge = document.getElementById('live-indicator');
   if (liveBadge) liveBadge.style.display = 'inline-block';
@@ -1195,9 +1210,7 @@ function initEventSource() {
       const q = JSON.parse(e.data);
       handleLiveEvent(q);
       liveEventCount++;
-      if (liveEventCount % 5 === 0) {
-        loadSummaryData();
-      }
+      triggerSummaryRefresh();
       if (q.tool && q.tool.startsWith('mem_')) {
         loadMemoriesData();
       }
@@ -1206,6 +1219,13 @@ function initEventSource() {
       }
     } catch(err) {}
   };
+
+  // Background fallback poll every 15s to keep metrics fresh
+  setInterval(() => {
+    loadSummaryData();
+    if (activeTab === 'reuse') loadReuseData();
+    if (activeTab === 'memory') loadMemoriesData();
+  }, 15000);
 }
 
 function handleLiveEvent(q) {
