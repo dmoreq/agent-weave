@@ -242,3 +242,61 @@ fn dashboard_api_summary_returns_reuse_and_memory_aggs() {
     handle.join().unwrap();
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn monitor_tui_render_all_tabs_coverage() {
+    use agent_weave::dashboard::monitor::render::render_screen;
+    use agent_weave::dashboard::monitor::state::{MonitorTab, TuiState};
+
+    let temp_dir = std::env::temp_dir().join(format!("test_tui_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let log_path = temp_dir.join("usage.log");
+    std::fs::write(
+        &log_path,
+        r#"{"ts":1794123456,"tool":"callers","repo_name":"test-repo","agent":"test-agent","latency_us":1200,"exit_code":0,"args":{"symbol":"test_fn"}}
+{"ts":1794123460,"tool":"search","repo_name":"test-repo","agent":"test-agent","latency_us":3400,"exit_code":0,"args":{"terms":"cache"}}
+{"ts":1794123470,"tool":"mem_get","repo_name":"test-repo","agent":"test-agent","latency_us":900,"exit_code":0,"args":{"key":"arch:test"}}
+"#,
+    )
+    .unwrap();
+
+    let mut state = TuiState::new(None, log_path.clone(), None, false);
+    assert_eq!(state.total_repos, 1);
+    assert_eq!(state.recent_events.len(), 3);
+
+    for tab in [
+        MonitorTab::Graph,
+        MonitorTab::Reuse,
+        MonitorTab::Memory,
+        MonitorTab::Stream,
+    ] {
+        state.active_tab = tab;
+        let mut buf = Vec::new();
+        render_screen(&mut buf, &state, 100, 30).unwrap();
+        let rendered = String::from_utf8_lossy(&buf);
+        assert!(
+            rendered.contains("aw monitor v0.5.3"),
+            "Header missing in tab {tab:?}"
+        );
+        assert!(rendered.contains("Keys:"), "Footer missing in tab {tab:?}");
+        match tab {
+            MonitorTab::Graph => {
+                assert!(rendered.contains("USP 1: DETERMINISTIC CODE GRAPH"));
+                assert!(rendered.contains("callers"));
+            }
+            MonitorTab::Reuse => {
+                assert!(rendered.contains("USP 2: REAL-TIME ANTI-REINVENTION"));
+            }
+            MonitorTab::Memory => {
+                assert!(rendered.contains("USP 3: ZERO-TOKEN PERSISTENT PROJECT MEMORY"));
+            }
+            MonitorTab::Stream => {
+                assert!(rendered.contains("[GRAPH ]"));
+                assert!(rendered.contains("[REUSE ]"));
+                assert!(rendered.contains("[MEMORY]"));
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
