@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 
 use crate::error::Result;
-use crate::query::reuse::DetectorId;
+use crate::query::reuse::{DetectorId, ReuseCandidate};
 
 use super::discover_repos;
 use super::read_snippet;
@@ -69,145 +69,11 @@ pub fn collect_reuse_candidates(
     discover_repos(root, entries, "index.db", &mut repos);
 
     let mut candidates_json = Vec::new();
-
     for (r_name, r_root) in &repos {
-        let db_path = r_root.join(".aw").join("index.db");
-        if !db_path.is_file() {
-            continue;
-        }
-
-        let conn =
-            match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-
-        let (candidates, _) = match crate::query::reuse::analyze_corpus(&conn, None, None, 25) {
-            Ok(res) => res,
-            Err(_) => continue,
-        };
-
-        for c in candidates {
-            let (det_title, det_summary) = match c.detector {
-                DetectorId::D1 => (
-                    "D1 Callee Footprint Overlap",
-                    format!("Workflow '{}' calls identical downstream functions as canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-                ),
-                DetectorId::D2 => (
-                    "D2 Interface Token Overlap",
-                    format!("Signature and parameters of '{}' duplicate canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-                ),
-                DetectorId::D3 => (
-                    "D3 Raw Client Bypass",
-                    format!("Symbol '{}' calls raw external clients directly instead of canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-                ),
-                DetectorId::D4 => (
-                    "D4 Redundant Pass-Through Wrapper",
-                    format!("Single-caller wrapper '{}' adds zero logic around canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-                ),
-            };
-
-            // Query candidate location and canonical location from symbols
-            let cand_loc = symbol_loc(&conn, &c.symbol, Loc::estimated(c.file.clone(), c.line));
-            let can_loc = symbol_loc(
-                &conn,
-                &c.canonical,
-                Loc::estimated(c.canonical_file.clone(), c.canonical_line),
-            );
-            let cand_snippet = read_snippet(
-                &r_root.join(&cand_loc.file),
-                cand_loc.start,
-                cand_loc.end,
-                30,
-            );
-            let can_snippet =
-                read_snippet(&r_root.join(&can_loc.file), can_loc.start, can_loc.end, 30);
-
-            let loc_saving = cand_loc.loc;
-            let narrative = format!(
-                "Consolidating '{}' into authoritative '{}' ([callers={}]) deletes ~{} duplicate lines and eliminates drift between twin implementations.",
-                c.symbol, c.canonical, c.canonical_callers, loc_saving
-            );
-
-            let shared_evidence = if c.shared_items.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "{}: [{}]",
-                    match c.detector {
-                        DetectorId::D1 => "shared callees",
-                        DetectorId::D2 => "shared tokens",
-                        DetectorId::D3 => "client bypass",
-                        DetectorId::D4 => "details",
-                    },
-                    c.shared_items.join(", ")
-                )
-            };
-
-            candidates_json.push(json!({
-                "id": format!("{}:{}->{}", r_name, c.symbol, c.canonical),
-                "repo": r_name,
-                "detector": c.detector.as_str(),
-                "detector_title": det_title,
-                "detector_summary": det_summary,
-                "symbol": c.symbol,
-                "canonical": c.canonical,
-                "canonical_callers": c.canonical_callers,
-                "canonical_file": c.canonical_file,
-                "canonical_line": c.canonical_line,
-                "overlap_pct": c.overlap_pct,
-                "shared_evidence": shared_evidence,
-                "candidate_info": json!({
-                    "file": cand_loc.file,
-                    "line_start": cand_loc.start,
-                    "line_end": cand_loc.end,
-                    "loc": cand_loc.loc,
-                }),
-                "canonical_info": json!({
-                    "file": can_loc.file,
-                    "line_start": can_loc.start,
-                    "line_end": can_loc.end,
-                    "loc": can_loc.loc,
-                }),
-                "candidate_snippet": cand_snippet,
-                "canonical_snippet": can_snippet,
-                "loc_saving": loc_saving,
-                "prevention_narrative": narrative,
-            }));
-        }
+        collect_repo_candidates(r_name, r_root, &mut candidates_json);
     }
 
-    // Prewrite search telemetry
-    let mut prewrite_searches = Vec::new();
-    for e in entries.iter().rev() {
-        let tool = e.get("tool").and_then(Value::as_str).unwrap_or("");
-        if tool == "search" || tool == "reuse" {
-            let args = e.get("args").cloned().unwrap_or(Value::Null);
-            let terms = args
-                .get("terms")
-                .or_else(|| args.get("paths"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            prewrite_searches.push(json!({
-                "ts": e.get("ts").unwrap_or(&Value::Null),
-                "repo_name": e.get("repo_name").unwrap_or(&Value::Null),
-                "tool": tool,
-                "terms": terms,
-                "shown": e.get("shown").or_else(|| e.get("result_count")).unwrap_or(&json!(0)),
-                "latency_us": e.get("latency_us").unwrap_or(&json!(0)),
-            }));
-            if prewrite_searches.len() >= 40 {
-                break;
-            }
-        }
-    }
-
-    let total_cands = candidates_json.len();
-    let prev_loc: i64 = candidates_json
-        .iter()
-        .map(|c| c.get("loc_saving").and_then(Value::as_i64).unwrap_or(0))
-        .sum();
+    let prewrite_searches = collect_prewrite_searches(entries);
     let prewrite_count = entries
         .iter()
         .filter(|e| {
@@ -217,6 +83,168 @@ pub fn collect_reuse_candidates(
             )
         })
         .count();
+
+    let summary = summarize_reuse_metrics(&candidates_json, prewrite_count);
+    Ok((candidates_json, summary, prewrite_searches))
+}
+
+fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) {
+    let db_path = r_root.join(".aw").join("index.db");
+    if !db_path.is_file() {
+        return;
+    }
+    let conn =
+        match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+    let (candidates, _) = match crate::query::reuse::analyze_corpus(&conn, None, None, 25) {
+        Ok(res) => res,
+        Err(_) => return,
+    };
+    for c in candidates {
+        out.push(format_candidate_json(r_name, r_root, &conn, &c));
+    }
+}
+
+fn format_detector_metadata(c: &ReuseCandidate) -> (&'static str, String, String) {
+    let (title, summary) = match c.detector {
+        DetectorId::D1 => (
+            "D1 Callee Footprint Overlap",
+            format!("Workflow '{}' calls identical downstream functions as canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
+        ),
+        DetectorId::D2 => (
+            "D2 Interface Token Overlap",
+            format!("Signature and parameters of '{}' duplicate canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
+        ),
+        DetectorId::D3 => (
+            "D3 Raw Client Bypass",
+            format!("Symbol '{}' calls raw external clients directly instead of canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
+        ),
+        DetectorId::D4 => (
+            "D4 Redundant Pass-Through Wrapper",
+            format!("Single-caller wrapper '{}' adds zero logic around canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
+        ),
+    };
+
+    let evidence_kind = match c.detector {
+        DetectorId::D1 => "shared callees",
+        DetectorId::D2 => "shared tokens",
+        DetectorId::D3 => "client bypass",
+        DetectorId::D4 => "details",
+    };
+    let shared = if c.shared_items.is_empty() {
+        String::new()
+    } else {
+        format!("{}: [{}]", evidence_kind, c.shared_items.join(", "))
+    };
+
+    (title, summary, shared)
+}
+
+fn resolve_candidate_snippets(
+    r_root: &Path,
+    conn: &Connection,
+    c: &ReuseCandidate,
+) -> (Loc, Loc, String, String) {
+    let cand_loc = symbol_loc(conn, &c.symbol, Loc::estimated(c.file.clone(), c.line));
+    let can_loc = symbol_loc(
+        conn,
+        &c.canonical,
+        Loc::estimated(c.canonical_file.clone(), c.canonical_line),
+    );
+    let cand_snippet = read_snippet(
+        &r_root.join(&cand_loc.file),
+        cand_loc.start,
+        cand_loc.end,
+        30,
+    );
+    let can_snippet = read_snippet(&r_root.join(&can_loc.file), can_loc.start, can_loc.end, 30);
+    (cand_loc, can_loc, cand_snippet, can_snippet)
+}
+
+fn format_candidate_json(
+    r_name: &str,
+    r_root: &Path,
+    conn: &Connection,
+    c: &ReuseCandidate,
+) -> Value {
+    let (det_title, det_summary, shared_evidence) = format_detector_metadata(c);
+    let (cand_loc, can_loc, cand_snippet, can_snippet) =
+        resolve_candidate_snippets(r_root, conn, c);
+
+    let loc_saving = cand_loc.loc;
+    let narrative = format!(
+        "Consolidating '{}' into authoritative '{}' ([callers={}]) deletes ~{} duplicate lines and eliminates drift between twin implementations.",
+        c.symbol, c.canonical, c.canonical_callers, loc_saving
+    );
+
+    json!({
+        "id": format!("{}:{}->{}", r_name, c.symbol, c.canonical),
+        "repo": r_name,
+        "detector": c.detector.as_str(),
+        "detector_title": det_title,
+        "detector_summary": det_summary,
+        "symbol": c.symbol,
+        "canonical": c.canonical,
+        "canonical_callers": c.canonical_callers,
+        "canonical_file": c.canonical_file,
+        "canonical_line": c.canonical_line,
+        "overlap_pct": c.overlap_pct,
+        "shared_evidence": shared_evidence,
+        "candidate_info": json!({
+            "file": cand_loc.file,
+            "line_start": cand_loc.start,
+            "line_end": cand_loc.end,
+            "loc": cand_loc.loc,
+        }),
+        "canonical_info": json!({
+            "file": can_loc.file,
+            "line_start": can_loc.start,
+            "line_end": can_loc.end,
+            "loc": can_loc.loc,
+        }),
+        "candidate_snippet": cand_snippet,
+        "canonical_snippet": can_snippet,
+        "loc_saving": loc_saving,
+        "prevention_narrative": narrative,
+    })
+}
+
+fn collect_prewrite_searches(entries: &[Value]) -> Vec<Value> {
+    let mut out = Vec::new();
+    for e in entries.iter().rev() {
+        let tool = e.get("tool").and_then(Value::as_str).unwrap_or("");
+        if tool != "search" && tool != "reuse" {
+            continue;
+        }
+        let args = e.get("args").cloned().unwrap_or(Value::Null);
+        let terms = args
+            .get("terms")
+            .or_else(|| args.get("paths"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        out.push(json!({
+            "ts": e.get("ts").unwrap_or(&Value::Null),
+            "repo_name": e.get("repo_name").unwrap_or(&Value::Null),
+            "tool": tool,
+            "terms": terms,
+            "shown": e.get("shown").or_else(|| e.get("result_count")).unwrap_or(&json!(0)),
+            "latency_us": e.get("latency_us").unwrap_or(&json!(0)),
+        }));
+        if out.len() >= 40 {
+            break;
+        }
+    }
+    out
+}
+
+fn summarize_reuse_metrics(candidates_json: &[Value], prewrite_count: usize) -> Value {
+    let total_cands = candidates_json.len();
+    let prev_loc: i64 = candidates_json
+        .iter()
+        .map(|c| c.get("loc_saving").and_then(Value::as_i64).unwrap_or(0))
+        .sum();
     let avg_callers = if total_cands > 0 {
         let callers_sum: i64 = candidates_json
             .iter()
@@ -231,7 +259,7 @@ pub fn collect_reuse_candidates(
         0.0
     };
 
-    let summary = json!({
+    json!({
         "total_candidates": total_cands,
         "preventable_loc": prev_loc,
         "prewrite_count": prewrite_count,
@@ -242,7 +270,5 @@ pub fn collect_reuse_candidates(
             "D3": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D3"))).count(),
             "D4": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D4"))).count(),
         }
-    });
-
-    Ok((candidates_json, summary, prewrite_searches))
+    })
 }

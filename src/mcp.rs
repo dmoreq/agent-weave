@@ -13,7 +13,8 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use crate::service::{
-    from_tool_args, CommandRequest, ParamKind, Surface, MAX_STR_ARRAY_ITEMS, TOOL_SPECS,
+    from_tool_args, CommandRequest, ParamKind, ParamSpec, Surface, ToolSpec, MAX_STR_ARRAY_ITEMS,
+    TOOL_SPECS,
 };
 
 mod format;
@@ -22,52 +23,59 @@ use format::*;
 const PROTOCOL_VERSION: &str = "2025-06-18";
 
 /// Tool registry rendered from the shared specs; `doctor` is deliberately
+fn param_schema(param: &ParamSpec) -> (String, Value, bool) {
+    let mut schema = match &param.kind {
+        ParamKind::Str => json!({"type": "string"}),
+        ParamKind::Int { min, max } => {
+            let mut s = json!({"type": "integer", "minimum": min});
+            if let Some(max) = max {
+                s["maximum"] = json!(max);
+            }
+            s
+        }
+        ParamKind::Float { min, max } => {
+            json!({"type": "number", "minimum": min, "maximum": max})
+        }
+        ParamKind::Bool => json!({"type": "boolean"}),
+        ParamKind::StrArray => {
+            json!({
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": MAX_STR_ARRAY_ITEMS
+            })
+        }
+    };
+    schema["description"] = json!(param.description);
+    (param.name.to_string(), schema, param.required)
+}
+
+fn tool_schema(spec: &ToolSpec) -> Value {
+    let mut props = serde_json::Map::new();
+    let mut required: Vec<Value> = Vec::new();
+    for param in spec.params {
+        let (name, schema, is_required) = param_schema(param);
+        props.insert(name, schema);
+        if is_required {
+            required.push(json!(param.name));
+        }
+    }
+    json!({
+        "name": spec.name,
+        "description": spec.description,
+        "inputSchema": {
+            "type": "object",
+            "properties": Value::Object(props),
+            "required": required,
+        },
+    })
+}
+
 /// absent: `--invalidate` is reserved for the human CLI.
 fn tools(all: bool) -> Value {
     let list: Vec<Value> = TOOL_SPECS
         .iter()
         .filter(|spec| all || spec.core)
-        .map(|spec| {
-            let mut props = serde_json::Map::new();
-            let mut required: Vec<Value> = Vec::new();
-            for param in spec.params {
-                let mut schema = match &param.kind {
-                    ParamKind::Str => json!({"type": "string"}),
-                    ParamKind::Int { min, max } => {
-                        let mut s = json!({"type": "integer", "minimum": min});
-                        if let Some(max) = max {
-                            s["maximum"] = json!(max);
-                        }
-                        s
-                    }
-                    ParamKind::Float { min, max } => {
-                        json!({"type": "number", "minimum": min, "maximum": max})
-                    }
-                    ParamKind::Bool => json!({"type": "boolean"}),
-                    ParamKind::StrArray => {
-                        json!({
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "maxItems": MAX_STR_ARRAY_ITEMS
-                        })
-                    }
-                };
-                schema["description"] = json!(param.description);
-                props.insert(param.name.to_string(), schema);
-                if param.required {
-                    required.push(json!(param.name));
-                }
-            }
-            json!({
-                "name": spec.name,
-                "description": spec.description,
-                "inputSchema": {
-                    "type": "object",
-                    "properties": Value::Object(props),
-                    "required": required,
-                },
-            })
-        })
+        .map(tool_schema)
         .collect();
     Value::Array(list)
 }
@@ -217,40 +225,7 @@ fn handle_message(
     };
     match method.as_str() {
         "initialize" => {
-            if root.is_none() {
-                if let Some(params) = msg.get("params") {
-                    let root_candidate = params
-                        .get("rootUri")
-                        .and_then(|u| u.as_str())
-                        .or_else(|| params.get("rootPath").and_then(|u| u.as_str()))
-                        .or_else(|| {
-                            params
-                                .get("workspaceFolders")
-                                .and_then(|wf| wf.as_array())
-                                .and_then(|arr| arr.first())
-                                .and_then(|f| f.get("uri"))
-                                .and_then(|u| u.as_str())
-                        });
-                    if let Some(uri) = root_candidate {
-                        let path_str = uri.strip_prefix("file://").unwrap_or(uri);
-                        if let Ok(r) = crate::walk::discover_root(Some(Path::new(path_str))) {
-                            *root = Some(r);
-                        }
-                    }
-                }
-            }
-            let requested = msg
-                .get("params")
-                .and_then(|p| p.get("protocolVersion"))
-                .and_then(|v| v.as_str())
-                .unwrap_or(PROTOCOL_VERSION)
-                .to_string();
-            let result = json!({
-                "protocolVersion": requested,
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
-            });
-            write_result(out, id, result)?;
+            handle_initialize(msg.get("params"), root, id, out)?;
         }
         "initialized" | "notifications/initialized" => {}
         "ping" => {
@@ -268,6 +243,58 @@ fn handle_message(
         }
     }
     Ok(())
+}
+
+fn handle_initialize(
+    params: Option<&Value>,
+    root: &mut Option<PathBuf>,
+    id: Option<Value>,
+    out: &mut impl Write,
+) -> std::io::Result<()> {
+    if let Some(p) = params {
+        if let Some(client_name) = p
+            .get("clientInfo")
+            .and_then(|c| c.get("name"))
+            .and_then(|n| n.as_str())
+        {
+            crate::journal::set_agent_context(client_name);
+        }
+    }
+    if root.is_none() {
+        if let Some(p) = params {
+            let root_candidate = p
+                .get("rootUri")
+                .and_then(|u| u.as_str())
+                .or_else(|| p.get("rootPath").and_then(|u| u.as_str()))
+                .or_else(|| {
+                    p.get("workspaceFolders")
+                        .and_then(|wf| wf.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|f| f.get("uri"))
+                        .and_then(|u| u.as_str())
+                });
+            if let Some(uri) = root_candidate {
+                let path_str = uri.strip_prefix("file://").unwrap_or(uri);
+                let path = Path::new(path_str);
+                if let Some(r) = crate::walk::find_git_root(path) {
+                    *root = Some(r);
+                } else if let Ok(r) = crate::walk::discover_root(Some(path)) {
+                    *root = Some(r);
+                }
+            }
+        }
+    }
+    let requested = params
+        .and_then(|p| p.get("protocolVersion"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(PROTOCOL_VERSION)
+        .to_string();
+    let result = json!({
+        "protocolVersion": requested,
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "agent-weave", "version": env!("CARGO_PKG_VERSION")},
+    });
+    write_result(out, id, result)
 }
 
 /// One `tools/call`: validate the tool name and required args, run the tool
@@ -299,27 +326,7 @@ fn handle_tools_call(
     if let Some(reason) = missing_required_arg(&tool_name, &arguments) {
         return write_error(out, id, -32602, &reason);
     }
-    if root.is_none() {
-        if let Some(file_val) = arguments
-            .get("file")
-            .or_else(|| arguments.get("path"))
-            .and_then(|v| v.as_str())
-        {
-            let p = Path::new(file_val);
-            let dir = if p.is_dir() {
-                p
-            } else {
-                p.parent().unwrap_or(p)
-            };
-            if let Ok(r) = crate::walk::discover_root(Some(dir)) {
-                *root = Some(r);
-            }
-        } else if let Ok(cwd) = std::env::current_dir() {
-            if let Ok(r) = crate::walk::discover_root(Some(&cwd)) {
-                *root = Some(r);
-            }
-        }
-    }
+    infer_active_root(root, &arguments);
     let Some(active_root) = root.as_deref() else {
         return write_result(
             out,
@@ -338,6 +345,45 @@ fn handle_tools_call(
         id,
         json!({"content": [{"type": "text", "text": text}], "isError": is_error}),
     )
+}
+
+fn infer_active_root(root: &mut Option<PathBuf>, arguments: &Value) {
+    if root.is_some() {
+        return;
+    }
+    if let Some(file_val) = arguments
+        .get("file")
+        .or_else(|| arguments.get("path"))
+        .and_then(|v| v.as_str())
+    {
+        let p = Path::new(file_val);
+        let dir = if p.is_dir() {
+            p
+        } else {
+            p.parent().unwrap_or(p)
+        };
+        let start = if dir.is_absolute() {
+            dir.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|c| c.join(dir))
+                .unwrap_or_else(|_| dir.to_path_buf())
+        };
+        if let Some(r) = crate::walk::find_git_root(&start) {
+            *root = Some(r);
+            return;
+        } else if let Ok(r) = crate::walk::discover_root(Some(&start)) {
+            *root = Some(r);
+            return;
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(r) = crate::walk::find_git_root(&cwd) {
+            *root = Some(r);
+        } else if let Ok(r) = crate::walk::discover_root(Some(&cwd)) {
+            *root = Some(r);
+        }
+    }
 }
 
 /// Panic boundary + journal tail of one `tools/call`: one tool must not kill

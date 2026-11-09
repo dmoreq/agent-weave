@@ -58,7 +58,7 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
     }
 }
 
-fn find_git_root(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
     let mut cur = start.to_path_buf();
     loop {
         if cur.join(".git").exists() {

@@ -98,14 +98,20 @@ fn run(cli: cli::Cli, no_journal: bool, journaled: bool) -> Result<i32, AwError>
         port,
         host,
         open,
-        global,
+        local,
+        global: _,
     } = cmd
     {
-        agent_weave::dashboard::run_dashboard(root.as_deref(), &host, port, open, global)?;
+        agent_weave::dashboard::run_dashboard(root.as_deref(), &host, port, open, local)?;
         return Ok(0);
     }
-    if let cli::Cmd::Monitor { repo, errors_only } = cmd {
-        agent_weave::dashboard::run_monitor(root.as_deref(), repo.as_deref(), errors_only)?;
+    if let cli::Cmd::Monitor {
+        repo,
+        errors_only,
+        local,
+    } = cmd
+    {
+        agent_weave::dashboard::run_monitor(root.as_deref(), repo.as_deref(), errors_only, local)?;
         return Ok(0);
     }
     let req = service::CommandRequest::from_cli(cmd)?;

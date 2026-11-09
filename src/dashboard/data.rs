@@ -78,6 +78,17 @@ pub fn read_usage_entries(log_path: &Path) -> Vec<Value> {
                     continue;
                 }
                 if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+                    let is_worktree = val
+                        .get("worktree")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    if is_worktree {
+                        if let Some(repo) = val.get("repo").and_then(Value::as_str) {
+                            if !Path::new(repo).exists() {
+                                continue;
+                            }
+                        }
+                    }
                     entries.push(val);
                 }
             }

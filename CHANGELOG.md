@@ -16,6 +16,16 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-09
+
+### Added
+
+- **Global telemetry default with backlog streaming.** `aw dashboard` and `aw monitor` now default to machine-wide global telemetry (`~/.aw/usage.log`), providing cross-repository visibility by default. Added `--local` flag to scope down to the current workspace (`.aw/usage.log`).
+- **Initial backlog replay in `aw monitor`.** Terminal query monitor pre-loads and streams the 15 most recent invocations on launch, eliminating blank screen confusion before live events arrive.
+- **Agent caller attribution & tagging.** Invocations are automatically attributed to calling agents via MCP handshake `clientInfo.name` (e.g. `antigravity`), CLI environment variables (`AW_AGENT`, `ANTIGRAVITY_AGENT`), or fallback to `user`. Added dedicated `AGENT` column on terminal monitor and colored badge tags (`.agent-tag`) on the web dashboard.
+- **Workspace & Agent workload comparative analytics charts.** Interactive horizontal comparative bar charts on the web dashboard for workspace distribution and agent attribution, tracking call volume, percentage share, reliability %, tokens saved, and last active timestamp with 1-click cross-filtering.
+- **Automated orphaned worktree pruning.** Dual-layer cleanup for temporary or deleted Git worktrees: runtime filter immediately excludes missing worktree paths from metrics and charts, and physical disk pruning (`prune_deleted_worktrees_all`) purges orphaned records from `usage.log` during `aw dashboard` startup and `aw doctor`.
+
 ## [0.5.1] - 2026-11-08
 
 ### Fixed

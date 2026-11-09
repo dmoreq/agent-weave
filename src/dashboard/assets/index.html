@@ -63,8 +63,8 @@
       <!-- Repositories & Worktrees Breakdown -->
       <div class="card">
         <div class="card-title">
-          <span>Monitored Repositories &amp; Worktrees</span>
-          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Filter telemetry by workspace</span>
+          <span>Workspace Distribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Filter telemetry by repository</span>
         </div>
         <table>
           <thead>
@@ -81,25 +81,46 @@
         </table>
       </div>
 
-      <!-- Tool Distribution -->
+      <!-- Agent Attribution Breakdown -->
       <div class="card">
         <div class="card-title">
-          <span>Command Distribution &amp; Latency Profile</span>
-          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Execution volume and median latency</span>
+          <span>Agent Attribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Workload and efficiency by calling agent</span>
         </div>
         <table>
           <thead>
             <tr>
-              <th>Tool Command</th>
+              <th>Agent Identity</th>
               <th class="text-right">Calls</th>
-              <th class="text-right">p50 Latency</th>
+              <th>Reliability</th>
+              <th class="text-right">Tokens Saved</th>
             </tr>
           </thead>
-          <tbody id="tools-tbody">
-            <tr><td colspan="3" class="empty-cell">Loading tools...</td></tr>
+          <tbody id="agents-tbody">
+            <tr><td colspan="4" class="empty-cell">Loading agents...</td></tr>
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Tool Distribution -->
+    <div class="card" style="margin-bottom: 1.75rem;">
+      <div class="card-title">
+        <span>Command Distribution &amp; Latency Profile</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Execution volume and median latency</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Tool Command</th>
+            <th class="text-right">Calls</th>
+            <th class="text-right">p50 Latency</th>
+          </tr>
+        </thead>
+        <tbody id="tools-tbody">
+          <tr><td colspan="3" class="empty-cell">Loading tools...</td></tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- Live Query Stream -->
@@ -113,6 +134,11 @@
         <label for="repo-filter" class="text-muted" style="font-size: 0.78rem;">Scope:</label>
         <select id="repo-filter" class="filter-select" onchange="applyTelemetryFilters()">
           <option value="ALL">All Repositories</option>
+        </select>
+
+        <label for="agent-filter" class="text-muted" style="font-size: 0.78rem;">Agent:</label>
+        <select id="agent-filter" class="filter-select" onchange="applyTelemetryFilters()">
+          <option value="ALL">All Agents</option>
         </select>
 
         <label for="status-filter" class="text-muted" style="font-size: 0.78rem;">Status:</label>
@@ -132,6 +158,7 @@
           <tr>
             <th>Time</th>
             <th>Repository</th>
+            <th>Agent</th>
             <th>Tool</th>
             <th class="text-right">Items</th>
             <th class="text-right">Latency</th>
@@ -140,7 +167,7 @@
           </tr>
         </thead>
         <tbody id="recent-tbody">
-          <tr><td colspan="7" class="empty-cell">No queries recorded</td></tr>
+          <tr><td colspan="8" class="empty-cell">No queries recorded</td></tr>
         </tbody>
       </table>
     </div>

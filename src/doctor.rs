@@ -87,6 +87,12 @@ pub fn report(root: &Path) -> Result<Vec<String>> {
 
     report_orphans(root, &mut out);
 
+    let local_log = crate::journal::usage_log_path(root);
+    let _ = crate::journal::prune_deleted_worktrees_all(&local_log);
+    if let Ok(global_log) = db::global_usage_log_path() {
+        let _ = crate::journal::prune_deleted_worktrees_all(&global_log);
+    }
+
     let size = db::file_size(&db::db_path(root));
     out.push(format!("  db size: {size} bytes (target < 52428800)"));
 

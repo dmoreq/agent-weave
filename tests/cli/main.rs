@@ -3,6 +3,7 @@
 
 mod common;
 mod cuj;
+mod dashboard;
 mod force_parse;
 mod global_usage;
 mod impact;

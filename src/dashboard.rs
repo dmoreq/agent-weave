@@ -14,15 +14,16 @@ pub fn run_dashboard(
     host: &str,
     port: u16,
     open: bool,
-    global: bool,
+    local: bool,
 ) -> Result<()> {
-    server::serve_dashboard(root, host, port, open, global)
+    server::serve_dashboard(root, host, port, open, local)
 }
 
 pub fn run_monitor(
     root: Option<&Path>,
     repo_filter: Option<&str>,
     errors_only: bool,
+    local: bool,
 ) -> Result<()> {
-    monitor::stream_monitor(root, repo_filter, errors_only)
+    monitor::stream_monitor(root, repo_filter, errors_only, local)
 }

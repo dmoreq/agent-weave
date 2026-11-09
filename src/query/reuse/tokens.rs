@@ -132,7 +132,7 @@ pub(super) fn build_stoplist(symbols: &HashMap<i64, SymbolData>) -> HashSet<Stri
 
     let threshold = (total as f64 * 0.05).max(4.0) as usize;
     for (callee, count) in freq {
-        if count >= threshold {
+        if count >= threshold && !is_raw_client(&callee) {
             stopset.insert(callee);
         }
     }

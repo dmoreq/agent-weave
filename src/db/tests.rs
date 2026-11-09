@@ -82,3 +82,31 @@ fn load_carried_chunks_large_path_sets() {
     drop(conn);
     remove_tree(&dir);
 }
+
+#[test]
+fn gap_files_for_new_names_chunks_large_symbol_sets() {
+    let dir = temp_root("db-gap-large");
+    let conn = create_fresh(&dir).unwrap();
+    conn.execute(
+        "INSERT INTO files(id, path, size, mtime, content_hash, parse_status, error_nodes)
+             VALUES (1, 'gap.py', 1, 0, 0, 'ok', 0)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO unresolved_calls(file_id, dst_name, site_line)
+             VALUES (1, 'target_fn', 1)",
+        [],
+    )
+    .unwrap();
+
+    // 600 unique symbols (> 500 SQL_CHUNK) to verify SQLite expression tree depth stays <= 1000
+    let mut new_names: HashSet<String> = (0..600).map(|i| format!("mod{i}.sym{i}")).collect();
+    new_names.insert("pkg.target_fn".to_string());
+    new_names.insert("other_pkg.target_fn".to_string());
+    new_names.insert("another.target_fn".to_string());
+    let gaps = gap_files_for_new_names(&conn, &new_names).unwrap();
+    assert!(gaps.contains("gap.py"));
+    drop(conn);
+    remove_tree(&dir);
+}

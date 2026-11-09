@@ -424,3 +424,49 @@ fn global_memory_expired_local_does_not_shadow_global() {
     assert!(stdout.contains(" [global]"));
     assert!(stdout.contains("durable global knowledge"));
 }
+
+#[test]
+fn reuse_d3_raw_client_bypass_detects_matching_canonical_wrapper() {
+    let repo = temp_repo("reuse-d3");
+    write(
+        &repo,
+        "client.py",
+        "import requests\ndef fetch_api(url: str):\n    return requests.get(url)\n",
+    );
+    write(
+        &repo,
+        "app.py",
+        "from client import fetch_api\ndef run_a():\n    return fetch_api('http://a')\ndef run_b():\n    return fetch_api('http://b')\n",
+    );
+    write(
+        &repo,
+        "bypass.py",
+        "import requests\ndef rogue_fetch(endpoint: str):\n    return requests.get(endpoint)\n",
+    );
+    write(
+        &repo,
+        "other.py",
+        "import requests\ndef post_data(endpoint: str):\n    return requests.post(endpoint)\n",
+    );
+    build(&repo);
+
+    let out = aw(&repo).args(["reuse"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+    assert!(
+        stdout.contains("rogue_fetch"),
+        "must identify rogue_fetch: {stdout}"
+    );
+    assert!(
+        stdout.contains("bypasses canonical client 'client.fetch_api'"),
+        "must detect D3 raw client bypass: {stdout}"
+    );
+    assert!(
+        stdout.contains("client bypass: [raw_client=requests.get]"),
+        "must display raw_client=requests.get: {stdout}"
+    );
+    assert!(
+        !stdout.contains("post_data"),
+        "post_data calling requests.post must not match requests.get wrapper: {stdout}"
+    );
+}

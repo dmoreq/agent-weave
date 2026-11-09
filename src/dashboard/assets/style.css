@@ -280,6 +280,44 @@ tr:hover td { background: var(--bg-subtle); }
   border-radius: 3px;
 }
 
+tr.agent-row-item { cursor: pointer; }
+
+.agent-tag {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.agent-tag-antigravity {
+  background: var(--intent-primary-soft);
+  color: var(--intent-primary);
+  border-color: rgba(9, 105, 218, 0.25);
+}
+
+.agent-tag-user {
+  background: rgba(168, 85, 247, 0.12);
+  color: #9333ea;
+  border-color: rgba(168, 85, 247, 0.25);
+}
+
+[data-theme="dark"] .agent-tag-user {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.35);
+}
+
+.row-track-fill-agent {
+  background: #8b5cf6;
+}
+[data-theme="dark"] .row-track-fill-agent {
+  background: #a78bfa;
+}
+
 .args-cell {
   max-width: 320px;
   overflow: hidden;

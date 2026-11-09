@@ -181,7 +181,7 @@ pub enum Cmd {
         #[arg(long)]
         all_tools: bool,
     },
-    /// Serve local interactive telemetry, anti-reinvention, and memory dashboard
+    /// Serve interactive telemetry, anti-reinvention, and memory dashboard
     Dashboard {
         /// Port to bind the local dashboard web server (default: 7890)
         #[arg(long, default_value_t = 7890)]
@@ -192,7 +192,10 @@ pub enum Cmd {
         /// Open dashboard in default web browser automatically
         #[arg(long)]
         open: bool,
-        /// Read telemetry and memories exclusively from global ~/.aw/
+        /// Scope dashboard telemetry exclusively to current repository (.aw/)
+        #[arg(long)]
+        local: bool,
+        /// Deprecated alias: global is now the default mode across all repositories
         #[arg(long)]
         global: bool,
     },
@@ -204,6 +207,9 @@ pub enum Cmd {
         /// Filter for critical errors only (exit code >= 3)
         #[arg(long)]
         errors_only: bool,
+        /// Scope monitor stream exclusively to current repository (.aw/)
+        #[arg(long)]
+        local: bool,
     },
 }
 

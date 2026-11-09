@@ -86,6 +86,7 @@ pub enum AwError {
 /// contract; [`AwError::code_class`] is the error-to-code direction). One
 /// home for the thresholds so telemetry surfaces bucket outcomes identically:
 /// 0 ok, 1 empty result, 2 ambiguous usage, 3+ operational errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitClass {
     Ok,
     Empty,

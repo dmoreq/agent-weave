@@ -108,6 +108,8 @@ function loadSummaryData() {
 
       // Render Repositories Table
       renderReposTable(data.repo_aggs || {});
+      // Render Agents Table
+      renderAgentsTable(data.agent_aggs || {}, totalCalls);
       // Render Tools Table
       renderToolsTable(data.tool_aggs || {}, totalCalls);
       // Render Recent Queries
@@ -239,6 +241,67 @@ function renderReposTable(repoAggs) {
   });
 }
 
+function renderAgentsTable(agentAggs, totalCalls) {
+  const tbody = document.getElementById('agents-tbody');
+  const select = document.getElementById('agent-filter');
+  if (!tbody) return;
+
+  const entries = Object.entries(agentAggs);
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No agent calls recorded</td></tr>';
+    return;
+  }
+
+  entries.sort((a, b) => b[1].calls - a[1].calls);
+  const maxCalls = entries[0][1].calls || 1;
+
+  tbody.innerHTML = '';
+  if (select) {
+    select.innerHTML = '<option value="ALL">All Agents</option>';
+  }
+
+  entries.forEach(([aName, aData]) => {
+    if (select) {
+      const opt = document.createElement('option');
+      opt.value = aName;
+      opt.textContent = aName;
+      select.appendChild(opt);
+    }
+
+    const tr = document.createElement('tr');
+    tr.className = 'agent-row-item';
+    tr.onclick = () => filterByAgent(aName);
+
+    const calls = aData.calls;
+    const errs = aData.errors || 0;
+    const rel = aData.reliability_pct || (calls ? 100.0 * (calls - errs) / calls : 100.0);
+    const saved = aData.saved_tokens || 0;
+    const pct = (calls / maxCalls) * 100.0;
+    const share = totalCalls ? (calls / totalCalls * 100.0) : 0.0;
+    const shareStr = (share > 0 && share < 0.1) ? '<0.1%' : share.toFixed(1) + '%';
+    const relClass = errs === 0 ? 'status-ok' : 'status-err';
+
+    tr.innerHTML =
+      '<td>' +
+      '  <div class="repo-name-wrap"><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span> <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
+      '  <div class="row-track"><div class="row-track-fill row-track-fill-agent" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
+      '</td>' +
+      '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
+      '<td><span class="badge ' + relClass + '">' + rel.toFixed(1) + '% (' + errs + ' err)</span></td>' +
+      '<td class="text-right num-col text-muted">~' + saved.toLocaleString() + '</td>';
+
+    tbody.appendChild(tr);
+  });
+}
+
+function filterByAgent(agentName) {
+  const select = document.getElementById('agent-filter');
+  if (select) {
+    select.value = agentName;
+    applyTelemetryFilters();
+  }
+}
+
 function renderToolsTable(toolAggs, totalCalls) {
   const tbody = document.getElementById('tools-tbody');
   if (!tbody) return;
@@ -278,7 +341,7 @@ function renderRecentQueries(queries) {
   if (!tbody) return;
 
   if (queries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">No recent queries</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">No recent queries</td></tr>';
     return;
   }
 
@@ -302,6 +365,7 @@ function renderErrorsTriage(errors) {
     const tr = document.createElement('tr');
     const ts = e.ts ? new Date(e.ts * 1000).toLocaleTimeString() : '—';
     const rName = e.repo_name || 'workspace';
+    const aName = e.agent || 'user';
     const latStr = e.latency_us ? (e.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
     const argsStr = JSON.stringify(e.args || {});
 
@@ -321,8 +385,10 @@ function createRecentRow(q) {
   const tr = document.createElement('tr');
   tr.className = 'query-row';
   const rName = q.repo_name || 'workspace';
+  const aName = q.agent || 'user';
   const exitCode = parseInt(q.exit_code || 0, 10);
   tr.setAttribute('data-repo', rName);
+  tr.setAttribute('data-agent', aName);
   tr.setAttribute('data-code', exitCode);
 
   const ts = q.ts ? new Date(q.ts * 1000).toLocaleTimeString() : '—';
@@ -347,6 +413,7 @@ function createRecentRow(q) {
   tr.innerHTML =
     '<td class="num-col text-muted">' + ts + '</td>' +
     '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
+    '<td><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span></td>' +
     '<td><code>' + escapeHtml(q.tool || '—') + '</code></td>' +
     '<td class="text-right num-col">' + (q.shown || q.result_count || 0) + '</td>' +
     '<td class="text-right num-col">' + latStr + '</td>' +
@@ -358,16 +425,20 @@ function createRecentRow(q) {
 
 function applyTelemetryFilters() {
   const selectedRepo = document.getElementById('repo-filter').value;
+  const agentFilterEl = document.getElementById('agent-filter');
+  const selectedAgent = agentFilterEl ? agentFilterEl.value : 'ALL';
   const selectedStatus = document.getElementById('status-filter').value;
   const search = document.getElementById('query-search').value.toLowerCase().trim();
 
   const rows = document.querySelectorAll('#recent-tbody tr.query-row');
   rows.forEach(row => {
     const repo = row.getAttribute('data-repo');
+    const agent = row.getAttribute('data-agent');
     const code = row.getAttribute('data-code');
     const text = row.textContent.toLowerCase();
 
     let matchesRepo = (selectedRepo === 'ALL' || repo === selectedRepo);
+    let matchesAgent = (selectedAgent === 'ALL' || agent === selectedAgent);
     let matchesStatus = true;
     if (selectedStatus === '0') matchesStatus = (code === '0');
     else if (selectedStatus === '1') matchesStatus = (code === '1');
@@ -375,7 +446,7 @@ function applyTelemetryFilters() {
     else if (selectedStatus === 'ERR') matchesStatus = (parseInt(code, 10) >= 3);
 
     let matchesSearch = (!search || text.includes(search));
-    row.style.display = (matchesRepo && matchesStatus && matchesSearch) ? '' : 'none';
+    row.style.display = (matchesRepo && matchesAgent && matchesStatus && matchesSearch) ? '' : 'none';
   });
 }
 
@@ -705,6 +776,8 @@ function renderMemoryDossier(m) {
     tagsHtml;
 }
 
+let liveEventCount = 0;
+
 // Live Server-Sent Events (SSE)
 function initEventSource() {
   const liveBadge = document.getElementById('live-indicator');
@@ -715,6 +788,10 @@ function initEventSource() {
     try {
       const q = JSON.parse(e.data);
       handleLiveEvent(q);
+      liveEventCount++;
+      if (liveEventCount % 5 === 0) {
+        loadSummaryData();
+      }
       if (q.tool && q.tool.startsWith('mem_')) {
         loadMemoriesData();
       }

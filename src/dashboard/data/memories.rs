@@ -16,6 +16,29 @@ pub fn collect_memories(
     global_only: bool,
     entries: &[Value],
 ) -> Result<Vec<Value>> {
+    let stores = discover_memory_stores(root, global_only, entries);
+    let recalls_map = aggregate_recalls(entries);
+    let mut notes_json = Vec::new();
+
+    for (store_name, (repo_root, db_path)) in stores {
+        collect_store_notes(
+            &store_name,
+            &repo_root,
+            &db_path,
+            entries,
+            &recalls_map,
+            &mut notes_json,
+        );
+    }
+
+    Ok(notes_json)
+}
+
+fn discover_memory_stores(
+    root: Option<&Path>,
+    global_only: bool,
+    entries: &[Value],
+) -> HashMap<String, (PathBuf, PathBuf)> {
     let mut stores: HashMap<String, (PathBuf, PathBuf)> = HashMap::new();
 
     if let Ok(g_dir) = db::global_aw_dir() {
@@ -28,9 +51,6 @@ pub fn collect_memories(
     if !global_only {
         let mut locals: HashMap<String, PathBuf> = HashMap::new();
         super::discover_repos(root, entries, "memory.db", &mut locals);
-        // An explicit root replaces a same-named store (today's short-circuit
-        // overwrite); discovered repos only fill gaps, matching the scan's
-        // contains_key guard against the already-inserted global store.
         let store_pair = |r: PathBuf| {
             let l_db = r.join(".aw").join("memory.db");
             (r, l_db)
@@ -44,241 +64,272 @@ pub fn collect_memories(
         }
     }
 
-    // Correlate recall counts from usage entries
+    stores
+}
+
+fn aggregate_recalls(entries: &[Value]) -> HashMap<String, (usize, f64)> {
     let mut recalls_map: HashMap<String, (usize, f64)> = HashMap::new();
     for e in entries {
         let tool = e.get("tool").and_then(Value::as_str).unwrap_or("");
-        if tool == "mem_get" || tool == "mem_query" {
+        if tool != "mem_get" && tool != "mem_query" {
+            continue;
+        }
+        let ts = e.get("ts").and_then(Value::as_f64).unwrap_or(0.0);
+        let args = e.get("args").cloned().unwrap_or(Value::Null);
+        let key = args.get("key").and_then(Value::as_str).unwrap_or("");
+        if !key.is_empty() {
+            let rec = recalls_map.entry(key.to_string()).or_insert((0, 0.0));
+            rec.0 += 1;
+            if ts > rec.1 {
+                rec.1 = ts;
+            }
+        }
+    }
+    recalls_map
+}
+
+fn kind_prevention_card(kind: &str, key: &str) -> (&'static str, &'static str, String) {
+    match crate::memory::MemKind::parse(kind) {
+        Some(crate::memory::MemKind::Gotcha) => (
+            "REGRESSION GUARD",
+            "Regression & Bug Guard",
+            format!("Prevents repeating root-cause trap in '{key}'. Blocks known fragility before changes are committed."),
+        ),
+        Some(crate::memory::MemKind::Decision) => (
+            "ARCHITECTURE INVARIANT",
+            "Architecture & Policy Guard",
+            format!("Enforces repository architectural constraint '{key}'. Prevents forbidden abstractions or boundary violations."),
+        ),
+        Some(crate::memory::MemKind::Fact) => (
+            "EXPLORATION SHORTCUT",
+            "Verified Fact Shortcut",
+            format!("Avoids costly multi-file grep scans by caching verified system truth for '{key}'."),
+        ),
+        Some(crate::memory::MemKind::Task) | None => (
+            "HANDOFF CONTEXT",
+            "Cross-Session Handoff Guard",
+            format!("Preserves active state across conversation turns for '{key}'."),
+        ),
+    }
+}
+
+fn estimate_fallback_recall(
+    key: &str,
+    body: &str,
+    entries: &[Value],
+    count: &mut usize,
+    last_ts: &mut f64,
+) {
+    let key_lower = key.to_lowercase();
+    let body_lower = body.to_lowercase();
+    for e in entries {
+        let tool = e.get("tool").and_then(Value::as_str).unwrap_or("");
+        if tool != "mem_query" && tool != "mem_get" {
+            continue;
+        }
+        let args = e.get("args").cloned().unwrap_or(Value::Null);
+        let terms = args
+            .get("terms")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_lowercase();
+        if !terms.is_empty() && (key_lower.contains(&terms) || body_lower.contains(&terms)) {
+            *count += 1;
             let ts = e.get("ts").and_then(Value::as_f64).unwrap_or(0.0);
-            let args = e.get("args").cloned().unwrap_or(Value::Null);
-            let key = args.get("key").and_then(Value::as_str).unwrap_or("");
-            if !key.is_empty() {
-                let rec = recalls_map.entry(key.to_string()).or_insert((0, 0.0));
-                rec.0 += 1;
-                if ts > rec.1 {
-                    rec.1 = ts;
-                }
+            if ts > *last_ts {
+                *last_ts = ts;
             }
         }
     }
+}
 
-    let mut notes_json = Vec::new();
+fn resolve_single_ref(r: &str, index_conn: Option<&Connection>) -> Value {
+    let mut ref_val = json!({
+        "ref": r,
+        "verified": false,
+        "type": "path",
+        "location": ""
+    });
+    let Some(iconn) = index_conn else {
+        return ref_val;
+    };
 
-    for (store_name, (repo_root, db_path)) in stores {
-        let conn =
-            match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
+    if let Ok(mut f_stmt) =
+        iconn.prepare("SELECT path, size FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1")
+    {
+        if let Ok((path, size)) = f_stmt.query_row(rusqlite::params![r, format!("%{r}")], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
+            return json!({
+                "ref": r,
+                "verified": true,
+                "type": "file",
+                "location": format!("{path} ({size} bytes)")
+            });
+        }
+    }
 
-        let index_conn = Connection::open_with_flags(
-            repo_root.join(".aw").join("index.db"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .ok();
+    if let Ok(mut s_stmt) = iconn.prepare(
+        "SELECT file_path, line_start, line_end FROM symbols WHERE name = ?1 OR qualname = ?1 LIMIT 1",
+    ) {
+        if let Ok((fp, ls, le)) = s_stmt.query_row(rusqlite::params![r], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+        }) {
+            ref_val = json!({
+                "ref": r,
+                "verified": true,
+                "type": "symbol",
+                "location": format!("{fp}:{ls}-{le}")
+            });
+        }
+    }
 
-        let mut stmt = match conn.prepare(
-            "SELECT id, key, rev, kind, scope, session, body, tags, refs, content_hash, source, created_at, expires_at, superseded_by, superseded_at FROM memories ORDER BY key ASC, rev DESC"
-        ) {
-            Ok(s) => s,
-            Err(_) => continue,
+    ref_val
+}
+
+fn resolve_note_refs(refs_list: &[String], index_conn: Option<&Connection>) -> Vec<Value> {
+    refs_list
+        .iter()
+        .map(|r| resolve_single_ref(r, index_conn))
+        .collect()
+}
+
+struct MemoryRow {
+    id: i64,
+    key: String,
+    rev: i64,
+    kind: String,
+    scope: String,
+    session: String,
+    body: String,
+    tags_raw: String,
+    refs_raw: String,
+    content_hash: i64,
+    source: String,
+    created_at: i64,
+    expires_at: i64,
+    superseded_by: Option<i64>,
+    superseded_at: i64,
+}
+
+impl MemoryRow {
+    fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: r.get(0)?,
+            key: r.get(1)?,
+            rev: r.get(2)?,
+            kind: r.get(3)?,
+            scope: r.get(4)?,
+            session: r.get(5)?,
+            body: r.get(6)?,
+            tags_raw: r.get(7)?,
+            refs_raw: r.get(8)?,
+            content_hash: r.get(9)?,
+            source: r.get(10)?,
+            created_at: r.get(11)?,
+            expires_at: r.get(12)?,
+            superseded_by: r.get(13)?,
+            superseded_at: r.get(14)?,
+        })
+    }
+}
+
+fn format_note_json(
+    store_name: &str,
+    row: MemoryRow,
+    index_conn: Option<&Connection>,
+    recalls_map: &HashMap<String, (usize, f64)>,
+    entries: &[Value],
+) -> Value {
+    let tags: Vec<String> = row
+        .tags_raw
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let refs_list: Vec<String> = row
+        .refs_raw
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let (prev_cat, prev_title, prev_detail) = kind_prevention_card(&row.kind, &row.key);
+
+    let mut recall_count = recalls_map.get(&row.key).map(|r| r.0).unwrap_or(0);
+    let mut last_recalled_ts = recalls_map.get(&row.key).map(|r| r.1).unwrap_or(0.0);
+    if recall_count == 0 {
+        estimate_fallback_recall(
+            &row.key,
+            &row.body,
+            entries,
+            &mut recall_count,
+            &mut last_recalled_ts,
+        );
+    }
+
+    let resolved_refs = resolve_note_refs(&refs_list, index_conn);
+    json!({
+        "id": row.id,
+        "store": store_name,
+        "key": row.key,
+        "rev": row.rev,
+        "kind": row.kind,
+        "scope": row.scope,
+        "session": row.session,
+        "body": row.body,
+        "tags": tags,
+        "refs": refs_list,
+        "resolved_refs": resolved_refs,
+        "content_hash": format!("{:x}", row.content_hash),
+        "source": row.source,
+        "created_at": row.created_at,
+        "expires_at": row.expires_at,
+        "is_current": row.superseded_by.is_none(),
+        "superseded_by": row.superseded_by,
+        "superseded_at": row.superseded_at,
+        "prev_category": prev_cat,
+        "prev_title": prev_title,
+        "prev_detail": prev_detail,
+        "recall_count": recall_count,
+        "last_recalled_ts": last_recalled_ts,
+    })
+}
+
+fn collect_store_notes(
+    store_name: &str,
+    repo_root: &Path,
+    db_path: &Path,
+    entries: &[Value],
+    recalls_map: &HashMap<String, (usize, f64)>,
+    out: &mut Vec<Value>,
+) {
+    let conn =
+        match Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(c) => c,
+            Err(_) => return,
         };
+    let index_conn = Connection::open_with_flags(
+        repo_root.join(".aw").join("index.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok();
 
-        let rows = stmt.query_map([], |r| {
-            let id: i64 = r.get(0)?;
-            let key: String = r.get(1)?;
-            let rev: i64 = r.get(2)?;
-            let kind: String = r.get(3)?;
-            let scope: String = r.get(4)?;
-            let session: String = r.get(5)?;
-            let body: String = r.get(6)?;
-            let tags_raw: String = r.get(7)?;
-            let refs_raw: String = r.get(8)?;
-            let content_hash: i64 = r.get(9)?;
-            let source: String = r.get(10)?;
-            let created_at: i64 = r.get(11)?;
-            let expires_at: i64 = r.get(12)?;
-            let superseded_by: Option<i64> = r.get(13)?;
-            let superseded_at: i64 = r.get(14)?;
-            Ok((
-                id,
-                key,
-                rev,
-                kind,
-                scope,
-                session,
-                body,
-                tags_raw,
-                refs_raw,
-                content_hash,
-                source,
-                created_at,
-                expires_at,
-                superseded_by,
-                superseded_at,
-            ))
-        });
+    let sql = "SELECT id, key, rev, kind, scope, session, body, tags, refs, content_hash, source, created_at, expires_at, superseded_by, superseded_at FROM memories ORDER BY key ASC, rev DESC";
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
 
-        if let Ok(mapped_rows) = rows {
-            for row in mapped_rows.flatten() {
-                let (
-                    id,
-                    key,
-                    rev,
-                    kind,
-                    scope,
-                    session,
-                    body,
-                    tags_raw,
-                    refs_raw,
-                    content_hash,
-                    source,
-                    created_at,
-                    expires_at,
-                    superseded_by,
-                    superseded_at,
-                ) = row;
-                let is_current = superseded_by.is_none();
-                let tags: Vec<String> =
-                    tags_raw.split_whitespace().map(|s| s.to_string()).collect();
-                let refs_list: Vec<String> =
-                    refs_raw.split_whitespace().map(|s| s.to_string()).collect();
+    let rows = stmt.query_map([], MemoryRow::from_row);
 
-                let (prev_cat, prev_title, prev_detail) = match crate::memory::MemKind::parse(&kind)
-                {
-                    Some(crate::memory::MemKind::Gotcha) => (
-                        "REGRESSION GUARD",
-                        "Regression & Bug Guard",
-                        format!("Prevents repeating root-cause trap in '{}'. Blocks known fragility before changes are committed.", key),
-                    ),
-                    Some(crate::memory::MemKind::Decision) => (
-                        "ARCHITECTURE INVARIANT",
-                        "Architecture & Policy Guard",
-                        format!("Enforces repository architectural constraint '{}'. Prevents forbidden abstractions or boundary violations.", key),
-                    ),
-                    Some(crate::memory::MemKind::Fact) => (
-                        "EXPLORATION SHORTCUT",
-                        "Verified Fact Shortcut",
-                        format!("Avoids costly multi-file grep scans by caching verified system truth for '{}'.", key),
-                    ),
-                    Some(crate::memory::MemKind::Task) | None => (
-                        "HANDOFF CONTEXT",
-                        "Cross-Session Handoff Guard",
-                        format!("Preserves active state across conversation turns for '{}'.", key),
-                    ),
-                };
-
-                let mut recall_count = recalls_map.get(&key).map(|r| r.0).unwrap_or(0);
-                let mut last_recalled_ts = recalls_map.get(&key).map(|r| r.1).unwrap_or(0.0);
-
-                if recall_count == 0 {
-                    let key_lower = key.to_lowercase();
-                    let body_lower = body.to_lowercase();
-                    for e in entries {
-                        let tool = e.get("tool").and_then(Value::as_str).unwrap_or("");
-                        if tool == "mem_query" || tool == "mem_get" {
-                            let args = e.get("args").cloned().unwrap_or(Value::Null);
-                            let terms = args
-                                .get("terms")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
-                                .to_lowercase();
-                            if !terms.is_empty()
-                                && (key_lower.contains(&terms) || body_lower.contains(&terms))
-                            {
-                                recall_count += 1;
-                                let ts = e.get("ts").and_then(Value::as_f64).unwrap_or(0.0);
-                                if ts > last_recalled_ts {
-                                    last_recalled_ts = ts;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Verify refs against index.db
-                let mut resolved_refs = Vec::new();
-                for r in &refs_list {
-                    let mut ref_val = json!({
-                        "ref": r,
-                        "verified": false,
-                        "type": "path",
-                        "location": ""
-                    });
-
-                    if let Some(ref iconn) = index_conn {
-                        if let Ok(mut f_stmt) = iconn.prepare(
-                            "SELECT path, size FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1",
-                        ) {
-                            if let Ok(f_row) =
-                                f_stmt.query_row(rusqlite::params![r, format!("%{}", r)], |row| {
-                                    let path: String = row.get(0)?;
-                                    let size: i64 = row.get(1)?;
-                                    Ok((path, size))
-                                })
-                            {
-                                ref_val = json!({
-                                    "ref": r,
-                                    "verified": true,
-                                    "type": "file",
-                                    "location": format!("{} ({} bytes)", f_row.0, f_row.1)
-                                });
-                            }
-                        }
-                        if !ref_val
-                            .get("verified")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false)
-                        {
-                            if let Ok(mut s_stmt) = iconn.prepare("SELECT file_path, line_start, line_end FROM symbols WHERE name = ?1 OR qualname = ?1 LIMIT 1") {
-                                if let Ok(s_row) = s_stmt.query_row(rusqlite::params![r], |row| {
-                                    let fp: String = row.get(0)?;
-                                    let ls: i64 = row.get(1)?;
-                                    let le: i64 = row.get(2)?;
-                                    Ok((fp, ls, le))
-                                }) {
-                                    ref_val = json!({
-                                        "ref": r,
-                                        "verified": true,
-                                        "type": "symbol",
-                                        "location": format!("{}:{}-{}", s_row.0, s_row.1, s_row.2)
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    resolved_refs.push(ref_val);
-                }
-
-                notes_json.push(json!({
-                    "id": id,
-                    "store": store_name,
-                    "key": key,
-                    "rev": rev,
-                    "kind": kind,
-                    "scope": scope,
-                    "session": session,
-                    "body": body,
-                    "tags": tags,
-                    "refs": refs_list,
-                    "resolved_refs": resolved_refs,
-                    "content_hash": format!("{content_hash:x}"),
-                    "source": source,
-                    "created_at": created_at,
-                    "expires_at": expires_at,
-                    "is_current": is_current,
-                    "superseded_by": superseded_by,
-                    "superseded_at": superseded_at,
-                    "prev_category": prev_cat,
-                    "prev_title": prev_title,
-                    "prev_detail": prev_detail,
-                    "recall_count": recall_count,
-                    "last_recalled_ts": last_recalled_ts,
-                }));
-            }
-        }
+    let Ok(mapped_rows) = rows else {
+        return;
+    };
+    for row in mapped_rows.flatten() {
+        out.push(format_note_json(
+            store_name,
+            row,
+            index_conn.as_ref(),
+            recalls_map,
+            entries,
+        ));
     }
-
-    Ok(notes_json)
 }

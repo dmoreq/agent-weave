@@ -203,3 +203,46 @@ fn mcp_dynamic_root_initialization_from_non_git_cwd() {
     let _ = child.wait();
     let _ = fs::remove_dir_all(&empty_dir);
 }
+
+#[test]
+fn mcp_client_info_sets_agent_identity() {
+    let repo = fixture("mcp-agent-id");
+    let build = aw_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let init = rpc(
+        &mut srv,
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "antigravity-test",
+                "version": "1.0.0"
+            }
+        }),
+    );
+    assert_eq!(init["id"], 1);
+
+    let call = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({
+            "name": "search",
+            "arguments": {"terms": "dummy"}
+        }),
+    );
+    assert_eq!(call["id"], 2);
+
+    let usage_log = repo.join(".aw/usage.log");
+    let content = fs::read_to_string(&usage_log).unwrap();
+    assert!(
+        content.contains("\"agent\":\"antigravity-test\""),
+        "usage log must record MCP clientInfo name: {content}"
+    );
+
+    let _ = fs::remove_dir_all(&repo);
+}

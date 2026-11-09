@@ -6,8 +6,9 @@ use super::*;
 use std::collections::HashMap;
 
 /// Raw external clients targeted by D3 abstraction bypass.
-const RAW_CLIENTS: &[&str] = &[
+pub(crate) const RAW_CLIENTS: &[&str] = &[
     "Connection::open",
+    "Connection.open",
     "sqlite3_open",
     "requests.get",
     "requests.post",
@@ -16,8 +17,21 @@ const RAW_CLIENTS: &[&str] = &[
     "axios.post",
     "fetch",
     "reqwest::get",
+    "reqwest.get",
     "ureq::get",
+    "ureq.get",
 ];
+
+pub(crate) fn is_raw_client(callee: &str) -> bool {
+    RAW_CLIENTS.contains(&callee)
+        || RAW_CLIENTS
+            .iter()
+            .any(|&r| r.replace("::", ".") == callee || callee.replace("::", ".") == r)
+}
+
+fn raw_client_eq(a: &str, b: &str) -> bool {
+    a == b || a.replace("::", ".") == b.replace("::", ".")
+}
 
 /// One reuse detector: resolve a target against the corpus to a candidate.
 pub(super) type Detector = fn(&SymbolData, &HashMap<i64, SymbolData>) -> Option<ReuseCandidate>;
@@ -224,32 +238,29 @@ fn find_best_d2(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Opti
 
 /// Detector D3: Raw Client / Abstraction Bypass.
 fn check_d3(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Option<ReuseCandidate> {
-    let raw_client = target
-        .all_callees
-        .iter()
-        .find(|c| RAW_CLIENTS.iter().any(|r| r.contains(c.as_str())))?;
-
-    let mut best_wrapper: Option<&SymbolData> = None;
+    let mut best_wrapper: Option<(&SymbolData, &str)> = None;
     for s in symbols.values() {
         let same_file_overlap = s.file_id == target.file_id
             && !(s.line_end < target.line_start || s.line_start > target.line_end);
-        if s.id != target.id
-            && !same_file_overlap
-            && is_more_canonical(s, target)
-            && s.all_callees
-                .iter()
-                .any(|c| RAW_CLIENTS.iter().any(|r| r.contains(c.as_str())))
-            // A caller-count tie breaks by the canonical key so the winner
-            // does not depend on HashMap iteration order.
-            && best_wrapper.is_none_or(|bw| {
-                s.inbound_callers > bw.inbound_callers
-                    || (s.inbound_callers == bw.inbound_callers && is_more_canonical(s, bw))
-            })
-        {
-            best_wrapper = Some(s);
+        if s.id == target.id || same_file_overlap || !is_more_canonical(s, target) {
+            continue;
+        }
+        let Some(shared_raw) = target
+            .all_callees
+            .iter()
+            .find(|tc| is_raw_client(tc) && s.all_callees.iter().any(|sc| raw_client_eq(tc, sc)))
+        else {
+            continue;
+        };
+        let is_better = best_wrapper.is_none_or(|(bw, _)| {
+            s.inbound_callers > bw.inbound_callers
+                || (s.inbound_callers == bw.inbound_callers && is_more_canonical(s, bw))
+        });
+        if is_better {
+            best_wrapper = Some((s, shared_raw.as_str()));
         }
     }
-    let canonical = best_wrapper?;
+    let (canonical, raw_client) = best_wrapper?;
     if canonical.inbound_callers < 2 {
         return None;
     }
@@ -287,4 +298,67 @@ fn check_d4(target: &SymbolData, symbols: &HashMap<i64, SymbolData>) -> Option<R
         100,
         std::slice::from_ref(&callee.name),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_symbol(
+        id: i64,
+        qualname: &str,
+        file_id: i64,
+        callers: i64,
+        callees: &[&str],
+    ) -> SymbolData {
+        SymbolData {
+            id,
+            name: qualname.rsplit('.').next().unwrap_or(qualname).to_string(),
+            qualname: qualname.to_string(),
+            file_id,
+            file_path: format!("src/file_{file_id}.rs"),
+            line_start: 10,
+            line_end: 20,
+            resolved_callees: HashSet::new(),
+            all_callees: callees.iter().map(|&s| s.to_string()).collect(),
+            callee_ids: HashSet::new(),
+            inbound_callers: callers,
+            tokens: HashSet::new(),
+            type_tokens: HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn d3_matches_raw_client_across_rust_path_styles() {
+        let mut symbols = HashMap::new();
+        symbols.insert(
+            1,
+            make_test_symbol(1, "client.fetch", 1, 5, &["reqwest::get"]),
+        );
+        let target_rust = make_test_symbol(2, "app.rogue", 2, 0, &["reqwest.get"]);
+
+        let candidate = check_d3(&target_rust, &symbols);
+        assert!(
+            candidate.is_some(),
+            "must match reqwest.get with reqwest::get wrapper"
+        );
+        let cand = candidate.unwrap();
+        assert_eq!(cand.canonical, "client.fetch");
+        assert_eq!(cand.shared_items, vec!["raw_client=reqwest.get"]);
+
+        let target_diff = make_test_symbol(3, "app.post", 2, 0, &["requests.post"]);
+        assert!(check_d3(&target_diff, &symbols).is_none());
+    }
+
+    #[test]
+    fn d3_matches_exact_client_only() {
+        let mut symbols = HashMap::new();
+        symbols.insert(1, make_test_symbol(1, "api.get", 1, 3, &["requests.get"]));
+        let target_post = make_test_symbol(2, "app.post", 2, 0, &["requests.post"]);
+        assert!(check_d3(&target_post, &symbols).is_none());
+
+        let target_get = make_test_symbol(3, "app.fetch", 2, 0, &["requests.get"]);
+        let cand = check_d3(&target_get, &symbols).expect("should match requests.get");
+        assert_eq!(cand.canonical, "api.get");
+    }
 }

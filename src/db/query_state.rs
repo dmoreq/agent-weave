@@ -271,12 +271,20 @@ pub fn gap_files_for_new_names(
     // `dst` ends with `.seg` is exactly "the last segment is `seg`"; the two
     // GLOB arms share one numbered parameter per segment. GLOB is
     // case-sensitive, matching the Rust set membership it replaced.
-    let segments: Vec<String> = new_qualnames
+    //
+    // SQLite's default binary-tree depth limit (`SQLITE_MAX_EXPR_DEPTH`) is
+    // 1000. Each segment generates 2 `OR` terms, so a batch of 100 segments
+    // creates at most 200 `OR` terms, maintaining a 5x safety margin against
+    // expression-tree-overflow errors.
+    let mut segments: Vec<String> = new_qualnames
         .iter()
         .map(|q| glob_literal(q.rsplit('.').next().unwrap_or(q)))
         .collect();
+    segments.sort_unstable();
+    segments.dedup();
+    const GLOB_OR_CHUNK: usize = 100;
     let mut out = HashSet::new();
-    for_each_chunk(old, &segments, |old, _placeholders, chunk| {
+    for chunk in segments.chunks(GLOB_OR_CHUNK) {
         // Parameter ?N is referenced twice: once for the exact match, once
         // for the `*.<segment>` suffix match.
         let last_segment = (1..=chunk.len())
@@ -300,8 +308,7 @@ pub fn gap_files_for_new_names(
              WHERE {last_segment}"
         );
         collect_gap_paths(old, &unresolved_sql, chunk, &mut out)?;
-        Ok(())
-    })?;
+    }
     Ok(out)
 }
 

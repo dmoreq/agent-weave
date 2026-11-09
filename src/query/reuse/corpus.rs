@@ -70,6 +70,14 @@ pub(super) fn load_callees(
     map_unresolved_callees(conn, symbols)
 }
 
+fn callee_name(dst_name: &str) -> String {
+    if is_raw_client(dst_name) {
+        dst_name.to_string()
+    } else {
+        dst_name.rsplit('.').next().unwrap_or(dst_name).to_string()
+    }
+}
+
 /// Fold the resolved `calls` edges into each source symbol's callee sets.
 fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolData>) -> Result<()> {
     let mut edge_stmt =
@@ -85,11 +93,11 @@ fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDat
     for row in rows {
         let (src_id, dst_id, dst_name) = row?;
         if let Some(sym) = symbols.get_mut(&src_id) {
-            let bare = dst_name.rsplit('.').next().unwrap_or(&dst_name).to_string();
-            sym.all_callees.insert(bare.clone());
+            let callee = callee_name(&dst_name);
+            sym.all_callees.insert(callee.clone());
             if let Some(did) = dst_id {
                 sym.callee_ids.insert(did);
-                sym.resolved_callees.insert(bare);
+                sym.resolved_callees.insert(callee);
             }
         }
     }
@@ -114,7 +122,7 @@ fn map_unresolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDa
     let spans = span_index(symbols);
     for r in unres_rows {
         let (file_id, site_line, dst_name) = r?;
-        let bare = dst_name.rsplit('.').next().unwrap_or(&dst_name).to_string();
+        let callee = callee_name(&dst_name);
         // Map unresolved call to the innermost callable enclosing site_line
         // (smallest span): candidates end where line_start passes the site.
         let Some(candidates) = spans.get(&file_id) else {
@@ -128,7 +136,7 @@ fn map_unresolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDa
             .map(|&(_, _, id)| id);
 
         if let Some(sym) = innermost.and_then(|id| symbols.get_mut(&id)) {
-            sym.all_callees.insert(bare);
+            sym.all_callees.insert(callee);
         }
     }
     Ok(())

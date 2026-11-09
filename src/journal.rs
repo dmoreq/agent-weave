@@ -45,11 +45,40 @@ struct Pending {
     stale: bool,
     session: String,
     arm: String,
+    agent: String,
 }
 
 thread_local! {
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
     static DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static CURRENT_AGENT: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Set active agent context for subsequent journal invocations in this process
+/// (e.g. from MCP handshake initialize clientInfo.name).
+pub fn set_agent_context(name: &str) {
+    let sanitized: String = name.trim().chars().take(32).collect();
+    if !sanitized.is_empty() {
+        CURRENT_AGENT.with(|a| *a.borrow_mut() = Some(sanitized));
+    }
+}
+
+/// Detect the calling agent identity from explicit context, environment variables,
+/// or fallback to "user".
+pub fn detect_agent() -> String {
+    if let Some(agent) = CURRENT_AGENT.with(|a| a.borrow().clone()) {
+        return agent;
+    }
+    if let Ok(val) = std::env::var("AW_AGENT") {
+        let trimmed = val.trim();
+        if !trimmed.is_empty() {
+            return trimmed.chars().take(32).collect();
+        }
+    }
+    if std::env::var("ANTIGRAVITY_AGENT").is_ok() {
+        return "antigravity".to_string();
+    }
+    "user".to_string()
 }
 
 /// Disable journaling for this process without mutating the environment.
@@ -85,6 +114,7 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
             stale: false,
             session: env_tag("AW_SESSION"),
             arm: env_tag("AW_ARM"),
+            agent: detect_agent(),
         });
     });
 }
@@ -164,6 +194,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "aw_version": env!("CARGO_PKG_VERSION"),
         "session": pending.session,
         "arm": pending.arm,
+        "agent": pending.agent,
         "repo": repo_path,
         "repo_name": repo_name,
         "worktree": is_worktree,
@@ -246,18 +277,6 @@ fn recreate_journal(path: &Path, aw_created_here: bool) {
     let _ = crate::db::ensure_aw_gitignore(root);
 }
 
-/// Bounded reader for one journal generation: reject non-regular files and
-/// cap allocation at 16 MiB even when the file is oversized or growing.
-const MAX_LOG_READ: u64 = 16 * 1024 * 1024;
-
-fn read_log_bounded(path: &Path) -> Option<String> {
-    let file = crate::walk::open_regular_file(path).ok().flatten()?;
-    let mut reader = file.take(MAX_LOG_READ);
-    let mut out = String::new();
-    reader.read_to_string(&mut out).ok()?;
-    Some(out)
-}
-
 fn rotate_if_needed(path: &Path, max: u64) {
     let oversized = fs::metadata(path).map(|m| m.len() > max).unwrap_or(false);
     if !oversized {
@@ -268,50 +287,63 @@ fn rotate_if_needed(path: &Path, max: u64) {
     let _ = fs::rename(path, PathBuf::from(rotated));
 }
 
-// ---------------------------------------------------------------------------
-// `aw usage` summary: tolerant parsing of the fixed keys this module writes.
-// ---------------------------------------------------------------------------
+/// Prune usage.log entries belonging to git worktrees that no longer exist on disk.
+/// Rewrites the log file in place. Returns the count of pruned lines.
+pub fn prune_deleted_worktrees(log_path: &Path) -> std::io::Result<usize> {
+    if !log_path.is_file() {
+        return Ok(0);
+    }
+    let content = match fs::read_to_string(log_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(0),
+    };
 
-/// Parsed usage line. Queries and signatures can contain quotes, backslashes,
-/// and control characters, so this must go through serde_json rather than
-/// slicing the raw text between quote characters.
-struct UsageFields {
-    tool: String,
-    exit_code: i64,
-    result_count: i64,
-    shown: i64,
-    total: i64,
-    stale: bool,
-    ambiguous: i64,
-    latency_us: Option<i64>,
-    ts: Option<i64>,
-    repo: Option<String>,
-    repo_name: Option<String>,
-    worktree: bool,
+    let mut kept = Vec::new();
+    let mut pruned = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            let is_worktree = val
+                .get("worktree")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if is_worktree {
+                if let Some(repo_path) = val.get("repo").and_then(|v| v.as_str()) {
+                    if !Path::new(repo_path).exists() {
+                        pruned += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        kept.push(trimmed);
+    }
+
+    if pruned > 0 {
+        let mut new_text = kept.join("\n");
+        if !new_text.is_empty() {
+            new_text.push('\n');
+        }
+        fs::write(log_path, new_text)?;
+    }
+
+    Ok(pruned)
 }
 
-fn parse_usage_line(line: &str) -> Option<UsageFields> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    Some(UsageFields {
-        tool: v.get("tool")?.as_str()?.to_string(),
-        exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
-        result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
-        shown: v.get("shown").and_then(|x| x.as_i64()).unwrap_or(0),
-        total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
-        stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
-        ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
-        latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
-        ts: v.get("ts").and_then(|x| x.as_i64()),
-        repo: v
-            .get("repo")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        repo_name: v
-            .get("repo_name")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        worktree: v.get("worktree").and_then(|x| x.as_bool()).unwrap_or(false),
-    })
+/// Prune deleted worktree entries from both current and rotated (.1) generations.
+pub fn prune_deleted_worktrees_all(base_path: &Path) -> std::io::Result<usize> {
+    let mut total = prune_deleted_worktrees(base_path)?;
+    if let Some(parent) = base_path.parent() {
+        let rotated = parent.join("usage.log.1");
+        if rotated.is_file() {
+            total += prune_deleted_worktrees(&rotated)?;
+        }
+    }
+    Ok(total)
 }
 
 mod render;
@@ -420,6 +452,47 @@ mod tests {
         std::os::unix::fs::symlink(&outside, linked_root.join(".aw")).unwrap();
         append_line(&linked_root.join(".aw/usage.log"), "line\n");
         assert!(!outside.join("usage.log").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn agent_detection_and_tagging() {
+        set_agent_context("custom-agent");
+        assert_eq!(detect_agent(), "custom-agent");
+
+        let line = r#"{"tool":"symbols","exit_code":0,"agent":"antigravity","worktree":false}"#;
+        let f = parse_usage_line(line).unwrap();
+        assert_eq!(f.agent.as_deref(), Some("antigravity"));
+    }
+
+    #[test]
+    fn prune_deleted_worktrees_removes_missing_paths() {
+        let dir = crate::db::temp_root("prune-wt");
+        let active_wt = dir.join("active-wt");
+        let deleted_wt = dir.join("deleted-wt");
+        fs::create_dir_all(&active_wt).unwrap();
+
+        let log_path = dir.join("usage.log");
+        let line1 = format!(
+            r#"{{"tool":"build","repo":"{}","worktree":true}}"#,
+            active_wt.display()
+        );
+        let line2 = format!(
+            r#"{{"tool":"build","repo":"{}","worktree":true}}"#,
+            deleted_wt.display()
+        );
+        let line3 = r#"{"tool":"symbols","repo":"/persistent/repo","worktree":false}"#.to_string();
+
+        fs::write(&log_path, format!("{line1}\n{line2}\n{line3}\n")).unwrap();
+
+        let pruned = prune_deleted_worktrees(&log_path).unwrap();
+        assert_eq!(pruned, 1);
+
+        let remaining = fs::read_to_string(&log_path).unwrap();
+        assert!(remaining.contains(&active_wt.to_string_lossy().to_string()));
+        assert!(!remaining.contains(&deleted_wt.to_string_lossy().to_string()));
+        assert!(remaining.contains("/persistent/repo"));
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

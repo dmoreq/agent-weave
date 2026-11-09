@@ -3,6 +3,65 @@
 
 use super::*;
 
+/// Bounded reader for one journal generation: reject non-regular files and
+/// cap allocation at 16 MiB even when the file is oversized or growing.
+const MAX_LOG_READ: u64 = 16 * 1024 * 1024;
+
+fn read_log_bounded(path: &Path) -> Option<String> {
+    let file = crate::walk::open_regular_file(path).ok().flatten()?;
+    let mut reader = file.take(MAX_LOG_READ);
+    let mut out = String::new();
+    reader.read_to_string(&mut out).ok()?;
+    Some(out)
+}
+
+/// Parsed usage line. Queries and signatures can contain quotes, backslashes,
+/// and control characters, so this must go through serde_json rather than
+/// slicing the raw text between quote characters.
+pub(crate) struct UsageFields {
+    pub(crate) tool: String,
+    pub(crate) exit_code: i64,
+    pub(crate) result_count: i64,
+    pub(crate) shown: i64,
+    pub(crate) total: i64,
+    pub(crate) stale: bool,
+    pub(crate) ambiguous: i64,
+    pub(crate) latency_us: Option<i64>,
+    pub(crate) ts: Option<i64>,
+    pub(crate) repo: Option<String>,
+    pub(crate) repo_name: Option<String>,
+    pub(crate) worktree: bool,
+    pub(crate) agent: Option<String>,
+}
+
+pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    Some(UsageFields {
+        tool: v.get("tool")?.as_str()?.to_string(),
+        exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
+        result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
+        shown: v.get("shown").and_then(|x| x.as_i64()).unwrap_or(0),
+        total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
+        stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
+        ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
+        latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
+        ts: v.get("ts").and_then(|x| x.as_i64()),
+        repo: v
+            .get("repo")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        repo_name: v
+            .get("repo_name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        worktree: v.get("worktree").and_then(|x| x.as_bool()).unwrap_or(false),
+        agent: v
+            .get("agent")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+    })
+}
+
 #[derive(Default)]
 struct RepoAgg {
     calls: usize,
@@ -15,6 +74,7 @@ struct ErrorRecord {
     tool: String,
     repo_name: Option<String>,
     exit_code: i64,
+    agent: Option<String>,
 }
 
 #[derive(Default)]
@@ -124,6 +184,13 @@ fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
+        if fields.worktree {
+            if let Some(ref r_path) = fields.repo {
+                if !std::path::Path::new(r_path).exists() {
+                    continue;
+                }
+            }
+        }
         fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
     }
     aggs
@@ -201,6 +268,13 @@ fn aggregate_global_usage(
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
+        if fields.worktree {
+            if let Some(ref r_path) = fields.repo {
+                if !std::path::Path::new(r_path).exists() {
+                    continue;
+                }
+            }
+        }
         fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
 
         let repo_key = fields
@@ -217,6 +291,7 @@ fn aggregate_global_usage(
                 tool: fields.tool,
                 repo_name: fields.repo_name,
                 exit_code: fields.exit_code,
+                agent: fields.agent,
             });
         }
         if fields.worktree {
@@ -241,21 +316,7 @@ fn render_global_summary(
     out.extend(kpi_section(aggs, " across all repos"));
 
     if !repo_aggs.is_empty() {
-        out.push("  ├─ Active Repositories:".to_string());
-        let mut repos: Vec<(&String, &RepoAgg)> = repo_aggs.iter().collect();
-        repos.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
-        for (repo_name, r_agg) in repos {
-            let rel = if r_agg.calls > 0 {
-                100.0 * (r_agg.calls.saturating_sub(r_agg.errors) as f64) / (r_agg.calls as f64)
-            } else {
-                100.0
-            };
-            let wt_tag = if r_agg.worktree { " [worktree]" } else { "" };
-            out.push(format!(
-                "  │   ├─ {repo_name}{wt_tag}: {} calls ({rel:.1}% ok, {} errors)",
-                r_agg.calls, r_agg.errors
-            ));
-        }
+        out.extend(active_repos_section(repo_aggs));
     }
 
     out.push("  ├─ Tool Breakdown:".to_string());
@@ -266,24 +327,47 @@ fn render_global_summary(
             .map(|(tool, agg)| tool_row(tool, agg, quality)),
     );
 
-    let now = crate::db::unix_now();
-    if recent_errors.is_empty() {
-        out.push("  └─ Recent Errors: None (100% clean)".to_string());
-    } else {
-        out.push("  └─ Recent Errors (latest first):".to_string());
-        for err in recent_errors.iter().take(5) {
-            let repo_label = err.repo_name.as_deref().unwrap_or("unknown");
-            let age_str = err
-                .ts
-                .map(|t| format_age_secs(now.saturating_sub(t)))
-                .unwrap_or_else(|| "-".to_string());
-            out.push(format!(
-                "      • [{age_str}] {} in {repo_label} -> exit {}",
-                err.tool, err.exit_code
-            ));
-        }
-    }
+    out.extend(recent_errors_section(recent_errors));
+    out
+}
 
+fn active_repos_section(repo_aggs: &std::collections::BTreeMap<String, RepoAgg>) -> Vec<String> {
+    let mut out = vec!["  ├─ Active Repositories:".to_string()];
+    let mut repos: Vec<(&String, &RepoAgg)> = repo_aggs.iter().collect();
+    repos.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
+    for (repo_name, r_agg) in repos {
+        let rel = if r_agg.calls > 0 {
+            100.0 * (r_agg.calls.saturating_sub(r_agg.errors) as f64) / (r_agg.calls as f64)
+        } else {
+            100.0
+        };
+        let wt_tag = if r_agg.worktree { " [worktree]" } else { "" };
+        out.push(format!(
+            "  │   ├─ {repo_name}{wt_tag}: {} calls ({rel:.1}% ok, {} errors)",
+            r_agg.calls, r_agg.errors
+        ));
+    }
+    out
+}
+
+fn recent_errors_section(recent_errors: &[ErrorRecord]) -> Vec<String> {
+    if recent_errors.is_empty() {
+        return vec!["  └─ Recent Errors: None (100% clean)".to_string()];
+    }
+    let now = crate::db::unix_now();
+    let mut out = vec!["  └─ Recent Errors (latest first):".to_string()];
+    for err in recent_errors.iter().take(5) {
+        let repo_label = err.repo_name.as_deref().unwrap_or("unknown");
+        let agent_label = err.agent.as_deref().unwrap_or("user");
+        let age_str = err
+            .ts
+            .map(|t| format_age_secs(now.saturating_sub(t)))
+            .unwrap_or_else(|| "-".to_string());
+        out.push(format!(
+            "      • [{age_str}] {} in {repo_label} [{agent_label}] -> exit {}",
+            err.tool, err.exit_code
+        ));
+    }
     out
 }
 

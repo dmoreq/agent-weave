@@ -299,26 +299,27 @@ aw-dashboard [--open] [--serve [PORT]] [--out <PATH>]
 - Includes repository filter dropdown, active repositories overview, tool breakdown charts, and an error triage inspection table.
 
 ### Native Dashboard (`aw dashboard`)
-Serve the interactive 3-tab web dashboard (Telemetry, Anti-Reinvention, Agent Memory) with real-time SSE streaming. Built into the native Rust binary with zero Python dependencies.
+Serve the interactive 3-tab web dashboard (Telemetry, Anti-Reinvention, Agent Memory) with real-time SSE streaming. Built into the native Rust binary with zero Python dependencies. By default, telemetry is aggregated globally across all repositories (`~/.aw/`).
 
 ```bash
-aw dashboard [--port 7890] [--host 127.0.0.1] [--open] [--global]
+aw dashboard [--port 7890] [--host 127.0.0.1] [--open] [--local]
 ```
 
 - `--port <PORT>`: Port to bind the local dashboard web server (default: 7890).
 - `--host <HOST>`: Loopback interface to bind (default: 127.0.0.1).
 - `--open`: Automatically opens the dashboard in your default browser.
-- `--global`: Reads telemetry and memories across all repositories from `~/.aw/`.
+- `--local`: Scope telemetry exclusively to the current repository (`.aw/usage.log`) instead of global.
 
 ### Live Query Monitor (`aw monitor`)
-Stream real-time query events directly in your terminal with colored ANSI output and zero dependencies.
+Stream real-time query events directly in your terminal with colored ANSI output, agent attribution tags, and zero dependencies. Defaults to global telemetry across all repositories with an initial backlog of recent events.
 
 ```bash
-aw monitor [--repo <NAME>] [--errors-only]
+aw monitor [--repo <NAME>] [--errors-only] [--local]
 ```
 
 - `--repo <NAME>`: Restrict streaming query output to a specific repository.
 - `--errors-only`: Filter for critical errors (exit code >= 3).
+- `--local`: Scope streaming exclusively to the current repository (`.aw/usage.log`).
 
 ---
 

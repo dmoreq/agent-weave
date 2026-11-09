@@ -16,6 +16,7 @@ use crate::query::{clamp_limit, QueryCtx};
 use corpus::{load_callees, load_symbols, select_targets};
 use detectors::DETECTORS;
 
+pub(crate) use detectors::is_raw_client;
 pub use detectors::DetectorId;
 use tokens::build_stoplist;
 
@@ -149,7 +150,8 @@ pub(crate) fn analyze_corpus(
     load_callees(conn, &mut symbols)?;
     let stopset = build_stoplist(&symbols);
     for sym in symbols.values_mut() {
-        sym.all_callees.retain(|c| !stopset.contains(c.as_str()));
+        sym.all_callees
+            .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
     }
