@@ -373,6 +373,7 @@ function renderReposTable(repoAggs) {
   const maxCalls = entries[0][1].calls || 1;
 
   tbody.innerHTML = '';
+  const curRepoVal = select ? select.value : 'ALL';
   if (select) {
     select.innerHTML = '<option value="ALL">All Repositories</option>';
   }
@@ -409,6 +410,9 @@ function renderReposTable(repoAggs) {
 
     tbody.appendChild(tr);
   });
+  if (select && curRepoVal) {
+    select.value = curRepoVal;
+  }
 }
 
 function renderAgentsTable(agentAggs, totalCalls) {
@@ -433,6 +437,7 @@ function renderAgentsTable(agentAggs, totalCalls) {
   const maxCalls = entries[0][1].calls || 1;
 
   tbody.innerHTML = '';
+  const curAgentVal = select ? select.value : 'ALL';
   if (select) {
     select.innerHTML = '<option value="ALL">All Agents</option>';
   }
@@ -469,6 +474,9 @@ function renderAgentsTable(agentAggs, totalCalls) {
 
     tbody.appendChild(tr);
   });
+  if (select && curAgentVal) {
+    select.value = curAgentVal;
+  }
 }
 
 function filterByAgent(agentName) {
@@ -1192,36 +1200,255 @@ function renderMemoryDossier(m) {
 }
 
 let liveEventCount = 0;
+let isDocumentVisible = true;
 
-// Live Server-Sent Events (SSE)
+// Selective Invalidation Debounce Timers
 let summaryDebounceTimer = null;
+let reuseDebounceTimer = null;
+let memoriesDebounceTimer = null;
+
 function triggerSummaryRefresh() {
   if (summaryDebounceTimer) clearTimeout(summaryDebounceTimer);
-  summaryDebounceTimer = setTimeout(loadSummaryData, 300);
+  summaryDebounceTimer = setTimeout(loadSummaryData, 3000);
 }
 
+function triggerReuseRefresh() {
+  if (reuseDebounceTimer) clearTimeout(reuseDebounceTimer);
+  reuseDebounceTimer = setTimeout(loadReuseData, 1000);
+}
+
+function triggerMemoriesRefresh() {
+  if (memoriesDebounceTimer) clearTimeout(memoriesDebounceTimer);
+  memoriesDebounceTimer = setTimeout(loadMemoriesData, 500);
+}
+
+function flashElement(el) {
+  if (!el) return;
+  el.classList.remove('metric-flash');
+  void el.offsetWidth;
+  el.classList.add('metric-flash');
+}
+
+function estimateEventTokens(tool, shown, resultCount) {
+  switch (tool) {
+    case 'context':
+    case 'callers':
+    case 'callees':
+    case 'path':
+    case 'impact':
+    case 'imports':
+      return shown * 35 + 800;
+    case 'search':
+      return shown * 25 + 800;
+    case 'reuse':
+      return resultCount * 350 + 1200;
+    case 'symbols':
+      return shown * 15;
+    case 'build':
+      return 1500;
+    default:
+      return 0;
+  }
+}
+
+function patchSummaryState(q) {
+  if (!latestSummaryData) return;
+
+  const tool = q.tool || '';
+  const repoName = q.repo_name || 'workspace';
+  const agentName = q.agent || 'user';
+  const exitCode = parseInt(q.exit_code || 0, 10);
+  const isError = exitCode >= 3;
+  const shown = q.shown || 0;
+  const resultCount = q.result_count || 0;
+  const isGraph = GRAPH_TOOLS.includes(tool);
+  const isReuse = tool === 'reuse' || tool === 'search';
+  const isMem = tool.startsWith('mem_');
+  const isMemRead = tool === 'mem_query' || tool === 'mem_get' || tool === 'mem_export';
+  const isMemWrite = tool === 'mem_write' || tool === 'mem_delete' || tool === 'mem_touch' || tool === 'mem_gc';
+
+  const savedTokens = estimateEventTokens(tool, shown, resultCount);
+
+  // 1. Overall & Graph Totals
+  latestSummaryData.total_calls = (latestSummaryData.total_calls || 0) + 1;
+  if (isError) {
+    latestSummaryData.error_count = (latestSummaryData.error_count || 0) + 1;
+  }
+  const tot = latestSummaryData.total_calls;
+  const err = latestSummaryData.error_count || 0;
+  latestSummaryData.reliability_pct = tot > 0 ? (100.0 * (tot - err) / tot) : 100.0;
+  latestSummaryData.saved_tokens = (latestSummaryData.saved_tokens || 0) + savedTokens;
+  latestSummaryData.saved_dollars = (latestSummaryData.saved_tokens / 1000000.0) * 3.0;
+
+  if (isGraph) {
+    latestSummaryData.graph_calls = (latestSummaryData.graph_calls || 0) + 1;
+    if (isError) {
+      latestSummaryData.graph_errors = (latestSummaryData.graph_errors || 0) + 1;
+    }
+    const gTot = latestSummaryData.graph_calls;
+    const gErr = latestSummaryData.graph_errors || 0;
+    latestSummaryData.graph_reliability_pct = gTot > 0 ? (100.0 * (gTot - gErr) / gTot) : 100.0;
+    latestSummaryData.graph_saved_tokens = (latestSummaryData.graph_saved_tokens || 0) + savedTokens;
+    latestSummaryData.graph_saved_dollars = (latestSummaryData.graph_saved_tokens / 1000000.0) * 3.0;
+  }
+
+  if (tool === 'reuse' && exitCode === 0) {
+    const hits = Math.max(shown, resultCount);
+    if (hits > 0) {
+      latestSummaryData.reuse_hits = (latestSummaryData.reuse_hits || 0) + hits;
+    }
+  }
+
+  // 2. Tool Aggs
+  if (!latestSummaryData.tool_aggs) latestSummaryData.tool_aggs = {};
+  if (!latestSummaryData.tool_aggs[tool]) {
+    latestSummaryData.tool_aggs[tool] = { calls: 0, errors: 0, shown: 0 };
+  }
+  const tEntry = latestSummaryData.tool_aggs[tool];
+  tEntry.calls = (tEntry.calls || 0) + 1;
+  tEntry.shown = (tEntry.shown || 0) + shown;
+  if (isError) tEntry.errors = (tEntry.errors || 0) + 1;
+
+  // 3. Repo Aggs
+  if (!latestSummaryData.repo_aggs) latestSummaryData.repo_aggs = {};
+  if (!latestSummaryData.repo_aggs[repoName]) {
+    latestSummaryData.repo_aggs[repoName] = {
+      calls: 0, errors: 0, graph_calls: 0, graph_errors: 0,
+      saved_tokens: 0, graph_saved_tokens: 0,
+      reuse_calls: 0, reuse_errors: 0, reuse_hits: 0, reuse_saved_tokens: 0,
+      memory_calls: 0, memory_errors: 0, memory_reads: 0, memory_writes: 0,
+      worktree: Boolean(q.worktree),
+    };
+  }
+  const rEntry = latestSummaryData.repo_aggs[repoName];
+  rEntry.calls = (rEntry.calls || 0) + 1;
+  if (isError) rEntry.errors = (rEntry.errors || 0) + 1;
+  rEntry.saved_tokens = (rEntry.saved_tokens || 0) + savedTokens;
+  rEntry.worktree = rEntry.worktree || Boolean(q.worktree);
+  if (q.ts) rEntry.last_ts = q.ts;
+  if (isGraph) {
+    rEntry.graph_calls = (rEntry.graph_calls || 0) + 1;
+    if (isError) rEntry.graph_errors = (rEntry.graph_errors || 0) + 1;
+    rEntry.graph_saved_tokens = (rEntry.graph_saved_tokens || 0) + savedTokens;
+    rEntry.graph_reliability_pct = rEntry.graph_calls ? 100.0 * (rEntry.graph_calls - rEntry.graph_errors) / rEntry.graph_calls : 100.0;
+  }
+  if (isReuse) {
+    rEntry.reuse_calls = (rEntry.reuse_calls || 0) + 1;
+    if (isError) rEntry.reuse_errors = (rEntry.reuse_errors || 0) + 1;
+    rEntry.reuse_saved_tokens = (rEntry.reuse_saved_tokens || 0) + savedTokens;
+    if (tool === 'reuse' && exitCode === 0) {
+      const hits = Math.max(shown, resultCount);
+      rEntry.reuse_hits = (rEntry.reuse_hits || 0) + hits;
+    }
+    rEntry.reuse_reliability_pct = rEntry.reuse_calls ? 100.0 * (rEntry.reuse_calls - rEntry.reuse_errors) / rEntry.reuse_calls : 100.0;
+  }
+  if (isMem) {
+    rEntry.memory_calls = (rEntry.memory_calls || 0) + 1;
+    if (isError) rEntry.memory_errors = (rEntry.memory_errors || 0) + 1;
+    if (isMemRead) rEntry.memory_reads = (rEntry.memory_reads || 0) + 1;
+    if (isMemWrite) rEntry.memory_writes = (rEntry.memory_writes || 0) + 1;
+    rEntry.memory_reliability_pct = rEntry.memory_calls ? 100.0 * (rEntry.memory_calls - rEntry.memory_errors) / rEntry.memory_calls : 100.0;
+  }
+
+  // 4. Agent Aggs
+  if (!latestSummaryData.agent_aggs) latestSummaryData.agent_aggs = {};
+  if (!latestSummaryData.agent_aggs[agentName]) {
+    latestSummaryData.agent_aggs[agentName] = {
+      calls: 0, errors: 0, graph_calls: 0, graph_errors: 0,
+      saved_tokens: 0, graph_saved_tokens: 0,
+      reuse_calls: 0, reuse_errors: 0, reuse_hits: 0, reuse_saved_tokens: 0,
+      memory_calls: 0, memory_errors: 0, memory_reads: 0, memory_writes: 0,
+    };
+  }
+  const aEntry = latestSummaryData.agent_aggs[agentName];
+  aEntry.calls = (aEntry.calls || 0) + 1;
+  if (isError) aEntry.errors = (aEntry.errors || 0) + 1;
+  aEntry.saved_tokens = (aEntry.saved_tokens || 0) + savedTokens;
+  if (q.ts) aEntry.last_ts = q.ts;
+  if (isGraph) {
+    aEntry.graph_calls = (aEntry.graph_calls || 0) + 1;
+    if (isError) aEntry.graph_errors = (aEntry.graph_errors || 0) + 1;
+    aEntry.graph_saved_tokens = (aEntry.graph_saved_tokens || 0) + savedTokens;
+    aEntry.graph_reliability_pct = aEntry.graph_calls ? 100.0 * (aEntry.graph_calls - aEntry.graph_errors) / aEntry.graph_calls : 100.0;
+  }
+  if (isReuse) {
+    aEntry.reuse_calls = (aEntry.reuse_calls || 0) + 1;
+    if (isError) aEntry.reuse_errors = (aEntry.reuse_errors || 0) + 1;
+    aEntry.reuse_saved_tokens = (aEntry.reuse_saved_tokens || 0) + savedTokens;
+    if (tool === 'reuse' && exitCode === 0) {
+      const hits = Math.max(shown, resultCount);
+      aEntry.reuse_hits = (aEntry.reuse_hits || 0) + hits;
+    }
+    aEntry.reuse_reliability_pct = aEntry.reuse_calls ? 100.0 * (aEntry.reuse_calls - aEntry.reuse_errors) / aEntry.reuse_calls : 100.0;
+  }
+  if (isMem) {
+    aEntry.memory_calls = (aEntry.memory_calls || 0) + 1;
+    if (isError) aEntry.memory_errors = (aEntry.memory_errors || 0) + 1;
+    if (isMemRead) aEntry.memory_reads = (aEntry.memory_reads || 0) + 1;
+    if (isMemWrite) aEntry.memory_writes = (aEntry.memory_writes || 0) + 1;
+    aEntry.memory_reliability_pct = aEntry.memory_calls ? 100.0 * (aEntry.memory_calls - aEntry.memory_errors) / aEntry.memory_calls : 100.0;
+  }
+}
+
+// Live Server-Sent Events (SSE)
 function initEventSource() {
   const liveBadge = document.getElementById('live-indicator');
   if (liveBadge) liveBadge.style.display = 'inline-block';
 
   const source = new EventSource('/events');
+
+  source.onopen = function() {
+    const dot = document.querySelector('.live-dot');
+    if (dot) {
+      dot.className = 'live-dot live-active';
+    }
+    if (liveBadge) liveBadge.title = 'Live stream connected';
+  };
+
+  source.onerror = function() {
+    const dot = document.querySelector('.live-dot');
+    if (dot) {
+      dot.className = 'live-dot live-reconnecting';
+    }
+    if (liveBadge) liveBadge.title = 'Reconnecting to live stream...';
+  };
+
   source.onmessage = function(e) {
     try {
       const q = JSON.parse(e.data);
       handleLiveEvent(q);
       liveEventCount++;
+
+      // Lazy background drift reconciliation (debounced 3s)
       triggerSummaryRefresh();
-      if (q.tool && q.tool.startsWith('mem_')) {
-        loadMemoriesData();
-      }
-      if (q.tool && (q.tool === 'reuse' || q.tool === 'search')) {
-        loadReuseData();
+
+      // Mutation-selective endpoint invalidation
+      const tool = q.tool || '';
+      if (tool === 'build') {
+        triggerReuseRefresh();
+      } else if (tool === 'mem_write' || tool === 'mem_delete' || tool === 'mem_touch') {
+        triggerMemoriesRefresh();
       }
     } catch(err) {}
   };
 
-  // Background fallback poll every 15s to keep metrics fresh
+  // Page Visibility API to save battery and sync on foreground
+  document.addEventListener('visibilitychange', () => {
+    isDocumentVisible = !document.hidden;
+    const dot = document.querySelector('.live-dot');
+    if (isDocumentVisible) {
+      if (dot) dot.className = 'live-dot live-active';
+      loadSummaryData();
+      if (activeTab === 'reuse') loadReuseData();
+      if (activeTab === 'memory') loadMemoriesData();
+    } else {
+      if (dot) dot.className = 'live-dot live-paused';
+    }
+  });
+
+  // Background fallback poll every 15s to keep metrics fresh when visible
   setInterval(() => {
+    if (!isDocumentVisible) return;
     loadSummaryData();
     if (activeTab === 'reuse') loadReuseData();
     if (activeTab === 'memory') loadMemoriesData();
@@ -1231,18 +1458,36 @@ function initEventSource() {
 function handleLiveEvent(q) {
   const tool = q.tool || '';
   const isGraph = GRAPH_TOOLS.includes(tool);
+  const exitCode = parseInt(q.exit_code || 0, 10);
+
+  // 1. Immediately patch in-memory aggregation state
+  patchSummaryState(q);
+
+  // 2. Real-time updates for Tab 01 (Graph Navigation)
   if (isGraph) {
-    totalCalls++;
-    const exitCode = parseInt(q.exit_code || 0, 10);
-    if (exitCode >= 3) totalErrors++;
+    totalCalls = latestSummaryData ? latestSummaryData.graph_calls : (totalCalls + 1);
+    totalErrors = latestSummaryData ? latestSummaryData.graph_errors : (exitCode >= 3 ? totalErrors + 1 : totalErrors);
 
     const totalCallsEl = document.getElementById('metric-total-calls');
-    if (totalCallsEl) totalCallsEl.textContent = totalCalls.toLocaleString();
+    if (totalCallsEl) {
+      totalCallsEl.textContent = totalCalls.toLocaleString();
+      flashElement(totalCallsEl);
+    }
 
     const relEl = document.getElementById('metric-reliability');
     if (relEl) {
-      const rel = totalCalls > 0 ? (100.0 * (totalCalls - totalErrors) / totalCalls).toFixed(1) : "100.0";
-      relEl.textContent = rel + "% clean (" + totalErrors + " errs)";
+      const rel = latestSummaryData ? latestSummaryData.graph_reliability_pct : (totalCalls > 0 ? (100.0 * (totalCalls - totalErrors) / totalCalls) : 100.0);
+      relEl.textContent = rel.toFixed(1) + "% clean (" + totalErrors + " errs)";
+    }
+
+    const tokEl = document.getElementById('metric-tokens');
+    if (tokEl && latestSummaryData) {
+      tokEl.textContent = '~' + (latestSummaryData.graph_saved_tokens || 0).toLocaleString();
+    }
+
+    const dolEl = document.getElementById('metric-dollars');
+    if (dolEl && latestSummaryData) {
+      dolEl.textContent = '~$' + (latestSummaryData.graph_saved_dollars || 0.0).toFixed(2) + ' avoided vs full reads';
     }
 
     const recentTbody = document.getElementById('recent-tbody');
@@ -1280,6 +1525,7 @@ function handleLiveEvent(q) {
       }
     }
   } else if (tool === 'search' || tool === 'reuse') {
+    // 3. Real-time updates for Tab 02 (Anti-Reinvention)
     const args = q.args || {};
     const terms = args.terms || args.paths || '';
     const newSearch = {
@@ -1297,6 +1543,27 @@ function handleLiveEvent(q) {
     if (kpiPrewrite) {
       const cur = parseInt(kpiPrewrite.textContent.replace(/,/g, ''), 10) || 0;
       kpiPrewrite.textContent = (cur + 1).toLocaleString();
+      flashElement(kpiPrewrite);
+    }
+  } else if (tool.startsWith('mem_')) {
+    // 4. Real-time updates for Tab 03 (Project Memory)
+    updateMemoryKpis();
+    const rwEl = document.getElementById('mem-kpi-rw');
+    if (rwEl) flashElement(rwEl);
+  }
+
+  // 5. Update the active tab breakdown tables immediately using in-memory state
+  if (latestSummaryData) {
+    if (activeTab === 'telemetry') {
+      renderReposTable(latestSummaryData.repo_aggs || {});
+      renderAgentsTable(latestSummaryData.agent_aggs || {}, latestSummaryData.graph_calls || latestSummaryData.total_calls);
+      renderToolsTable(latestSummaryData.tool_aggs || {}, latestSummaryData.graph_calls || latestSummaryData.total_calls);
+    } else if (activeTab === 'reuse') {
+      renderReuseReposTable(latestSummaryData.repo_aggs || {});
+      renderReuseAgentsTable(latestSummaryData.agent_aggs || {});
+    } else if (activeTab === 'memory') {
+      renderMemoryReposTable(latestSummaryData.repo_aggs || {});
+      renderMemoryAgentsTable(latestSummaryData.agent_aggs || {});
     }
   }
 }

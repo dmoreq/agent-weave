@@ -243,6 +243,7 @@ tr:hover td { background: var(--bg-subtle); }
 .row-track-fill {
   background: var(--intent-primary);
   height: 100%;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .num-col { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -615,6 +616,25 @@ tr.agent-row-item { cursor: pointer; }
   background: var(--intent-success);
   margin-right: 0.4rem;
   animation: pulse 2s infinite;
+}
+.live-dot.live-active {
+  background: var(--intent-success);
+}
+.live-dot.live-reconnecting {
+  background: var(--intent-warn);
+}
+.live-dot.live-paused {
+  background: var(--text-muted);
+  animation: none;
+}
+
+/* Metric Flash Animation on Live Invocations */
+.metric-flash {
+  animation: metricFlash 0.75s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes metricFlash {
+  0% { background-color: var(--border-subtle); }
+  100% { background-color: transparent; }
 }
 @keyframes pulse {
   0% { opacity: 1; transform: scale(1); }
