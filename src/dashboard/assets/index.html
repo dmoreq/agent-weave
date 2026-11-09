@@ -22,23 +22,23 @@
   <!-- Primary Tab Bar (3 Dedicated Tabs) -->
   <nav class="nav-tabs" role="tablist">
     <button class="tab-btn active" id="tab-telemetry-btn" onclick="switchTab('telemetry')">
-      <span class="tab-num">01</span> Telemetry &amp; Operations
+      <span class="tab-num">01</span> Code Graph &amp; Navigation
     </button>
     <button class="tab-btn" id="tab-reuse-btn" onclick="switchTab('reuse')">
-      <span class="tab-num">02</span> Anti-Reinvention Inspector
+      <span class="tab-num">02</span> Anti-Reinvention Engine
       <span class="tab-badge" id="nav-reuse-count">0</span>
     </button>
     <button class="tab-btn" id="tab-memory-btn" onclick="switchTab('memory')">
-      <span class="tab-num">03</span> Agent Memory Inspector
+      <span class="tab-num">03</span> Persistent Project Memory
       <span class="tab-badge" id="nav-mem-count">0</span>
     </button>
   </nav>
 
-  <!-- ==================== TAB 01: TELEMETRY & OPERATIONS ==================== -->
+  <!-- ==================== TAB 01: DETERMINISTIC CODE GRAPH & NAVIGATION ==================== -->
   <div id="tab-telemetry-content">
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Total Operations</div>
+        <div class="kpi-label">Deterministic Graph Queries</div>
         <div id="metric-total-calls" class="kpi-value">0</div>
         <div id="metric-reliability" class="kpi-sub">100.0% clean (0 errors)</div>
       </div>
@@ -48,14 +48,14 @@
         <div id="metric-latency-sub" class="kpi-sub">p95 = 0.0ms &middot; avg = 0.0ms</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Context Efficiency</div>
+        <div class="kpi-label">Context Window Token Avoidance</div>
         <div id="metric-tokens" class="kpi-value">~0</div>
         <div id="metric-dollars" class="kpi-sub">Avoided model context overhead</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Active Workspaces</div>
+        <div class="kpi-label">Graph Workspace Scope</div>
         <div class="kpi-value"><span id="metric-active-repos">0</span> <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: normal;">repos</span></div>
-        <div id="metric-active-worktrees" class="kpi-sub">Multi-repository telemetry attribution</div>
+        <div id="metric-active-worktrees" class="kpi-sub">Multi-repository graph index</div>
       </div>
     </div>
 
@@ -63,8 +63,8 @@
       <!-- Repositories & Worktrees Breakdown -->
       <div class="card">
         <div class="card-title">
-          <span>Workspace Distribution</span>
-          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Filter telemetry by repository</span>
+          <span>Workspace Graph Distribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Indexed repositories and worktree branches</span>
         </div>
         <table>
           <thead>
@@ -81,17 +81,17 @@
         </table>
       </div>
 
-      <!-- Agent Attribution Breakdown -->
+      <!-- Agent Navigation Attribution Breakdown -->
       <div class="card">
         <div class="card-title">
-          <span>Agent Attribution</span>
-          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Workload and efficiency by calling agent</span>
+          <span>Agent Navigation Attribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Graph queries and context avoidance by agent</span>
         </div>
         <table>
           <thead>
             <tr>
               <th>Agent Identity</th>
-              <th class="text-right">Calls</th>
+              <th class="text-right">Queries</th>
               <th>Reliability</th>
               <th class="text-right">Tokens Saved</th>
             </tr>
@@ -103,11 +103,11 @@
       </div>
     </div>
 
-    <!-- Tool Distribution -->
+    <!-- Graph Command Distribution -->
     <div class="card" style="margin-bottom: 1.75rem;">
       <div class="card-title">
-        <span>Command Distribution &amp; Latency Profile</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Execution volume and median latency</span>
+        <span>Graph Command Performance Profile</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Deterministic graph tools (callers, callees, path, context, impact, symbols, imports, build)</span>
       </div>
       <table>
         <thead>
@@ -118,7 +118,7 @@
           </tr>
         </thead>
         <tbody id="tools-tbody">
-          <tr><td colspan="3" class="empty-cell">Loading tools...</td></tr>
+          <tr><td colspan="3" class="empty-cell">Loading graph tools...</td></tr>
         </tbody>
       </table>
     </div>
@@ -126,8 +126,8 @@
     <!-- Live Query Stream -->
     <div class="card">
       <div class="card-title">
-        <span>Real-Time Invocations</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Live query telemetry stream</span>
+        <span>Real-Time Graph Navigation Invocations</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Live code graph query stream (callers, callees, path, context, impact, symbols, imports, build)</span>
       </div>
 
       <div class="filter-bar">
@@ -175,8 +175,8 @@
     <!-- Triage Log -->
     <div class="card">
       <div class="card-title">
-        <span>Operational Diagnostics &amp; Exceptions</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Exit status &gt;= 3</span>
+        <span>Graph Diagnostics &amp; Exceptions</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Non-zero exit resolutions on graph navigation queries (Exit &gt;= 3)</span>
       </div>
       <table>
         <thead>
@@ -196,14 +196,14 @@
     </div>
   </div>
 
-  <!-- ==================== TAB 02: ANTI-REINVENTION INSPECTOR ==================== -->
+  <!-- ==================== TAB 02: REAL-TIME ANTI-REINVENTION ENGINE ==================== -->
   <div id="tab-reuse-content" class="hidden">
     <!-- Prevention KPI Strip -->
     <div class="kpi-strip">
       <div class="kpi-tile">
         <div class="kpi-label">Duplicate Candidates Identified</div>
         <div class="kpi-value text-success" id="reuse-kpi-count">0</div>
-        <div class="kpi-sub">D1–D4 syntactic &amp; structural detectors</div>
+        <div class="kpi-sub">Syntactic &amp; structural duplicate twins</div>
       </div>
       <div class="kpi-tile">
         <div class="kpi-label">Preventable Excess Code</div>
@@ -211,14 +211,14 @@
         <div class="kpi-sub">Redundant lines eliminated via consolidation</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Proactive Reuse Lookups</div>
-        <div class="kpi-value" id="reuse-kpi-prewrite">0</div>
-        <div class="kpi-sub">Pre-write searches discovering canonical helpers</div>
+        <div class="kpi-label">Authoritative Concentration</div>
+        <div class="kpi-value"><span id="reuse-kpi-callers">0.0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">callers</span></div>
+        <div class="kpi-sub">Average caller volume on canonical helpers</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Canonical Target Concentration</div>
-        <div class="kpi-value"><span id="reuse-kpi-callers">0.0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">callers</span></div>
-        <div class="kpi-sub">Average caller volume on authoritative helpers</div>
+        <div class="kpi-label">Pre-Write Helper Discovery</div>
+        <div class="kpi-value"><span id="reuse-kpi-prewrite">0</span> <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal;">queries</span></div>
+        <div class="kpi-sub" id="reuse-kpi-detectors">D1: 0 &middot; D2: 0 &middot; D3: 0 &middot; D4: 0</div>
       </div>
     </div>
 
@@ -230,7 +230,7 @@
       </select>
 
       <span class="text-muted" style="font-size: 0.78rem;">Detector:</span>
-      <div class="pill-group">
+      <div class="pill-group" id="reuse-detector-pills">
         <button class="filter-pill active" data-det="ALL" onclick="setReuseDetectorFilter('ALL')">All</button>
         <button class="filter-pill" data-det="D1" onclick="setReuseDetectorFilter('D1')">D1 Callee</button>
         <button class="filter-pill" data-det="D2" onclick="setReuseDetectorFilter('D2')">D2 Interface</button>
@@ -251,11 +251,84 @@
       </div>
     </div>
 
-    <!-- Pre-Write Helper Discovery Feed -->
+    <!-- Anti-Reinvention Engine Policy & Detector Matrix -->
     <div class="card" style="margin-top: 1.5rem;">
       <div class="card-title">
-        <span>Pre-Implementation Discovery Queries</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Agent search queries executed prior to code generation</span>
+        <span>Anti-Reinvention Detector Specification &amp; Policy Matrix</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Deterministic consolidation rules governing duplicate prevention</span>
+      </div>
+      <div class="detector-matrix-grid">
+        <div class="detector-matrix-card">
+          <div class="detector-matrix-header">
+            <span class="badge badge-d1">D1</span>
+            <strong>Callee Footprint Overlap</strong>
+          </div>
+          <div class="detector-matrix-desc text-muted">
+            Flags parallel functions calling identical downstream subroutines with shared topological graph dependencies.
+          </div>
+          <div class="detector-matrix-spec">
+            <span class="text-muted">Threshold:</span> <code>&gt;= 70% shared callees</code>
+          </div>
+          <div class="detector-matrix-action">
+            Consolidate into canonical helper with highest caller volume.
+          </div>
+        </div>
+
+        <div class="detector-matrix-card">
+          <div class="detector-matrix-header">
+            <span class="badge badge-d2">D2</span>
+            <strong>Interface Token Similarity</strong>
+          </div>
+          <div class="detector-matrix-desc text-muted">
+            Flags twin utility definitions with identical parameter types, return signatures, and identifier token bags.
+          </div>
+          <div class="detector-matrix-spec">
+            <span class="text-muted">Threshold:</span> <code>&gt;= 80% token overlap</code>
+          </div>
+          <div class="detector-matrix-action">
+            Adopt authoritative signature; deprecate redundant utility copy.
+          </div>
+        </div>
+
+        <div class="detector-matrix-card">
+          <div class="detector-matrix-header">
+            <span class="badge badge-d3">D3</span>
+            <strong>Raw Client Bypass</strong>
+          </div>
+          <div class="detector-matrix-desc text-muted">
+            Flags functions constructing or invoking raw HTTP, database, or external client primitives directly.
+          </div>
+          <div class="detector-matrix-spec">
+            <span class="text-muted">Rule:</span> <code>Bypasses canonical client wrapper</code>
+          </div>
+          <div class="detector-matrix-action">
+            Route access through shared managed client wrapper with pooling &amp; retry.
+          </div>
+        </div>
+
+        <div class="detector-matrix-card">
+          <div class="detector-matrix-header">
+            <span class="badge badge-d4">D4</span>
+            <strong>Pass-Through Wrapper</strong>
+          </div>
+          <div class="detector-matrix-desc text-muted">
+            Flags single-caller forwarding wrappers that introduce layer indirection without validation, transforms, or caching.
+          </div>
+          <div class="detector-matrix-spec">
+            <span class="text-muted">Rule:</span> <code>1 caller &middot; 0 added logic</code>
+          </div>
+          <div class="detector-matrix-action">
+            Inline invocation directly to target; delete redundant intermediate layer.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pre-Write Helper Discovery & Duplicate Audits Feed -->
+    <div class="card" style="margin-top: 1.5rem;">
+      <div class="card-title">
+        <span>Pre-Write Helper Discovery &amp; Duplicate Audits</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Agent search and reuse queries executed to discover canonical helpers and verify duplicate avoidance</span>
       </div>
       <table>
         <thead>
@@ -269,7 +342,7 @@
           </tr>
         </thead>
         <tbody id="prewrite-tbody">
-          <!-- Rendered dynamically via JS -->
+          <tr><td colspan="6" class="empty-cell">No pre-write helper searches recorded yet</td></tr>
         </tbody>
       </table>
     </div>

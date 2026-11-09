@@ -1,5 +1,7 @@
 // aw Native Rust Dashboard Client (Zero External Dependencies)
 
+const GRAPH_TOOLS = ['callers', 'callees', 'path', 'context', 'impact', 'symbols', 'imports', 'build'];
+
 let allMemories = [];
 let recentQueries = [];
 let reuseCandidates = [];
@@ -63,30 +65,42 @@ function loadSummaryData() {
     .then(r => r.json())
     .then(data => {
       latestSummaryData = data;
-      totalCalls = data.total_calls || 0;
-      totalErrors = data.error_count || 0;
+      totalCalls = data.graph_calls !== undefined ? data.graph_calls : (data.total_calls || 0);
+      totalErrors = data.graph_errors !== undefined ? data.graph_errors : (data.error_count || 0);
 
       const totalCallsEl = document.getElementById('metric-total-calls');
       if (totalCallsEl) totalCallsEl.textContent = totalCalls.toLocaleString();
 
       const relEl = document.getElementById('metric-reliability');
       if (relEl) {
-        relEl.textContent = (data.reliability_pct || 100.0).toFixed(1) + '% clean (' + totalErrors + ' errs)';
+        const rel = data.graph_reliability_pct !== undefined ? data.graph_reliability_pct : (data.reliability_pct || 100.0);
+        relEl.textContent = rel.toFixed(1) + '% clean (' + totalErrors + ' errs)';
       }
 
       const p50El = document.getElementById('metric-p50');
-      if (p50El) p50El.textContent = (data.p50_ms || 0.0).toFixed(1) + 'ms';
+      if (p50El) {
+        const p50 = data.graph_p50_ms !== undefined ? data.graph_p50_ms : data.p50_ms;
+        p50El.textContent = (p50 || 0.0).toFixed(1) + 'ms';
+      }
 
       const latSubEl = document.getElementById('metric-latency-sub');
       if (latSubEl) {
-        latSubEl.textContent = 'p95 = ' + (data.p95_ms || 0.0).toFixed(1) + 'ms · avg = ' + (data.avg_ms || 0.0).toFixed(1) + 'ms';
+        const p95 = data.graph_p95_ms !== undefined ? data.graph_p95_ms : data.p95_ms;
+        const avg = data.graph_avg_ms !== undefined ? data.graph_avg_ms : data.avg_ms;
+        latSubEl.textContent = 'p95 = ' + (p95 || 0.0).toFixed(1) + 'ms · avg = ' + (avg || 0.0).toFixed(1) + 'ms';
       }
 
       const tokEl = document.getElementById('metric-tokens');
-      if (tokEl) tokEl.textContent = '~' + (data.saved_tokens || 0).toLocaleString();
+      if (tokEl) {
+        const tokens = data.graph_saved_tokens !== undefined ? data.graph_saved_tokens : (data.saved_tokens || 0);
+        tokEl.textContent = '~' + tokens.toLocaleString();
+      }
 
       const dolEl = document.getElementById('metric-dollars');
-      if (dolEl) dolEl.textContent = '~$' + (data.saved_dollars || 0.0).toFixed(2) + ' avoided vs full reads';
+      if (dolEl) {
+        const dollars = data.graph_saved_dollars !== undefined ? data.graph_saved_dollars : (data.saved_dollars || 0.0);
+        dolEl.textContent = '~$' + dollars.toFixed(2) + ' avoided vs full reads';
+      }
 
       const activeReposEl = document.getElementById('metric-active-repos');
       if (activeReposEl) {
@@ -99,14 +113,8 @@ function loadSummaryData() {
         const wtCount = Object.values(data.repo_aggs || {}).filter(r => r.worktree).length;
         activeWorktreesEl.textContent = wtCount > 0
           ? wtCount + ' worktree' + (wtCount > 1 ? 's' : '') + ' active'
-          : 'Multi-repository attribution';
+          : 'Multi-repository graph index';
       }
-
-      const reuseHitsEl = document.getElementById('metric-reuse-hits');
-      if (reuseHitsEl) reuseHitsEl.textContent = (data.reuse_hits || 0).toLocaleString();
-
-      const activeMemEl = document.getElementById('metric-active-memories');
-      if (activeMemEl) activeMemEl.textContent = data.active_memories || 0;
 
       // Render Repositories Table
       renderReposTable(data.repo_aggs || {});
@@ -114,10 +122,10 @@ function loadSummaryData() {
       renderAgentsTable(data.agent_aggs || {}, totalCalls);
       // Render Tools Table
       renderToolsTable(data.tool_aggs || {}, totalCalls);
-      // Render Recent Queries
-      renderRecentQueries(data.recent_queries || []);
-      // Render Errors Triage
-      renderErrorsTriage(data.recent_errors || []);
+      // Render Recent Queries (Graph only)
+      renderRecentQueries(data.graph_recent_queries || data.recent_queries || []);
+      // Render Errors Triage (Graph only)
+      renderErrorsTriage(data.graph_recent_errors || data.recent_errors || []);
       // Update Memory KPIs
       updateMemoryKpis();
     })
@@ -139,19 +147,42 @@ function loadReuseData() {
 
       const summary = data.summary || {};
       const kpiLoc = document.getElementById('reuse-kpi-loc');
-      if (kpiLoc) kpiLoc.textContent = '~' + (summary.preventable_loc || 0).toLocaleString();
-
-      const kpiPre = document.getElementById('reuse-kpi-prewrite');
-      if (kpiPre) kpiPre.textContent = summary.prewrite_count || prewriteSearches.length;
+      if (kpiLoc) kpiLoc.textContent = '~' + (summary.preventable_loc || 0).toLocaleString() + ' LOC';
 
       const kpiCallers = document.getElementById('reuse-kpi-callers');
       if (kpiCallers) kpiCallers.textContent = (summary.avg_callers || 0.0).toFixed(1);
 
+      const kpiPrewrite = document.getElementById('reuse-kpi-prewrite');
+      if (kpiPrewrite) {
+        const count = summary.prewrite_count !== undefined ? summary.prewrite_count : prewriteSearches.length;
+        kpiPrewrite.textContent = count.toLocaleString();
+      }
+
+      const counts = summary.detector_counts || {};
+      const kpiDetectors = document.getElementById('reuse-kpi-detectors');
+      if (kpiDetectors) {
+        kpiDetectors.textContent = 'D1: ' + (counts.D1 || 0) + ' · D2: ' + (counts.D2 || 0) + ' · D3: ' + (counts.D3 || 0) + ' · D4: ' + (counts.D4 || 0);
+      }
+
+      updateDetectorPills(counts, reuseCandidates.length);
       populateReuseRepoFilter();
       renderReuseList();
       renderPrewriteTable();
     })
     .catch(() => {});
+}
+
+function updateDetectorPills(counts, total) {
+  const pills = document.querySelectorAll('#reuse-detector-pills .filter-pill');
+  pills.forEach(pill => {
+    const det = pill.getAttribute('data-det');
+    if (det === 'ALL') {
+      pill.textContent = 'All (' + total + ')';
+    } else if (counts && counts[det] !== undefined) {
+      const label = det === 'D1' ? 'D1 Callee' : det === 'D2' ? 'D2 Interface' : det === 'D3' ? 'D3 Bypass' : 'D4 Wrapper';
+      pill.textContent = label + ' (' + counts[det] + ')';
+    }
+  });
 }
 
 function loadMemoriesData() {
@@ -303,9 +334,15 @@ function renderReposTable(repoAggs) {
   const select = document.getElementById('repo-filter');
   if (!tbody) return;
 
-  const entries = Object.entries(repoAggs);
+  const entries = Object.entries(repoAggs).map(([rName, rData]) => {
+    const calls = rData.graph_calls !== undefined ? rData.graph_calls : rData.calls;
+    const errs = rData.graph_errors !== undefined ? rData.graph_errors : (rData.errors || 0);
+    const rel = rData.graph_reliability_pct !== undefined ? rData.graph_reliability_pct : (rData.reliability_pct || (calls ? 100.0 * (calls - errs) / calls : 100.0));
+    return [rName, { ...rData, calls, errors: errs, reliability_pct: rel }];
+  }).filter(([_, rData]) => rData.calls > 0);
+
   if (entries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No repositories recorded</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No graph workspace activity recorded</td></tr>';
     return;
   }
 
@@ -331,7 +368,7 @@ function renderReposTable(repoAggs) {
 
     const calls = rData.calls;
     const errs = rData.errors || 0;
-    const rel = rData.reliability_pct || (calls ? 100.0 * (calls - errs) / calls : 100.0);
+    const rel = rData.reliability_pct;
     const wt = rData.worktree;
     const lastStr = rData.last_ts ? new Date(rData.last_ts * 1000).toLocaleString() : '—';
     const pct = (calls / maxCalls) * 100.0;
@@ -356,9 +393,16 @@ function renderAgentsTable(agentAggs, totalCalls) {
   const select = document.getElementById('agent-filter');
   if (!tbody) return;
 
-  const entries = Object.entries(agentAggs);
+  const entries = Object.entries(agentAggs).map(([aName, aData]) => {
+    const calls = aData.graph_calls !== undefined ? aData.graph_calls : aData.calls;
+    const errs = aData.graph_errors !== undefined ? aData.graph_errors : (aData.errors || 0);
+    const saved = aData.graph_saved_tokens !== undefined ? aData.graph_saved_tokens : (aData.saved_tokens || 0);
+    const rel = aData.graph_reliability_pct !== undefined ? aData.graph_reliability_pct : (aData.reliability_pct || (calls ? 100.0 * (calls - errs) / calls : 100.0));
+    return [aName, { ...aData, calls, errors: errs, saved_tokens: saved, reliability_pct: rel }];
+  }).filter(([_, aData]) => aData.calls > 0);
+
   if (entries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No agent calls recorded</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No agent graph navigation recorded</td></tr>';
     return;
   }
 
@@ -384,7 +428,7 @@ function renderAgentsTable(agentAggs, totalCalls) {
 
     const calls = aData.calls;
     const errs = aData.errors || 0;
-    const rel = aData.reliability_pct || (calls ? 100.0 * (calls - errs) / calls : 100.0);
+    const rel = aData.reliability_pct;
     const saved = aData.saved_tokens || 0;
     const pct = (calls / maxCalls) * 100.0;
     const share = totalCalls ? (calls / totalCalls * 100.0) : 0.0;
@@ -416,9 +460,9 @@ function renderToolsTable(toolAggs, totalCalls) {
   const tbody = document.getElementById('tools-tbody');
   if (!tbody) return;
 
-  const entries = Object.entries(toolAggs);
+  const entries = Object.entries(toolAggs).filter(([tName]) => GRAPH_TOOLS.includes(tName));
   if (entries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="3" class="empty-cell">No tool calls recorded</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-cell">No graph tool calls recorded</td></tr>';
     return;
   }
 
@@ -450,13 +494,14 @@ function renderRecentQueries(queries) {
   const tbody = document.getElementById('recent-tbody');
   if (!tbody) return;
 
-  if (queries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">No recent queries</td></tr>';
+  const graphQueries = queries.filter(q => GRAPH_TOOLS.includes(q.tool));
+  if (graphQueries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">No graph navigation queries recorded</td></tr>';
     return;
   }
 
   tbody.innerHTML = '';
-  queries.forEach(q => {
+  graphQueries.forEach(q => {
     tbody.appendChild(createRecentRow(q));
   });
 }
@@ -465,17 +510,17 @@ function renderErrorsTriage(errors) {
   const tbody = document.getElementById('errors-tbody');
   if (!tbody) return;
 
-  if (errors.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">Zero critical errors recorded</td></tr>';
+  const graphErrors = errors.filter(e => GRAPH_TOOLS.includes(e.tool));
+  if (graphErrors.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">Zero critical graph errors recorded</td></tr>';
     return;
   }
 
   tbody.innerHTML = '';
-  errors.forEach(e => {
+  graphErrors.forEach(e => {
     const tr = document.createElement('tr');
     const ts = e.ts ? new Date(e.ts * 1000).toLocaleTimeString() : '—';
     const rName = e.repo_name || 'workspace';
-    const aName = e.agent || 'user';
     const latStr = e.latency_us ? (e.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
     const argsStr = JSON.stringify(e.args || {});
 
@@ -686,7 +731,7 @@ function renderReuseDossier(c) {
     '    <span class="badge status-warn">Save ~' + c.loc_saving + ' LOC</span>' +
     '  </div>' +
     '  <div class="dossier-title">' + escapeHtml(c.symbol) + '</div>' +
-    '  <div class="text-muted" style="font-size:0.82rem;">Duplicates Authoritative Target: <strong>' + escapeHtml(c.canonical) + '</strong> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span></div>' +
+    '  <div class="text-muted" style="font-size:0.82rem;">Authoritative Target: <strong>' + escapeHtml(c.canonical) + '</strong> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span></div>' +
     '</div>' +
     '<div class="prevention-banner">' +
     '  <strong>What This Prevents:</strong> ' + escapeHtml(c.prevention_narrative) +
@@ -708,6 +753,9 @@ function renderReuseDossier(c) {
     '    </div>' +
     '    <pre><code>' + escapeHtml(canSnippet) + '</code></pre>' +
     '  </div>' +
+    '</div>' +
+    '<div class="action-recommendation">' +
+    '  <strong>Consolidation Recommendation:</strong> Import authoritative helper <code>' + escapeHtml(c.canonical) + '</code> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span> and remove redundant definition <code>' + escapeHtml(c.symbol) + '</code> to eliminate drift and save ~' + c.loc_saving + ' LOC.' +
     '</div>';
 }
 
@@ -724,12 +772,13 @@ function renderPrewriteTable() {
     const tr = document.createElement('tr');
     const ts = s.ts ? new Date(s.ts * 1000).toLocaleTimeString() : '—';
     const latStr = s.latency_us ? (s.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
+    const rName = s.repo_name || 'workspace';
     tr.innerHTML =
       '<td class="num-col text-muted">' + ts + '</td>' +
-      '<td><span class="repo-tag">' + escapeHtml(s.repo_name) + '</span></td>' +
+      '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
       '<td><code>' + escapeHtml(s.tool) + '</code></td>' +
       '<td class="args-cell"><code>' + escapeHtml(s.terms || '(all paths)') + '</code></td>' +
-      '<td class="text-right num-col">' + s.shown + '</td>' +
+      '<td class="text-right num-col">' + (s.shown || 0) + '</td>' +
       '<td class="text-right num-col">' + latStr + '</td>';
     tbody.appendChild(tr);
   });
@@ -924,25 +973,74 @@ function initEventSource() {
 }
 
 function handleLiveEvent(q) {
-  totalCalls++;
-  const exitCode = parseInt(q.exit_code || 0, 10);
-  if (exitCode >= 3) totalErrors++;
+  const tool = q.tool || '';
+  const isGraph = GRAPH_TOOLS.includes(tool);
+  if (isGraph) {
+    totalCalls++;
+    const exitCode = parseInt(q.exit_code || 0, 10);
+    if (exitCode >= 3) totalErrors++;
 
-  const totalCallsEl = document.getElementById('metric-total-calls');
-  if (totalCallsEl) totalCallsEl.textContent = totalCalls.toLocaleString();
+    const totalCallsEl = document.getElementById('metric-total-calls');
+    if (totalCallsEl) totalCallsEl.textContent = totalCalls.toLocaleString();
 
-  const relEl = document.getElementById('metric-reliability');
-  if (relEl) {
-    const rel = totalCalls > 0 ? (100.0 * (totalCalls - totalErrors) / totalCalls).toFixed(1) : "100.0";
-    relEl.textContent = rel + "% clean (" + totalErrors + " errs)";
-  }
+    const relEl = document.getElementById('metric-reliability');
+    if (relEl) {
+      const rel = totalCalls > 0 ? (100.0 * (totalCalls - totalErrors) / totalCalls).toFixed(1) : "100.0";
+      relEl.textContent = rel + "% clean (" + totalErrors + " errs)";
+    }
 
-  const recentTbody = document.getElementById('recent-tbody');
-  if (recentTbody) {
-    const row = createRecentRow(q);
-    recentTbody.insertBefore(row, recentTbody.firstChild);
-    while (recentTbody.children.length > 50) {
-      recentTbody.removeChild(recentTbody.lastChild);
+    const recentTbody = document.getElementById('recent-tbody');
+    if (recentTbody) {
+      const emptyRow = recentTbody.querySelector('.empty-cell');
+      if (emptyRow) recentTbody.innerHTML = '';
+      const row = createRecentRow(q);
+      recentTbody.insertBefore(row, recentTbody.firstChild);
+      while (recentTbody.children.length > 50) {
+        recentTbody.removeChild(recentTbody.lastChild);
+      }
+    }
+
+    if (exitCode >= 3) {
+      const errorsTbody = document.getElementById('errors-tbody');
+      if (errorsTbody) {
+        const emptyRow = errorsTbody.querySelector('.empty-cell');
+        if (emptyRow) errorsTbody.innerHTML = '';
+        const ts = q.ts ? new Date(q.ts * 1000).toLocaleTimeString() : '—';
+        const rName = q.repo_name || 'workspace';
+        const latStr = q.latency_us ? (q.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
+        const argsStr = JSON.stringify(q.args || {});
+        const errRow = document.createElement('tr');
+        errRow.innerHTML =
+          '<td class="num-col text-muted">' + ts + '</td>' +
+          '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
+          '<td><code>' + escapeHtml(q.tool || '—') + '</code></td>' +
+          '<td><span class="badge status-err">Exit ' + exitCode + '</span></td>' +
+          '<td class="text-right num-col">' + latStr + '</td>' +
+          '<td class="args-cell"><code>' + escapeHtml(argsStr) + '</code></td>';
+        errorsTbody.insertBefore(errRow, errorsTbody.firstChild);
+        while (errorsTbody.children.length > 25) {
+          errorsTbody.removeChild(errorsTbody.lastChild);
+        }
+      }
+    }
+  } else if (tool === 'search' || tool === 'reuse') {
+    const args = q.args || {};
+    const terms = args.terms || args.paths || '';
+    const newSearch = {
+      ts: q.ts,
+      repo_name: q.repo_name,
+      tool: tool,
+      terms: terms,
+      shown: q.shown || q.result_count || 0,
+      latency_us: q.latency_us || 0,
+    };
+    prewriteSearches.unshift(newSearch);
+    if (prewriteSearches.length > 40) prewriteSearches.pop();
+    renderPrewriteTable();
+    const kpiPrewrite = document.getElementById('reuse-kpi-prewrite');
+    if (kpiPrewrite) {
+      const cur = parseInt(kpiPrewrite.textContent.replace(/,/g, ''), 10) || 0;
+      kpiPrewrite.textContent = (cur + 1).toLocaleString();
     }
   }
 }

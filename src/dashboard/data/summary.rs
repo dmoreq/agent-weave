@@ -19,11 +19,18 @@ pub fn compute_summary(entries: &[Value]) -> Value {
     }
 
     let (p50, p95, avg) = compute_percentiles(&mut state.latencies_ms);
+    let (graph_p50, graph_p95, graph_avg) = compute_percentiles(&mut state.graph_latencies_ms);
     let tool_aggs_json = format_tool_aggs(state.tool_aggs);
     let repo_aggs_json = format_repo_aggs(state.repo_aggs);
     let agent_aggs_json = format_agent_aggs(state.agent_aggs);
     let reliability = 100.0 * (total_calls - state.errors) as f64 / total_calls as f64;
+    let graph_reliability = if state.graph_calls > 0 {
+        100.0 * (state.graph_calls - state.graph_errors) as f64 / state.graph_calls as f64
+    } else {
+        100.0
+    };
     let saved_dollars = state.saved_tokens as f64 * crate::journal::PRICE_PER_TOKEN;
+    let graph_saved_dollars = state.graph_saved_tokens as f64 * crate::journal::PRICE_PER_TOKEN;
     let total_sessions = state.sessions.len();
     let memory_sessions = state.memory_sessions.len();
     let session_recall_pct = if total_sessions > 0 {
@@ -33,8 +40,17 @@ pub fn compute_summary(entries: &[Value]) -> Value {
     };
 
     let recent_queries: Vec<Value> = entries.iter().rev().take(50).cloned().collect();
+    let graph_recent_queries: Vec<Value> = entries
+        .iter()
+        .rev()
+        .filter(|e| is_graph_tool(e.get("tool").and_then(Value::as_str).unwrap_or("")))
+        .take(50)
+        .cloned()
+        .collect();
     state.recent_errors.reverse();
     state.recent_errors.truncate(25);
+    state.graph_recent_errors.reverse();
+    state.graph_recent_errors.truncate(25);
 
     json!({
         "total_calls": total_calls,
@@ -46,6 +62,14 @@ pub fn compute_summary(entries: &[Value]) -> Value {
         "avg_ms": avg,
         "saved_tokens": state.saved_tokens,
         "saved_dollars": saved_dollars,
+        "graph_calls": state.graph_calls,
+        "graph_errors": state.graph_errors,
+        "graph_reliability_pct": graph_reliability,
+        "graph_p50_ms": graph_p50,
+        "graph_p95_ms": graph_p95,
+        "graph_avg_ms": graph_avg,
+        "graph_saved_tokens": state.graph_saved_tokens,
+        "graph_saved_dollars": graph_saved_dollars,
         "reuse_hits": state.reuse_hits,
         "session_count": total_sessions,
         "memory_session_count": memory_sessions,
@@ -55,6 +79,8 @@ pub fn compute_summary(entries: &[Value]) -> Value {
         "agent_aggs": agent_aggs_json,
         "recent_queries": recent_queries,
         "recent_errors": state.recent_errors,
+        "graph_recent_queries": graph_recent_queries,
+        "graph_recent_errors": state.graph_recent_errors,
     })
 }
 
@@ -69,6 +95,14 @@ fn empty_summary() -> Value {
         "avg_ms": 0.0,
         "saved_tokens": 0,
         "saved_dollars": 0.0,
+        "graph_calls": 0,
+        "graph_errors": 0,
+        "graph_reliability_pct": 100.0,
+        "graph_p50_ms": 0.0,
+        "graph_p95_ms": 0.0,
+        "graph_avg_ms": 0.0,
+        "graph_saved_tokens": 0,
+        "graph_saved_dollars": 0.0,
         "reuse_hits": 0,
         "session_count": 0,
         "memory_session_count": 0,
@@ -77,8 +111,17 @@ fn empty_summary() -> Value {
         "repo_aggs": {},
         "agent_aggs": {},
         "recent_queries": [],
-        "recent_errors": []
+        "recent_errors": [],
+        "graph_recent_queries": [],
+        "graph_recent_errors": []
     })
+}
+
+fn is_graph_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "callers" | "callees" | "path" | "context" | "impact" | "symbols" | "imports" | "build"
+    )
 }
 
 #[derive(Default)]
@@ -88,12 +131,17 @@ struct SummaryState {
     reuse_hits: usize,
     saved_tokens: usize,
     latencies_ms: Vec<f64>,
+    graph_calls: usize,
+    graph_errors: usize,
+    graph_saved_tokens: usize,
+    graph_latencies_ms: Vec<f64>,
     sessions: HashSet<String>,
     memory_sessions: HashSet<String>,
     tool_aggs: HashMap<String, ToolAgg>,
     repo_aggs: HashMap<String, RepoAgg>,
     agent_aggs: HashMap<String, AgentAgg>,
     recent_errors: Vec<Value>,
+    graph_recent_errors: Vec<Value>,
 }
 
 impl SummaryState {
@@ -131,6 +179,11 @@ impl SummaryState {
             .filter(|s| !s.is_empty())
             .unwrap_or("default");
 
+        let is_graph = is_graph_tool(tool);
+        if is_graph {
+            self.graph_calls += 1;
+        }
+
         self.sessions.insert(session_name.to_string());
         if tool == "mem_query" || tool == "mem_get" {
             self.memory_sessions.insert(session_name.to_string());
@@ -146,11 +199,17 @@ impl SummaryState {
         if ts > r_entry.last_ts {
             r_entry.last_ts = ts;
         }
+        if is_graph {
+            r_entry.graph_calls += 1;
+        }
 
         let a_entry = self.agent_aggs.entry(agent_name.to_string()).or_default();
         a_entry.calls += 1;
         if ts > a_entry.last_ts {
             a_entry.last_ts = ts;
+        }
+        if is_graph {
+            a_entry.graph_calls += 1;
         }
 
         self.record_exit_status(exit_code, e, tool, repo_name, agent_name);
@@ -159,6 +218,9 @@ impl SummaryState {
             if us >= 0.0 {
                 let ms = us / 1000.0;
                 self.latencies_ms.push(ms);
+                if is_graph {
+                    self.graph_latencies_ms.push(ms);
+                }
                 self.tool_aggs
                     .entry(tool.to_string())
                     .or_default()
@@ -181,6 +243,17 @@ impl SummaryState {
                 .entry(agent_name.to_string())
                 .or_default()
                 .tokens_saved += saved;
+            if is_graph {
+                self.graph_saved_tokens += saved;
+                self.repo_aggs
+                    .entry(repo_name.to_string())
+                    .or_default()
+                    .graph_tokens_saved += saved;
+                self.agent_aggs
+                    .entry(agent_name.to_string())
+                    .or_default()
+                    .graph_tokens_saved += saved;
+            }
         }
     }
 
@@ -202,6 +275,12 @@ impl SummaryState {
                 r_entry.errors += 1;
                 a_entry.errors += 1;
                 self.recent_errors.push(e.clone());
+                if is_graph_tool(tool) {
+                    self.graph_errors += 1;
+                    r_entry.graph_errors += 1;
+                    a_entry.graph_errors += 1;
+                    self.graph_recent_errors.push(e.clone());
+                }
             }
             ExitClass::Empty | ExitClass::Ambiguous => {
                 self.warnings += 1;
@@ -255,15 +334,24 @@ fn format_repo_aggs(repo_aggs: HashMap<String, RepoAgg>) -> BTreeMap<String, Val
         } else {
             100.0
         };
+        let graph_rel = if v.graph_calls > 0 {
+            100.0 * (v.graph_calls - v.graph_errors) as f64 / v.graph_calls as f64
+        } else {
+            100.0
+        };
         out.insert(
             k,
             json!({
                 "calls": v.calls,
                 "errors": v.errors,
+                "graph_calls": v.graph_calls,
+                "graph_errors": v.graph_errors,
                 "worktree": v.worktree,
                 "last_ts": v.last_ts,
                 "reliability_pct": rel,
+                "graph_reliability_pct": graph_rel,
                 "saved_tokens": v.tokens_saved,
+                "graph_saved_tokens": v.graph_tokens_saved,
             }),
         );
     }
@@ -278,14 +366,23 @@ fn format_agent_aggs(agent_aggs: HashMap<String, AgentAgg>) -> BTreeMap<String, 
         } else {
             100.0
         };
+        let graph_rel = if v.graph_calls > 0 {
+            100.0 * (v.graph_calls - v.graph_errors) as f64 / v.graph_calls as f64
+        } else {
+            100.0
+        };
         out.insert(
             k,
             json!({
                 "calls": v.calls,
                 "errors": v.errors,
+                "graph_calls": v.graph_calls,
+                "graph_errors": v.graph_errors,
                 "last_ts": v.last_ts,
                 "reliability_pct": rel,
+                "graph_reliability_pct": graph_rel,
                 "saved_tokens": v.tokens_saved,
+                "graph_saved_tokens": v.graph_tokens_saved,
             }),
         );
     }
@@ -304,8 +401,11 @@ struct ToolAgg {
 struct RepoAgg {
     calls: usize,
     errors: usize,
+    graph_calls: usize,
+    graph_errors: usize,
     worktree: bool,
     tokens_saved: usize,
+    graph_tokens_saved: usize,
     last_ts: f64,
 }
 
@@ -313,6 +413,9 @@ struct RepoAgg {
 struct AgentAgg {
     calls: usize,
     errors: usize,
+    graph_calls: usize,
+    graph_errors: usize,
     tokens_saved: usize,
+    graph_tokens_saved: usize,
     last_ts: f64,
 }
