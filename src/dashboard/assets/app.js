@@ -53,9 +53,17 @@ function switchTab(tab) {
     populateReuseRepoFilter();
     renderReuseList();
     renderPrewriteTable();
+    if (latestSummaryData) {
+      renderReuseReposTable(latestSummaryData.repo_aggs || {});
+      renderReuseAgentsTable(latestSummaryData.agent_aggs || {});
+    }
   } else if (tab === 'memory') {
     populateMemoryStoreFilter();
     renderMemoryList();
+    if (latestSummaryData) {
+      renderMemoryReposTable(latestSummaryData.repo_aggs || {});
+      renderMemoryAgentsTable(latestSummaryData.agent_aggs || {});
+    }
   }
 }
 
@@ -120,6 +128,12 @@ function loadSummaryData() {
       renderReposTable(data.repo_aggs || {});
       // Render Agents Table
       renderAgentsTable(data.agent_aggs || {}, totalCalls);
+      // Render Anti-Reinvention Repos & Agents
+      renderReuseReposTable(data.repo_aggs || {});
+      renderReuseAgentsTable(data.agent_aggs || {});
+      // Render Memory Repos & Agents
+      renderMemoryReposTable(data.repo_aggs || {});
+      renderMemoryAgentsTable(data.agent_aggs || {});
       // Render Tools Table
       renderToolsTable(data.tool_aggs || {}, totalCalls);
       // Render Recent Queries (Graph only)
@@ -453,6 +467,228 @@ function filterByAgent(agentName) {
   if (select) {
     select.value = agentName;
     applyTelemetryFilters();
+  }
+}
+
+function renderReuseReposTable(repoAggs) {
+  const tbody = document.getElementById('reuse-repos-tbody');
+  if (!tbody) return;
+
+  const entries = Object.entries(repoAggs)
+    .filter(([_, rData]) => (rData.reuse_calls || 0) > 0);
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No anti-reinvention workspace activity recorded</td></tr>';
+    return;
+  }
+
+  entries.sort((a, b) => (b[1].reuse_calls || 0) - (a[1].reuse_calls || 0));
+  const maxCalls = entries[0][1].reuse_calls || 1;
+
+  tbody.innerHTML = '';
+  entries.forEach(([rName, rData]) => {
+    const tr = document.createElement('tr');
+    tr.className = 'repo-row-item';
+    tr.onclick = () => filterReuseByRepo(rName);
+
+    const calls = rData.reuse_calls || 0;
+    const hits = rData.reuse_hits || 0;
+    const saved = rData.reuse_saved_tokens || 0;
+    const wt = rData.worktree;
+    const pct = (calls / maxCalls) * 100.0;
+    const wtBadge = wt ? '<span class="badge badge-wt">worktree</span>' : '<span class="badge badge-repo">repo</span>';
+    const hitBadge = hits > 0 ? '<span class="badge status-ok">' + hits.toLocaleString() + ' hits</span>' : '<span class="text-muted">0</span>';
+
+    tr.innerHTML =
+      '<td>' +
+      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rName) + '</strong> ' + wtBadge + '</div>' +
+      '  <div class="row-track"><div class="row-track-fill" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
+      '</td>' +
+      '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
+      '<td class="text-right num-col">' + hitBadge + '</td>' +
+      '<td class="text-right num-col text-muted">~' + saved.toLocaleString() + '</td>';
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderReuseAgentsTable(agentAggs) {
+  const tbody = document.getElementById('reuse-agents-tbody');
+  if (!tbody) return;
+
+  const entries = Object.entries(agentAggs)
+    .filter(([_, aData]) => (aData.reuse_calls || 0) > 0);
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No agent anti-reinvention activity recorded</td></tr>';
+    return;
+  }
+
+  const totalReuseCalls = entries.reduce((acc, [_, aData]) => acc + (aData.reuse_calls || 0), 0);
+  entries.sort((a, b) => (b[1].reuse_calls || 0) - (a[1].reuse_calls || 0));
+  const maxCalls = entries[0][1].reuse_calls || 1;
+
+  tbody.innerHTML = '';
+  entries.forEach(([aName, aData]) => {
+    const tr = document.createElement('tr');
+    tr.className = 'agent-row-item';
+    tr.onclick = () => {
+      switchTab('graph');
+      filterByAgent(aName);
+    };
+
+    const calls = aData.reuse_calls || 0;
+    const hits = aData.reuse_hits || 0;
+    const saved = aData.reuse_saved_tokens || 0;
+    const pct = (calls / maxCalls) * 100.0;
+    const share = totalReuseCalls ? (calls / totalReuseCalls * 100.0) : 0.0;
+    const shareStr = (share > 0 && share < 0.1) ? '<0.1%' : share.toFixed(1) + '%';
+    const hitBadge = hits > 0 ? '<span class="badge status-ok">' + hits.toLocaleString() + ' hits</span>' : '<span class="text-muted">0</span>';
+
+    tr.innerHTML =
+      '<td>' +
+      '  <div class="repo-name-wrap"><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span> <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
+      '  <div class="row-track"><div class="row-track-fill row-track-fill-agent" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
+      '</td>' +
+      '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
+      '<td class="text-right num-col">' + hitBadge + '</td>' +
+      '<td class="text-right num-col text-muted">~' + saved.toLocaleString() + '</td>';
+
+    tbody.appendChild(tr);
+  });
+}
+
+function filterReuseByRepo(repoName) {
+  const select = document.getElementById('reuse-repo-filter');
+  if (select) {
+    let exists = false;
+    for (let i = 0; i < select.options.length; i++) {
+      if (select.options[i].value === repoName) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = repoName;
+      opt.textContent = repoName;
+      select.appendChild(opt);
+    }
+    select.value = (select.value === repoName) ? 'ALL' : repoName;
+    renderReuseList();
+  }
+}
+
+function renderMemoryReposTable(repoAggs) {
+  const tbody = document.getElementById('mem-repos-tbody');
+  if (!tbody) return;
+
+  const entries = Object.entries(repoAggs)
+    .filter(([_, rData]) => (rData.memory_calls || 0) > 0);
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No memory workspace activity recorded</td></tr>';
+    return;
+  }
+
+  entries.sort((a, b) => (b[1].memory_calls || 0) - (a[1].memory_calls || 0));
+  const maxCalls = entries[0][1].memory_calls || 1;
+
+  tbody.innerHTML = '';
+  entries.forEach(([rName, rData]) => {
+    const tr = document.createElement('tr');
+    tr.className = 'repo-row-item';
+    tr.onclick = () => filterMemoryByRepo(rName);
+
+    const calls = rData.memory_calls || 0;
+    const errs = rData.memory_errors || 0;
+    const reads = rData.memory_reads || 0;
+    const writes = rData.memory_writes || 0;
+    const rel = rData.memory_reliability_pct !== undefined ? rData.memory_reliability_pct : (calls ? 100.0 * (calls - errs) / calls : 100.0);
+    const wt = rData.worktree;
+    const pct = (calls / maxCalls) * 100.0;
+    const wtBadge = wt ? '<span class="badge badge-wt">worktree</span>' : '<span class="badge badge-repo">repo</span>';
+    const relClass = errs === 0 ? 'status-ok' : 'status-err';
+
+    tr.innerHTML =
+      '<td>' +
+      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rName) + '</strong> ' + wtBadge + '</div>' +
+      '  <div class="row-track"><div class="row-track-fill" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
+      '</td>' +
+      '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
+      '<td class="text-right num-col text-muted">' + reads.toLocaleString() + ' r · ' + writes.toLocaleString() + ' w</td>' +
+      '<td><span class="badge ' + relClass + '">' + rel.toFixed(1) + '% (' + errs + ' err)</span></td>';
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderMemoryAgentsTable(agentAggs) {
+  const tbody = document.getElementById('mem-agents-tbody');
+  if (!tbody) return;
+
+  const entries = Object.entries(agentAggs)
+    .filter(([_, aData]) => (aData.memory_calls || 0) > 0);
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty-cell">No agent memory activity recorded</td></tr>';
+    return;
+  }
+
+  const totalMemCalls = entries.reduce((acc, [_, aData]) => acc + (aData.memory_calls || 0), 0);
+  entries.sort((a, b) => (b[1].memory_calls || 0) - (a[1].memory_calls || 0));
+  const maxCalls = entries[0][1].memory_calls || 1;
+
+  tbody.innerHTML = '';
+  entries.forEach(([aName, aData]) => {
+    const tr = document.createElement('tr');
+    tr.className = 'agent-row-item';
+    tr.onclick = () => {
+      switchTab('graph');
+      filterByAgent(aName);
+    };
+
+    const calls = aData.memory_calls || 0;
+    const errs = aData.memory_errors || 0;
+    const reads = aData.memory_reads || 0;
+    const writes = aData.memory_writes || 0;
+    const rel = aData.memory_reliability_pct !== undefined ? aData.memory_reliability_pct : (calls ? 100.0 * (calls - errs) / calls : 100.0);
+    const pct = (calls / maxCalls) * 100.0;
+    const share = totalMemCalls ? (calls / totalMemCalls * 100.0) : 0.0;
+    const shareStr = (share > 0 && share < 0.1) ? '<0.1%' : share.toFixed(1) + '%';
+    const relClass = errs === 0 ? 'status-ok' : 'status-err';
+
+    tr.innerHTML =
+      '<td>' +
+      '  <div class="repo-name-wrap"><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span> <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
+      '  <div class="row-track"><div class="row-track-fill row-track-fill-agent" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
+      '</td>' +
+      '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
+      '<td class="text-right num-col text-muted">' + reads.toLocaleString() + ' r · ' + writes.toLocaleString() + ' w</td>' +
+      '<td><span class="badge ' + relClass + '">' + rel.toFixed(1) + '% (' + errs + ' err)</span></td>';
+
+    tbody.appendChild(tr);
+  });
+}
+
+function filterMemoryByRepo(repoName) {
+  const select = document.getElementById('mem-store-filter');
+  if (select) {
+    let exists = false;
+    for (let i = 0; i < select.options.length; i++) {
+      if (select.options[i].value === repoName) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      const opt = document.createElement('option');
+      opt.value = repoName;
+      opt.textContent = repoName;
+      select.appendChild(opt);
+    }
+    select.value = (select.value === repoName) ? 'ALL' : repoName;
+    renderMemoryList();
   }
 }
 

@@ -173,3 +173,72 @@ fn dashboard_api_memory_touch_success_and_error() {
 
     let _ = std::fs::remove_dir_all(&repo);
 }
+
+#[test]
+fn dashboard_api_summary_returns_reuse_and_memory_aggs() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_summary_reuse_mem_{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let temp_log = temp_dir.join("usage.log");
+    let line1 = r#"{"tool":"reuse","exit_code":0,"agent":"claude","repo_name":"repo-a","result_count":3,"latency_us":1000,"worktree":true}"#;
+    let line2 = r#"{"tool":"search","exit_code":0,"agent":"claude","repo_name":"repo-a","shown":2,"latency_us":1500}"#;
+    let line3 =
+        r#"{"tool":"reuse","exit_code":6,"agent":"claude","repo_name":"repo-a","latency_us":500}"#;
+    let line4 = r#"{"tool":"mem_query","exit_code":0,"agent":"antigravity","repo_name":"repo-b","latency_us":800}"#;
+    let line5 = r#"{"tool":"mem_write","exit_code":0,"agent":"antigravity","repo_name":"repo-b","latency_us":1200}"#;
+    let line6 = r#"{"tool":"mem_get","exit_code":6,"agent":"antigravity","repo_name":"repo-b","latency_us":400}"#;
+    std::fs::write(
+        &temp_log,
+        format!("{line1}\n{line2}\n{line3}\n{line4}\n{line5}\n{line6}\n"),
+    )
+    .unwrap();
+
+    let log_clone = temp_log.clone();
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = handle_client(stream, &log_clone, None, false);
+    });
+
+    let mut client = TcpStream::connect(addr).unwrap();
+    client
+        .write_all(b"GET /api/summary HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).unwrap();
+    assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+    let body_start = resp.find("\r\n\r\n").unwrap() + 4;
+    let json_val: serde_json::Value = serde_json::from_str(&resp[body_start..]).unwrap();
+    let claude = &json_val["agent_aggs"]["claude"];
+    assert_eq!(claude["reuse_calls"], 3);
+    assert_eq!(claude["reuse_errors"], 1);
+    assert_eq!(claude["reuse_hits"], 3);
+    assert_eq!(claude["reuse_saved_tokens"], 4300);
+    let claude_rel = claude["reuse_reliability_pct"].as_f64().unwrap();
+    assert!((claude_rel - 66.666).abs() < 0.1);
+
+    let antigravity = &json_val["agent_aggs"]["antigravity"];
+    assert_eq!(antigravity["memory_calls"], 3);
+    assert_eq!(antigravity["memory_errors"], 1);
+    assert_eq!(antigravity["memory_reads"], 2);
+    assert_eq!(antigravity["memory_writes"], 1);
+    let ag_rel = antigravity["memory_reliability_pct"].as_f64().unwrap();
+    assert!((ag_rel - 66.666).abs() < 0.1);
+
+    let repo_a = &json_val["repo_aggs"]["repo-a"];
+    assert_eq!(repo_a["reuse_calls"], 3);
+    assert_eq!(repo_a["reuse_errors"], 1);
+    assert_eq!(repo_a["reuse_hits"], 3);
+    assert_eq!(repo_a["worktree"], true);
+
+    let repo_b = &json_val["repo_aggs"]["repo-b"];
+    assert_eq!(repo_b["memory_calls"], 3);
+    assert_eq!(repo_b["memory_errors"], 1);
+    assert_eq!(repo_b["memory_reads"], 2);
+    assert_eq!(repo_b["memory_writes"], 1);
+
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

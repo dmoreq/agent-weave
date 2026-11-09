@@ -222,6 +222,49 @@
       </div>
     </div>
 
+    <!-- Anti-Reinvention Workspace & Agent Distribution -->
+    <div class="panel-grid">
+      <div class="card">
+        <div class="card-title">
+          <span>Workspace Distribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Search and reuse invocations across repositories</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Repository / Branch</th>
+              <th class="text-right">Invocations</th>
+              <th class="text-right">Duplicate Hits</th>
+              <th class="text-right">Tokens Saved</th>
+            </tr>
+          </thead>
+          <tbody id="reuse-repos-tbody">
+            <tr><td colspan="4" class="empty-cell">Loading repositories...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Agent Attribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Pre-write discovery and reuse enforcement by agent</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Agent Identity</th>
+              <th class="text-right">Invocations</th>
+              <th class="text-right">Duplicate Hits</th>
+              <th class="text-right">Tokens Saved</th>
+            </tr>
+          </thead>
+          <tbody id="reuse-agents-tbody">
+            <tr><td colspan="4" class="empty-cell">Loading agents...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Filter Bar -->
     <div class="filter-bar">
       <label for="reuse-repo-filter" class="text-muted" style="font-size: 0.78rem;">Repo:</label>
@@ -251,83 +294,85 @@
       </div>
     </div>
 
-    <!-- Anti-Reinvention Engine Policy & Detector Matrix -->
-    <div class="card" style="margin-top: 1.5rem;">
-      <div class="card-title">
-        <span>Anti-Reinvention Detector Specification &amp; Policy Matrix</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Deterministic consolidation rules governing duplicate prevention</span>
+    <!-- Collapsible Anti-Reinvention Policy & Detector Reference -->
+    <details class="minimal-details" style="margin-top: 1.5rem;">
+      <summary class="details-summary">
+        <span class="details-summary-title">Anti-Reinvention Detector Rules (D1–D4 Specifications)</span>
+        <span class="details-summary-hint text-muted">Click to view deterministic consolidation policies and thresholds</span>
+      </summary>
+      <div class="details-body">
+        <div class="detector-matrix-grid">
+          <div class="detector-matrix-card">
+            <div class="detector-matrix-header">
+              <span class="badge badge-d1">D1</span>
+              <strong>Callee Footprint Overlap</strong>
+            </div>
+            <div class="detector-matrix-desc text-muted">
+              Flags parallel functions calling identical downstream subroutines with shared topological graph dependencies.
+            </div>
+            <div class="detector-matrix-spec">
+              <span class="text-muted">Threshold:</span> <code>&gt;= 70% shared callees</code>
+            </div>
+            <div class="detector-matrix-action">
+              Consolidate into canonical helper with highest caller volume.
+            </div>
+          </div>
+
+          <div class="detector-matrix-card">
+            <div class="detector-matrix-header">
+              <span class="badge badge-d2">D2</span>
+              <strong>Interface Token Similarity</strong>
+            </div>
+            <div class="detector-matrix-desc text-muted">
+              Flags twin utility definitions with identical parameter types, return signatures, and identifier token bags.
+            </div>
+            <div class="detector-matrix-spec">
+              <span class="text-muted">Threshold:</span> <code>&gt;= 80% token overlap</code>
+            </div>
+            <div class="detector-matrix-action">
+              Adopt authoritative signature; deprecate redundant utility copy.
+            </div>
+          </div>
+
+          <div class="detector-matrix-card">
+            <div class="detector-matrix-header">
+              <span class="badge badge-d3">D3</span>
+              <strong>Raw Client Bypass</strong>
+            </div>
+            <div class="detector-matrix-desc text-muted">
+              Flags functions constructing or invoking raw HTTP, database, or external client primitives directly.
+            </div>
+            <div class="detector-matrix-spec">
+              <span class="text-muted">Rule:</span> <code>Bypasses canonical client wrapper</code>
+            </div>
+            <div class="detector-matrix-action">
+              Route access through shared managed client wrapper with pooling &amp; retry.
+            </div>
+          </div>
+
+          <div class="detector-matrix-card">
+            <div class="detector-matrix-header">
+              <span class="badge badge-d4">D4</span>
+              <strong>Pass-Through Wrapper</strong>
+            </div>
+            <div class="detector-matrix-desc text-muted">
+              Flags single-caller forwarding wrappers that introduce layer indirection without validation, transforms, or caching.
+            </div>
+            <div class="detector-matrix-spec">
+              <span class="text-muted">Rule:</span> <code>1 caller &middot; 0 added logic</code>
+            </div>
+            <div class="detector-matrix-action">
+              Inline invocation directly to target; delete redundant intermediate layer.
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="detector-matrix-grid">
-        <div class="detector-matrix-card">
-          <div class="detector-matrix-header">
-            <span class="badge badge-d1">D1</span>
-            <strong>Callee Footprint Overlap</strong>
-          </div>
-          <div class="detector-matrix-desc text-muted">
-            Flags parallel functions calling identical downstream subroutines with shared topological graph dependencies.
-          </div>
-          <div class="detector-matrix-spec">
-            <span class="text-muted">Threshold:</span> <code>&gt;= 70% shared callees</code>
-          </div>
-          <div class="detector-matrix-action">
-            Consolidate into canonical helper with highest caller volume.
-          </div>
-        </div>
-
-        <div class="detector-matrix-card">
-          <div class="detector-matrix-header">
-            <span class="badge badge-d2">D2</span>
-            <strong>Interface Token Similarity</strong>
-          </div>
-          <div class="detector-matrix-desc text-muted">
-            Flags twin utility definitions with identical parameter types, return signatures, and identifier token bags.
-          </div>
-          <div class="detector-matrix-spec">
-            <span class="text-muted">Threshold:</span> <code>&gt;= 80% token overlap</code>
-          </div>
-          <div class="detector-matrix-action">
-            Adopt authoritative signature; deprecate redundant utility copy.
-          </div>
-        </div>
-
-        <div class="detector-matrix-card">
-          <div class="detector-matrix-header">
-            <span class="badge badge-d3">D3</span>
-            <strong>Raw Client Bypass</strong>
-          </div>
-          <div class="detector-matrix-desc text-muted">
-            Flags functions constructing or invoking raw HTTP, database, or external client primitives directly.
-          </div>
-          <div class="detector-matrix-spec">
-            <span class="text-muted">Rule:</span> <code>Bypasses canonical client wrapper</code>
-          </div>
-          <div class="detector-matrix-action">
-            Route access through shared managed client wrapper with pooling &amp; retry.
-          </div>
-        </div>
-
-        <div class="detector-matrix-card">
-          <div class="detector-matrix-header">
-            <span class="badge badge-d4">D4</span>
-            <strong>Pass-Through Wrapper</strong>
-          </div>
-          <div class="detector-matrix-desc text-muted">
-            Flags single-caller forwarding wrappers that introduce layer indirection without validation, transforms, or caching.
-          </div>
-          <div class="detector-matrix-spec">
-            <span class="text-muted">Rule:</span> <code>1 caller &middot; 0 added logic</code>
-          </div>
-          <div class="detector-matrix-action">
-            Inline invocation directly to target; delete redundant intermediate layer.
-          </div>
-        </div>
-      </div>
-    </div>
+    </details>
 
     <!-- Pre-Write Helper Discovery & Duplicate Audits Feed -->
     <div class="card" style="margin-top: 1.5rem;">
       <div class="card-title">
-        <span>Pre-Write Helper Discovery &amp; Duplicate Audits</span>
+        <span>Pre-Write Discovery &amp; Verification Feed</span>
         <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Agent search and reuse queries executed to discover canonical helpers and verify duplicate avoidance</span>
       </div>
       <table>
@@ -371,6 +416,49 @@
         <div class="kpi-label">Guarded Symbols &amp; Hotspots</div>
         <div class="kpi-value"><span id="mem-kpi-guarded">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">anchors</span></div>
         <div class="kpi-sub" id="mem-kpi-guarded-sub">0 gotchas &middot; 0 decisions</div>
+      </div>
+    </div>
+
+    <!-- Memory Workspace & Agent Distribution -->
+    <div class="panel-grid">
+      <div class="card">
+        <div class="card-title">
+          <span>Workspace Memory Distribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Project memory reads, writes, and reliability by repository</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Repository / Store</th>
+              <th class="text-right">Operations</th>
+              <th class="text-right">Reads / Writes</th>
+              <th>Reliability</th>
+            </tr>
+          </thead>
+          <tbody id="mem-repos-tbody">
+            <tr><td colspan="4" class="empty-cell">Loading repositories...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>Agent Memory Attribution</span>
+          <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Agent memory lookups, notes authored, and reliability</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Agent Identity</th>
+              <th class="text-right">Operations</th>
+              <th class="text-right">Reads / Writes</th>
+              <th>Reliability</th>
+            </tr>
+          </thead>
+          <tbody id="mem-agents-tbody">
+            <tr><td colspan="4" class="empty-cell">Loading agents...</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
