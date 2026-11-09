@@ -44,16 +44,30 @@ pub fn stream_monitor(
     run_interactive(root, log_path, repo_filter, errors_only, guard)
 }
 
-struct RawModeGuard;
+struct RawModeGuard {
+    saved: Option<String>,
+}
 
 impl RawModeGuard {
     fn enter() -> Option<Self> {
-        let status = Command::new("stty").arg("raw").arg("-echo").status().ok()?;
+        let saved = Command::new("stty").arg("-g").output().ok().and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        });
+
+        let status = Command::new("stty")
+            .arg("-echo")
+            .arg("cbreak")
+            .status()
+            .ok()?;
         if status.success() {
             let mut out = io::stdout();
             let _ = write!(out, "\x1b[?1049h\x1b[?25l");
             let _ = out.flush();
-            Some(Self)
+            Some(Self { saved })
         } else {
             None
         }
@@ -65,7 +79,11 @@ impl Drop for RawModeGuard {
         let mut out = io::stdout();
         let _ = write!(out, "\x1b[?25h\x1b[?1049l");
         let _ = out.flush();
-        let _ = Command::new("stty").arg("-raw").arg("echo").status();
+        if let Some(ref s) = self.saved {
+            let _ = Command::new("stty").arg(s).status();
+        } else {
+            let _ = Command::new("stty").arg("echo").arg("-cbreak").status();
+        }
     }
 }
 
@@ -261,7 +279,7 @@ fn poll_linear_events(
         if !trimmed.is_empty() {
             if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
                 if is_event_matched(&val, repo_filter, errors_only) {
-                    let _ = render::render_event_row(&mut stdout, &val);
+                    let _ = render::render_event_row(&mut stdout, &val, 78);
                 }
             }
         }

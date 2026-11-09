@@ -26,10 +26,10 @@ impl MonitorTab {
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::Graph => "1 Code Graph",
-            Self::Reuse => "2 Anti-Reinvention",
-            Self::Memory => "3 Project Memory",
-            Self::Stream => "4 Live Stream",
+            Self::Graph => "1 Graph",
+            Self::Reuse => "2 Anti-Reinvent",
+            Self::Memory => "3 Memory",
+            Self::Stream => "4 Stream",
         }
     }
 }

@@ -272,7 +272,7 @@ fn monitor_tui_render_all_tabs_coverage() {
     ] {
         state.active_tab = tab;
         let mut buf = Vec::new();
-        render_screen(&mut buf, &state, 100, 30).unwrap();
+        render_screen(&mut buf, &state, 80, 24).unwrap();
         let rendered = String::from_utf8_lossy(&buf);
         assert!(
             rendered.contains("aw monitor v0.5.3"),

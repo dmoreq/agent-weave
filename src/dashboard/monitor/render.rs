@@ -1,4 +1,5 @@
 //! Terminal ANSI layout rendering for the multi-tab TUI monitor.
+//! Calibrated for standard 80x24 terminals with zero line wrapping and zero scrolling.
 
 use std::io::{self, Write};
 
@@ -13,36 +14,29 @@ pub fn render_screen<W: Write>(
     cols: usize,
     rows: usize,
 ) -> io::Result<()> {
+    let safe_cols = cols.clamp(40, 78);
+    let avail_lines = rows.saturating_sub(5).max(4);
+
     write!(w, "\x1b[H")?;
-    let mut lines_rendered = 0;
 
-    lines_rendered += render_header(w, state, cols)?;
+    render_header(w, state, safe_cols)?;
 
-    let content_height = rows.saturating_sub(lines_rendered + 2);
-    lines_rendered += match state.active_tab {
-        MonitorTab::Graph => render_tab_graph(w, state, cols, content_height)?,
-        MonitorTab::Reuse => render_tab_reuse(w, state, cols, content_height)?,
-        MonitorTab::Memory => render_tab_memory(w, state, cols, content_height)?,
-        MonitorTab::Stream => render_tab_stream(w, state, cols, content_height)?,
+    match state.active_tab {
+        MonitorTab::Graph => render_tab_graph(w, state, safe_cols, avail_lines)?,
+        MonitorTab::Reuse => render_tab_reuse(w, state, safe_cols, avail_lines)?,
+        MonitorTab::Memory => render_tab_memory(w, state, safe_cols, avail_lines)?,
+        MonitorTab::Stream => render_tab_stream(w, state, safe_cols, avail_lines)?,
     };
 
-    while lines_rendered + 1 < rows {
-        writeln!(w, "\x1b[2K")?;
-        lines_rendered += 1;
-    }
-
-    render_footer(w, state, cols)?;
+    write!(w, "\x1b[J")?;
+    render_footer(w, rows)?;
     w.flush()
 }
 
-fn render_header<W: Write>(w: &mut W, state: &TuiState, cols: usize) -> io::Result<usize> {
-    let mode_str = if state.errors_only {
-        " | Mode: CRITICAL ERRORS"
-    } else {
-        ""
-    };
+fn render_header<W: Write>(w: &mut W, state: &TuiState, safe_cols: usize) -> io::Result<()> {
+    let mode_str = if state.errors_only { " | ERRORS" } else { "" };
     let filter_str = match &state.repo_filter {
-        Some(f) if f != "ALL" => format!(" | Filter: {f}"),
+        Some(f) if f != "ALL" => format!(" | Repo: {f}"),
         _ => String::new(),
     };
 
@@ -50,46 +44,43 @@ fn render_header<W: Write>(w: &mut W, state: &TuiState, cols: usize) -> io::Resu
         "aw monitor v0.5.3 | Repos: {}{}{}",
         state.total_repos, filter_str, mode_str
     );
-    writeln!(w, "\x1b[2K\x1b[1;37m{title}\x1b[0m")?;
+    let title_trunc = truncate_chars(&title, safe_cols);
+    write!(w, "\r\x1b[2K\x1b[1;37m{title_trunc}\x1b[0m\r\n")?;
 
+    write!(w, "\r\x1b[2K")?;
     let tabs = [
         MonitorTab::Graph,
         MonitorTab::Reuse,
         MonitorTab::Memory,
         MonitorTab::Stream,
     ];
-    write!(w, "\x1b[2K")?;
     for t in tabs {
         if state.active_tab == t {
-            write!(w, "\x1b[7;1m [ {} ] \x1b[0m  ", t.title())?;
+            write!(w, "\x1b[7;1m [ {} ] \x1b[0m ", t.title())?;
         } else {
-            write!(w, "\x1b[90m [ {} ] \x1b[0m  ", t.title())?;
+            write!(w, "\x1b[90m [ {} ] \x1b[0m ", t.title())?;
         }
     }
-    writeln!(w)?;
+    write!(w, "\r\n")?;
 
-    let hr_len = cols.clamp(80, 120);
-    writeln!(w, "\x1b[2K\x1b[90m{}\x1b[0m", "─".repeat(hr_len))?;
-    Ok(3)
+    write!(w, "\r\x1b[2K\x1b[90m{}\x1b[0m\r\n", "─".repeat(safe_cols))?;
+    Ok(())
 }
 
-fn render_footer<W: Write>(w: &mut W, _state: &TuiState, _cols: usize) -> io::Result<usize> {
-    writeln!(
+fn render_footer<W: Write>(w: &mut W, rows: usize) -> io::Result<()> {
+    write!(
         w,
-        "\x1b[2K\x1b[90mKeys: \x1b[37m1-4\x1b[90m Tabs | \x1b[37mr\x1b[90m Refresh | \x1b[37mq\x1b[90m Exit\x1b[0m"
-    )?;
-    Ok(1)
+        "\x1b[{rows};1H\r\x1b[2K\x1b[90mKeys: \x1b[37m1-4\x1b[90m Tabs | \x1b[37mr\x1b[90m Refresh | \x1b[37mq\x1b[90m Exit\x1b[0m"
+    )
 }
 
 fn render_tab_graph<W: Write>(
     w: &mut W,
     state: &TuiState,
-    cols: usize,
-    max_lines: usize,
-) -> io::Result<usize> {
-    let mut count = 0;
+    safe_cols: usize,
+    avail_lines: usize,
+) -> io::Result<()> {
     let s = &state.summary;
-
     let total_calls = s.get("total_calls").and_then(Value::as_u64).unwrap_or(0);
     let graph_calls = s.get("graph_calls").and_then(Value::as_u64).unwrap_or(0);
     let graph_pct = if total_calls > 0 {
@@ -113,54 +104,43 @@ fn render_tab_graph<W: Write>(
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
 
-    writeln!(
+    write!(
         w,
-        "\x1b[2K\x1b[1;36m[USP 1: DETERMINISTIC CODE GRAPH & NAVIGATION]\x1b[0m"
+        "\r\x1b[2K\x1b[1;36m[USP 1: DETERMINISTIC CODE GRAPH & NAVIGATION]\x1b[0m\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Calls:       \x1b[1;32m{graph_calls}\x1b[0m calls ({graph_pct:.1}% of corpus)   Reliability: \x1b[1;32m{rel_pct:.1}%\x1b[0m ok ({graph_errors} errors)"
+        "\r\x1b[2K  Calls: \x1b[1;32m{graph_calls}\x1b[0m ({graph_pct:.1}%)  Rel: \x1b[1;32m{rel_pct:.1}%\x1b[0m ok  Errors: \x1b[33m{graph_errors}\x1b[0m\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Speed:       p50=\x1b[32m{p50:.1}ms\x1b[0m · p95=\x1b[32m{p95:.1}ms\x1b[0m"
+        "\r\x1b[2K  Speed: p50=\x1b[32m{p50:.1}ms\x1b[0m · p95=\x1b[32m{p95:.1}ms\x1b[0m  Tokens: ~\x1b[1;32m{saved_tokens}\x1b[0m (${saved_dollars:.2})\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Tokens:      ~\x1b[1;32m{saved_tokens}\x1b[0m tokens saved (~${saved_dollars:.2})"
+        "\r\x1b[2K\x1b[1m{:<9} {:>6} {:>7} {:>7} {:>10}  {:<24}\x1b[0m\r\n",
+        "TOOL", "CALLS", "OK %", "p50", "SAVED", "PURPOSE"
     )?;
-    writeln!(w, "\x1b[2K")?;
-    count += 5;
-
-    writeln!(
-        w,
-        "\x1b[2K\x1b[1m{:<12} {:>8} {:>9} {:>9} {:>14}  {:<24}\x1b[0m",
-        "TOOL", "CALLS", "OK %", "p50", "SAVED TOKENS", "CAPABILITY"
-    )?;
-    writeln!(
-        w,
-        "\x1b[2K\x1b[90m{}\x1b[0m",
-        "─".repeat(cols.clamp(74, 80))
-    )?;
-    count += 2;
+    write!(w, "\r\x1b[2K\x1b[90m{}\x1b[0m\r\n", "─".repeat(safe_cols))?;
 
     let graph_tools = [
         ("callers", "Upstream caller tree"),
         ("callees", "Downstream callee tree"),
         ("path", "Reachable call path route"),
         ("context", "Surrounding scope context"),
-        ("impact", "Blast radius impact analysis"),
+        ("impact", "Blast radius impact"),
         ("symbols", "Symbol definition search"),
         ("imports", "Import dependency mapping"),
-        ("build", "Incremental graph index build"),
+        ("build", "Incremental index build"),
     ];
 
     let tool_aggs = s.get("tool_aggs").and_then(Value::as_object);
-    for (tool, desc) in graph_tools {
-        if count + 2 >= max_lines {
+    let max_rows = avail_lines.saturating_sub(5);
+    for (idx, (tool, desc)) in graph_tools.iter().enumerate() {
+        if idx >= max_rows {
             break;
         }
-        let (calls, ok_pct, p50_ms, saved) = if let Some(tag) = tool_aggs.and_then(|m| m.get(tool))
+        let (calls, ok_pct, p50_ms, saved) = if let Some(tag) = tool_aggs.and_then(|m| m.get(*tool))
         {
             let c = tag.get("calls").and_then(Value::as_u64).unwrap_or(0);
             let rel = tag
@@ -173,32 +153,25 @@ fn render_tab_graph<W: Write>(
         } else {
             (0, 100.0, 0.0, 0)
         };
-        writeln!(
+        write!(
             w,
-            "\x1b[2K{:<12} {:>8} {:>8.1}% {:>8.1}ms {:>14}  \x1b[90m{:<24}\x1b[0m",
+            "\r\x1b[2K{:<9} {:>6} {:>6.1}% {:>6.1}ms {:>10}  \x1b[90m{:<24}\x1b[0m\r\n",
             tool, calls, ok_pct, p50_ms, saved, desc
         )?;
-        count += 1;
     }
 
-    Ok(count)
+    Ok(())
 }
 
 fn render_tab_reuse<W: Write>(
     w: &mut W,
     state: &TuiState,
-    cols: usize,
-    max_lines: usize,
-) -> io::Result<usize> {
-    let mut count = 0;
+    safe_cols: usize,
+    avail_lines: usize,
+) -> io::Result<()> {
     let s = &state.reuse_summary;
-
     let total_cands = s
         .get("total_candidates")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let sample_cands = s
-        .get("sample_candidates")
         .and_then(Value::as_u64)
         .unwrap_or(0);
     let prev_loc = s
@@ -226,45 +199,28 @@ fn render_tab_reuse<W: Write>(
         .and_then(Value::as_u64)
         .unwrap_or(0);
 
-    writeln!(
+    write!(
         w,
-        "\x1b[2K\x1b[1;32m[USP 2: REAL-TIME ANTI-REINVENTION ENGINE]\x1b[0m"
+        "\r\x1b[2K\x1b[1;32m[USP 2: REAL-TIME ANTI-REINVENTION ENGINE]\x1b[0m\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Duplicate Candidates: \x1b[1;32m{total_cands}\x1b[0m twins        Preventable Excess: ~\x1b[1;32m{prev_loc}\x1b[0m LOC"
+        "\r\x1b[2K  Duplicates: \x1b[1;32m{total_cands}\x1b[0m twins  Preventable: ~\x1b[1;32m{prev_loc}\x1b[0m LOC\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Pre-Write Searches:   \x1b[1;32m{prewrite_count}\x1b[0m intercepted     Authoritative Ratio: \x1b[1;32m{avg_callers:.1}\x1b[0m callers/canonical"
+        "\r\x1b[2K  Pre-writes: \x1b[1;32m{prewrite_count}\x1b[0m caught  Ratio: \x1b[1;32m{avg_callers:.1}\x1b[0m callers  D1:{d1} D2:{d2} D3:{d3} D4:{d4}\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Detectors: D1 Callee Overlap: {d1} · D2 Signature: {d2} · D3 Bypass: {d3} · D4 Wrapper: {d4}"
-    )?;
-    writeln!(w, "\x1b[2K")?;
-    count += 5;
-
-    let sub_title = if total_cands > sample_cands {
-        format!("DUPLICATE TWINS (Sample top {sample_cands} of {total_cands})")
-    } else {
-        "DUPLICATE TWINS".to_string()
-    };
-    writeln!(w, "\x1b[2K\x1b[1m{sub_title}\x1b[0m")?;
-    writeln!(
-        w,
-        "\x1b[2K\x1b[1m{:<8} {:<4} {:<28} {:<28} {:>7}\x1b[0m",
+        "\r\x1b[2K\x1b[1m{:<7} {:<4} {:<25} {:<25} {:>7}\x1b[0m\r\n",
         "REPO", "DET", "DUPLICATE SYMBOL", "CANONICAL TARGET", "SAVING"
     )?;
-    writeln!(
-        w,
-        "\x1b[2K\x1b[90m{}\x1b[0m",
-        "─".repeat(cols.clamp(77, 80))
-    )?;
-    count += 3;
+    write!(w, "\r\x1b[2K\x1b[90m{}\x1b[0m\r\n", "─".repeat(safe_cols))?;
 
-    for cand in &state.reuse_candidates {
-        if count + 2 >= max_lines {
+    let max_rows = avail_lines.saturating_sub(5);
+    for (idx, cand) in state.reuse_candidates.iter().enumerate() {
+        if idx >= max_rows {
             break;
         }
         let repo = cand.get("repo").and_then(Value::as_str).unwrap_or("-");
@@ -273,30 +229,27 @@ fn render_tab_reuse<W: Write>(
         let can = cand.get("canonical").and_then(Value::as_str).unwrap_or("-");
         let loc = cand.get("loc_saving").and_then(Value::as_i64).unwrap_or(0);
 
-        let r_trunc = truncate_chars(repo, 7);
-        let s_trunc = truncate_chars(sym, 27);
-        let c_trunc = truncate_chars(can, 27);
+        let r_trunc = truncate_chars(repo, 6);
+        let s_trunc = truncate_chars(sym, 24);
+        let c_trunc = truncate_chars(can, 24);
 
-        writeln!(
+        write!(
             w,
-            "\x1b[2K{:<8} {:<4} {:<28} {:<28} {:>5} L",
+            "\r\x1b[2K{:<7} {:<4} {:<25} {:<25} {:>5} L\r\n",
             r_trunc, det, s_trunc, c_trunc, loc
         )?;
-        count += 1;
     }
 
-    Ok(count)
+    Ok(())
 }
 
 fn render_tab_memory<W: Write>(
     w: &mut W,
     state: &TuiState,
-    cols: usize,
-    max_lines: usize,
-) -> io::Result<usize> {
-    let mut count = 0;
+    safe_cols: usize,
+    avail_lines: usize,
+) -> io::Result<()> {
     let s = &state.summary;
-
     let current_notes: Vec<&Value> = state
         .memories
         .iter()
@@ -336,36 +289,29 @@ fn render_tab_memory<W: Write>(
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
 
-    writeln!(
+    write!(
         w,
-        "\x1b[2K\x1b[1;35m[USP 3: ZERO-TOKEN PERSISTENT PROJECT MEMORY]\x1b[0m"
+        "\r\x1b[2K\x1b[1;35m[USP 3: ZERO-TOKEN PERSISTENT PROJECT MEMORY]\x1b[0m\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Read:Write Ratio:    \x1b[1;32m{rw_ratio}\x1b[0m ({reads} reads · {writes} writes)   Session Recall: \x1b[1;32m{session_recall_pct:.1}%\x1b[0m"
+        "\r\x1b[2K  R:W Ratio: \x1b[1;32m{rw_ratio}\x1b[0m ({reads}r/{writes}w)  Session Recall: \x1b[1;32m{session_recall_pct:.1}%\x1b[0m\r\n"
     )?;
-    writeln!(
+    write!(
         w,
-        "\x1b[2K  Guarded Hotspots:    \x1b[1;32m{}\x1b[0m active notes ({gotchas} gotchas · {decisions} decisions)",
+        "\r\x1b[2K  Guarded: \x1b[1;32m{}\x1b[0m active notes ({gotchas} gotchas · {decisions} decisions)\r\n",
         current_notes.len()
     )?;
-    writeln!(w, "\x1b[2K")?;
-    count += 4;
-
-    writeln!(
+    write!(
         w,
-        "\x1b[2K\x1b[1m{:<8} {:<30} {:<10} {:>5} {:>8}  {:<12}\x1b[0m",
+        "\r\x1b[2K\x1b[1m{:<7} {:<28} {:<9} {:>4} {:>7}  {:<8}\x1b[0m\r\n",
         "STORE", "KEY", "KIND", "REV", "RECALLS", "STATUS"
     )?;
-    writeln!(
-        w,
-        "\x1b[2K\x1b[90m{}\x1b[0m",
-        "─".repeat(cols.clamp(75, 80))
-    )?;
-    count += 2;
+    write!(w, "\r\x1b[2K\x1b[90m{}\x1b[0m\r\n", "─".repeat(safe_cols))?;
 
-    for note in &current_notes {
-        if count + 2 >= max_lines {
+    let max_rows = avail_lines.saturating_sub(5);
+    for (idx, note) in current_notes.iter().enumerate() {
+        if idx >= max_rows {
             break;
         }
         let store = note.get("store").and_then(Value::as_str).unwrap_or("-");
@@ -381,51 +327,48 @@ fn render_tab_memory<W: Write>(
             .and_then(Value::as_str)
             .unwrap_or("valid");
 
-        let k_trunc = truncate_chars(key, 29);
+        let k_trunc = truncate_chars(key, 27);
         let (status_str, status_color) = match status {
             "valid" | "none" => ("fresh", "\x1b[32m"),
             "modified" => ("modified", "\x1b[33m"),
             _ => ("broken", "\x1b[31;1m"),
         };
 
-        writeln!(
+        write!(
             w,
-            "\x1b[2K{:<8} {:<30} {:<10} {:>4}r {:>8}  {}{:<12}\x1b[0m",
+            "\r\x1b[2K{:<7} {:<28} {:<9} {:>3}r {:>7}  {}{:<8}\x1b[0m\r\n",
             store, k_trunc, kind, rev, recalls, status_color, status_str
         )?;
-        count += 1;
     }
 
-    Ok(count)
+    Ok(())
 }
 
 fn render_tab_stream<W: Write>(
     w: &mut W,
     state: &TuiState,
-    _cols: usize,
-    max_lines: usize,
-) -> io::Result<usize> {
-    let mut count = 0;
-    writeln!(
+    safe_cols: usize,
+    avail_lines: usize,
+) -> io::Result<()> {
+    write!(
         w,
-        "\x1b[2K\x1b[1m{:<8} {:<9} {:<12} {:<12} {:<11} {:<9} {:<8} ARGUMENTS\x1b[0m",
-        "TIME", "USP", "TOOL", "REPO", "AGENT", "LATENCY", "STATUS"
+        "\r\x1b[2K\x1b[1m{:<8} {:<8} {:<10} {:<10} {:<10} {:<7} {:<6} ARGS\x1b[0m\r\n",
+        "TIME", "USP", "TOOL", "REPO", "AGENT", "LAT", "STATUS"
     )?;
-    writeln!(w, "\x1b[2K\x1b[90m{}\x1b[0m", "─".repeat(96))?;
-    count += 2;
+    write!(w, "\r\x1b[2K\x1b[90m{}\x1b[0m\r\n", "─".repeat(safe_cols))?;
 
-    for val in &state.recent_events {
-        if count + 1 >= max_lines {
+    let max_rows = avail_lines.saturating_sub(2);
+    for (idx, val) in state.recent_events.iter().enumerate() {
+        if idx >= max_rows {
             break;
         }
-        render_event_row(w, val)?;
-        count += 1;
+        render_event_row(w, val, safe_cols)?;
     }
 
-    Ok(count)
+    Ok(())
 }
 
-pub fn render_event_row<W: Write>(w: &mut W, val: &Value) -> io::Result<()> {
+pub fn render_event_row<W: Write>(w: &mut W, val: &Value, safe_cols: usize) -> io::Result<()> {
     let ts = val.get("ts").and_then(Value::as_i64).unwrap_or(0);
     let time_str = format_timestamp(ts);
     let tool = val.get("tool").and_then(Value::as_str).unwrap_or("-");
@@ -435,14 +378,14 @@ pub fn render_event_row<W: Write>(w: &mut W, val: &Value) -> io::Result<()> {
         .get("repo_name")
         .and_then(Value::as_str)
         .unwrap_or("workspace");
-    let r_trunc = truncate_chars(repo_name, 11);
+    let r_trunc = truncate_chars(repo_name, 9);
 
     let agent_name = val
         .get("agent")
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .unwrap_or("user");
-    let a_trunc = truncate_chars(agent_name, 10);
+    let a_trunc = truncate_chars(agent_name, 9);
 
     let lat_str = val
         .get("latency_us")
@@ -460,15 +403,15 @@ pub fn render_event_row<W: Write>(w: &mut W, val: &Value) -> io::Result<()> {
 
     let args_val = val.get("args").cloned().unwrap_or(Value::Null);
     let args_str = serde_json::to_string(&args_val).unwrap_or_default();
-    let max_args_len = 32;
+    let max_args_len = safe_cols.saturating_sub(64).max(8);
     let short_args = if args_str.len() > max_args_len {
         format!("{}...", truncate_chars(&args_str, max_args_len - 3))
     } else {
         args_str
     };
 
-    writeln!(
+    write!(
         w,
-        "\x1b[2K{time_str:<8} {usp_color}[{usp_tag:<6}]\x1b[0m {tool:<12} {r_trunc:<12} {a_trunc:<11} {lat_str:<9} {status_color}{status_str:<8}\x1b[0m {short_args}"
+        "\r\x1b[2K{time_str:<8} {usp_color}[{usp_tag:<6}]\x1b[0m {tool:<10} {r_trunc:<10} {a_trunc:<10} {lat_str:<7} {status_color}{status_str:<6}\x1b[0m {short_args}\r\n"
     )
 }
