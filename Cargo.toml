@@ -1,6 +1,6 @@
 [package]
 name = "agent-weave"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 description = "Local deterministic code graph, real-time anti-reinvention engine, and zero-token persistent memory for AI coding agents."
 license = "MIT OR Apache-2.0"
