@@ -204,6 +204,7 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
 fn run_memory(req: &CommandRequest, root_arg: Option<&Path>, surface: Surface) -> Result<ArmOut> {
     match req {
         CommandRequest::MemWrite { .. } => run_mem_write(req, root_arg, surface),
+        CommandRequest::MemTouch { .. } => run_mem_touch(req, root_arg),
         CommandRequest::MemQuery { .. } => run_mem_query(req, root_arg),
         CommandRequest::MemGet { .. } => run_mem_get(req, root_arg),
         CommandRequest::MemDelete { .. } => run_mem_delete(req, root_arg),

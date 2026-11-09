@@ -17,6 +17,7 @@ pub(super) fn note<'a>(key: &'a str, body: &'a str, kind: &'a str) -> MemNoteInp
         source: "cli",
         expires_at: 0,
         supersedes: None,
+        touch: false,
     }
 }
 

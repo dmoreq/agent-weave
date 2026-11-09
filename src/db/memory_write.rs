@@ -68,10 +68,10 @@ pub struct MemNoteInput<'a> {
     pub source: &'a str,
     pub expires_at: i64,
     pub supersedes: Option<&'a str>,
+    pub touch: bool,
 }
 
-/// Write outcome: a new revision (with the superseded rev, when any) or an
-/// idempotent duplicate (the existing current rev, unchanged).
+/// Write outcome: a new revision, an idempotent duplicate, or a refreshed timestamp.
 #[derive(Debug)]
 pub enum MemWriteOutcome {
     Written {
@@ -79,6 +79,9 @@ pub enum MemWriteOutcome {
         superseded_rev: Option<i64>,
     },
     Duplicate {
+        rev: i64,
+    },
+    Touched {
         rev: i64,
     },
 }
@@ -158,6 +161,17 @@ fn try_write_revision(
     let current = current_revision(&tx, note.key)?;
     if let Some(row) = &current {
         if row.content_hash == hash {
+            if note.touch {
+                tx.execute(
+                    "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                    rusqlite::params![now, row.id],
+                )
+                .map_err(map_memory_err)?;
+                tx.commit().map_err(map_memory_err)?;
+                return Ok(WriteAttempt::Written(MemWriteOutcome::Touched {
+                    rev: row.rev,
+                }));
+            }
             // Idempotent replay: nothing written, nothing to commit.
             drop(tx);
             return Ok(WriteAttempt::Written(MemWriteOutcome::Duplicate {
@@ -282,4 +296,23 @@ fn supersede_cross_key(
         )));
     };
     supersede_current(tx, new_id, now, target_id)
+}
+
+/// Refresh `created_at = now` on the current active revision of `key`.
+/// Returns `Ok(Some(rev))` if active revision was updated, or `Ok(None)` if key does not exist.
+pub fn memory_touch(conn: &mut Connection, key: &str, now: i64) -> Result<Option<i64>> {
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(map_memory_err)?;
+    let current = current_revision(&tx, key)?;
+    let Some(rev_info) = current else {
+        return Ok(None);
+    };
+    tx.execute(
+        "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, rev_info.id],
+    )
+    .map_err(map_memory_err)?;
+    tx.commit().map_err(map_memory_err)?;
+    Ok(Some(rev_info.rev))
 }

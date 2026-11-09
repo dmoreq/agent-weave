@@ -103,6 +103,7 @@ pub enum CommandRequest {
         ttl: Option<u64>,
         supersedes: Option<String>,
         global: bool,
+        touch: bool,
     },
     MemQuery {
         terms: Vec<String>,
@@ -111,6 +112,11 @@ pub enum CommandRequest {
         scope: Option<crate::memory::MemScope>,
         limit: usize,
         include_superseded: bool,
+        global: bool,
+        reference: Option<String>,
+    },
+    MemTouch {
+        key: String,
         global: bool,
     },
     MemGet {
@@ -337,6 +343,7 @@ mod tests {
                 ttl: None,
                 supersedes: None,
                 global: false,
+                touch: false,
             },
             CommandRequest::MemQuery {
                 terms: vec!["x".into()],
@@ -345,6 +352,11 @@ mod tests {
                 scope: None,
                 limit: 10,
                 include_superseded: false,
+                global: false,
+                reference: None,
+            },
+            CommandRequest::MemTouch {
+                key: "k".into(),
                 global: false,
             },
             CommandRequest::MemGet {

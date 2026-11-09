@@ -6,5 +6,6 @@
 mod build_telemetry;
 mod common;
 mod memory;
+mod memory_touch;
 mod parity;
 mod protocol;

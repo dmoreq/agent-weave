@@ -90,7 +90,7 @@ fn open_browser(url: &str) {
     let _ = std::process::Command::new(cmd).args(&args).spawn();
 }
 
-fn read_http_request(stream: &TcpStream) -> std::io::Result<Option<(String, String)>> {
+fn read_http_request(stream: &mut TcpStream) -> std::io::Result<Option<(String, String, Vec<u8>)>> {
     let mut reader = BufReader::new(stream);
     let mut request_line = String::new();
     if reader.read_line(&mut request_line)? == 0 {
@@ -104,15 +104,29 @@ fn read_http_request(stream: &TcpStream) -> std::io::Result<Option<(String, Stri
     let method = parts[0].to_string();
     let path = parts[1].to_string();
 
+    let mut content_length = 0usize;
     let mut line = String::new();
     loop {
         line.clear();
         if reader.read_line(&mut line)? == 0 || line.trim().is_empty() {
             break;
         }
+        let lower = line.to_lowercase();
+        if lower.starts_with("content-length:") {
+            if let Some(val) = line.split(':').nth(1) {
+                content_length = val.trim().parse().unwrap_or(0);
+            }
+        }
     }
 
-    Ok(Some((method, path)))
+    let mut body = Vec::new();
+    if content_length > 0 && content_length < 1_000_000 {
+        use std::io::Read;
+        body.resize(content_length, 0);
+        reader.read_exact(&mut body)?;
+    }
+
+    Ok(Some((method, path, body)))
 }
 
 fn serve_static_asset(stream: &mut TcpStream, path: &str, is_head: bool) -> std::io::Result<bool> {
@@ -290,9 +304,15 @@ pub fn handle_client(
     global: bool,
 ) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let Some((method, raw_path)) = read_http_request(&stream)? else {
+    let Some((method, raw_path, body)) = read_http_request(&mut stream)? else {
         return Ok(());
     };
+
+    let path = raw_path.split('?').next().unwrap_or(&raw_path);
+
+    if method == "POST" && path == "/api/memory/touch" {
+        return handle_memory_touch(&mut stream, root, &body);
+    }
 
     if method != "GET" && method != "HEAD" {
         let resp = "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n";
@@ -301,7 +321,6 @@ pub fn handle_client(
     }
 
     let is_head = method == "HEAD";
-    let path = raw_path.split('?').next().unwrap_or(&raw_path);
 
     if serve_static_asset(&mut stream, path, is_head)? {
         return Ok(());
@@ -324,6 +343,81 @@ pub fn handle_client(
     stream.write_all(resp.as_bytes())
 }
 
+fn handle_memory_touch(
+    stream: &mut TcpStream,
+    root: Option<&Path>,
+    body: &[u8],
+) -> std::io::Result<()> {
+    let val: serde_json::Value = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+    let key = val
+        .get("key")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let is_global = val
+        .get("global")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if key.is_empty() {
+        let resp_body = serde_json::json!({ "ok": false, "error": "missing key" });
+        let encoded = serde_json::to_vec(&resp_body).unwrap_or_default();
+        return send_response(
+            stream,
+            400,
+            "application/json; charset=utf-8",
+            &encoded,
+            false,
+        );
+    }
+
+    let now = crate::db::unix_now();
+    let mut touched_rev = None;
+
+    if is_global {
+        if let Ok(mut conn) = crate::db::open_global_memory_mutation() {
+            if let Ok(rev) = crate::db::memory_touch(&mut conn, key, now) {
+                touched_rev = rev;
+            }
+        }
+    } else {
+        if let Some(r) = root {
+            if let Ok(mut conn) = crate::db::open_memory_mutation(r) {
+                if let Ok(rev) = crate::db::memory_touch(&mut conn, key, now) {
+                    touched_rev = rev;
+                }
+            }
+        }
+        if touched_rev.is_none() {
+            if let Ok(mut conn) = crate::db::open_global_memory_mutation() {
+                if let Ok(rev) = crate::db::memory_touch(&mut conn, key, now) {
+                    touched_rev = rev;
+                }
+            }
+        }
+    }
+
+    if let Some(rev) = touched_rev {
+        let resp_body = serde_json::json!({ "ok": true, "key": key, "rev": rev });
+        let encoded = serde_json::to_vec(&resp_body).unwrap_or_default();
+        send_response(
+            stream,
+            200,
+            "application/json; charset=utf-8",
+            &encoded,
+            false,
+        )
+    } else {
+        let resp_body = serde_json::json!({ "ok": false, "error": format!("unknown key '{key}'") });
+        let encoded = serde_json::to_vec(&resp_body).unwrap_or_default();
+        send_response(
+            stream,
+            404,
+            "application/json; charset=utf-8",
+            &encoded,
+            false,
+        )
+    }
+}
+
 fn send_response(
     stream: &mut TcpStream,
     status: u16,
@@ -331,8 +425,15 @@ fn send_response(
     body: &[u8],
     is_head: bool,
 ) -> std::io::Result<()> {
+    let status_line = match status {
+        200 => "200 OK",
+        400 => "400 Bad Request",
+        404 => "404 Not Found",
+        405 => "405 Method Not Allowed",
+        _ => "200 OK",
+    };
     let header = format!(
-        "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(header.as_bytes())?;

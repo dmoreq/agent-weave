@@ -213,6 +213,7 @@ aw mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 | `--scope <SCOPE>` | `durable` | `durable` (never expires) or `session` (expires after TTL). |
 | `--ttl <SECS>` | `604800` (7 days)| Expiration lifetime in seconds (only valid with `--scope session`). |
 | `--supersedes <KEY>`| None | Mark the specified key as superseded by this note in one atomic transaction. |
+| `--touch` | `false` | Refresh timestamp on active revision when content hash matches without revision churn. |
 | `--global` | `false` | Persist to global store (`~/.aw/memory.db`) instead of repository (`.aw/memory.db`). |
 
 ---
@@ -221,21 +222,22 @@ aw mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 Retrieve and rank memory notes using SQLite FTS5 BM25, reference token overlap, and recency decay.
 
 ```bash
-aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global]
+aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global] [--ref <REFERENCE>]
 ```
 
 | Option | Default | Description |
 |---|---|---|
-| `[TERMS]` | Optional | Search query terms (mutually exclusive with `--all`). |
+| `[TERMS]` | Optional | Search query terms (mutually exclusive with `--all`; empty/whitespace defaults to `--all`). |
 | `--all` | `false` | List all active notes ordered by recency. |
 | `--kind <KIND>` | None | Filter by note kind (`decision`, `gotcha`, `fact`, `task`). |
 | `--scope <SCOPE>` | None | Filter by scope (`durable` or `session`). |
 | `--limit <N>` | `10` | Maximum results displayed (1 to 100). |
 | `--include-superseded`| `false` | When combined with `--all`, includes superseded note revisions. |
 | `--global` | `false` | Restrict search exclusively to global store (`~/.aw/memory.db`). |
+| `--ref <REFERENCE>` | None | Filter notes referencing target path or symbol. |
 
 - **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
-- **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.aw/index.db`. Stale or modified references are badged with `[stale-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
+- **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.aw/index.db`. Broken targets missing from the index are badged with `[stale-ref] [broken-ref]`, while targets modified after note creation are badged with `[stale-ref] [modified-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
 
 ---
 
@@ -243,6 +245,7 @@ aw mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 
 | Subcommand | Syntax | Description |
 |---|---|---|
+| `touch` | `aw mem touch <KEY> [--global]` | Refresh `created_at` timestamp on active revision without creating a new revision. |
 | `get` | `aw mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
 | `delete` | `aw mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
 | `export` | `aw mem export [--limit <N>] [--global]` | Export active notes as JSONL to stdout (pure backup stream). |

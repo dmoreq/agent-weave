@@ -6,6 +6,7 @@ let reuseCandidates = [];
 let prewriteSearches = [];
 let totalCalls = 0;
 let totalErrors = 0;
+let latestSummaryData = null;
 
 let selectedMemoryIndex = 0;
 let selectedReuseIndex = 0;
@@ -61,6 +62,7 @@ function loadSummaryData() {
   fetch('/api/summary')
     .then(r => r.json())
     .then(data => {
+      latestSummaryData = data;
       totalCalls = data.total_calls || 0;
       totalErrors = data.error_count || 0;
 
@@ -116,6 +118,8 @@ function loadSummaryData() {
       renderRecentQueries(data.recent_queries || []);
       // Render Errors Triage
       renderErrorsTriage(data.recent_errors || []);
+      // Update Memory KPIs
+      updateMemoryKpis();
     })
     .catch(() => {});
 }
@@ -155,36 +159,142 @@ function loadMemoriesData() {
     .then(r => r.json())
     .then(data => {
       allMemories = data || [];
-      const currentNotes = allMemories.filter(m => m.is_current);
-
-      const navCount = document.getElementById('nav-mem-count');
-      if (navCount) navCount.textContent = currentNotes.length;
-
-      const memKpiActive = document.getElementById('mem-kpi-active');
-      if (memKpiActive) memKpiActive.textContent = currentNotes.length;
-
-      const totalRecalls = allMemories.reduce((sum, m) => sum + (m.recall_count || 0), 0);
-      const recallsEl = document.getElementById('mem-kpi-recalls');
-      if (recallsEl) recallsEl.textContent = totalRecalls;
-
-      const gotchas = currentNotes.filter(m => m.kind === 'gotcha').length;
-      const decisions = currentNotes.filter(m => m.kind === 'decision').length;
-      const guardedEl = document.getElementById('mem-kpi-guarded');
-      if (guardedEl) guardedEl.textContent = gotchas + decisions;
-
-      const guardedSub = document.getElementById('mem-kpi-guarded-sub');
-      if (guardedSub) guardedSub.textContent = gotchas + ' gotchas · ' + decisions + ' decisions';
-
-      const verifiedRefs = allMemories.reduce((sum, m) => {
-        return sum + (m.resolved_refs ? m.resolved_refs.filter(r => r.verified).length : 0);
-      }, 0);
-      const refsEl = document.getElementById('mem-kpi-refs');
-      if (refsEl) refsEl.textContent = verifiedRefs;
-
+      updateMemoryKpis();
       populateMemoryStoreFilter();
       renderMemoryList();
     })
     .catch(() => {});
+}
+
+function updateMemoryKpis() {
+  const currentNotes = allMemories.filter(m => m.is_current);
+
+  const navCount = document.getElementById('nav-mem-count');
+  if (navCount) navCount.textContent = currentNotes.length;
+
+  // KPI 1: Read:Write Ratio
+  let reads = 0;
+  let writes = 0;
+  if (latestSummaryData && latestSummaryData.tool_aggs) {
+    const aggs = latestSummaryData.tool_aggs;
+    reads = (aggs['mem_query'] ? aggs['mem_query'].calls : 0) + (aggs['mem_get'] ? aggs['mem_get'].calls : 0);
+    writes = (aggs['mem_write'] ? aggs['mem_write'].calls : 0) + (aggs['mem_touch'] ? aggs['mem_touch'].calls : 0);
+  }
+  const rwRatio = writes === 0 ? (reads > 0 ? reads.toFixed(1) + '×' : '0.0×') : (reads / writes).toFixed(1) + '×';
+  const rwEl = document.getElementById('mem-kpi-rw');
+  if (rwEl) rwEl.textContent = rwRatio;
+  const rwSubEl = document.getElementById('mem-kpi-rw-sub');
+  if (rwSubEl) rwSubEl.textContent = reads + ' reads · ' + writes + ' writes';
+
+  // KPI 2: Session Recall Rate
+  const recallPct = latestSummaryData ? (latestSummaryData.session_recall_pct || 0.0).toFixed(1) + '%' : '0.0%';
+  const recallEl = document.getElementById('mem-kpi-recall-pct');
+  if (recallEl) recallEl.textContent = recallPct;
+  const recallSubEl = document.getElementById('mem-kpi-recall-pct-sub');
+  if (recallSubEl) {
+    const memSessions = latestSummaryData ? (latestSummaryData.memory_session_count || 0) : 0;
+    const totalSessions = latestSummaryData ? (latestSummaryData.session_count || 0) : 0;
+    recallSubEl.textContent = memSessions + ' of ' + totalSessions + ' sessions';
+  }
+
+  // KPI 3: Anchor Currency Rate
+  const notesWithRefs = currentNotes.filter(m => m.refs && m.refs.length > 0);
+  let freshCount = 0;
+  let modifiedCount = 0;
+  let brokenCount = 0;
+  notesWithRefs.forEach(m => {
+    if (m.ref_status === 'broken') brokenCount++;
+    else if (m.ref_status === 'modified') modifiedCount++;
+    else freshCount++;
+  });
+  const currencyRate = notesWithRefs.length > 0 ? (100.0 * freshCount / notesWithRefs.length).toFixed(1) + '%' : '100.0%';
+  const currencyEl = document.getElementById('mem-kpi-currency');
+  if (currencyEl) currencyEl.textContent = currencyRate;
+  const currencySubEl = document.getElementById('mem-kpi-currency-sub');
+  if (currencySubEl) {
+    currencySubEl.textContent = freshCount + ' fresh · ' + modifiedCount + ' modified · ' + brokenCount + ' broken';
+  }
+
+  // KPI 4: Guarded Symbols & Hotspots
+  const gotchas = currentNotes.filter(m => m.kind === 'gotcha').length;
+  const decisions = currentNotes.filter(m => m.kind === 'decision').length;
+  const guardedEl = document.getElementById('mem-kpi-guarded');
+  if (guardedEl) guardedEl.textContent = gotchas + decisions;
+  const guardedSub = document.getElementById('mem-kpi-guarded-sub');
+  if (guardedSub) guardedSub.textContent = gotchas + ' gotchas · ' + decisions + ' decisions';
+
+  updateActionCenter(currentNotes, modifiedCount, brokenCount);
+}
+
+function updateActionCenter(currentNotes, modifiedCount, brokenCount) {
+  const centerEl = document.getElementById('mem-action-center');
+  const summaryEl = document.getElementById('action-center-summary');
+  const itemsEl = document.getElementById('action-center-items');
+  if (!centerEl || !itemsEl) return;
+
+  const actionable = currentNotes.filter(m => m.ref_status === 'modified' || m.ref_status === 'broken');
+  if (actionable.length === 0) {
+    centerEl.classList.add('hidden');
+    itemsEl.innerHTML = '';
+    return;
+  }
+
+  centerEl.classList.remove('hidden');
+  if (summaryEl) {
+    summaryEl.textContent = modifiedCount + ' modified · ' + brokenCount + ' broken requiring attention';
+  }
+
+  itemsEl.innerHTML = '';
+  actionable.forEach(m => {
+    const isModified = m.ref_status === 'modified';
+    const badge = isModified
+      ? '<span class="badge status-warn">[MODIFIED REF]</span>'
+      : '<span class="badge status-err">[BROKEN REF]</span>';
+    const explanation = isModified
+      ? 'Target file was modified after note creation. Review note and touch to confirm currency.'
+      : 'Referenced symbol or file path is missing from current code index (.aw/index.db).';
+    const touchBtn = isModified
+      ? '<button class="btn-touch" onclick="touchMemory(\'' + escapeHtml(m.key) + '\', ' + (m.store === 'global') + ')">Touch Anchor</button>'
+      : '';
+
+    const refsList = (m.refs || []).map(r => '<code>' + escapeHtml(r) + '</code>').join(', ');
+
+    const item = document.createElement('div');
+    item.className = 'action-item';
+    item.innerHTML =
+      '<div class="action-item-info">' +
+      '  <div class="action-item-title">' +
+      '    ' + badge +
+      '    <strong>' + escapeHtml(m.key) + '</strong>' +
+      '    <span class="badge badge-repo">' + escapeHtml(m.store) + '</span>' +
+      '    <span class="text-muted" style="font-size:0.75rem;">r' + m.rev + '</span>' +
+      '  </div>' +
+      '  <div class="action-item-desc text-muted">' + explanation + '</div>' +
+      '  <div class="action-item-refs text-muted" style="font-size:0.75rem;">Refs: ' + refsList + '</div>' +
+      '</div>' +
+      touchBtn;
+
+    itemsEl.appendChild(item);
+  });
+}
+
+function touchMemory(key, isGlobal) {
+  fetch('/api/memory/touch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: key, global: !!isGlobal })
+  })
+    .then(r => r.json())
+    .then(res => {
+      if (res.ok) {
+        loadMemoriesData();
+      } else {
+        alert('Failed to touch memory note: ' + (res.error || 'unknown error'));
+      }
+    })
+    .catch(err => {
+      alert('Network error touching memory note: ' + err.message);
+    });
 }
 
 // Telemetry Views Rendering
@@ -688,6 +798,11 @@ function renderMemoryList() {
     const storeBadge = '<span class="badge badge-repo">' + escapeHtml(m.store) + '</span>';
     const revPill = '<span class="badge" style="background: var(--bg-subtle);">r' + m.rev + '</span>';
     const recallsBadge = m.recall_count > 0 ? '<span class="badge status-ok">' + m.recall_count + ' recalls</span>' : '';
+    const refBadge = m.ref_status === 'broken'
+      ? '<span class="badge status-err">[broken-ref]</span>'
+      : m.ref_status === 'modified'
+      ? '<span class="badge status-warn">[modified-ref]</span>'
+      : '';
 
     card.innerHTML =
       '<div class="item-card-head">' +
@@ -695,6 +810,7 @@ function renderMemoryList() {
       '    <span class="' + kindClass + '">' + m.kind.toUpperCase() + '</span>' +
       '    ' + revPill +
       '    ' + recallsBadge +
+      '    ' + refBadge +
       '  </div>' +
       '  ' + storeBadge +
       '</div>' +
@@ -741,8 +857,8 @@ function renderMemoryDossier(m) {
   if (m.resolved_refs && m.resolved_refs.length) {
     refsHtml = '<div class="dossier-section-title">Guarded Code References (.aw/index.db verified)</div><div class="chips-row">';
     m.resolved_refs.forEach(r => {
-      const verClass = r.verified ? 'chip-ref verified' : 'chip-ref';
-      const verBadge = r.verified ? ' [VERIFIED ' + r.type.toUpperCase() + ']' : '';
+      const verClass = !r.verified ? 'chip-ref broken' : r.modified ? 'chip-ref modified' : 'chip-ref verified';
+      const verBadge = !r.verified ? ' [BROKEN REF]' : r.modified ? ' [MODIFIED REF]' : ' [VERIFIED ' + r.type.toUpperCase() + ']';
       const locStr = r.location ? ' &middot; ' + escapeHtml(r.location) : '';
       refsHtml += '<span class="' + verClass + '"><strong>' + escapeHtml(r.ref) + '</strong>' + verBadge + locStr + '</span>';
     });
@@ -753,6 +869,10 @@ function renderMemoryDossier(m) {
     refsHtml += '</div>';
   }
 
+  const touchBtn = m.ref_status === 'modified'
+    ? '<button class="btn-touch" style="padding: 0.15rem 0.5rem; font-size: 0.72rem; margin-left: 0.5rem;" onclick="touchMemory(\'' + escapeHtml(m.key) + '\', ' + (m.store === 'global') + ')">Touch Anchor</button>'
+    : '';
+
   container.innerHTML =
     '<div class="dossier-head">' +
     '  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">' +
@@ -760,6 +880,7 @@ function renderMemoryDossier(m) {
     '      <span class="' + kindClass + '">' + m.kind.toUpperCase() + '</span>' +
     '      <span class="badge" style="background:var(--bg-subtle);">Rev ' + m.rev + '</span>' +
     '      <span class="badge badge-repo">' + escapeHtml(m.store) + '</span>' +
+    '      ' + touchBtn +
     '    </div>' +
     '    <span class="text-muted" style="font-size:0.78rem;">' + dateStr + '</span>' +
     '  </div>' +

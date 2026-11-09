@@ -138,10 +138,12 @@ pub const RETENTION_DAYS: i64 = 30;
 // through `mem_tokens`, so query and stored text can never disagree.
 // ---------------------------------------------------------------------------
 
+mod guard;
 mod note;
 mod rank;
 mod tokens;
 
+pub(crate) use guard::*;
 pub(crate) use note::*;
 pub(crate) use rank::*;
 pub(crate) use tokens::*;

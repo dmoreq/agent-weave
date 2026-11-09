@@ -26,8 +26,8 @@ For structural code questions, **query `aw` first** before dumping entire source
 | Who calls this symbol | `aw callers <name>` | Pointer list `path:line qualname`; add `--depth N` for the transitive reverse call closure (tagged `[depth=N]`). |
 | What does this call (transitive) | `aw callees <name> --depth N` | Outgoing call closure over resolved static edges. |
 | Does A reach B, via which call sites | `aw path <from> <to>` | Shortest route over resolved call edges. Swap arguments for reverse query. |
-| Symbol surroundings | `aw context <name>` | Definition range + signature + direct callers + direct callees in one call. |
-| Which files depend on a file | `aw impact <file>` | Files that call into target; add `--edges calls,imports,inherits --depth N` for extended closure. |
+| Symbol surroundings & gotchas | `aw context <name>` | Definition range + signature + direct callers/callees + ambient gotchas/decisions guarding the symbol. |
+| Which files depend on a file | `aw impact <file>` | Files that call into target; add `--edges calls,imports,inherits --depth N` for extended closure; displays architectural decision guards. |
 | What does this file import | `aw imports <file>` | Outbound resolved imports for an indexed file. |
 | Symbols & definitions | `aw symbols <file> [--outline]` | Deterministic definition inventory and signatures of one indexed file or directory. |
 
@@ -36,7 +36,9 @@ For structural code questions, **query `aw` first** before dumping entire source
 - **Post-Edit Duplicate Audit**: Run `aw reuse [paths...]` after creating or editing functions. `aw` runs four calibrated detectors (callee footprint $C_{dup} \ge 80\%$, interface token similarity, client bypass, 1-caller wrappers) to ensure no redundant copies were introduced.
 
 ### Pillar 3: Project Memory Lifecycle (Pre-Task Recall & Post-Fix Capture)
-- **Pre-Task Recall**: Run `aw mem query` (or MCP `mem_query({})`) at the start of a session or when exploring an unfamiliar area. Without arguments, it seamlessly lists current project and global decisions, gotchas, and conventions.
+- **Pre-Task Recall**: Run `aw mem query` (or MCP `mem_query({})`) at the start of a session or when exploring an unfamiliar area. Without arguments, it lists current project and global decisions, gotchas, and conventions. Filter by code anchor with `aw mem query --ref <path_or_symbol>`.
+- **Ambient Retrieval & Guard Nudges**: `aw context <name>` and `aw impact <file>` automatically surface active decisions and gotchas anchoring targeted symbols or files. In addition, `aw build` emits non-invasive stderr notices when modified files are guarded by gotchas or decisions.
+- **Reference Currency & Touch**: Notes anchored with `--refs` flag `[stale-ref] [modified-ref]` when the target file was edited after the note, or `[stale-ref] [broken-ref]` if the anchor is missing from the index. Once audited, refresh currency without revision churn via `aw mem touch <key>` (or `aw mem write ... --touch` or MCP `mem_touch`).
 - **Post-Fix & Architecture Capture**: When you resolve a non-obvious bug or establish an architectural pattern, persist it before ending your turn:
   `aw mem write <key> --kind gotcha|decision --body <prose> [--tags ...] [--refs ...] [--global]`
   Use `--global` for cross-project preferences or machine-wide conventions.
@@ -83,12 +85,12 @@ Reach for these when the routed commands do not answer the question:
 
 `aw` carries agent-authored project notes in `.aw/memory.db` (local) and developer profile/cross-project preferences in `~/.aw/memory.db` (global) — decisions, gotchas, facts, and conventions that survive rebuilds:
 
-- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...] [--global]`):
-  Record when a decision is settled after real investigation, a gotcha cost debugging time, or a task ends with conclusions not yet in committed documentation. Use `--global` to persist cross-project conventions or developer profiles into `~/.aw/memory.db`.
-- **Query** (`aw mem query [terms]`; without terms lists by recency; add `--global` to search only global store):
-  Run at session start and before re-investigating an area worked on previously. Without `--global`, queries seamlessly search **both** local and global stores: global rows carry `[global]`, and local notes take precedence (shadowing colliding global keys).
-- **Maintain**:
-  Rewrite under the same key to update a note revision; `--supersedes <key>` records a cross-key replacement; `--scope session` (default TTL 7 days, `--ttl` overrides) keeps transient scratch out of durable memory. Use `aw mem get <key> [--global]`, `aw mem delete <key> [--global]`, `aw mem export [--global]` (JSONL backup), and `aw mem gc [--global]` (purge expired session notes and >30-day superseded revisions).
+- **Write** (`aw mem write <key> --body <prose> --kind decision|gotcha|fact|task [--tags ...] [--refs ...] [--global] [--touch]`):
+  Record when a decision is settled after real investigation, a gotcha cost debugging time, or a task ends with conclusions not yet in committed documentation. Use `--global` to persist cross-project conventions or developer profiles into `~/.aw/memory.db`. Pass `--touch` to refresh the note timestamp on identical content.
+- **Query** (`aw mem query [terms] [--ref <path_or_symbol>]`; without terms lists by recency; add `--global` to search only global store):
+  Run at session start and before re-investigating an area worked on previously. Without `--global`, queries search **both** local and global stores: global rows carry `[global]`, and local notes take precedence. Filter by anchored target with `--ref <path_or_symbol>`.
+- **Maintain & Touch**:
+  Rewrite under the same key to update a note revision; `--supersedes <key>` records a cross-key replacement; `aw mem touch <key> [--global]` refreshes `created_at` timestamp without revision churn when code changes are verified; `--scope session` (default TTL 7 days, `--ttl` overrides) keeps transient scratch out of durable memory. Use `aw mem get <key> [--global]`, `aw mem delete <key> [--global]`, `aw mem export [--global]` (JSONL backup), and `aw mem gc [--global]` (purge expired session notes and >30-day superseded revisions).
 
 ---
 

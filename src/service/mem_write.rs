@@ -19,6 +19,7 @@ pub(super) fn run_mem_write(
         ttl,
         supersedes,
         global,
+        touch,
     } = req
     else {
         unreachable!("run_mem_write called with a non-write request")
@@ -40,7 +41,14 @@ pub(super) fn run_mem_write(
         body,
         ttl: *ttl,
     })?;
-    let outcome = write_note(root_arg, &note, surface, supersedes.as_deref(), *global)?;
+    let outcome = write_note(
+        root_arg,
+        &note,
+        surface,
+        supersedes.as_deref(),
+        *global,
+        *touch,
+    )?;
     crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
     let line = outcome_line(&outcome, &note.key);
     Ok(ArmOut::plain(
@@ -55,6 +63,7 @@ fn write_note(
     surface: Surface,
     supersedes: Option<&str>,
     global: bool,
+    touch: bool,
 ) -> Result<crate::db::MemWriteOutcome> {
     let mut conn = open_mem_conn(root_arg, global, MemoryMode::Store)?;
     let session = crate::journal::session_tag();
@@ -76,6 +85,7 @@ fn write_note(
                 now + note.ttl_secs
             },
             supersedes,
+            touch,
         },
         now,
     )
@@ -93,6 +103,9 @@ fn outcome_line(outcome: &crate::db::MemWriteOutcome, key: &str) -> String {
         crate::db::MemWriteOutcome::Duplicate { rev } => {
             format!("ok: '{key}' unchanged at rev {rev} (identical content)")
         }
+        crate::db::MemWriteOutcome::Touched { rev } => {
+            format!("ok: '{key}' touched at rev {rev} (timestamp refreshed)")
+        }
     }
 }
 
@@ -105,6 +118,7 @@ pub(super) struct MemQueryArgs<'a> {
     pub(super) limit: usize,
     pub(super) filter: crate::db::MemFilter,
     pub(super) index_conn: Option<&'a rusqlite::Connection>,
+    pub(super) reference: Option<&'a str>,
 }
 
 /// The local and global memory stores a read command resolves once: `None`

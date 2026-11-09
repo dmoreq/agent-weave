@@ -15,8 +15,8 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
         return match crate::db::memory_get(&conn, key)? {
             None => Err(mem_unknown_key(key)),
             Some((row, revs)) => {
-                let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
-                Ok(render_mem_hit(&row, &store_tags(true, is_stale), revs))
+                let status = check_note_ref_status(index_conn.as_ref(), &row);
+                Ok(render_mem_hit(&row, &store_tags(true, status), revs))
             }
         };
     }
@@ -24,14 +24,14 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
     let stores = resolve_memory_stores(root_arg)?;
     if let Some(local) = &stores.local {
         if let Some((row, revs)) = crate::db::memory_get(local, key)? {
-            let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
-            return Ok(render_mem_hit(&row, &store_tags(false, is_stale), revs));
+            let status = check_note_ref_status(index_conn.as_ref(), &row);
+            return Ok(render_mem_hit(&row, &store_tags(false, status), revs));
         }
     }
     if let Some(global) = &stores.global {
         if let Some((row, revs)) = crate::db::memory_get(global, key)? {
-            let is_stale = check_note_stale_ref(index_conn.as_ref(), &row);
-            return Ok(render_mem_hit(&row, &store_tags(true, is_stale), revs));
+            let status = check_note_ref_status(index_conn.as_ref(), &row);
+            return Ok(render_mem_hit(&row, &store_tags(true, status), revs));
         }
     }
 
@@ -58,6 +58,28 @@ pub(super) fn run_mem_delete(req: &CommandRequest, root_arg: Option<&Path>) -> R
             Ok(ArmOut::plain(
                 format!(
                     "{}\ndeleted '{key}' revs={revs}\n",
+                    crate::memory::MEMORY_CAVEAT
+                ),
+                String::new(),
+            ))
+        }
+    }
+}
+
+/// Refresh created_at timestamp on the active revision without revision churn.
+pub(super) fn run_mem_touch(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
+    let CommandRequest::MemTouch { key, global } = req else {
+        unreachable!("run_mem_touch called with a non-touch request")
+    };
+    let now = crate::db::unix_now();
+    let mut conn = open_mem_conn(root_arg, *global, MemoryMode::Mutation)?;
+    match crate::db::memory_touch(&mut conn, key, now)? {
+        None => Err(mem_unknown_key(key)),
+        Some(rev) => {
+            crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
+            Ok(ArmOut::plain(
+                format!(
+                    "{}\nok: '{key}' rev {rev} touched\n",
                     crate::memory::MEMORY_CAVEAT
                 ),
                 String::new(),

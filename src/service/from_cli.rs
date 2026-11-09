@@ -173,6 +173,9 @@ impl CommandRequest {
         };
         match action {
             crate::cli::MemAction::Write { .. } => Self::mem_write_request(action),
+            crate::cli::MemAction::Touch { key, global } => {
+                Ok(CommandRequest::MemTouch { key, global })
+            }
             crate::cli::MemAction::Query { .. } => Self::mem_query_request(action),
             crate::cli::MemAction::Get { key, global } => {
                 Ok(CommandRequest::MemGet { key, global })
@@ -199,6 +202,7 @@ impl CommandRequest {
             ttl,
             supersedes,
             global,
+            touch,
         } = action
         else {
             unreachable!("mem_write_request called with a non-write action")
@@ -213,6 +217,7 @@ impl CommandRequest {
             ttl,
             supersedes,
             global,
+            touch,
         })
     }
 
@@ -221,6 +226,7 @@ impl CommandRequest {
         let crate::cli::MemAction::Query {
             terms,
             all,
+            reference,
             kind,
             scope,
             limit,
@@ -238,6 +244,7 @@ impl CommandRequest {
             limit,
             include_superseded,
             global,
+            reference,
         })
     }
 
@@ -260,6 +267,7 @@ impl CommandRequest {
             | CommandRequest::Search { .. }
             | CommandRequest::Stats { .. } => Family::Analysis,
             CommandRequest::MemWrite { .. }
+            | CommandRequest::MemTouch { .. }
             | CommandRequest::MemQuery { .. }
             | CommandRequest::MemGet { .. }
             | CommandRequest::MemDelete { .. }
@@ -286,6 +294,7 @@ impl CommandRequest {
             CommandRequest::Doctor { .. } => "doctor",
             CommandRequest::Usage { .. } => "usage",
             CommandRequest::MemWrite { .. } => "mem_write",
+            CommandRequest::MemTouch { .. } => "mem_touch",
             CommandRequest::MemQuery { .. } => "mem_query",
             CommandRequest::MemGet { .. } => "mem_get",
             CommandRequest::MemDelete { .. } => "mem_delete",
@@ -390,6 +399,9 @@ impl CommandRequest {
     fn journal_args_memory(&self) -> JournalArgs {
         match self {
             CommandRequest::MemWrite { .. } => self.mem_write_args(),
+            CommandRequest::MemTouch { key, global } => {
+                vec![("key", key.clone()), ("global", global.to_string())]
+            }
             CommandRequest::MemQuery { .. } => self.mem_query_args(),
             CommandRequest::MemGet { key, global } => {
                 vec![("key", key.clone()), ("global", global.to_string())]
@@ -418,6 +430,7 @@ impl CommandRequest {
             ttl,
             supersedes,
             global,
+            touch,
             ..
         } = self
         else {
@@ -431,6 +444,7 @@ impl CommandRequest {
             ("supersedes", supersedes.clone().unwrap_or_default()),
             ("body_len", body.len().to_string()),
             ("global", global.to_string()),
+            ("touch", touch.to_string()),
         ]
     }
 
@@ -443,6 +457,7 @@ impl CommandRequest {
             limit,
             include_superseded,
             global,
+            reference,
             ..
         } = self
         else {
@@ -450,6 +465,7 @@ impl CommandRequest {
         };
         vec![
             ("terms", terms.join(" ")),
+            ("ref", reference.clone().unwrap_or_default()),
             (
                 "kind",
                 kind.map_or_else(String::new, |k| k.as_str().to_string()),

@@ -138,9 +138,8 @@ pub fn from_tool_args(tool: &str, args: &serde_json::Value) -> Result<CommandReq
             from_tool_args_graph(&a, tool)
         }
         "symbols" | "reuse" | "search" => from_tool_args_analysis(&a, tool),
-        "mem_write" | "mem_query" | "mem_get" | "mem_delete" | "mem_gc" | "mem_export" => {
-            from_tool_args_memory(&a, tool)
-        }
+        "mem_write" | "mem_touch" | "mem_query" | "mem_get" | "mem_delete" | "mem_gc"
+        | "mem_export" => from_tool_args_memory(&a, tool),
         _ => Err(unknown_tool(tool)),
     }
 }
@@ -230,6 +229,11 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
             ttl: a.n_opt_spec(tool, "ttl")?.map(|v| v as u64),
             supersedes: a.s("supersedes"),
             global: a.b("global"),
+            touch: a.b("touch"),
+        },
+        "mem_touch" => CommandRequest::MemTouch {
+            key: a.req("key")?,
+            global: a.b("global"),
         },
         "mem_query" => CommandRequest::MemQuery {
             terms: a
@@ -242,6 +246,7 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
             limit: a.n_spec(tool, "limit", crate::memory::DEFAULT_MEM_LIMIT)?,
             include_superseded: a.b("include_superseded"),
             global: a.b("global"),
+            reference: a.s("ref").or_else(|| a.s("reference")),
         },
         "mem_get" => CommandRequest::MemGet {
             key: a.req("key")?,

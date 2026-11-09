@@ -139,3 +139,37 @@ fn dashboard_api_summary_returns_agent_aggs() {
     handle.join().unwrap();
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn dashboard_api_memory_touch_success_and_error() {
+    let repo = super::common::temp_repo("dash-touch-api");
+    super::common::mem_write(&repo, "touch-key", "body content", "gotcha");
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let temp_log = repo.join("usage.log");
+    let log_clone = temp_log.clone();
+    let repo_clone = repo.clone();
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = handle_client(stream, &log_clone, Some(&repo_clone), false);
+    });
+
+    let mut client = TcpStream::connect(addr).unwrap();
+    let body = r#"{"key":"touch-key","global":false}"#;
+    let req = format!(
+        "POST /api/memory/touch HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    client.write_all(req.as_bytes()).unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).unwrap();
+    assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+    assert!(resp.contains("\"ok\":true"), "{resp}");
+    assert!(resp.contains("\"rev\":1"), "{resp}");
+    handle.join().unwrap();
+
+    let _ = std::fs::remove_dir_all(&repo);
+}

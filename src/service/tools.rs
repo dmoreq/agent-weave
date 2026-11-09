@@ -279,6 +279,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 required: false,
                 description: "Write to the cross-project global memory store (~/.aw/memory.db) instead of the local repo",
             },
+            ParamSpec {
+                name: "touch",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Refresh timestamp when content_hash matches an existing current note",
+            },
         ],
         core: true,
     },
@@ -297,6 +303,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 kind: ParamKind::Bool,
                 required: false,
                 description: "List current notes by recency instead of ranking",
+            },
+            ParamSpec {
+                name: "ref",
+                kind: ParamKind::Str,
+                required: false,
+                description: "Restrict search to notes referencing this path or symbol",
             },
             ParamSpec {
                 name: "kind",
@@ -333,6 +345,20 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
             },
         ],
         core: true,
+    },
+    ToolSpec {
+        name: "mem_touch",
+        description: "Refresh created_at timestamp on the active revision without revision churn",
+        params: &[
+            KEY_PARAM,
+            ParamSpec {
+                name: "global",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Touch in the cross-project global memory store",
+            },
+        ],
+        core: false,
     },
     ToolSpec {
         name: "mem_get",

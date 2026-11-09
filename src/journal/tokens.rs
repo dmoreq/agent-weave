@@ -35,6 +35,7 @@ pub const UNPRICED_TOOLS: &[&str] = &[
     "usage",
     "mem_write",
     "mem_query",
+    "mem_touch",
     "mem_get",
     "mem_delete",
     "mem_gc",

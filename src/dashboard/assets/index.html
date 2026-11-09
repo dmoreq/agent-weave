@@ -277,27 +277,41 @@
 
   <!-- ==================== TAB 03: AGENT MEMORY INSPECTOR ==================== -->
   <div id="tab-memory-content" class="hidden">
-    <!-- Memory KPI Strip -->
+    <!-- Memory KPI Strip (4 Core KPIs) -->
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Active Project Memories</div>
-        <div class="kpi-value text-success" id="mem-kpi-active">0</div>
-        <div class="kpi-sub">Invariants &amp; conventions across local and global stores</div>
+        <div class="kpi-label">Read:Write Ratio</div>
+        <div class="kpi-value text-success" id="mem-kpi-rw">0.0&times;</div>
+        <div class="kpi-sub" id="mem-kpi-rw-sub">0 reads &middot; 0 writes</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Correlated Agent Recalls</div>
-        <div class="kpi-value text-success"><span id="mem-kpi-recalls">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">queries</span></div>
-        <div class="kpi-sub">Retrieval queries from agent sessions</div>
+        <div class="kpi-label">Session Recall Rate</div>
+        <div class="kpi-value text-success" id="mem-kpi-recall-pct">0.0%</div>
+        <div class="kpi-sub" id="mem-kpi-recall-pct-sub">Sessions recalling memory</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Invariants &amp; Regressions Guarded</div>
-        <div class="kpi-value"><span id="mem-kpi-guarded">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">rules</span></div>
+        <div class="kpi-label">Anchor Currency Rate</div>
+        <div class="kpi-value text-success" id="mem-kpi-currency">100.0%</div>
+        <div class="kpi-sub" id="mem-kpi-currency-sub">0 fresh &middot; 0 modified &middot; 0 broken</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-label">Guarded Symbols &amp; Hotspots</div>
+        <div class="kpi-value"><span id="mem-kpi-guarded">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">anchors</span></div>
         <div class="kpi-sub" id="mem-kpi-guarded-sub">0 gotchas &middot; 0 decisions</div>
       </div>
-      <div class="kpi-tile">
-        <div class="kpi-label">Verified Graph References</div>
-        <div class="kpi-value"><span id="mem-kpi-refs">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">symbols</span></div>
-        <div class="kpi-sub">Anchored symbols and files validated against index</div>
+    </div>
+
+    <!-- Action Center for Broken & Modified References -->
+    <div id="mem-action-center" class="card action-center-card hidden" style="margin-bottom: 1.25rem;">
+      <div class="card-title">
+        <span style="display:flex; align-items:center; gap:0.5rem;">
+          <span class="badge status-warn">ACTION REQUIRED</span>
+          <span>Anchor Currency Alert &amp; Action Center</span>
+        </span>
+        <span class="text-muted" id="action-center-summary" style="font-size: 0.75rem; font-weight: normal;"></span>
+      </div>
+      <div id="action-center-items" class="action-items-list">
+        <!-- Rendered dynamically via JS -->
       </div>
     </div>
 

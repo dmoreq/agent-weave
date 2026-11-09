@@ -1,7 +1,7 @@
 //! Usage-log summary aggregation: reliability, latency percentiles, and
 //! token-savings accounting folded per tool and repository.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{json, Value};
 
@@ -24,6 +24,13 @@ pub fn compute_summary(entries: &[Value]) -> Value {
     let agent_aggs_json = format_agent_aggs(state.agent_aggs);
     let reliability = 100.0 * (total_calls - state.errors) as f64 / total_calls as f64;
     let saved_dollars = state.saved_tokens as f64 * crate::journal::PRICE_PER_TOKEN;
+    let total_sessions = state.sessions.len();
+    let memory_sessions = state.memory_sessions.len();
+    let session_recall_pct = if total_sessions > 0 {
+        100.0 * memory_sessions as f64 / total_sessions as f64
+    } else {
+        0.0
+    };
 
     let recent_queries: Vec<Value> = entries.iter().rev().take(50).cloned().collect();
     state.recent_errors.reverse();
@@ -40,6 +47,9 @@ pub fn compute_summary(entries: &[Value]) -> Value {
         "saved_tokens": state.saved_tokens,
         "saved_dollars": saved_dollars,
         "reuse_hits": state.reuse_hits,
+        "session_count": total_sessions,
+        "memory_session_count": memory_sessions,
+        "session_recall_pct": session_recall_pct,
         "tool_aggs": tool_aggs_json,
         "repo_aggs": repo_aggs_json,
         "agent_aggs": agent_aggs_json,
@@ -60,6 +70,9 @@ fn empty_summary() -> Value {
         "saved_tokens": 0,
         "saved_dollars": 0.0,
         "reuse_hits": 0,
+        "session_count": 0,
+        "memory_session_count": 0,
+        "session_recall_pct": 0.0,
         "tool_aggs": {},
         "repo_aggs": {},
         "agent_aggs": {},
@@ -75,6 +88,8 @@ struct SummaryState {
     reuse_hits: usize,
     saved_tokens: usize,
     latencies_ms: Vec<f64>,
+    sessions: HashSet<String>,
+    memory_sessions: HashSet<String>,
     tool_aggs: HashMap<String, ToolAgg>,
     repo_aggs: HashMap<String, RepoAgg>,
     agent_aggs: HashMap<String, AgentAgg>,
@@ -110,6 +125,16 @@ impl SummaryState {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .unwrap_or("user");
+        let session_name = e
+            .get("session")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("default");
+
+        self.sessions.insert(session_name.to_string());
+        if tool == "mem_query" || tool == "mem_get" {
+            self.memory_sessions.insert(session_name.to_string());
+        }
 
         let t_entry = self.tool_aggs.entry(tool.to_string()).or_default();
         t_entry.calls += 1;

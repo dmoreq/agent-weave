@@ -83,6 +83,15 @@ fn aggregate_recalls(entries: &[Value]) -> HashMap<String, (usize, f64)> {
             if ts > rec.1 {
                 rec.1 = ts;
             }
+        } else if tool == "mem_query" {
+            let terms = args.get("terms").and_then(Value::as_str).unwrap_or("");
+            if terms.trim().is_empty() {
+                let rec = recalls_map.entry(String::new()).or_insert((0, 0.0));
+                rec.0 += 1;
+                if ts > rec.1 {
+                    rec.1 = ts;
+                }
+            }
         }
     }
     recalls_map
@@ -143,10 +152,11 @@ fn estimate_fallback_recall(
     }
 }
 
-fn resolve_single_ref(r: &str, index_conn: Option<&Connection>) -> Value {
-    let mut ref_val = json!({
+fn resolve_single_ref(r: &str, index_conn: Option<&Connection>, created_at: i64) -> Value {
+    let ref_val = json!({
         "ref": r,
         "verified": false,
+        "status": "broken",
         "type": "path",
         "location": ""
     });
@@ -155,14 +165,22 @@ fn resolve_single_ref(r: &str, index_conn: Option<&Connection>) -> Value {
     };
 
     if let Ok(mut f_stmt) =
-        iconn.prepare("SELECT path, size FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1")
+        iconn.prepare("SELECT path, size, mtime FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1")
     {
-        if let Ok((path, size)) = f_stmt.query_row(rusqlite::params![r, format!("%{r}")], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        }) {
+        if let Ok((path, size, mtime_nanos)) =
+            f_stmt.query_row(rusqlite::params![r, format!("%/{r}")], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+        {
+            let is_modified = (mtime_nanos / 1_000_000_000) > created_at;
             return json!({
                 "ref": r,
                 "verified": true,
+                "status": if is_modified { "modified" } else { "valid" },
                 "type": "file",
                 "location": format!("{path} ({size} bytes)")
             });
@@ -170,14 +188,16 @@ fn resolve_single_ref(r: &str, index_conn: Option<&Connection>) -> Value {
     }
 
     if let Ok(mut s_stmt) = iconn.prepare(
-        "SELECT file_path, line_start, line_end FROM symbols WHERE name = ?1 OR qualname = ?1 LIMIT 1",
+        "SELECT f.path, s.line_start, s.line_end, f.mtime FROM symbols s JOIN files f ON s.file_id = f.id WHERE s.name = ?1 OR s.qualname = ?1 LIMIT 1",
     ) {
-        if let Ok((fp, ls, le)) = s_stmt.query_row(rusqlite::params![r], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+        if let Ok((fp, ls, le, mtime_nanos)) = s_stmt.query_row(rusqlite::params![r], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?))
         }) {
-            ref_val = json!({
+            let is_modified = (mtime_nanos / 1_000_000_000) > created_at;
+            return json!({
                 "ref": r,
                 "verified": true,
+                "status": if is_modified { "modified" } else { "valid" },
                 "type": "symbol",
                 "location": format!("{fp}:{ls}-{le}")
             });
@@ -187,10 +207,14 @@ fn resolve_single_ref(r: &str, index_conn: Option<&Connection>) -> Value {
     ref_val
 }
 
-fn resolve_note_refs(refs_list: &[String], index_conn: Option<&Connection>) -> Vec<Value> {
+fn resolve_note_refs(
+    refs_list: &[String],
+    index_conn: Option<&Connection>,
+    created_at: i64,
+) -> Vec<Value> {
     refs_list
         .iter()
-        .map(|r| resolve_single_ref(r, index_conn))
+        .map(|r| resolve_single_ref(r, index_conn, created_at))
         .collect()
 }
 
@@ -253,8 +277,13 @@ fn format_note_json(
         .collect();
     let (prev_cat, prev_title, prev_detail) = kind_prevention_card(&row.kind, &row.key);
 
-    let mut recall_count = recalls_map.get(&row.key).map(|r| r.0).unwrap_or(0);
-    let mut last_recalled_ts = recalls_map.get(&row.key).map(|r| r.1).unwrap_or(0.0);
+    let (bare_recalls, bare_ts) = recalls_map.get("").copied().unwrap_or((0, 0.0));
+    let mut recall_count = recalls_map.get(&row.key).map(|r| r.0).unwrap_or(0) + bare_recalls;
+    let mut last_recalled_ts = recalls_map
+        .get(&row.key)
+        .map(|r| r.1)
+        .unwrap_or(0.0)
+        .max(bare_ts);
     if recall_count == 0 {
         estimate_fallback_recall(
             &row.key,
@@ -265,7 +294,23 @@ fn format_note_json(
         );
     }
 
-    let resolved_refs = resolve_note_refs(&refs_list, index_conn);
+    let resolved_refs = resolve_note_refs(&refs_list, index_conn, row.created_at);
+    let ref_status = if resolved_refs
+        .iter()
+        .any(|r| r.get("status").and_then(Value::as_str) == Some("broken"))
+    {
+        "broken"
+    } else if resolved_refs
+        .iter()
+        .any(|r| r.get("status").and_then(Value::as_str) == Some("modified"))
+    {
+        "modified"
+    } else if !resolved_refs.is_empty() {
+        "valid"
+    } else {
+        "none"
+    };
+
     json!({
         "id": row.id,
         "store": store_name,
@@ -278,6 +323,7 @@ fn format_note_json(
         "tags": tags,
         "refs": refs_list,
         "resolved_refs": resolved_refs,
+        "ref_status": ref_status,
         "content_hash": format!("{:x}", row.content_hash),
         "source": row.source,
         "created_at": row.created_at,

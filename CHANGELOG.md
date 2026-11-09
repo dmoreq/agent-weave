@@ -16,6 +16,14 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added
+
+- **Memory touch & anchor freshness refresh.** Added `aw mem touch <key>` subcommand and `mem_touch` MCP tool to refresh note timestamps without creating new revisions. Added `--touch` flag to `aw mem write` to refresh timestamps when content hash matches.
+- **Reference filter & empty query normalization.** Added `--ref <path_or_symbol>` parameter to `aw mem query` and `mem_query` tool to filter candidate notes by exact code reference target. Normalized empty string terms in `mem_query` to fall back to listing current notes (`effective_all = true`) with exit code 0.
+- **Broken vs. modified reference distinction.** Clarified stale reference statuses by distinguishing between missing targets (`[stale-ref] [broken-ref]`) and targets modified after note authoring (`[stale-ref] [modified-ref]`).
+- **Ambient memory co-retrieval and guard hints.** `aw context <name>` now co-retrieves active gotchas and decisions referencing the target symbol. `aw impact <file>` displays warnings when modified files are guarded by architectural decisions. `aw build` emits non-invasive stderr notes during incremental builds when modified files touch guarded areas.
+- **Memory dashboard KPIs & Action Center.** Web dashboard now features 4 memory KPIs (Read:Write ratio, Session Recall Rate, Anchor Currency Rate, and Guarded Symbols count) alongside an Action Center for broken and modified references with 1-click touch action.
+
 ## [0.5.2] - 2026-11-09
 
 ### Added

@@ -88,6 +88,15 @@ fn render_context(ctx: &QueryCtx<'_>, data: &ContextData) -> Result<LineQuery> {
         "{}:{}-{} {} {}{sig}",
         data.def_path, data.def_line, data.def_end, data.kind, data.qualname
     ));
+    let last_segment = data.qualname.split("::").last().unwrap_or("");
+    let guards = crate::memory::find_guarding_notes(
+        ctx.root,
+        &[&data.def_path],
+        &[&data.qualname, last_segment],
+    );
+    for g in guards.iter().take(2) {
+        out.push(format!("memory: [{}] {}: {}", g.kind, g.key, g.summary));
+    }
     out.push(format!(
         "callers (showing {} of {}):",
         data.callers.len(),

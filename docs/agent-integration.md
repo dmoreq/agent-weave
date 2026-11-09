@@ -100,11 +100,11 @@ By default, `aw mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 | `search` | `terms`, `limit?` | Discover symbols with interface cards & `[callers=N]` |
 | `reuse` | `paths?`, `limit?` | Anti-reinvention duplicate detector |
 | `usage` | `quality?` | Session telemetry, latency percentiles, and token savings |
-| `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `global?` | Persist architectural decisions and gotchas |
-| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?` | Zero-token layered memory search |
+| `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `touch?`, `global?` | Persist architectural decisions and gotchas |
+| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?` | Zero-token layered memory search |
 
 ### Extended Surface (`--all-tools`)
-Passing `--all-tools` exposes 4 additional memory maintenance tools (17 total): `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
+Passing `--all-tools` exposes 5 additional memory maintenance tools (18 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, and `mem_export`.
 
 *Note*: `doctor`, `stats`, and `unresolved` are intentionally reserved for human CLI inspection and omitted from MCP stdio dispatch.
 

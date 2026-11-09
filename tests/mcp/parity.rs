@@ -50,6 +50,7 @@ fn g10_initialize_tools_list_and_parity() {
             "usage",
             "mem_write",
             "mem_query",
+            "mem_touch",
             "mem_get",
             "mem_delete",
             "mem_gc",

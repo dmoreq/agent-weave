@@ -13,15 +13,17 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
         limit,
         include_superseded,
         global,
+        reference,
     } = req
     else {
         unreachable!("run_mem_query called with a non-query request")
     };
-    let effective_all = *all || terms.is_empty();
+    let clean_terms: Vec<String> = terms.iter().filter(|t| !t.is_empty()).cloned().collect();
+    let effective_all = *all || clean_terms.is_empty();
     validate_mem_query(terms, *all, effective_all, *include_superseded)?;
     let index_conn = stale_ref_conn(root_arg);
     let args = MemQueryArgs {
-        terms,
+        terms: &clean_terms,
         all: effective_all,
         limit: (*limit).clamp(1, crate::memory::MAX_MEM_LIMIT),
         filter: crate::db::MemFilter {
@@ -31,6 +33,7 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
             include_superseded: *include_superseded,
         },
         index_conn: index_conn.as_ref(),
+        reference: reference.as_deref(),
     };
 
     if *global {
@@ -47,17 +50,29 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
     }
 }
 
-/// Check if a referenced file or symbol is stale against the current index:
-/// returns true if missing from index.db or if the underlying file was modified
-/// after the note was created.
-fn is_ref_stale(index_conn: &rusqlite::Connection, r: &str, created_at: i64) -> bool {
-    let file_check: rusqlite::Result<i64> = index_conn.query_row(
-        "SELECT mtime FROM files WHERE path = ?1 LIMIT 1",
-        rusqlite::params![r],
-        |row| row.get(0),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefStatus {
+    Valid,
+    Modified,
+    Broken,
+}
+
+pub(crate) fn check_ref_status(
+    index_conn: &rusqlite::Connection,
+    r: &str,
+    created_at: i64,
+) -> RefStatus {
+    let file_check: rusqlite::Result<(String, i64)> = index_conn.query_row(
+        "SELECT path, mtime FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1",
+        rusqlite::params![r, format!("%/{r}")],
+        |row| Ok((row.get(0)?, row.get(1)?)),
     );
-    if let Ok(mtime_nanos) = file_check {
-        return (mtime_nanos / 1_000_000_000) > created_at;
+    if let Ok((_path, mtime_nanos)) = file_check {
+        return if (mtime_nanos / 1_000_000_000) > created_at {
+            RefStatus::Modified
+        } else {
+            RefStatus::Valid
+        };
     }
 
     let sym_check: rusqlite::Result<i64> = index_conn.query_row(
@@ -67,48 +82,64 @@ fn is_ref_stale(index_conn: &rusqlite::Connection, r: &str, created_at: i64) -> 
         |row| row.get(0),
     );
     if let Ok(mtime_nanos) = sym_check {
-        return (mtime_nanos / 1_000_000_000) > created_at;
+        return if (mtime_nanos / 1_000_000_000) > created_at {
+            RefStatus::Modified
+        } else {
+            RefStatus::Valid
+        };
     }
 
-    true
+    RefStatus::Broken
 }
 
-pub(super) fn check_note_stale_ref(
+pub(super) fn check_note_ref_status(
     index_conn: Option<&rusqlite::Connection>,
     row: &crate::db::MemRow,
-) -> bool {
+) -> RefStatus {
     let Some(conn) = index_conn else {
-        return false;
+        return RefStatus::Valid;
     };
     if row.refs.trim().is_empty() {
-        return false;
+        return RefStatus::Valid;
     }
-    row.refs
-        .split_whitespace()
-        .any(|r| is_ref_stale(conn, r, row.created_at))
+    let mut has_modified = false;
+    for r in row.refs.split_whitespace() {
+        match check_ref_status(conn, r, row.created_at) {
+            RefStatus::Broken => return RefStatus::Broken,
+            RefStatus::Modified => has_modified = true,
+            RefStatus::Valid => {}
+        }
+    }
+    if has_modified {
+        RefStatus::Modified
+    } else {
+        RefStatus::Valid
+    }
 }
 
 /// The `[global] [stale-ref]` store markers shared by `mem get` output and
 /// the listing tag builder, so the suffix order cannot drift.
-pub(super) fn store_tags(is_global: bool, is_stale: bool) -> String {
+pub(super) fn store_tags(is_global: bool, status: RefStatus) -> String {
     let mut tag = String::new();
     if is_global {
         tag.push_str(" [global]");
     }
-    if is_stale {
-        tag.push_str(" [stale-ref]");
+    match status {
+        RefStatus::Broken => tag.push_str(" [stale-ref] [broken-ref]"),
+        RefStatus::Modified => tag.push_str(" [stale-ref] [modified-ref]"),
+        RefStatus::Valid => {}
     }
     tag
 }
 
 /// The `[superseded]`/`[global]`/`[stale-ref]` listing tag for one row, shared
 /// by the single-store and merged listings so the markers cannot drift.
-fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, is_stale: bool) -> String {
+fn mem_row_tag(row: &crate::db::MemRow, is_global: bool, status: RefStatus) -> String {
     let mut tag = String::new();
     if row.superseded_by.is_some() {
         tag.push_str(" [superseded]");
     }
-    tag.push_str(&store_tags(is_global, is_stale));
+    tag.push_str(&store_tags(is_global, status));
     tag
 }
 
@@ -130,6 +161,13 @@ fn render_mem_rows(
     args: &MemQueryArgs<'_>,
     empty_error: impl FnOnce() -> AwError,
 ) -> Result<ArmOut> {
+    let rows: Vec<_> = if let Some(target_ref) = args.reference {
+        rows.into_iter()
+            .filter(|(row, _)| crate::memory::ref_matches_target(&row.refs, target_ref))
+            .collect()
+    } else {
+        rows
+    };
     if rows.is_empty() {
         return Err(empty_error());
     }
@@ -139,8 +177,8 @@ fn render_mem_rows(
         .iter()
         .take(shown)
         .map(|(row, is_global)| {
-            let is_stale = check_note_stale_ref(args.index_conn, row);
-            crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global, is_stale))
+            let status = check_note_ref_status(args.index_conn, row);
+            crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global, status))
         })
         .collect();
     Ok(render_mem_list(&rendered, total, shown))
@@ -262,7 +300,7 @@ fn validate_mem_query(
             "mem query: --all and terms are mutually exclusive".to_string(),
         ));
     }
-    if !terms.is_empty() && terms.iter().all(|t| t.trim().is_empty()) {
+    if !terms.is_empty() && terms.iter().all(|t| !t.is_empty() && t.trim().is_empty()) {
         return Err(AwError::Usage(
             "mem query: provide terms or --all".to_string(),
         ));

@@ -125,13 +125,24 @@ pub fn impact(
         kinds: &kinds,
         extended,
     };
-    if depth == 1 {
+    let mut out = if depth == 1 {
         if !sites {
-            return impact_direct_grouped(qctx, &ctx);
+            impact_direct_grouped(qctx, &ctx)?
+        } else {
+            impact_direct_sites(qctx, &ctx)?
         }
-        return impact_direct_sites(qctx, &ctx);
+    } else {
+        impact_deep(qctx, &ctx)?
+    };
+
+    let guards = crate::memory::find_guarding_notes(qctx.root, &[&rel], &[]);
+    for g in guards.iter().filter(|g| g.kind == "decision").take(1) {
+        prepend_header(
+            &mut out,
+            &format!("warning: guarded by decision '{}': {}", g.key, g.summary),
+        );
     }
-    impact_deep(qctx, &ctx)
+    Ok(out)
 }
 
 /// Shared, immutable arguments for the three impact phases. The phases stay

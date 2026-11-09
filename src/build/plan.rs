@@ -38,9 +38,30 @@ pub(super) fn finish_index(
         },
     );
     let stderr_hints = incremental_reuse_hints(prep, &resolution, is_incremental);
+    let mem_hints = incremental_memory_hints(prep, is_incremental);
     let mut stderr = skipped_notice(&prep.stats);
     stderr.push_str(&stderr_hints);
+    stderr.push_str(&mem_hints);
     Ok((stdout_line, stderr, total_files))
+}
+
+fn incremental_memory_hints(prep: &BuildPrep, is_incremental: bool) -> String {
+    if !is_incremental || prep.cls.fresh.is_empty() {
+        return String::new();
+    }
+    let fresh_paths: Vec<&str> = prep.cls.fresh.iter().map(|f| f.rel.as_str()).collect();
+    let guards = crate::memory::find_guarding_notes(&prep.root, &fresh_paths, &[]);
+    if guards.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for g in guards.iter().take(3) {
+        out.push_str(&format!(
+            "aw: note: modified file '{}' is guarded by {} '{}'\n",
+            g.target, g.kind, g.key
+        ));
+    }
+    out
 }
 
 fn incremental_reuse_hints(

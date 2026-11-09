@@ -247,6 +247,9 @@ pub enum MemAction {
         /// Persist to the cross-project global memory store (~/.aw/memory.db)
         #[arg(long)]
         global: bool,
+        /// Refresh timestamp when content_hash matches an existing current note
+        #[arg(long)]
+        touch: bool,
     },
     /// Rank current notes for the terms (bm25 + ref-token overlap + recency)
     Query {
@@ -255,6 +258,9 @@ pub enum MemAction {
         /// List current notes by recency instead of ranking
         #[arg(long)]
         all: bool,
+        /// Restrict search to notes referencing this path or symbol
+        #[arg(long = "ref")]
+        reference: Option<String>,
         /// Restrict to one kind: decision, gotcha, fact, task
         #[arg(long)]
         kind: Option<String>,
@@ -268,6 +274,14 @@ pub enum MemAction {
         #[arg(long)]
         include_superseded: bool,
         /// Restrict search exclusively to the global store (~/.aw/memory.db)
+        #[arg(long)]
+        global: bool,
+    },
+    /// Refresh created_at timestamp on the active revision without revision churn
+    Touch {
+        /// The note's stable identity
+        key: String,
+        /// Touch in the cross-project global memory store (~/.aw/memory.db)
         #[arg(long)]
         global: bool,
     },

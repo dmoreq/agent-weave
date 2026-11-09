@@ -553,6 +553,51 @@ tr.agent-row-item { cursor: pointer; }
 .chip-tag { background: var(--intent-primary-soft); color: var(--intent-primary); }
 .chip-ref { background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 .chip-ref.verified { border-color: var(--intent-success); color: var(--intent-success); }
+.chip-ref.modified { border-color: var(--intent-warning); color: var(--intent-warning); }
+.chip-ref.broken { border-color: var(--intent-danger); color: var(--intent-danger); }
+
+/* Action Center & Action Items */
+.action-center-card {
+  border-left: 4px solid var(--intent-warning);
+}
+.action-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+.action-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  gap: 1rem;
+}
+.action-item-desc {
+  font-size: 0.78rem;
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+}
+.action-item-actions {
+  flex-shrink: 0;
+}
+.btn-touch {
+  background: var(--intent-primary);
+  color: #ffffff;
+  border: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-touch:hover {
+  opacity: 0.85;
+}
 
 .empty-cell {
   text-align: center;
