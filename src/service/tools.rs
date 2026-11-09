@@ -187,6 +187,12 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 required: false,
                 description: "Maximum candidates shown (default 10)",
             },
+            ParamSpec {
+                name: "deep_callee",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Extend the callee footprint to second-hop callees (weight 0.5)",
+            },
         ],
         core: true,
     },

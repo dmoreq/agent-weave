@@ -265,3 +265,111 @@ fn test_ambient_nudges_in_context_impact_and_build() {
         "build must emit memory hint: {stderr}"
     );
 }
+
+#[test]
+fn mem_write_hints_on_near_duplicate_and_stays_silent_otherwise() {
+    let repo = temp_repo("mem-consolidation-guard");
+    let (code, first, stderr) = mem_write(
+        &repo,
+        "note-a",
+        "resolver keeps confidence tiers over resolved edges",
+        "decision",
+    );
+    assert_eq!(code, 0, "{first}{stderr}");
+
+    // Paraphrase under a different key: advisory hint, write still succeeds.
+    let (code, stdout, stderr) = mem_write(
+        &repo,
+        "note-b",
+        "the resolver keeps confidence tiers on resolved edges",
+        "decision",
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        stdout.contains("eg: mem hint: 'note-b' is"),
+        "expected consolidation hint: {stdout}"
+    );
+    assert!(
+        stdout.contains("consider --supersedes note-a"),
+        "hint must name the canonical key: {stdout}"
+    );
+
+    // Unrelated note: no hint noise.
+    let (code, stdout, stderr) = mem_write(
+        &repo,
+        "note-c",
+        "dashboard renders latency sparklines with ANSI colors",
+        "gotcha",
+    );
+    assert_eq!(code, 0, "{stdout}{stderr}");
+    assert!(
+        !stdout.contains("mem hint"),
+        "unrelated note must not trigger a hint: {stdout}"
+    );
+}
+
+#[test]
+fn mem_query_expands_through_call_graph_and_falls_back_without_index() {
+    let repo = temp_repo("mem-graph-expand");
+    let seeds = [
+        "entry_one",
+        "entry_two",
+        "entry_three",
+        "entry_four",
+        "entry_five",
+    ];
+    let helpers = [
+        "canonical_alpha",
+        "canonical_beta",
+        "canonical_gamma",
+        "canonical_delta",
+        "canonical_epsilon",
+    ];
+    let mut code = String::new();
+    for (seed, helper) in seeds.iter().zip(helpers.iter()) {
+        code.push_str(&format!(
+            "def {helper}():\n    return 1\n\ndef {seed}():\n    return {helper}()\n\n"
+        ));
+    }
+    write(&repo, "core.py", &code);
+    build(&repo);
+    for (i, helper) in helpers.iter().enumerate() {
+        let out = eg(&repo)
+            .args([
+                "mem",
+                "write",
+                &format!("helper-note-{i}"),
+                "--body",
+                "helper keeps invariants stable",
+                "--kind",
+                "gotcha",
+                "--refs",
+                helper,
+            ])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+
+    // The seed token shares no token with the note body or refs. Only the
+    // call edge seed -> helper can surface the note.
+    for (i, seed) in seeds.iter().enumerate() {
+        let (code, stdout, stderr) = mem_out(&repo, &["query", seed]);
+        assert_eq!(code, 0, "{stdout}{stderr}");
+        assert!(
+            stdout.contains(&format!("helper-note-{i} r1 gotcha durable ")),
+            "graph expansion must surface downstream note {i}: {stdout}"
+        );
+    }
+
+    // Missing index: plain FTS only, no crash, no note.
+    fs::remove_file(repo.join(".engram/index.db")).unwrap();
+    for seed in seeds.iter() {
+        let (code, _stdout, stderr) = mem_out(&repo, &["query", seed]);
+        assert_eq!(code, 1, "seed {seed}");
+        assert!(
+            stderr.contains(&format!("no memory matches '{seed}'")),
+            "fallback must keep the plain FTS contract: {stderr}"
+        );
+    }
+}

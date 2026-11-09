@@ -14,6 +14,30 @@ changes bump the minor while 0.x is unstable.
 - Read [evaluation](docs/evaluation.md) for the public evidence summary and its limitations, not replacement original evidence.
 - Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
+## [Unreleased]
+
+### Added
+- `eg reuse --deep-callee`: extends the D1 callee footprint to second-hop
+  callees (weight `0.5`), catching wrappers that forward through an
+  intermediate helper.
+- `eg mem write` near-duplicate guard: at 80% Jaccard token similarity the
+  write appends an advisory hint naming the existing key and suggesting
+  `--supersedes`. The note is still written.
+- `eg mem query` call-graph expansion: when `.engram/index.db` is readable,
+  query terms seed a bounded `calls` traversal (depth <= 3, decay
+  `0.5^depth`) so notes anchored to downstream callees surface. A missing
+  index falls back to plain FTS5 ranking.
+
+### Changed
+- `eg reuse` builds inverted posting lists for callees, token pairs, and raw
+  clients above 1,000 symbols, replacing the per-target corpus scan with
+  posting-list candidates. Output is unchanged; a parity unit test compares
+  the indexed and flat detector results.
+- `eg reuse` folds caller counts from the call edges it already loads instead
+  of running a correlated count subquery per symbol.
+- `eg reuse` skips the unresolved-call span index when the index has no
+  unresolved call rows.
+
 ## [1.0.0] - 2026-11-09
 
 ### Highlights & Official Release

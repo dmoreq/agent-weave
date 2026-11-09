@@ -223,7 +223,7 @@ fn query_single_store(
         return render_all_rows(rows.into_iter().map(|row| (row, is_global)).collect(), args);
     }
     let joined = args.terms.join(" ");
-    let candidates = mem_ranked(conn, &joined, &args.filter, is_global)?;
+    let candidates = mem_ranked(conn, &joined, &args.filter, is_global, args.index_conn)?;
     render_ranked(candidates, args)
 }
 
@@ -266,10 +266,10 @@ fn query_merged_stores(
         return render_all_rows(combined, args);
     }
     let joined = args.terms.join(" ");
-    let mut combined = mem_ranked(local_conn, &joined, &args.filter, false)?;
+    let mut combined = mem_ranked(local_conn, &joined, &args.filter, false, args.index_conn)?;
     let seen_keys: std::collections::HashSet<String> =
         combined.iter().map(|c| c.row.key.clone()).collect();
-    let global = mem_ranked(global_conn, &joined, &args.filter, true)?;
+    let global = mem_ranked(global_conn, &joined, &args.filter, true, args.index_conn)?;
     // One batched existence probe replaces the per-candidate `memory_get`
     // (N+1 with a revision COUNT per key): only keys the local ranking has
     // not already surfaced need the shadowing check.

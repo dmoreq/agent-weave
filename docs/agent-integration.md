@@ -98,10 +98,10 @@ By default, `eg mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 | `imports` | `file`, `limit?` | Outbound resolved imports |
 | `symbols` | `file`, `outline?`, `limit?` | File/directory definitions and signatures |
 | `search` | `terms`, `limit?` | Discover symbols with interface cards & `[callers=N]` |
-| `reuse` | `paths?`, `limit?` | Anti-reinvention duplicate detector |
+| `reuse` | `paths?`, `limit?`, `deep_callee?` | Anti-reinvention duplicate detector; `deep_callee` adds second-hop callee footprints |
+| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?` | Zero-token layered memory search; uses the code index for call-graph expansion when available |
 | `usage` | `quality?` | Session telemetry, latency percentiles, and token savings |
 | `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `touch?`, `global?` | Persist architectural decisions and gotchas |
-| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?` | Zero-token layered memory search |
 
 ### Extended Surface (`--all-tools`)
 Passing `--all-tools` exposes 6 additional memory maintenance tools (19 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, `mem_export` (JSONL or Markdown), and `mem_import` (reject-on-conflict restore; confined to the project store).

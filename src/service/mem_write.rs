@@ -41,6 +41,15 @@ pub(super) fn run_mem_write(
         body,
         ttl: *ttl,
     })?;
+    // Advisory only: a near-duplicate under another key suggests --supersedes.
+    // Same-key updates and explicit --supersedes already express intent.
+    let consolidation = if supersedes.is_none() {
+        open_mem_conn(root_arg, *global, MemoryMode::Query)
+            .ok()
+            .and_then(|conn| crate::memory::find_consolidation_match(&conn, &note))
+    } else {
+        None
+    };
     let outcome = write_note(
         root_arg,
         &note,
@@ -51,10 +60,12 @@ pub(super) fn run_mem_write(
     )?;
     crate::journal::record_result(crate::journal::OutcomeCounts::uniform(1), false, 0);
     let line = outcome_line(&outcome, &note.key);
-    Ok(ArmOut::plain(
-        format!("{}\n{line}\n", crate::memory::MEMORY_CAVEAT),
-        String::new(),
-    ))
+    let mut stdout = format!("{}\n{line}\n", crate::memory::MEMORY_CAVEAT);
+    if let Some(m) = consolidation {
+        stdout.push_str(&m.hint_line(&note.key));
+        stdout.push('\n');
+    }
+    Ok(ArmOut::plain(stdout, String::new()))
 }
 
 fn write_note(

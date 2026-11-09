@@ -91,7 +91,7 @@ eg reuse src/walk.rs src/parse.rs
 ```
 
 `eg reuse` executes four calibrated detectors across files and within the same file:
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard).
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`), catching wrappers that forward through an intermediate helper.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
 - **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
 - **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.
@@ -113,6 +113,11 @@ eg mem write resolver-confidence-tiers --kind decision \
 
 #### 2. Code-Anchored References & Stale Alerts
 The `--refs` flag anchors the note to specific AST symbols or file paths. If a subsequent commit alters or moves the referenced symbol, `eg mem query` automatically flags the note with a `[stale-ref]` alert.
+
+#### 2b. Duplicate Guard & Graph Expansion
+Before writing, `eg mem write` compares the new note with current notes by Jaccard token similarity. At 80% or more it appends an advisory hint naming the existing key and suggests `--supersedes`; the write still succeeds.
+
+When `.engram/index.db` exists, `eg mem query` also follows resolved `calls` edges outward from the query's symbols (depth up to 3, score decay `0.5^depth`). Notes anchored to downstream callees surface without lexical overlap. If the index is missing, the query falls back to plain FTS5 ranking.
 
 #### 3. Record Multi-Agent Task Handoffs
 When wrapping up a session or passing tasks between agents, write a scoped task note:

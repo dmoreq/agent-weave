@@ -135,6 +135,9 @@ pub enum Cmd {
         /// Maximum candidates shown (default 10, max 100)
         #[arg(long, default_value_t = crate::query::DEFAULT_REUSE_LIMIT)]
         limit: usize,
+        /// Extend the callee footprint to second-hop callees (weight 0.5)
+        #[arg(long)]
+        deep_callee: bool,
     },
     /// Symbol-level search: bm25-ranked FTS5 over identifier tokens with interface cards
     Search {

@@ -106,6 +106,8 @@ eg callers read_bounded --depth 2
 
 # 4. USP 2: Verify zero duplicate functions after edits
 eg reuse
+# Optional: extend D1 to second-hop callees for wrappers through a helper
+eg reuse --deep-callee
 
 # 5. USP 3: Persist cross-project developer preferences (0 tokens)
 eg mem write dev-profile --kind decision --global \

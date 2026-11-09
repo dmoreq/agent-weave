@@ -176,16 +176,17 @@ eg symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 Real-time anti-reinvention engine. Detects cross-file and intra-file duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
 ```bash
-eg reuse [PATHS]... [--limit <N>]
+eg reuse [PATHS]... [--limit <N>] [--deep-callee]
 ```
 
 | Option / Argument | Default | Description |
 |---|---|---|
 | `[PATHS]...` | Empty (repo) | Optional file or directory paths to inspect. |
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
+| `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). |
 
 #### Calibrated Detectors
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard).
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard). With `--deep-callee`, the footprint includes second-hop callees, catching wrappers that forward through an intermediate helper.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Flags functions with heavily overlapping signatures and parameter types.
 - **D3: Raw Client Bypass**: Warns when callers invoke raw primitives rather than existing canonical wrappers.
 - **D4: 1-Caller Wrappers**: Surfaces redundant single-use forwarding functions.
@@ -216,6 +217,8 @@ eg mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 | `--touch` | `false` | Refresh timestamp on active revision when content hash matches without revision churn. |
 | `--global` | `false` | Persist to global store (`~/.engram/memory.db`) instead of repository (`.engram/memory.db`). |
 
+When the new note is at least 80% Jaccard-similar to an existing current note under another key, `mem write` appends an advisory `eg: mem hint:` line suggesting `--supersedes`. The write still succeeds; the hint is never a hard failure.
+
 ---
 
 ### `eg mem query`
@@ -237,6 +240,7 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 | `--ref <REFERENCE>` | None | Filter notes referencing target path or symbol. |
 
 - **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
+- **Graph Expansion**: When `.engram/index.db` is readable, query terms seed a bounded traversal of resolved `calls` edges (depth $\le 3$, decay $0.5^{depth}$), so notes attached to downstream callees still surface. A missing or unreadable index silently falls back to plain FTS5 ranking.
 - **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.engram/index.db`. Broken targets missing from the index are badged with `[stale-ref] [broken-ref]`, while targets modified after note creation are badged with `[stale-ref] [modified-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
 
 ---

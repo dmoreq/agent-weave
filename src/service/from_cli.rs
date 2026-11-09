@@ -159,7 +159,15 @@ impl CommandRequest {
                 outline,
                 limit,
             },
-            crate::cli::Cmd::Reuse { paths, limit } => CommandRequest::Reuse { paths, limit },
+            crate::cli::Cmd::Reuse {
+                paths,
+                limit,
+                deep_callee,
+            } => CommandRequest::Reuse {
+                paths,
+                limit,
+                deep_callee,
+            },
             crate::cli::Cmd::Search { terms, limit } => CommandRequest::Search { terms, limit },
             crate::cli::Cmd::Stats { path } => CommandRequest::Stats { path },
             _ => unreachable!("from_cli_analysis called with a non-matching command"),
@@ -400,9 +408,15 @@ impl CommandRequest {
                 ("outline", outline.to_string()),
                 ("limit", limit.to_string()),
             ],
-            CommandRequest::Reuse { paths, limit } => {
-                vec![("paths", paths.join(",")), ("limit", limit.to_string())]
-            }
+            CommandRequest::Reuse {
+                paths,
+                limit,
+                deep_callee,
+            } => vec![
+                ("paths", paths.join(",")),
+                ("limit", limit.to_string()),
+                ("deep_callee", deep_callee.to_string()),
+            ],
             CommandRequest::Search { terms, limit } => {
                 vec![("terms", terms.clone()), ("limit", limit.to_string())]
             }

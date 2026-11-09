@@ -289,6 +289,14 @@ fn reuse_arguments_via_mcp() {
         json!({"name": "reuse", "arguments": {"paths": ["utils.py"]}}),
     );
     assert_eq!(ok["result"]["isError"], false, "{ok}");
+
+    let deep = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "deep_callee": true}}),
+    );
+    assert_eq!(deep["result"]["isError"], false, "{deep}");
     let _ = fs::remove_dir_all(&repo);
 }
 

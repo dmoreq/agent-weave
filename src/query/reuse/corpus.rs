@@ -18,20 +18,24 @@ pub(super) struct SymbolData {
     pub(super) resolved_callees: HashSet<String>,
     pub(super) all_callees: HashSet<String>,
     pub(super) callee_ids: HashSet<i64>,
+    /// Weighted 1-hop (1.0) and 2-hop (0.5) callee footprint, populated only
+    /// when `reuse --deep-callee` asks for the transitive signal.
+    pub(super) deep_weights: HashMap<String, f64>,
     pub(super) inbound_callers: i64,
     pub(super) tokens: HashSet<String>,
     pub(super) type_tokens: HashSet<String>,
 }
 
 pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT s.id, s.name, s.qualname, s.file_id, f.path, s.line_start, s.line_end, s.signature,
-                {} AS callers
+    // Caller counts are folded from the call edges `load_resolved_callees`
+    // already reads: the previous per-row `CALLER_COUNT_SQL` subquery repeated
+    // 5,000 correlated counts on large corpora.
+    let mut stmt = conn.prepare(
+        "SELECT s.id, s.name, s.qualname, s.file_id, f.path, s.line_start, s.line_end, s.signature
          FROM symbols s
          JOIN files f ON f.id = s.file_id
          WHERE s.is_test = 0 AND s.kind IN ('function', 'method')",
-        crate::db::CALLER_COUNT_SQL
-    ))?;
+    )?;
 
     let mut map = HashMap::new();
     let rows = stmt.query_map([], |r| {
@@ -49,7 +53,8 @@ pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>
             resolved_callees: HashSet::new(),
             all_callees: HashSet::new(),
             callee_ids: HashSet::new(),
-            inbound_callers: r.get(8)?,
+            deep_weights: HashMap::new(),
+            inbound_callers: 0,
             tokens,
             type_tokens,
         })
@@ -68,6 +73,35 @@ pub(super) fn load_callees(
 ) -> Result<()> {
     load_resolved_callees(conn, symbols)?;
     map_unresolved_callees(conn, symbols)
+}
+
+/// Build the weighted two-hop footprint after the stoplist filter: direct
+/// resolved callees weigh 1.0, callees of those callees weigh 0.5. A callee
+/// reachable both ways keeps the direct 1.0 weight.
+pub(super) fn load_deep_weights(symbols: &mut HashMap<i64, SymbolData>) {
+    let computed: HashMap<i64, HashMap<String, f64>> = symbols
+        .iter()
+        .map(|(&id, sym)| {
+            let mut weights: HashMap<String, f64> = sym
+                .resolved_callees
+                .iter()
+                .map(|callee| (callee.clone(), 1.0))
+                .collect();
+            for callee_id in &sym.callee_ids {
+                if let Some(callee) = symbols.get(callee_id) {
+                    for second in &callee.resolved_callees {
+                        weights.entry(second.clone()).or_insert(0.5);
+                    }
+                }
+            }
+            (id, weights)
+        })
+        .collect();
+    for (id, weights) in computed {
+        if let Some(sym) = symbols.get_mut(&id) {
+            sym.deep_weights = weights;
+        }
+    }
 }
 
 fn callee_name(dst_name: &str) -> String {
@@ -92,6 +126,11 @@ fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDat
 
     for row in rows {
         let (src_id, dst_id, dst_name) = row?;
+        if let Some(did) = dst_id {
+            if let Some(dst) = symbols.get_mut(&did) {
+                dst.inbound_callers += 1;
+            }
+        }
         if let Some(sym) = symbols.get_mut(&src_id) {
             let callee = callee_name(&dst_name);
             sym.all_callees.insert(callee.clone());
@@ -111,7 +150,7 @@ fn map_unresolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDa
         "SELECT u.file_id, u.site_line, u.dst_name FROM unresolved_calls u WHERE u.kind = '{}'",
         EdgeSiteKind::Call.as_str()
     ))?;
-    let unres_rows = unres_stmt.query_map([], |r| {
+    let mut unres_rows = unres_stmt.query_map([], |r| {
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, i64>(1)?,
@@ -119,8 +158,14 @@ fn map_unresolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDa
         ))
     })?;
 
+    // Peek one row before building the span index: a corpus with no unresolved
+    // calls (the common case in a fully resolved repo) must not pay the
+    // per-file span sort. Streaming keeps the previous bounded memory profile.
+    let Some(first) = unres_rows.next() else {
+        return Ok(());
+    };
     let spans = span_index(symbols);
-    for r in unres_rows {
+    for r in std::iter::once(first).chain(unres_rows) {
         let (file_id, site_line, dst_name) = r?;
         let callee = callee_name(&dst_name);
         // Map unresolved call to the innermost callable enclosing site_line

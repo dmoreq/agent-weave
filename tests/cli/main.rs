@@ -17,6 +17,7 @@ mod memory_session;
 mod p8_impact;
 mod rename_migration;
 mod reuse;
+mod reuse_deep;
 mod robustness;
 mod stats;
 mod symbols;

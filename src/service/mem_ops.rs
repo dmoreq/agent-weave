@@ -262,6 +262,7 @@ pub(super) fn mem_ranked(
     joined_terms: &str,
     filter: &crate::db::MemFilter,
     is_global: bool,
+    index_conn: Option<&rusqlite::Connection>,
 ) -> Result<Vec<crate::memory::Candidate>> {
     let query = crate::memory::mem_query_terms(joined_terms);
     let hits = crate::db::memory_fts_candidates(conn, &query, crate::memory::CANDIDATE_CAP)?;
@@ -283,7 +284,7 @@ pub(super) fn mem_ranked(
         by_id.insert(row.id, row);
     }
 
-    if hit_map.is_empty() {
+    if hit_map.is_empty() && index_conn.is_none() {
         return Ok(Vec::new());
     }
 
@@ -298,12 +299,47 @@ pub(super) fn mem_ranked(
         }
     }
 
-    let candidates = hit_map
+    let mut candidates: Vec<crate::memory::Candidate> = hit_map
         .into_iter()
         .filter_map(|(id, lex_raw)| {
             mem_candidate(by_id.get(&id)?, lex_raw, &query_tokens, filter, is_global)
         })
         .collect();
+
+    // Graph expansion is best-effort: any index error already degraded to an
+    // empty expansion inside `graph_expand`, so the lexical ranking survives.
+    if let Some(index) = index_conn {
+        let known_ids: std::collections::HashSet<i64> =
+            candidates.iter().map(|c| c.row.id).collect();
+        let expansion = crate::memory::graph_expand(
+            index,
+            conn,
+            &query_tokens,
+            filter,
+            &known_ids,
+            crate::memory::CANDIDATE_CAP,
+        );
+        for candidate in &mut candidates {
+            candidate.graph_raw = expansion
+                .scores
+                .get(&candidate.row.id)
+                .copied()
+                .unwrap_or(0.0);
+        }
+        for (row, decay) in expansion.extra {
+            let Some(mut candidate) = mem_candidate(
+                &row,
+                crate::memory::GRAPH_LEX_RAW,
+                &query_tokens,
+                filter,
+                is_global,
+            ) else {
+                continue;
+            };
+            candidate.graph_raw = decay;
+            candidates.push(candidate);
+        }
+    }
     Ok(candidates)
 }
 
@@ -335,6 +371,7 @@ fn mem_candidate(
         row: row.clone(),
         lex_raw,
         ref_raw,
+        graph_raw: 0.0,
         age_days,
         score: 0.0,
         is_global,

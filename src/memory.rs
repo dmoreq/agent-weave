@@ -146,11 +146,13 @@ pub const RETENTION_DAYS: i64 = 30;
 // through `mem_tokens`, so query and stored text can never disagree.
 // ---------------------------------------------------------------------------
 
+mod graph;
 mod guard;
 mod note;
 mod rank;
 mod tokens;
 
+pub(crate) use graph::*;
 pub(crate) use guard::*;
 pub(crate) use note::*;
 pub(crate) use rank::*;
@@ -305,6 +307,7 @@ mod tests {
             },
             lex_raw: lex,
             ref_raw: r#ref,
+            graph_raw: 0.0,
             age_days: age,
             score: 0.0,
             is_global: false,
