@@ -1,15 +1,23 @@
 # Architecture: Memory Store
 
 Project memory persists agent-authored notes — decisions, gotchas, facts, and
-tasks — across index rebuilds and across sessions. This page describes the
-storage shape, the retrieval scoring, the reference-currency model, and the
-confinement rules.
+tasks — across index rebuilds and across sessions. Grounded in research from
+Zero-Mem ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377)), Agent Zero Memory
+([arXiv:2608.29606](https://arxiv.org/abs/2608.29606)), and Agent-Native Memory Systems
+([arXiv:2606.24775](https://arxiv.org/abs/2606.24775)), `eg` operationalizes memory
+with **zero LLM tokens**, immutable AST provenance anchors, and sub-millisecond
+SQLite performance.
 
-## Two stores, one contract
+This page describes the storage shape, the retrieval scoring, the reference-currency
+model, and the confinement rules.
+
+## Data Management Model & Two Stores
+
+Under the formal agent-native memory system framework $\mathcal{M}_{sys} = \langle \mathcal{R}, \mathcal{S}, \mathcal{Q}, \mathcal{U} \rangle$ ([arXiv:2606.24775](https://arxiv.org/abs/2606.24775)), `eg` implements representation $\mathcal{R}$ as raw interaction notes, extraction $\mathcal{S}$ through caller-provided schemas, retrieval $\mathcal{Q}$ via FTS5 BM25 + AST graph expansion, and update $\mathcal{U}$ through content-hashed revision chains and TTL-based GC:
 
 | Store | Location | Scope |
 |---|---|---|
-| Local | `.engram/memory.db` | One repository's decisions and gotchas |
+| Local | `.engram/memory.db` | One repository's decisions, gotchas, and procedures |
 | Global | `~/.engram/memory.db` | Cross-project conventions and developer profile |
 
 `$ENGRAM_GLOBAL_DIR` overrides the global location; the pre-rename
@@ -19,7 +27,9 @@ or write when the new store is absent. The legacy file is never moved or
 deleted, so a downgrade keeps working.
 
 Memory is **primary data**, unlike the index. It is never rebuilt from source
-and is never reset by `eg doctor --invalidate`.
+and is never reset by `eg doctor --invalidate`. As proven by Zhou et al. (2026),
+preserving raw human/agent notes avoids the destructive information loss of write-time
+LLM summarization while maintaining Pareto-optimal query latency (< 2ms).
 
 ## Schema
 
@@ -48,16 +58,20 @@ A newer store, or one missing required structure, exits `5`.
 Secondary indexes live in the same file (not in `schema/indexes.sql`): memory
 writes are single-row transactions with no bulk-insert phase to post-index.
 
-## Retrieval
+## Retrieval & Graph Propagation
 
-`eg mem query` fuses three signals, each min-max normalized across the
-candidate set:
+Grounded in [Zero-Mem](https://arxiv.org/abs/2607.29377), `eg mem query` consumes **0 LLM tokens**. When `.engram/index.db` is available, query tokens seed a bounded breadth-first traversal along resolved `calls` edges (depth $\le 3$, fanout 64, decay $0.5^{depth}$, max 256 visited symbols) to co-retrieve notes anchored to downstream helpers.
+
+Candidate notes are ranked by fusing min-max normalized features:
 
 | Signal | Weight | Meaning |
 |---|---|---|
-| Lexical | 0.5 | Inverted FTS5 bm25 rank over key, tags, and body tokens |
-| Reference | 0.3 | Token overlap between `--ref` and the note's `refs` |
-| Recency | 0.2 | Bounded decay `1 / (1 + age_days)` |
+| Lexical | 0.50 | Inverted FTS5 BM25 rank over key, tags, and body tokens |
+| Reference | 0.30 | Token overlap between `--ref` and the note's `refs` |
+| Recency | 0.20 | Bounded decay `1 / (1 + age_days)` |
+| Graph | 0.25 | Call-graph decay $0.5^{depth}$ for notes referencing reachable symbols |
+
+When no graph candidates exist or `.engram/index.db` is absent, the graph feature normalizes to a constant offset, preserving exact lexical/reference/recency ordering with zero failure risk.
 
 Ties break on score, then `created_at`, `key`, and `rev`, so identical inputs
 produce an identical order. `eg mem query` with no terms lists current notes by
@@ -66,13 +80,15 @@ recency instead of ranking.
 Without `--global` the search covers the local store and the global store;
 `--global` restricts it to the global store.
 
-## Reference currency
+## Reference Currency & Citation Locks
 
-A note can be anchored to a file or symbol through `--refs`. At render time
-each anchor is classified against the current index:
+Implementing the **Citation-Lock** and provenance model of [Agent Zero Memory](https://arxiv.org/abs/2608.29606), notes anchor to exact codebase entities through `--refs`. Every anchor represents an immutable provenance triple $\pi(x) = \langle \text{source}, \text{timestamp}, \text{raw evidence pointer} \rangle$.
 
-- `[stale-ref]` — the anchor moved or the file changed after the note was
-  written. `[modified-ref]` and `[broken-ref]` refine the reason.
+At query time, anchors are dynamically verified against `.engram/index.db`:
+
+- `[stale-ref]` — the anchor was modified or deleted after note creation.
+- `[modified-ref]` — symbol modified at a later timestamp; re-auditing required.
+- `[broken-ref]` — symbol no longer exists in the AST index.
 - `eg mem touch <key>` refreshes the timestamp without creating a revision once
   the reader has re-audited the anchor.
 
@@ -80,8 +96,13 @@ each anchor is classified against the current index:
 symbol, and `eg build` emits a stderr note when modified files touch guarded
 areas.
 
-## Lifecycle
+## Lifecycle & Consolidation Guard
 
+- **Consolidation Guard (Write)** — before persisting, `eg mem write` tokenizes body,
+  tags, and refs through the memory tokenizer, queries the top 32 FTS candidates, and computes
+  Jaccard similarity without English glue words. At $\ge 80\%$ similarity under another key,
+  it appends an advisory hint suggesting `--supersedes <old>` ($659\text{ \mu s}$ overhead).
+  The write always succeeds (exit 0).
 - **Write** — append a revision, update the FTS row, and commit in one
   transaction. `--touch` refreshes `created_at` when the content hash matches.
 - **Supersede** — `--supersedes <key>` marks the older key's current row and

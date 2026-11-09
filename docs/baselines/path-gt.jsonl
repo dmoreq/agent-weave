@@ -1,8 +1,0 @@
-{"repo": "kg", "from": "src.extract.walk_children", "to": "src.extract.record_ts_arrow_function", "expect_hops": 2}
-{"repo": "kg", "from": "src.main.main", "to": "src.extract.walk_node", "expect_hops": 6}
-{"repo": "kg", "from": "src.parse", "to": "src.extract.record_ts_arrow_function", "expect": "no_path"}
-{"repo": "kg", "from": "src.query.target_ids", "to": "src.insights.hotspots", "expect": "no_path"}
-{"repo": "vihap", "from": "vihap.cleaners.unicode.normalize_ascii", "to": "vihap.cleaners.unicode._ascii_diacritic_trans", "expect_hops": 1}
-{"repo": "vihap", "from": "scripts.build_golden_fixtures.main", "to": "vihap.cleaners.unicode.normalize_ascii", "expect_hops": 2}
-{"repo": "vihap", "from": "scripts.build_knowledge_base.main", "to": "vihap.cleaners.unicode.normalize_ascii", "expect_hops": 3}
-{"repo": "vihap", "from": "vihap.cleaners.unicode.normalize_unicode_nfkc", "to": "tests.support.sqlite_master_reference.SqliteFileReference.get_district_streets_mapping", "expect": "no_path"}

@@ -58,7 +58,7 @@ eg impact src/build.rs --sites --edges all --depth 2
 
 ### Scenario 2: Preventing Code Bloat (The Anti-Reinvention Workflow)
 
-AI coding agents frequently recreate utility functions that already exist in the codebase. Grounded in RepoReuse research ([arXiv:2609.35357](https://arxiv.org/abs/2609.35357)), `eg` enforces a two-moment anti-reinvention loop.
+AI coding agents frequently recreate utility functions that already exist in the codebase. Grounded in [RepoReuse](https://arxiv.org/abs/2609.35357) (*Ma et al., 2026*), `eg` enforces a two-moment anti-reinvention loop to counter the **Exploration Gap** (where agents fail to discover existing helpers) and resolve the **Historical Memory Paradox** (where dumping full source code triggers copy-paste duplication up to 70.7%–94.7%).
 
 #### 1. Pre-Write Discovery
 Before authoring a new helper (e.g., reading a bounded file or computing a hash), search the index:
@@ -67,13 +67,13 @@ Before authoring a new helper (e.g., reading a bounded file or computing a hash)
 eg search "read bounded file"
 ```
 
-`eg search` returns **Concise Interface Cards** ranked by caller frequency (`BM25 + log(1 + callers)`):
+`eg search` returns **Concise Interface Cards** (signatures, types, and caller counts) ranked by caller frequency (`BM25 + log(1 + callers)`):
 
 ```text
 src/walk.rs:42 fn read_bounded(path: &Path, max_bytes: usize) -> Result<Vec<u8>> [callers=14]
 ```
 
-The `[callers=14]` metric immediately identifies `read_bounded` as the established, canonical helper. Reuse it instead of writing an ad-hoc implementation.
+The `[callers=14]` metric immediately identifies `read_bounded` as the established, canonical helper. Supplying interface cards closes the exploration gap without context window bloat.
 
 #### 2. Post-Edit Defense
 After modifying or adding code, rebuild the index:
@@ -88,10 +88,12 @@ If duplicate helpers or bypasses are suspected, run `eg reuse`:
 eg reuse
 # Or scope to specific paths:
 eg reuse src/walk.rs src/parse.rs
+# Extend to second-hop wrappers:
+eg reuse --deep-callee
 ```
 
-`eg reuse` executes four calibrated detectors across files and within the same file:
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`), catching wrappers that forward through an intermediate helper.
+Powered by an in-memory inverted posting index (< 3ms scan on 5,000 symbols), `eg reuse` executes four calibrated detectors across files and within the same file:
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
 - **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
 - **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.
@@ -112,12 +114,12 @@ eg mem write resolver-confidence-tiers --kind decision \
 ```
 
 #### 2. Code-Anchored References & Stale Alerts
-The `--refs` flag anchors the note to specific AST symbols or file paths. If a subsequent commit alters or moves the referenced symbol, `eg mem query` automatically flags the note with a `[stale-ref]` alert.
+Grounded in the citation-lock principles of [Agent Zero Memory](https://arxiv.org/abs/2608.29606), the `--refs` flag anchors the note to specific AST symbols or file paths as an immutable provenance pointer. If a subsequent commit alters or moves the referenced symbol, `eg mem query` and `eg context` automatically flag the note with a `[stale-ref]` alert, preventing stale architectural assumptions.
 
 #### 2b. Duplicate Guard & Graph Expansion
-Before writing, `eg mem write` compares the new note with current notes by Jaccard token similarity. At 80% or more it appends an advisory hint naming the existing key and suggests `--supersedes`; the write still succeeds.
+Before writing, `eg mem write` verifies note novelty via Jaccard token similarity against existing notes. At 80% or more similarity, it appends an advisory hint naming the existing key and suggests `--supersedes` to prevent memory bloat while preserving execution flow.
 
-When `.engram/index.db` exists, `eg mem query` also follows resolved `calls` edges outward from the query's symbols (depth up to 3, score decay `0.5^depth`). Notes anchored to downstream callees surface without lexical overlap. If the index is missing, the query falls back to plain FTS5 ranking.
+Operationalizing [Zero-Mem](https://arxiv.org/abs/2607.29377), `eg mem query` consumes 0 LLM tokens. When `.engram/index.db` exists, it follows resolved `calls` edges outward from the query's symbols (depth up to 3, decay `0.5^depth`). Notes anchored to downstream callees surface automatically without requiring exact lexical overlap. If the index is missing, the query safely falls back to plain FTS5 ranking.
 
 #### 3. Record Multi-Agent Task Handoffs
 When wrapping up a session or passing tasks between agents, write a scoped task note:

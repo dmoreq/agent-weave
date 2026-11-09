@@ -36,7 +36,6 @@ Current, maintained specifications of the shipping system:
 |---|---|
 | **[Evaluation](evaluation.md)** | Empirical measurements: recall benchmarks, token savings, latency, and methodology limits. |
 | **[Pointer Benchmark](../bench/README.md)** | Reproducible regression benchmark suite for static code navigation pointers. |
-| **[Evidence Vault](baselines)** | Frozen ground-truth fixtures, dated measurement manifests, and review records. Historical measurements, not new verification. |
 
 ---
 
@@ -47,12 +46,3 @@ Current, maintained specifications of the shipping system:
 - **[Security Policy](../SECURITY.md)**: Vulnerability disclosure, sandbox confinement, and privacy model.
 - **[Contributing](../CONTRIBUTING.md)**: Development setup, MSRV 1.90 requirements, and verification gates.
 - **[Code of Conduct](../CODE_OF_CONDUCT.md)**: Community standards and participation guidelines.
-
----
-
-## Archive
-
-Historical design specifications and review reports are preserved under
-[`docs/archive/`](archive) for reference. They describe the system as it was at
-their date and can contradict the current implementation; the architecture pages
-above are authoritative.

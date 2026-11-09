@@ -132,15 +132,14 @@ eg usage --quality
 
 ## Agent Routing Rules (`engram-first`)
 
-To ensure AI models take full advantage of `eg` rather than falling back to slow whole-file reads:
+Empirical research in [RepoReuse](https://arxiv.org/abs/2609.35357) (*Ma et al., 2026*) and [SWE-CI](https://arxiv.org/abs/2603.03823) (*Chen et al., 2026*) demonstrates that unguided coding agents degrade severely over multi-turn tasks: repository exploration recall collapses to 35.4%, duplicate code accumulates in 50.8% of tasks, and over 75% of CI maintenance loops suffer regressions without explicit architectural grounding.
+
+To ensure AI models take full advantage of `eg` rather than falling back to slow whole-file reads and reinventing logic, `eg` configures a **3-pillar routing scaffold**:
 1. Load the repository agent skill from [`skills/engram-first/SKILL.md`](../skills/engram-first/SKILL.md).
-2. The skill enforces **query-first routing** for:
-   - Locating callers (`callers`)
-   - Finding call chains (`path`)
-   - Assessing blast radius (`impact`)
-   - Discovering reusable helpers (`search`)
-   - Checking for code duplication (`reuse`)
-   - Retrieving session context and developer preferences (`mem_query`)
+2. The skill enforces **query-first routing** across three non-overlapping pillars:
+   - **Pillar 1: Graph Navigation**: Locating callers (`callers`), tracing call chains (`path`), and assessing blast radius (`impact`) before modifying code.
+   - **Pillar 2: Anti-Reinvention**: Running `search` before writing new helpers to close the exploration gap via interface cards; running `reuse` (`--deep-callee`) post-edit to prevent duplicate logic.
+   - **Pillar 3: Zero-Token Memory**: Querying prior architectural decisions (`mem_query`) before starting tasks; persisting durable learnings and gotchas with AST anchors (`mem_write --refs`) upon completion.
 
 ---
 

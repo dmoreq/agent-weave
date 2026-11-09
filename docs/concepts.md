@@ -126,6 +126,23 @@ command names, arguments, result counts, exit codes, and latency; it does not
 record file contents. Pass `--no-journal` or set `ENGRAM_NO_JOURNAL=1` to disable it.
 `eg` makes no network requests and installs no hooks or background processes.
 
+## Theoretical Foundations & Agent Failure Modes
+
+`eg` is architected as an empirical countermeasure to failure modes documented in AI agent research:
+
+### 1. Exploration Collapse & The Historical Memory Paradox (RepoReuse)
+In [RepoReuse](https://arxiv.org/abs/2609.35357) (*Ma et al., 2026*), empirical auditing of 3,000 multi-turn agent sessions revealed two structural breakdowns:
+- **Exploration Gap vs. Execution Gap**: As task turns progress, an agent's repository exploration recall ($\text{recall}_{\text{repo}}$) collapses from 83.6% down to 35.4%. Even when agents inspect their own previous code ($\text{recall}_{\text{self}} \approx 99.6\%$), actual reuse ($\text{reuse}_{\text{self}}$) still declines from 83.9% to 69.1%, resulting in duplicate code in **50.8% of multi-turn task chains** by Turn 5.
+- **The Historical Memory Paradox**: Feeding raw source code into prompts (**Source Memory**) severely exacerbates duplication: $C_{dup}$ reaches **70.7%** (and **94.7%** at Turn 5) because models copy-paste and alter code in-context rather than importing existing modules. In contrast, providing **Interface Memory** (signatures, types, and caller counts) lowers $C_{dup}$ to **46.7%** while doubling reuse.
+- **`eg` Implementation**: `eg search` generates zero-body Concise Interface Cards ranked by caller centrality (`BM25 + log(1 + callers)`), solving the exploration gap without triggering the copy-paste paradox. Post-edit `eg reuse` guards against $C_{dup} \ge 80\%$ duplication across both direct (1-hop) and indirect (`--deep-callee` 2-hop) call graphs.
+
+### 2. Zero-Token Memory & Provenance Citation Locks (Zero-Mem & Agent Zero Memory)
+Traditional agent memory systems introduce latency and hallucination by placing LLMs on memory operations:
+- **Zero-Token Memory Operations**: [Zero-Mem](https://arxiv.org/abs/2607.29377) (*Xiao et al., 2026*) proves that eliminating LLMs from memory indexing, retrieval, and conflict resolution cuts latency by 57.6% (0.22s/query), eliminates 100% of LLM token costs, and achieves superior benchmark accuracy compared to prompt-heavy memory.
+- **Destructive Summarization**: [Zhou et al.](https://arxiv.org/abs/2606.24775) (2026) demonstrated across 12 memory systems that storing raw interaction records yields 2× higher retrieval accuracy than LLM-generated summaries (24.2 EM vs 8.5 EM on LoCoMo), and local deterministic maintenance is Pareto-optimal ($30\text{--}40\times$ faster than global LLM graph rebuilding).
+- **Citation-Locked Provenance**: [Agent Zero Memory](https://arxiv.org/abs/2608.29606) (*Wu & Zhu, 2026*) establishes that memory hallucination can only be eliminated when notes carry immutable provenance triples $\pi(x) = \langle \text{source}, \text{timestamp}, \text{raw evidence pointer} \rangle$ verified by citation locks.
+- **`eg` Implementation**: `eg mem` executes all operations with **0 LLM tokens** in sub-millisecond SQLite time. Notes are anchored directly to AST definitions via `--refs`. `eg mem query` and `eg context` automatically verify anchors against the live AST index, badging broken or modified anchors with `[stale-ref]` alerts.
+
 ## Where to go next
 
 - [CLI reference](cli-reference.md): command syntax, options, and output shapes.

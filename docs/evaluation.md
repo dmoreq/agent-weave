@@ -167,8 +167,7 @@ depth>1 transitive test-selection task; API inventory needs a directory or
 multi-file export task; `clones` is partial in its seeded fixture; `dead`
 and `complexity` have no utility task. The review recorded no REMOVE
 decision; it demoted `search` filters and the `eg api` surface (later
-removed). See [the P8 feature review](baselines/reviews/R14-p8/README.md)
-and the [2026-11-02 utility battery](baselines/agent-utility-2026-11-02.md).
+removed). See the historical P8 feature review and 2026-11-02 utility battery records.
 
 ## 4. Static accuracy and coverage
 
@@ -279,11 +278,11 @@ Record the commit, binary build mode, operating system, CPU/RAM, corpus generato
 
 ## 6a. Project memory: retrieval recall (measured 2026-11-06)
 
-The project-memory resolver (design: [memory retrieval](archive/designs/2026-11-05_agent-weave-memory-retrieval.md)) is measured against a frozen oracle, not agent economics. Method follows the standing experiment-plan principles: the fixture freezes 30 notes and 20 queries with expected keys and the negative-control seed before any run; measurement is deterministic (same DB + query + binary → same ranking); the script is stdlib Python only.
+The project-memory resolver (design: [memory store architecture](architecture/memory-store.md)) is measured against a frozen oracle, not agent economics. Method follows the standing experiment-plan principles: the fixture freezes 30 notes and 20 queries with expected keys and the negative-control seed before any run; measurement is deterministic (same DB + query + binary → same ranking); the script is stdlib Python only.
 
-- **Command:** `python3 -I tests/scripts/mem_recall.py --eg target/release/eg --json docs/baselines/2026-11-06_memory-phase3/recall.json`
+- **Command:** `python3 -I tests/scripts/mem_recall.py --eg target/release/eg --fixture tests/fixtures/memory/oracle-v2.json`
 - **Fixture:** [tests/fixtures/memory/oracle-v2.json](../tests/fixtures/memory/oracle-v2.json) (30 notes, 20 queries, seed 20261105)
-- **Result (eg, release build, 2026-11-06):** recall@5 = 20/20 = **1.000**, Wilson 95% interval [0.839, 1.000]. Negative control (frozen shuffle of the term→key mapping, scored against the same retrievals): 1/20 = **0.050**, clearly below the 0.8 gate — the ranking is load-bearing, not a pass-everything store. Gate: PASS. Evidence: [docs/baselines/2026-11-06_memory-phase3/recall.json](baselines/2026-11-06_memory-phase3/recall.json).
+- **Result (eg, release build, 2026-11-06):** recall@5 = 20/20 = **1.000**, Wilson 95% interval [0.839, 1.000]. Negative control (frozen shuffle of the term→key mapping, scored against the same retrievals): 1/20 = **0.050**, clearly below the 0.8 gate — the ranking is load-bearing, not a pass-everything store. Gate: PASS. Evidence: historical release gate records (reproducible via `tests/fixtures/memory/oracle-v2.json`).
 - **Weight-tuning rule:** the resolver weights (0.5 lexical / 0.3 ref-overlap / 0.2 recency) change only if a frozen-oracle run drops below 0.8, with before/after numbers recorded here and in the changelog. No retune was needed for this measurement.
 - **Feature retention:** `eg usage --quality` splits `mem_write`/`mem_query` call and empty rates from the journal. A measurement window with zero `mem_write` calls makes the feature a recorded drop candidate rather than a permanent fixture.
 

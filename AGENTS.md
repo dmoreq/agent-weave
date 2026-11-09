@@ -6,10 +6,6 @@ Read the governing specifications before changing schemas, resolution semantics,
 - Code Graph & Resolution: [`docs/architecture/code-index.md`](docs/architecture/code-index.md)
 - Agent Memory & Retrieval: [`docs/architecture/memory-store.md`](docs/architecture/memory-store.md)
 
-Historical design specifications and review records live under
-[`docs/archive/`](docs/archive). They describe the system at their date and are
-never authoritative.
-
 ## 1. Architecture & Safety Invariants (Non-Negotiable)
 
 - **Local-First & Zero Outbound Network**:
