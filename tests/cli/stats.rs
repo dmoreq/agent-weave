@@ -212,7 +212,7 @@ fn partial_v10_index_rebuilds_fresh() {
 
 /// Fixture repo for the path gate. Every file is pinned line-by-line; the
 /// expected call sites below are derived from these exact byte layouts.
-fn path_fixture(name: &str) -> PathBuf {
+fn path_fixture(name: &str) -> TempRepo {
     let repo = temp_repo(name);
     write(
         &repo,
