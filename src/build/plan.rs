@@ -286,7 +286,7 @@ pub(super) fn heal_gaps(prep: &mut BuildPrep, fe: &mut FreshExtract) -> Result<(
     let Some(c) = &prep.old else {
         return Ok(());
     };
-    let gap = plan_gap_files(c, &prep.old_map, &prep.by_rel, &prep.cls, fe)?;
+    let gap = plan_gap_files(c, prep, fe)?;
     if gap.is_empty() {
         return Ok(());
     }
@@ -304,15 +304,13 @@ pub(super) fn heal_gaps(prep: &mut BuildPrep, fe: &mut FreshExtract) -> Result<(
 /// Bounded by gap rows, not by corpus size.
 fn plan_gap_files(
     c: &rusqlite::Connection,
-    old_map: &HashMap<String, crate::db::FileStat>,
-    by_rel: &HashMap<String, usize>,
-    cls: &Classified,
+    prep: &BuildPrep,
     fe: &FreshExtract,
 ) -> Result<HashSet<String>> {
     let old_quals = crate::db::symbol_names(c)?;
     let old_qual_files = crate::db::symbol_qualname_files(c)?;
-    let fresh = collect_fresh_quals(fe, cls, &old_quals, &old_qual_files);
-    let changed = changed_files(cls, old_map, by_rel);
+    let fresh = collect_fresh_quals(fe, &prep.cls, &old_quals, &old_qual_files);
+    let changed = changed_files(&prep.cls, &prep.old_map, &prep.by_rel);
     // ANEW2: a candidate set changes when a defining file is added,
     // removed, or renamed. A shrink leaves no resolved edge for the dirty
     // closure to follow, so find cls.carried sites that still name the old
@@ -321,7 +319,7 @@ fn plan_gap_files(
     changed_quals.extend(changed_qualnames(
         c,
         &changed,
-        &cls.carried,
+        &prep.cls.carried,
         QualFiles {
             old: &old_qual_files,
             fresh: &fresh.files,

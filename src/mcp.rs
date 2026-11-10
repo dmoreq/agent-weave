@@ -276,9 +276,7 @@ fn handle_initialize(
             if let Some(uri) = root_candidate {
                 let path_str = uri.strip_prefix("file://").unwrap_or(uri);
                 let path = Path::new(path_str);
-                if let Some(r) = crate::walk::find_git_root(path) {
-                    *root = Some(r);
-                } else if let Ok(r) = crate::walk::discover_root(Some(path)) {
+                if let Some(r) = root_from_path(path) {
                     *root = Some(r);
                 }
             }
@@ -347,6 +345,12 @@ fn handle_tools_call(
     )
 }
 
+/// Active-root fallback shared by initialize and tools/call: the enclosing git
+/// repository when one exists, else the discovered project root.
+fn root_from_path(start: &Path) -> Option<PathBuf> {
+    crate::walk::find_git_root(start).or_else(|| crate::walk::discover_root(Some(start)).ok())
+}
+
 fn infer_active_root(root: &mut Option<PathBuf>, arguments: &Value) {
     if root.is_some() {
         return;
@@ -369,18 +373,13 @@ fn infer_active_root(root: &mut Option<PathBuf>, arguments: &Value) {
                 .map(|c| c.join(dir))
                 .unwrap_or_else(|_| dir.to_path_buf())
         };
-        if let Some(r) = crate::walk::find_git_root(&start) {
-            *root = Some(r);
-            return;
-        } else if let Ok(r) = crate::walk::discover_root(Some(&start)) {
+        if let Some(r) = root_from_path(&start) {
             *root = Some(r);
             return;
         }
     }
     if let Ok(cwd) = std::env::current_dir() {
-        if let Some(r) = crate::walk::find_git_root(&cwd) {
-            *root = Some(r);
-        } else if let Ok(r) = crate::walk::discover_root(Some(&cwd)) {
+        if let Some(r) = root_from_path(&cwd) {
             *root = Some(r);
         }
     }

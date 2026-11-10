@@ -32,10 +32,7 @@ pub(crate) const RAW_CLIENTS: &[&str] = &[
 ];
 
 pub(crate) fn is_raw_client(callee: &str) -> bool {
-    RAW_CLIENTS.contains(&callee)
-        || RAW_CLIENTS
-            .iter()
-            .any(|&r| r.replace("::", ".") == callee || callee.replace("::", ".") == r)
+    RAW_CLIENTS.iter().any(|&r| raw_client_eq(r, callee))
 }
 
 fn raw_client_eq(a: &str, b: &str) -> bool {

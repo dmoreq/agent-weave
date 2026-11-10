@@ -163,16 +163,16 @@ fn from_tool_args_diag(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> 
 }
 fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> {
     Ok(match tool {
-        "callers" => CommandRequest::Callers {
-            name: a.req("name")?,
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-            depth: a.n_spec(tool, "depth", crate::query::DEFAULT_DEPTH)?,
-        },
-        "callees" => CommandRequest::Callees {
-            name: a.req("name")?,
-            limit: a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?,
-            depth: a.n_spec(tool, "depth", crate::query::DEFAULT_DEPTH)?,
-        },
+        "callers" | "callees" => {
+            let name = a.req("name")?;
+            let limit = a.n_spec(tool, "limit", crate::query::DEFAULT_LIMIT)?;
+            let depth = a.n_spec(tool, "depth", crate::query::DEFAULT_DEPTH)?;
+            if tool == "callers" {
+                CommandRequest::Callers { name, limit, depth }
+            } else {
+                CommandRequest::Callees { name, limit, depth }
+            }
+        }
         "context" => CommandRequest::Context {
             name: a.req("name")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_CONTEXT_LIMIT)?,

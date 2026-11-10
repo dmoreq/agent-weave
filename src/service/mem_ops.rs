@@ -26,22 +26,16 @@ pub(super) fn run_mem_get(req: &CommandRequest, root_arg: Option<&Path>) -> Resu
     }
 
     let stores = resolve_memory_stores(root_arg)?;
-    if let Some(local) = &stores.local {
-        if let Some((row, revs)) = crate::db::memory_get(local, key)? {
+    for (is_global, conn) in [
+        (false, stores.local.as_ref()),
+        (true, stores.global.as_ref()),
+    ] {
+        let Some(conn) = conn else { continue };
+        if let Some((row, revs)) = crate::db::memory_get(conn, key)? {
             let status = check_note_ref_status(index_conn.as_ref(), &row);
             return Ok(render_mem_hit(
                 &row,
-                &store_tags(false, status, &row.source),
-                revs,
-            ));
-        }
-    }
-    if let Some(global) = &stores.global {
-        if let Some((row, revs)) = crate::db::memory_get(global, key)? {
-            let status = check_note_ref_status(index_conn.as_ref(), &row);
-            return Ok(render_mem_hit(
-                &row,
-                &store_tags(true, status, &row.source),
+                &store_tags(is_global, status, &row.source),
                 revs,
             ));
         }
