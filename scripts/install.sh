@@ -72,7 +72,9 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   cargo build --release --locked
 fi
 
-RELEASE_BIN="$REPO_ROOT/target/release/eg"
+# Honour CARGO_TARGET_DIR: a custom target directory would otherwise leave a
+# stale previous build behind at $REPO_ROOT/target/release/eg.
+RELEASE_BIN="${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/eg"
 if [[ ! -f "$RELEASE_BIN" ]]; then
   log_err "Release binary not found at $RELEASE_BIN"
   exit 1
