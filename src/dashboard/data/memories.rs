@@ -116,15 +116,11 @@ fn kind_prevention_card(kind: &str, key: &str) -> (&'static str, &'static str, S
     }
 }
 
-fn estimate_fallback_recall(
-    key: &str,
-    body: &str,
-    entries: &[Value],
-    count: &mut usize,
-    last_ts: &mut f64,
-) {
+fn estimate_fallback_recall(key: &str, body: &str, entries: &[Value]) -> (usize, f64) {
     let key_lower = key.to_lowercase();
     let body_lower = body.to_lowercase();
+    let mut count = 0;
+    let mut last_ts: f64 = 0.0;
     for e in entries {
         let tool = e.get("tool").and_then(Value::as_str).unwrap_or("");
         if tool != "mem_query" && tool != "mem_get" {
@@ -137,13 +133,14 @@ fn estimate_fallback_recall(
             .unwrap_or("")
             .to_lowercase();
         if !terms.is_empty() && (key_lower.contains(&terms) || body_lower.contains(&terms)) {
-            *count += 1;
+            count += 1;
             let ts = e.get("ts").and_then(Value::as_f64).unwrap_or(0.0);
-            if ts > *last_ts {
-                *last_ts = ts;
+            if ts > last_ts {
+                last_ts = ts;
             }
         }
     }
+    (count, last_ts)
 }
 
 fn resolve_single_ref(r: &str, index_conn: Option<&Connection>, created_at: i64) -> Value {
@@ -279,13 +276,9 @@ fn format_note_json(
         .unwrap_or(0.0)
         .max(bare_ts);
     if recall_count == 0 {
-        estimate_fallback_recall(
-            &row.key,
-            &row.body,
-            entries,
-            &mut recall_count,
-            &mut last_recalled_ts,
-        );
+        let (fallback_count, fallback_ts) = estimate_fallback_recall(&row.key, &row.body, entries);
+        recall_count = fallback_count;
+        last_recalled_ts = last_recalled_ts.max(fallback_ts);
     }
 
     let resolved_refs = resolve_note_refs(&refs_list, index_conn, row.created_at);
