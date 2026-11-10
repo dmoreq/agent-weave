@@ -14,5 +14,6 @@ pub mod mcp;
 pub mod memory;
 pub mod parse;
 pub mod query;
+pub mod repo;
 pub mod service;
 pub mod walk;
