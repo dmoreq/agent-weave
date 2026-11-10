@@ -20,6 +20,62 @@ changes bump the minor while 0.x is unstable.
 - Integration-test fixtures now delete their temporary repositories on drop.
   A full `cargo test` run previously left ~6,000 `eg-*` directories (933 MB) in
   the system temp dir; the MCP suite left another eleven per run.
+- Usage entries for deleted scratch repositories no longer reach the dashboard or
+  `eg usage`. Pruning and both read-time filters keyed on the linked-worktree
+  flag, which benchmark temp roots never set; one predicate now drops an entry
+  whose absolute repo path is gone and whose root is a worktree or a temp
+  directory. Relative repo paths are never judged, and benchmark builds pass
+  `--no-journal` so they stop writing these lines at all.
+- Agent attribution now recognizes the calling CLI. `CLAUDECODE`,
+  `CODEX_TOOL_CALL_ID`, `ZCODE_MANAGED_PACKAGE`, `OPENCODE_CLIENT`, and
+  `ZED_ENVIRONMENT=worktree-shell` are read as markers, with agent markers taking
+  precedence over editor markers; `ENGRAM_AGENT` still overrides every marker.
+  `TERM_PROGRAM=zed` is deliberately ignored, since Zed sets it for terminals a
+  person opens too. Caller names are canonicalized, so `antigravity-client`,
+  `claude`, and `CLAUDE_CODE` resolve to one slug each.
+- Anti-Reinvention tab: the Semantic Judge tile now reports the real judged-run
+  count instead of always zero, the detector card states the implemented
+  thresholds (D1 80%, D2 60%), and the excess-code subtitle marks the figure as
+  an extrapolation from sampled candidates.
+- `eg build` refuses the filesystem root with a usage error (exit 2) instead of
+  trying to create `/.engram` and failing later with an opaque I/O error. An MCP
+  client that reports a `rootUri` of `/` used to reach the second case.
+- `eg mem` commands reject an explicit `--root` that cannot resolve, instead of
+  silently falling back to the global store.
+- D2 no longer reports two functions that merely share a signature. Similarity
+  is measured on the symbol names instead of the signature-dominated token bag,
+  and numbered siblings in one file (`find_best_d1` / `find_best_d2`) are treated
+  as a family. This removes the `check_d3`/`check_d4` and `find_best_d1`/
+  `find_best_d2` classes of sibling pair.
+- Usage lines for calls that resolved no repository are marked
+  `"attribution":"no_root"`, and the dashboard files them under `(unattributed)`
+  instead of `workspace`, so a repository actually named `workspace` stays
+  readable.
+- `eg` resolves the project root once per run and hands that path to the arm and
+  to the journal. Previously both resolved separately, so a command could succeed
+  and still be logged without a repository.
+- One repository identity replaces the per-surface guesses. `src/repo.rs`
+  resolves a canonical root, a subdirectory now resolves to its work tree root
+  instead of inventing a repository named after the directory, and the journal
+  writes the canonical path. The dashboard keys `repo_aggs` by that path and
+  shows the directory name in `display`, so two checkouts sharing a name stay
+  apart. The `"workspace"` and `"repo"` fallbacks in the journal, dashboard,
+  monitor, and reuse panel are gone.
+
+### Added
+- `eg usage` prints a `Savings basis` line splitting the token estimate by tool
+  family. The reuse coefficient dominates that estimate, and the single total no
+  longer reads as measured savings.
+- `eg reuse --judge` explains a no-op run: when no candidate falls in the 45-75%
+  band it says so, instead of returning silently as if a verdict had been given.
+
+### Changed
+- The pre-rename `aw` compatibility layer is gone. `AW_AGENT`, `AW_SESSION`,
+  `AW_ARM`, `AW_NO_JOURNAL`, and `AW_GLOBAL_DIR` are no longer read, `.aw/` is
+  no longer skipped during discovery, and the one-shot migration of
+  `.aw/memory.db` and `~/.aw/memory.db` is removed with its test. Migrate a
+  store that only exists under `.aw/` before upgrading; this release does not
+  read it.
 
 ## [1.0.2] - 2026-11-10
 

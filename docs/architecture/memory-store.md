@@ -20,11 +20,10 @@ Under the formal agent-native memory system framework $\mathcal{M}_{sys} = \lang
 | Local | `.engram/memory.db` | One repository's decisions, gotchas, and procedures |
 | Global | `~/.engram/memory.db` | Cross-project conventions and developer profile |
 
-`$ENGRAM_GLOBAL_DIR` overrides the global location; the pre-rename
-`$AW_GLOBAL_DIR` is still honoured. A pre-rename `.aw/memory.db` or
-`~/.aw/memory.db` is copied into the new location atomically on the first read
-or write when the new store is absent. The legacy file is never moved or
-deleted, so a downgrade keeps working.
+`$ENGRAM_GLOBAL_DIR` overrides the global location. The pre-rename `.aw/`
+store is no longer read: this release removed that compatibility layer, so a
+repository still holding notes only in `.aw/memory.db` must be migrated to
+`.engram/memory.db` before upgrading.
 
 Memory is **primary data**, unlike the index. It is never rebuilt from source
 and is never reset by `eg doctor --invalidate`. As proven by Zhou et al. (2026),

@@ -32,7 +32,7 @@ partially migrated tree.
 ## Build lifecycle
 
 1. **Discover** (`src/walk.rs`) — enumerate Git-visible files, honour
-   `.gitignore`/`.ignore`, skip `.engram/` and `.aw/` by whole path segment,
+   `.gitignore`/`.ignore`, skip `.engram/` by whole path segment,
    reject symlinked ancestors, and cap each file at 1 MiB.
 2. **Hash** (`src/hash.rs`) — FNV-1a 64 over the file bytes, combined with size
    and nanosecond mtime to decide whether a file can be carried forward.

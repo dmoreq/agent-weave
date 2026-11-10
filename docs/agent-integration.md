@@ -31,6 +31,19 @@ Running `./install.sh` from the repository root automatically discovers and conf
 ./install.sh
 ```
 
+### After Upgrading the Binary
+
+A running MCP server keeps the binary image it started with, so an upgrade does
+not reach it. Restart the sessions that host `eg mcp` after every install:
+
+```bash
+pkill -f 'eg mcp'
+```
+
+Hosts respawn the server on the next tool call. Until that happens, usage lines
+keep whatever the old build wrote, and one agent can appear under two names in
+`eg usage` and the dashboard.
+
 ---
 
 ## Manual Host Configuration
@@ -127,6 +140,34 @@ Check aggregate session statistics via the `usage` tool or CLI:
 ```bash
 eg usage --quality
 ```
+
+### Session Tagging
+
+Export `ENGRAM_SESSION` before a work session to attribute its calls and memory
+writes to one bucket:
+
+```bash
+export ENGRAM_SESSION=refactor-auth-3
+```
+
+Without it every call is filed under one synthetic session, so the dashboard's
+Session Recall Rate has nothing to divide. The tile shows a dash and asks for the
+tag when no call carries one.
+
+### Unattributed Calls
+
+A call that resolves no repository is journaled with `"attribution":"no_root"`
+and appears in the dashboard under `(unattributed)`. That bucket is separate from
+`workspace` so a repository actually named `workspace` stays readable.
+
+### Repository Identity
+
+A repository is identified by its canonical absolute path, and the dashboard
+keys `repo_aggs` by that path while showing the directory name in `display`.
+Two checkouts with the same directory name therefore stay apart. A `--root`
+that points inside a work tree resolves to the work tree root, so a
+subdirectory cannot stand in for a repository; a directory outside any work
+tree remains its own repository.
 
 ---
 
