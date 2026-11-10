@@ -32,48 +32,6 @@ pub const SIGNATURE_VERSION: &str = "3";
 /// Per-symbol metric-rule version (Amendment 19); a mismatch disables the fast path.
 pub const METRICS_VERSION: &str = "2";
 
-/// Batch size for every `IN (...)` bind list. SQLite's variable limit is 999;
-/// 500 keeps headroom for the other bound parameters in the same statement.
-pub(crate) const SQL_CHUNK: usize = 500;
-
-/// `?,?,...` placeholders for an `IN (...)` list of `count` bound values.
-pub(crate) fn sql_placeholders(count: usize) -> String {
-    std::iter::repeat_n("?", count)
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// Chunked IN-query scaffold: slices `values` into `SQL_CHUNK` batches
-/// (SQLite's variable limit) and runs `body` per batch with the connection,
-/// the batch's placeholder list, and the batch's value slice. `&Transaction`
-/// call sites deref to `Connection`.
-pub(crate) fn for_each_chunk<T: rusqlite::ToSql, F>(
-    conn: &Connection,
-    values: &[T],
-    mut body: F,
-) -> Result<()>
-where
-    F: FnMut(&Connection, &str, &[T]) -> Result<()>,
-{
-    for chunk in values.chunks(SQL_CHUNK) {
-        body(conn, &sql_placeholders(chunk.len()), chunk)?;
-    }
-    Ok(())
-}
-
-/// Row mappers for the fixed-width integer tuples used by counter queries.
-pub(crate) fn ints3(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64, i64)> {
-    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-}
-
-pub(crate) fn ints4(r: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, i64, i64, i64)> {
-    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-}
-
-pub fn eg_dir(root: &Path) -> PathBuf {
-    root.join(".engram")
-}
-
 /// Copy one confinement file into place atomically: private temp file beside
 /// the target, fsync, then rename. The source is left untouched, so a downgrade
 /// to the pre-rename binary keeps reading its own store.
@@ -96,18 +54,6 @@ pub(crate) fn copy_file_atomic(from: &Path, to: &Path) -> Result<()> {
     if let Some(dir) = to.parent() {
         if let Ok(handle) = File::open(dir) {
             let _ = handle.sync_all();
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
-    if let Ok(meta) = fs::symlink_metadata(path) {
-        if meta.file_type().is_symlink() {
-            return Err(EgError::Internal(format!(
-                "refusing symlinked {label}: {}",
-                path.display()
-            )));
         }
     }
     Ok(())
@@ -155,20 +101,6 @@ pub fn ensure_eg_dir(root: &Path) -> Result<PathBuf> {
     let dir = eg_dir(root);
     ensure_dir_validated(&dir, ".engram directory", false)?;
     Ok(dir)
-}
-
-pub fn db_path(root: &Path) -> PathBuf {
-    eg_dir(root).join("index.db")
-}
-
-/// Best-effort byte size of one file; `0` when the path is absent or
-/// unreadable — size lines are presentation, never a hard failure.
-pub(crate) fn file_size(path: &Path) -> u64 {
-    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-}
-
-pub fn db_new_path(root: &Path) -> PathBuf {
-    eg_dir(root).join("index.db.new")
 }
 
 fn unexpected_gitignore(marker: &Path) -> EgError {
@@ -476,8 +408,10 @@ mod memory_store;
 mod memory_tests;
 mod memory_write;
 mod meta;
+mod paths;
 mod query_state;
 mod security;
+mod sql;
 #[cfg(test)]
 mod tests;
 
@@ -486,5 +420,8 @@ pub(crate) use memory_query::*;
 pub(crate) use memory_store::*;
 pub(crate) use memory_write::*;
 pub(crate) use meta::*;
+pub(crate) use paths::file_size;
+pub use paths::{db_new_path, db_path, eg_dir};
 pub(crate) use query_state::*;
 pub(crate) use security::*;
+pub(crate) use sql::*;

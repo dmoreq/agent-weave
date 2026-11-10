@@ -34,6 +34,20 @@ pub(crate) fn harden_file_mode(_: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Reject a symlinked path before any write or open: a symlink can redirect
+/// every later operation outside the intended confinement root.
+pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err(EgError::Internal(format!(
+                "refusing symlinked {label}: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Create or validate the machine-wide confinement directory and keep it
 /// owner-only. The repo-local `.engram/` is left at the project's own mode:
 /// several developers can share one working tree.
