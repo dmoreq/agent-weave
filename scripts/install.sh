@@ -148,9 +148,9 @@ rule_text = (
     "  When locating callers, callees, the impact of a change, the call route between two symbols, "
     "a symbol's surroundings, a file's imports, or searching existing helpers, query `eg` (CLI or MCP `engram`) "
     "first before reading entire source files or running broad greps. Verify pointed lines directly.\n"
-    "  - **Pre-Task**: Run `eg mem query` to inspect prior architectural decisions, gotchas, and conventions.\n"
+    "  - **Pre-Task**: Run `eg mem query --limit 3` as the first command of a session; cite any matching decision or gotcha, and verify a `[stale-ref]` note before relying on it.\n"
     "  - **Pre-Write / Post-Edit**: Run `eg search '<terms>'` before implementing helpers; run `eg reuse <paths>` to prevent duplicate functions.\n"
-    "  - **Post-Fix**: Run `eg mem write <key> --kind gotcha|decision|procedure --body ... --refs <paths>` to persist durable learnings before task completion.\n"
+    "  - **Post-Fix**: Run `eg mem write <key> --kind gotcha --refs \"<path> <path>\" --body ...` to persist a durable learning before the task ends; reuse the same key to supersede.\n"
 )
 
 def update_json_file(path, updater_fn):
@@ -188,16 +188,35 @@ def inject_rule(rules_path):
     with open(rules_path, "r", encoding="utf-8") as f:
         content = f.read()
     if rule_marker in content:
-        return True  # already present
-    # Insert under Section 3 (Code Quality & Verification) if present
-    target_section = "## 3. Code Quality & Verification\n"
-    if target_section in content:
-        parts = content.split(target_section, 1)
-        new_content = parts[0] + target_section + rule_text + parts[1]
+        # Replace the block already present. Skipping it as "already present"
+        # meant an updated rule_text never reached a configured agent.
+        lines = content.splitlines(keepends=True)
+        out = []
+        index = 0
+        while index < len(lines):
+            if lines[index].startswith(rule_marker):
+                out.append(rule_text)
+                index += 1
+                # The block owns its indented sub-bullets; drop them with it.
+                while index < len(lines) and lines[index].startswith("  "):
+                    index += 1
+                continue
+            out.append(lines[index])
+            index += 1
+        new_content = "".join(out)
+        if new_content == content:
+            return True
     else:
-        new_content = content + "\n" + rule_text
+        # Insert under Section 3 (Code Quality & Verification) if present
+        target_section = "## 3. Code Quality & Verification\n"
+        if target_section in content:
+            parts = content.split(target_section, 1)
+            new_content = parts[0] + target_section + rule_text + parts[1]
+        else:
+            new_content = content + "\n" + rule_text
     with open(rules_path, "w", encoding="utf-8") as f:
         f.write(new_content)
+    return True
     return True
 
 # --- 1. Antigravity ---
