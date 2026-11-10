@@ -1,10 +1,12 @@
 //! Shared MCP test helpers: server process lifecycle, JSON-RPC framing I/O,
 //! and temp-repo fixtures.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 
@@ -117,10 +119,51 @@ pub(crate) fn strip_footer(text: &str) -> &str {
     }
 }
 
-pub(crate) fn fixture(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("eg-mcp-{}-{}", name, std::process::id()));
+/// Temporary repository that deletes itself when the last handle drops.
+///
+/// The helper used to return a bare `PathBuf`, so every MCP test run left eleven `eg-mcp-*`
+/// directories behind. Cloning shares one `Arc`, so a test that clones the path for a spawned
+/// thread still cleans up exactly once.
+#[derive(Clone)]
+pub(crate) struct TempRepo(Arc<TempRepoInner>);
+
+struct TempRepoInner(PathBuf);
+
+impl Drop for TempRepoInner {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+impl std::ops::Deref for TempRepo {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0 .0
+    }
+}
+
+impl AsRef<Path> for TempRepo {
+    fn as_ref(&self) -> &Path {
+        &self.0 .0
+    }
+}
+
+impl AsRef<OsStr> for TempRepo {
+    fn as_ref(&self) -> &OsStr {
+        self.0 .0.as_os_str()
+    }
+}
+
+fn make_dir(prefix: &str) -> TempRepo {
+    let dir = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    TempRepo(Arc::new(TempRepoInner(dir)))
+}
+
+pub(crate) fn fixture(name: &str) -> TempRepo {
+    let dir = make_dir(&format!("eg-mcp-{name}"));
     let tail =
         "def tail_block(v):\n    a = v + 1\n    b = v + 2\n    c = v + 3\n    return a + b + c\n";
     fs::write(dir.join("utils.py"), format!("def normalize(text):\n    return text.strip()\n\ndef caller():\n    return normalize('a')\n{}", tail)).unwrap();
@@ -135,11 +178,8 @@ pub(crate) fn fixture(name: &str) -> PathBuf {
     dir
 }
 
-pub(crate) fn mem_fixture(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("eg-mcp-mem-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
+pub(crate) fn mem_fixture(name: &str) -> TempRepo {
+    make_dir(&format!("eg-mcp-mem-{name}"))
 }
 
 pub(crate) fn cli_mem(repo: &Path, args: &[&str]) -> (i32, String, String) {

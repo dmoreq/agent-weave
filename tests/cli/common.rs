@@ -1,18 +1,56 @@
 //! Shared helpers and fixtures for the cli integration suite.
 
+pub(crate) use std::ffi::OsStr;
 pub(crate) use std::fs;
 pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::process::Command;
 pub(crate) use std::sync::atomic::{AtomicUsize, Ordering};
+pub(crate) use std::sync::Arc;
 
 pub(crate) static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
 
-pub(crate) fn temp_repo(name: &str) -> PathBuf {
+/// Temporary repository that deletes itself when the last handle drops.
+///
+/// Returning a bare `PathBuf` leaked one directory per test invocation; a full run left 6,083
+/// `eg-*` directories in the temp dir. Cloning shares the handle through an `Arc`, so a test that
+/// spawns threads and clones the path still cleans up exactly once.
+#[derive(Clone)]
+pub(crate) struct TempRepo(Arc<TempRepoInner>);
+
+struct TempRepoInner(PathBuf);
+
+impl Drop for TempRepoInner {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+impl std::ops::Deref for TempRepo {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0 .0
+    }
+}
+
+impl AsRef<Path> for TempRepo {
+    fn as_ref(&self) -> &Path {
+        &self.0 .0
+    }
+}
+
+impl AsRef<OsStr> for TempRepo {
+    fn as_ref(&self) -> &OsStr {
+        self.0 .0.as_os_str()
+    }
+}
+
+pub(crate) fn temp_repo(name: &str) -> TempRepo {
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("eg-it-{}-{}-{seq}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    dir
+    TempRepo(Arc::new(TempRepoInner(dir)))
 }
 
 pub(crate) fn write(repo: &Path, rel: &str, content: &str) {
@@ -73,7 +111,7 @@ def run():
 "#;
 pub(crate) const BROKEN: &str = "def broken(:\n    pass\n";
 
-pub(crate) fn fixture(name: &str) -> PathBuf {
+pub(crate) fn fixture(name: &str) -> TempRepo {
     let repo = temp_repo(name);
     write(&repo, "utils.py", UTILS);
     write(&repo, "widget.py", WIDGET);

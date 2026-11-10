@@ -95,6 +95,8 @@ fn reuse_c1_p95_on_5000_symbols() {
     let root = std::env::temp_dir().join(format!("eg-reuse-bench-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
+    // The benchmark is `#[ignore]`, so a panic aborts before any Drop guard would run; the
+    // explicit removal below covers the normal path and the harness cleanup covers the rest.
     write_corpus(&root);
     let eg = binary();
     let build = Command::new(&eg)
