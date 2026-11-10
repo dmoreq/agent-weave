@@ -233,12 +233,14 @@ pub enum MemAction {
         /// One of: decision, gotcha, fact, task, procedure
         #[arg(long)]
         kind: String,
-        /// Whitespace-separated lowercase tags (<= 16 x 32 chars)
-        #[arg(long)]
-        tags: Option<String>,
-        /// Whitespace-separated qualnames / repo paths the note is about (<= 16 x 256 chars)
-        #[arg(long)]
-        refs: Option<String>,
+        /// Whitespace-separated lowercase tags (<= 16 x 32 chars). Accepts
+        /// several values or a repeated flag.
+        #[arg(long, num_args = 1..)]
+        tags: Vec<String>,
+        /// Whitespace-separated qualnames / repo paths the note is about
+        /// (<= 16 x 256 chars). Accepts several values or a repeated flag.
+        #[arg(long, num_args = 1..)]
+        refs: Vec<String>,
         /// Note scope: durable (default, never expires) or session (expires
         /// after the TTL)
         #[arg(long, default_value = "durable")]

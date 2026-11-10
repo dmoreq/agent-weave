@@ -209,6 +209,9 @@ pub(super) fn resolve_memory_stores(root_arg: Option<&Path>) -> Result<MemorySto
             Err(EgError::NoMemory(_)) => None,
             Err(e) => return Err(e),
         },
+        // An explicit --root that cannot resolve is a usage error; an implicit
+        // lookup with no git ancestor is not — the global store still applies.
+        Err(e) if root_arg.is_some() => return Err(e),
         Err(_) => None,
     };
     let global = match crate::db::open_global_memory_query() {

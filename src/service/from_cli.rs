@@ -238,14 +238,21 @@ impl CommandRequest {
             key,
             body,
             kind,
-            tags,
-            refs,
+            tags: Self::join_list(tags),
+            refs: Self::join_list(refs),
             scope,
             ttl,
             supersedes,
             global,
             touch,
         })
+    }
+
+    /// Collapse `--tags a b` and `--tags a --tags b` into the one
+    /// space-separated string the request carries.
+    fn join_list(values: Vec<String>) -> Option<String> {
+        let joined = values.join(" ");
+        (!joined.is_empty()).then_some(joined)
     }
 
     /// The `mem query` request shape, destructured from the CLI variant.
