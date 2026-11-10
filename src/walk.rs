@@ -38,7 +38,7 @@ pub struct WalkStats {
 }
 
 pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
-    match explicit {
+    let root = match explicit {
         Some(p) => {
             if !p.is_dir() {
                 return Err(EgError::Usage(format!(
@@ -46,16 +46,32 @@ pub fn discover_root(explicit: Option<&Path>) -> Result<PathBuf> {
                     p.display()
                 )));
             }
-            Ok(p.to_path_buf())
+            p.to_path_buf()
         }
         None => {
             let cwd = std::env::current_dir()
                 .map_err(|e| EgError::Internal(format!("cannot read cwd: {e}")))?;
             find_git_root(&cwd).ok_or_else(|| {
                 EgError::Usage("no git root ancestor found — pass --root <path>".to_string())
-            })
+            })?
         }
+    };
+    reject_filesystem_root(&root)?;
+    Ok(root)
+}
+
+/// The filesystem root is never a project. Every surface would create its
+/// `.engram/` there: an MCP client that reports `rootUri` of `/`, or a file
+/// argument outside any repository, used to reach this and fail later with an
+/// opaque I/O error. Refuse it at resolution time with the usage contract.
+fn reject_filesystem_root(root: &Path) -> Result<()> {
+    if root.parent().is_none() {
+        return Err(EgError::Usage(format!(
+            "{} is the filesystem root — pass --root <repository>",
+            root.display()
+        )));
     }
+    Ok(())
 }
 
 pub(crate) fn find_git_root(start: &Path) -> Option<PathBuf> {
@@ -124,7 +140,7 @@ enum WalkVerdict {
     OverCap,
 }
 
-/// The guard chain for one git-visible path: `.engram/`/`.aw/` membership,
+/// The guard chain for one git-visible path: `.engram/` membership,
 /// extension allowlist, ancestor-symlink containment, symlink leaf, non-file,
 /// and size cap. The metadata is stat'ed exactly once, here.
 fn walk_verdict(
@@ -136,7 +152,7 @@ fn walk_verdict(
 ) -> WalkVerdict {
     // Whole-segment equality keeps application paths such as `src/engram/`
     // indexed while both confinement directories stay out of the graph.
-    if rel.split('/').any(|seg| seg == ".engram" || seg == ".aw") {
+    if rel.split('/').any(|seg| seg == ".engram") {
         return WalkVerdict::Skip;
     }
     let ext = Path::new(rel)
@@ -262,7 +278,7 @@ fn walk_fallback(root: &Path, exts: &[&str]) -> Result<WalkStats> {
     builder.hidden(false);
     builder.filter_entry(|entry| {
         let name = entry.file_name();
-        name != std::ffi::OsStr::new(".engram") && name != std::ffi::OsStr::new(".aw")
+        name != std::ffi::OsStr::new(".engram")
     });
 
     let mut files = Vec::new();
@@ -380,5 +396,15 @@ mod tests {
     fn discover_root_explicit_bad_dir_is_usage() {
         let err = discover_root(Some(Path::new("/definitely/not/a/dir"))).unwrap_err();
         assert_eq!(err.exit_code(), 2);
+    }
+
+    #[test]
+    fn discover_root_filesystem_root_is_usage() {
+        let err = discover_root(Some(Path::new("/"))).unwrap_err();
+        assert_eq!(err.exit_code(), 2);
+        assert!(
+            err.to_string().contains("filesystem root"),
+            "message must name the cause: {err}"
+        );
     }
 }

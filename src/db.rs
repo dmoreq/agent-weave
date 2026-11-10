@@ -32,33 +32,6 @@ pub const SIGNATURE_VERSION: &str = "3";
 /// Per-symbol metric-rule version (Amendment 19); a mismatch disables the fast path.
 pub const METRICS_VERSION: &str = "2";
 
-/// Copy one confinement file into place atomically: private temp file beside
-/// the target, fsync, then rename. The source is left untouched, so a downgrade
-/// to the pre-rename binary keeps reading its own store.
-pub(crate) fn copy_file_atomic(from: &Path, to: &Path) -> Result<()> {
-    let tmp = match to.parent() {
-        Some(dir) => dir.join(format!(
-            ".{}.{}.migrating",
-            to.file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            std::process::id()
-        )),
-        None => return Err(EgError::Internal("migration target has no parent".into())),
-    };
-    let _ = fs::remove_file(&tmp);
-    fs::copy(from, &tmp)?;
-    File::open(&tmp)?.sync_all()?;
-    fs::rename(&tmp, to)?;
-    let _ = harden_file_mode(to);
-    if let Some(dir) = to.parent() {
-        if let Ok(handle) = File::open(dir) {
-            let _ = handle.sync_all();
-        }
-    }
-    Ok(())
-}
-
 fn unsafe_lock(path: &Path) -> EgError {
     EgError::Internal(format!("refusing unsafe build lock: {}", path.display()))
 }
