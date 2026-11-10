@@ -72,7 +72,9 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
   cargo build --release --locked
 fi
 
-RELEASE_BIN="$REPO_ROOT/target/release/eg"
+# Honour CARGO_TARGET_DIR: a custom target directory would otherwise leave a
+# stale previous build behind at $REPO_ROOT/target/release/eg.
+RELEASE_BIN="${CARGO_TARGET_DIR:-$REPO_ROOT/target}/release/eg"
 if [[ ! -f "$RELEASE_BIN" ]]; then
   log_err "Release binary not found at $RELEASE_BIN"
   exit 1
@@ -508,7 +510,31 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   "$HOME/.cargo/bin/eg" build
 fi
 
-# 5. Global Telemetry Sanity Check
+# 5. Semantic Judge Wiring (optional)
+if command -v eg-judge >/dev/null 2>&1; then
+  JUDGE_BIN="$(command -v eg-judge)"
+  JUDGE_MODEL="${EG_JUDGE_MODEL:-$HOME/.engram/judge/model}"
+  log_info "Detected eg-judge at $JUDGE_BIN"
+  echo "  Add these to your shell config to enable 'eg reuse --judge':"
+  echo "    export EG_JUDGE_BIN=\"$JUDGE_BIN\""
+  echo "    export EG_JUDGE_MODEL=\"$JUDGE_MODEL\""
+  if [ ! -f "$JUDGE_MODEL/lazy.json" ]; then
+    log_warn "No checkpoint at $JUDGE_MODEL; fetch one before using --judge."
+  fi
+  for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    [ -f "$rc" ] || continue
+    if grep -q "EG_JUDGE_BIN" "$rc"; then
+      continue
+    fi
+    printf '\n# eg-judge (engram reuse --judge)\nexport EG_JUDGE_BIN="%s"\nexport EG_JUDGE_MODEL="%s"\n' \
+      "$JUDGE_BIN" "$JUDGE_MODEL" >> "$rc"
+    echo "  ├─ Added EG_JUDGE_* to $rc"
+  done
+else
+  log_info "eg-judge not on PATH; 'eg reuse --judge' stays disabled (static reuse is unchanged)."
+fi
+
+# 6. Global Telemetry Sanity Check
 log_info "Verifying global telemetry (~/.engram/usage.log)..."
 "$HOME/.cargo/bin/eg" usage --global
 

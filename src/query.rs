@@ -74,6 +74,7 @@ use staleness::*;
 mod analysis;
 mod callgraph;
 mod impact;
+pub mod judge;
 pub mod reuse;
 
 pub use analysis::{search, symbols, unresolved, unresolved_names, SymbolsOpts};

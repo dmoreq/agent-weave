@@ -14,7 +14,22 @@ changes bump the minor while 0.x is unstable.
 - Read [evaluation](docs/evaluation.md) for the public evidence summary and its limitations, not replacement original evidence.
 - Internal evaluation corpus names are neutralized as `corpus-a` and `corpus-b`.
 
-## [1.0.2] - 2026-11-09
+## [1.0.2] - 2026-11-10
+
+### Added
+- `eg reuse --judge`: sends candidates with 45-75% overlap to a local `eg-judge`
+  binary and appends its verdict. Reads `EG_JUDGE_BIN` and `EG_JUDGE_MODEL`; a
+  missing binary, missing checkpoint, timeout, or malformed answer leaves the
+  static output byte-identical and prints one stderr note. Exposed on the MCP
+  `reuse` tool as `judge`.
+- Usage log field `"judged": true` on invocations that dispatched `eg-judge`
+  successfully. The dashboard shows a `judge` badge on those rows and a
+  "Semantic Judge" counter in the Reuse panel.
+
+### Changed
+- Companion repository `engram-laya` renamed to `engram-judge`; binary
+  `eg-laya` renamed `eg-judge`, and the checkpoint variables are now
+  `EG_JUDGE_BIN` / `EG_JUDGE_MODEL` with no legacy alias.
 
 ### Fixed
 - Fixed clippy `unneeded_wildcard_pattern` warning in `src/query/analysis/unresolved.rs`.

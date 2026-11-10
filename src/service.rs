@@ -79,6 +79,7 @@ pub enum CommandRequest {
         paths: Vec<String>,
         limit: usize,
         deep_callee: bool,
+        judge: bool,
     },
     Search {
         terms: String,
@@ -334,6 +335,7 @@ mod tests {
                 paths: vec!["f".into()],
                 limit: 10,
                 deep_callee: false,
+                judge: false,
             },
             CommandRequest::Search {
                 terms: "x".into(),

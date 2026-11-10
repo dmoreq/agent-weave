@@ -126,6 +126,7 @@ fn make_candidate(
     let mut shared_items: Vec<String> = shared.to_vec();
     shared_items.sort();
     ReuseCandidate {
+        verdict: None,
         detector,
         symbol: target.qualname.clone(),
         file: target.file_path.clone(),
