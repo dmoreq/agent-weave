@@ -110,6 +110,12 @@ fn is_more_canonical(candidate: &SymbolData, target: &SymbolData) -> bool {
     }
 }
 
+/// `find_best_d1` -> `find_best_d`. Numbered siblings share a stem: they are a
+/// deliberate family, so a matching name must not read as duplication.
+fn strip_trailing_digits(name: &str) -> &str {
+    name.trim_end_matches(|c: char| c.is_ascii_digit() || c == '_')
+}
+
 /// The identity block every detector builds from a matched (target,
 /// candidate) pair; detectors only differ in the overlap signal above it.
 /// `shared` is sorted into the candidate's display items.
@@ -299,15 +305,40 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             if candidate.tokens.len() < 2 {
                 return None;
             }
-            let shared: Vec<String> = target
-                .tokens
-                .intersection(&candidate.tokens)
-                .cloned()
-                .collect();
+            // Similarity is measured on the symbol names when both sides have
+            // name tokens. Signature tokens dominate the union otherwise, which
+            // pushed every D2 candidate to ~100% and left the 45-75% judge band
+            // permanently empty.
+            let comparable = !target.name_tokens.is_empty() || !candidate.name_tokens.is_empty();
+            let (shared, union_len): (Vec<String>, usize) = if comparable {
+                (
+                    target
+                        .name_tokens
+                        .intersection(&candidate.name_tokens)
+                        .cloned()
+                        .collect(),
+                    target.name_tokens.union(&candidate.name_tokens).count(),
+                )
+            } else {
+                (
+                    target
+                        .tokens
+                        .intersection(&candidate.tokens)
+                        .cloned()
+                        .collect(),
+                    target.tokens.union(&candidate.tokens).count(),
+                )
+            };
             if shared.len() < 2 {
                 return None;
             }
-            let union_len = target.tokens.union(&candidate.tokens).count();
+            // Numbered siblings in one file (`find_best_d1` / `find_best_d2`,
+            // `check_d3` / `check_d4`) are a family by design, not twins.
+            if candidate.file_id == target.file_id
+                && strip_trailing_digits(&target.name) == strip_trailing_digits(&candidate.name)
+            {
+                return None;
+            }
             let jaccard = shared.len() as f64 / union_len as f64;
             let type_jaccard =
                 if !target.type_tokens.is_empty() && !candidate.type_tokens.is_empty() {

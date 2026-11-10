@@ -171,6 +171,7 @@ mod tests {
             inbound_callers: 0,
             tokens: tokens.iter().map(|s| s.to_string()).collect(),
             type_tokens: HashSet::new(),
+            name_tokens: HashSet::new(),
         }
     }
 

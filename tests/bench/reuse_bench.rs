@@ -102,6 +102,7 @@ fn reuse_c1_p95_on_5000_symbols() {
     let build = Command::new(&eg)
         .arg("--root")
         .arg(&root)
+        .arg("--no-journal")
         .args(["build"])
         .output()
         .unwrap();

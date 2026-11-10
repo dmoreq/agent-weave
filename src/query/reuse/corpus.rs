@@ -24,6 +24,9 @@ pub(super) struct SymbolData {
     pub(super) inbound_callers: i64,
     pub(super) tokens: HashSet<String>,
     pub(super) type_tokens: HashSet<String>,
+    /// Tokens from the symbol's own name, separate from its signature. Two
+    /// functions that only share a parameter shape must not read as twins.
+    pub(super) name_tokens: HashSet<String>,
 }
 
 pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>> {
@@ -41,7 +44,7 @@ pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>
     let rows = stmt.query_map([], |r| {
         let name: String = r.get(1)?;
         let signature: String = r.get(7)?;
-        let (tokens, type_tokens) = tokenize_name_sig(&name, &signature);
+        let (tokens, type_tokens, name_tokens) = tokenize_name_sig(&name, &signature);
         Ok(SymbolData {
             id: r.get(0)?,
             name,
@@ -57,6 +60,7 @@ pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>
             inbound_callers: 0,
             tokens,
             type_tokens,
+            name_tokens,
         })
     })?;
 

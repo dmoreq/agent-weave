@@ -181,7 +181,14 @@ fn arbitrate(ctx: &QueryCtx<'_>, candidates: &mut [ReuseCandidate]) -> String {
             }
         }
     }
-    if gray > 0 && judged == 0 {
+    if gray == 0 {
+        return format!(
+            "eg: judge: no candidate in the {}-{}% band — overlaps sit outside it\n",
+            judge::GRAY_LOW,
+            judge::GRAY_HIGH
+        );
+    }
+    if judged == 0 {
         return "eg: judge: eg-judge returned no verdict (timeout or model error)\n".to_string();
     }
     if gray > judged {

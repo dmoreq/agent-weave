@@ -74,24 +74,31 @@ const STOPLIST: &[&str] = &[
     "isinstance",
 ];
 
-pub(super) fn tokenize_name_sig(name: &str, sig: &str) -> (HashSet<String>, HashSet<String>) {
+pub(super) fn tokenize_name_sig(
+    name: &str,
+    sig: &str,
+) -> (HashSet<String>, HashSet<String>, HashSet<String>) {
     let mut all_tokens = HashSet::new();
     let mut type_tokens = HashSet::new();
+    let mut name_tokens = HashSet::new();
     // One normalized insert shared by every scan: lowercase, keep the
     // three-plus-char non-stoplist tokens, and also file them into the
     // type-only set when they come from a typed position.
-    let mut push_token = |tok: &str, typed: bool| {
+    let mut push_token = |tok: &str, typed: bool, from_name: bool| {
         let lower = tok.to_ascii_lowercase();
         if keep_token(&lower) {
             if typed {
                 type_tokens.insert(lower.clone());
+            }
+            if from_name {
+                name_tokens.insert(lower.clone());
             }
             all_tokens.insert(lower);
         }
     };
 
     for tok in split_ident(name).split_whitespace() {
-        push_token(tok, false);
+        push_token(tok, false, true);
     }
 
     for part in sig.split(['(', ')', ',', '{', ';']) {
@@ -101,16 +108,16 @@ pub(super) fn tokenize_name_sig(name: &str, sig: &str) -> (HashSet<String>, Hash
             .flatten()
         {
             for tok in split_ident(typed).split_whitespace() {
-                push_token(tok, true);
+                push_token(tok, true, false);
             }
         }
     }
 
     for tok in split_ident(sig).split_whitespace() {
-        push_token(tok, false);
+        push_token(tok, false, false);
     }
 
-    (all_tokens, type_tokens)
+    (all_tokens, type_tokens, name_tokens)
 }
 
 /// Shared tokenizer guard: keep lowercase tokens of at least three characters

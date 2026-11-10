@@ -24,7 +24,100 @@ fn make_test_symbol(
         inbound_callers: callers,
         tokens: HashSet::new(),
         type_tokens: HashSet::new(),
+        name_tokens: HashSet::new(),
     }
+}
+
+#[test]
+fn d2_rejects_signature_only_twins() {
+    let signature_tokens = ["candidate", "corpus", "option", "reuse", "symbol", "target"];
+    let mut canonical = make_test_symbol(1, "mod.check_d3", 1, 5, &[]);
+    canonical.tokens = signature_tokens.iter().map(|t| t.to_string()).collect();
+    canonical.name_tokens = ["check"].iter().map(|t| t.to_string()).collect();
+    let mut target = make_test_symbol(2, "mod.check_d4", 2, 0, &[]);
+    target.tokens = signature_tokens.iter().map(|t| t.to_string()).collect();
+    target.name_tokens = ["check"].iter().map(|t| t.to_string()).collect();
+
+    let mut symbols = HashMap::new();
+    symbols.insert(1, canonical);
+    symbols.insert(2, target);
+    let corpus = Corpus {
+        symbols: &symbols,
+        index: None,
+        deep_callee: false,
+    };
+    assert!(
+        find_best_d2(&symbols[&2], &corpus).is_none(),
+        "an identical signature alone must not make two functions twins"
+    );
+}
+
+#[test]
+fn d2_accepts_twins_that_share_name_tokens() {
+    let shared_tokens = ["render", "memory", "list", "section", "value"];
+    let mut canonical = make_test_symbol(1, "ui.render_memory_list", 1, 5, &[]);
+    canonical.tokens = shared_tokens.iter().map(|t| t.to_string()).collect();
+    canonical.name_tokens = ["render", "memory", "list"]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    canonical.type_tokens = ["section", "value"].iter().map(|t| t.to_string()).collect();
+    let mut target = make_test_symbol(2, "ui.render_memory_hit", 2, 0, &[]);
+    target.tokens = shared_tokens.iter().map(|t| t.to_string()).collect();
+    target.name_tokens = ["render", "memory", "hit"]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    target.type_tokens = ["section", "value"].iter().map(|t| t.to_string()).collect();
+
+    let mut symbols = HashMap::new();
+    symbols.insert(1, canonical);
+    symbols.insert(2, target);
+    let corpus = Corpus {
+        symbols: &symbols,
+        index: None,
+        deep_callee: false,
+    };
+    let candidate = find_best_d2(&symbols[&2], &corpus).expect("shared name tokens match");
+    assert_eq!(candidate.canonical, "ui.render_memory_list");
+}
+
+#[test]
+fn d2_rejects_numbered_siblings() {
+    let shared_tokens = ["finder", "best", "candidate", "corpus"];
+    let mut canonical = make_test_symbol(1, "mod.find_best_d1", 1, 5, &[]);
+    canonical.tokens = shared_tokens.iter().map(|t| t.to_string()).collect();
+    canonical.name_tokens = ["find", "best", "d1"]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    canonical.type_tokens = ["candidate", "corpus"]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    let mut target = make_test_symbol(2, "mod.find_best_d2", 1, 0, &[]);
+    target.tokens = shared_tokens.iter().map(|t| t.to_string()).collect();
+    target.name_tokens = ["find", "best", "d2"]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    target.type_tokens = ["candidate", "corpus"]
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+
+    let mut symbols = HashMap::new();
+    symbols.insert(1, canonical);
+    symbols.insert(2, target);
+    let corpus = Corpus {
+        symbols: &symbols,
+        index: None,
+        deep_callee: false,
+    };
+    assert!(
+        find_best_d2(&symbols[&2], &corpus).is_none(),
+        "numbered siblings in one file are a family, not twins"
+    );
 }
 
 #[test]
