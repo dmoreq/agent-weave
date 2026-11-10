@@ -31,13 +31,11 @@ fn env_tag(keys: &[&str]) -> String {
 /// sanitized `ENGRAM_SESSION` tag the journal line carries. Public because the
 /// memory write path stamps it at write time.
 pub fn session_tag() -> String {
-    env_tag(&["ENGRAM_SESSION", "AW_SESSION"])
+    env_tag(&["ENGRAM_SESSION"])
 }
 
 /// Journal opt-out contract: env `ENGRAM_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
-/// `AW_NO_JOURNAL` is still honored: an operator who exported the pre-rename
-/// variable must not silently start journaling again.
 struct Pending {
     surface: &'static str,
     tool: String,
@@ -68,39 +66,11 @@ pub fn set_judged() {
 thread_local! {
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
     static DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static CURRENT_AGENT: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-/// Set active agent context for subsequent journal invocations in this process
-/// (e.g. from MCP handshake initialize clientInfo.name).
-pub fn set_agent_context(name: &str) {
-    let sanitized: String = name.trim().chars().take(32).collect();
-    if !sanitized.is_empty() {
-        CURRENT_AGENT.with(|a| *a.borrow_mut() = Some(sanitized));
-    }
-}
-
-/// Detect the calling agent identity from explicit context, environment variables,
-/// or fallback to "user".
-pub fn detect_agent() -> String {
-    if let Some(agent) = CURRENT_AGENT.with(|a| a.borrow().clone()) {
-        return agent;
-    }
-    if let Ok(val) = std::env::var("ENGRAM_AGENT").or_else(|_| std::env::var("AW_AGENT")) {
-        let trimmed = val.trim();
-        if !trimmed.is_empty() {
-            return trimmed.chars().take(32).collect();
-        }
-    }
-    if std::env::var("ANTIGRAVITY_AGENT").is_ok() {
-        return "antigravity".to_string();
-    }
-    "user".to_string()
 }
 
 /// The opt-out is `1` in either spelling; any other value leaves journaling on.
 fn no_journal_requested() -> bool {
-    ["ENGRAM_NO_JOURNAL", "AW_NO_JOURNAL"]
+    ["ENGRAM_NO_JOURNAL"]
         .iter()
         .any(|key| std::env::var(key).as_deref() == Ok("1"))
 }
@@ -136,8 +106,8 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
             total: 0,
             ambiguous: 0,
             stale: false,
-            session: env_tag(&["ENGRAM_SESSION", "AW_SESSION"]),
-            arm: env_tag(&["ENGRAM_ARM", "AW_ARM"]),
+            session: env_tag(&["ENGRAM_SESSION"]),
+            arm: env_tag(&["ENGRAM_ARM"]),
             agent: detect_agent(),
             judged: false,
         });
@@ -153,13 +123,15 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         return;
     };
     let ts = crate::db::unix_now();
-    let repo_path = root.map(|r| r.to_string_lossy().into_owned());
-    let repo_name = root
-        .and_then(|r| r.file_name())
-        .map(|n| n.to_string_lossy().into_owned());
-    let is_worktree = root.map(|r| r.join(".git").is_file()).unwrap_or(false);
+    // One identity for every surface. The `file_name` and `.git` probes that
+    // used to live here belong to `repo::RepoRef`.
+    let repo = root.map(crate::repo::RepoRef::from_root);
+    let repo_path = repo.as_ref().and_then(crate::repo::RepoRef::journal_repo);
+    let repo_name = repo.as_ref().map(|r| r.name().to_string());
+    let is_worktree = repo.as_ref().is_some_and(crate::repo::RepoRef::is_worktree);
+    let unattributed = repo_path.is_none();
 
-    let line = serde_json::json!({
+    let mut line = serde_json::json!({
         "ts": ts,
         "surface": pending.surface,
         "tool": pending.tool,
@@ -180,6 +152,12 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "worktree": is_worktree,
         "judged": pending.judged,
     });
+    // A line with no repository name cannot be attributed anywhere. Mark why so
+    // a reader does not have to guess between "outside a git repository" and
+    // "the root failed to resolve".
+    if unattributed {
+        line["attribution"] = Value::String("no_root".to_string());
+    }
     let line_str = format!("{line}\n");
 
     if let Some(root) = root {
@@ -290,17 +268,9 @@ pub fn prune_deleted_worktrees(log_path: &Path) -> std::io::Result<usize> {
             continue;
         }
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            let is_worktree = val
-                .get("worktree")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if is_worktree {
-                if let Some(repo_path) = val.get("repo").and_then(|v| v.as_str()) {
-                    if !Path::new(repo_path).exists() {
-                        pruned += 1;
-                        continue;
-                    }
-                }
+            if liveness::entry_is_stale(&val) {
+                pruned += 1;
+                continue;
             }
         }
         kept.push(trimmed);
@@ -329,10 +299,13 @@ pub fn prune_deleted_worktrees_all(base_path: &Path) -> std::io::Result<usize> {
     Ok(total)
 }
 
+mod agent;
+pub(crate) mod liveness;
 mod outcome;
 mod render;
 mod tokens;
 
+pub use agent::{detect_agent, set_agent_context};
 pub(crate) use outcome::*;
 pub(crate) use render::*;
 pub(crate) use tokens::*;

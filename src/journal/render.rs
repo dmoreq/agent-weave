@@ -184,12 +184,8 @@ fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        if fields.worktree {
-            if let Some(ref r_path) = fields.repo {
-                if !std::path::Path::new(r_path).exists() {
-                    continue;
-                }
-            }
+        if fields.is_stale() {
+            continue;
         }
         fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
     }
@@ -223,17 +219,56 @@ fn kpi_section(
     let (saved_tokens, reuse_hits) = calculate_telemetry_totals(aggs);
     let dollars = (saved_tokens as f64) * PRICE_PER_TOKEN;
     let saved_tokens_formatted = format_number_with_commas(saved_tokens);
+    let basis = savings_basis(aggs);
 
-    vec![
+    let mut out = vec![
         format!("  ├─ Speed: p50 = {p50} | p95 = {p95}"),
         format!("  ├─ Reliability: {reliability_pct:.1}% ok ({total_errors} errors{errors_note}, {total_stale} stale reads)"),
         format!(
             "  ├─ Estimated Token Savings: ~{saved_tokens_formatted} tokens (~${dollars:.2})"
         ),
-        format!(
-            "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
-        ),
-    ]
+    ];
+    if !basis.is_empty() {
+        out.push(format!("  ├─ Savings basis: {basis}"));
+    }
+    out.push(format!(
+        "  ├─ Anti-Reinvention: {reuse_hits} duplication warnings caught"
+    ));
+    out
+}
+
+/// Which tool family the estimate comes from. The coefficient table prices a
+/// reuse hit far above a graph row, so one line naming the mix keeps the total
+/// from reading as measured savings.
+fn savings_basis(aggs: &std::collections::BTreeMap<String, ToolAgg>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut add = |label: &str, tools: &[&str]| {
+        let sum: usize = tools
+            .iter()
+            .map(|tool| {
+                aggs.get(*tool).map_or(0, |agg| {
+                    estimated_tokens_saved(
+                        tool,
+                        agg.total_shown,
+                        agg.total_results,
+                        agg.calls.saturating_sub(agg.errors),
+                    )
+                })
+            })
+            .sum();
+        if sum > 0 {
+            parts.push(format!("{label} ~{}", format_number_with_commas(sum)));
+        }
+    };
+    add(
+        "graph",
+        &["context", "callers", "callees", "path", "impact", "imports"],
+    );
+    add("search", &["search"]);
+    add("reuse", &["reuse"]);
+    add("symbols", &["symbols"]);
+    add("build", &["build"]);
+    parts.join(" · ")
 }
 
 fn render_summary(
@@ -268,12 +303,8 @@ fn aggregate_global_usage(
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        if fields.worktree {
-            if let Some(ref r_path) = fields.repo {
-                if !std::path::Path::new(r_path).exists() {
-                    continue;
-                }
-            }
+        if fields.is_stale() {
+            continue;
         }
         fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
 

@@ -192,15 +192,20 @@ pub fn execute(
         crate::journal::begin(surface.as_str(), req.tool_name(), &req.journal_args());
     }
     let started = Instant::now();
-    let outcome = run(req, root_arg, surface);
+    // One resolution for both the arm and the journal line. `RepoRef` also
+    // walks a subdirectory up to its git root, so a `--root src` cannot invent
+    // a repository named after the directory.
+    let resolved_root = crate::repo::RepoRef::resolve(root_arg)
+        .ok()
+        .map(|r| r.root().to_path_buf());
+    let outcome = run(req, resolved_root.as_deref().or(root_arg), surface);
     let latency_us = started.elapsed().as_micros() as u64;
-    let root = crate::walk::discover_root(root_arg).ok();
     let (stdout, stderr, exit_code, shown) = match outcome {
         Ok(arm) => {
             if journal {
                 // record_result for the query shapes ran inside the arm; the
                 // exit is 0 here.
-                crate::journal::finalize(root.as_deref(), 0, latency_us);
+                crate::journal::finalize(resolved_root.as_deref(), 0, latency_us);
             }
             (arm.stdout, arm.stderr, 0, arm.shown)
         }
@@ -217,7 +222,7 @@ pub fn execute(
             }
             let stderr = format!("{e}\n");
             if journal {
-                crate::journal::finalize(root.as_deref(), e.exit_code(), latency_us);
+                crate::journal::finalize(resolved_root.as_deref(), e.exit_code(), latency_us);
             }
             (stdout, stderr, e.exit_code(), None)
         }
