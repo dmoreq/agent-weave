@@ -25,8 +25,8 @@ fn judge_without_binary_reports_once_and_keeps_static_output() {
         .args(["reuse", "--judge"])
         .env("HOME", repo.join("no-home"))
         .env("PATH", "")
-        .env_remove("EG_LAYA_BIN")
-        .env_remove("EG_LAYA_MODEL")
+        .env_remove("EG_JUDGE_BIN")
+        .env_remove("EG_JUDGE_MODEL")
         .output()
         .unwrap();
     assert_eq!(judged.status.code(), Some(0));

@@ -184,7 +184,7 @@ eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--judge]
 | `[PATHS]...` | Empty (repo) | Optional file or directory paths to inspect. |
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
 | `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). |
-| `--judge` | `false` | Send candidates with 45-75% overlap to a local `eg-laya` binary and append its verdict. Reads `EG_LAYA_BIN` and `EG_LAYA_MODEL`; any failure keeps the static output and prints one stderr note. |
+| `--judge` | `false` | Send candidates with 45-75% overlap to a local `eg-judge` binary and append its verdict. Reads `EG_JUDGE_BIN` and `EG_JUDGE_MODEL`; any failure keeps the static output and prints one stderr note. |
 
 #### Calibrated Detectors
 - **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard). With `--deep-callee`, the footprint includes second-hop callees, catching wrappers that forward through an intermediate helper.

@@ -138,7 +138,7 @@ pub enum Cmd {
         /// Extend the callee footprint to second-hop callees (weight 0.5)
         #[arg(long)]
         deep_callee: bool,
-        /// Ask the local eg-laya model to arbitrate 45-75% overlap candidates
+        /// Ask the local eg-judge model to arbitrate 45-75% overlap candidates
         #[arg(long)]
         judge: bool,
     },

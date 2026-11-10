@@ -60,7 +60,8 @@ pub fn compute_summary(entries: &[Value]) -> Value {
         "graph_reliability_pct": graph_reliability, "graph_p50_ms": graph_p50,
         "graph_p95_ms": graph_p95, "graph_avg_ms": graph_avg,
         "graph_saved_tokens": state.graph_saved_tokens, "graph_saved_dollars": graph_saved_dollars,
-        "reuse_hits": state.reuse_hits, "session_count": total_sessions,
+        "reuse_hits": state.reuse_hits, "judged_calls": state.judged_calls,
+        "session_count": total_sessions,
         "memory_session_count": memory_sessions, "session_recall_pct": session_recall_pct,
         "tool_aggs": tool_aggs_json, "repo_aggs": repo_aggs_json, "agent_aggs": agent_aggs_json,
         "recent_queries": recent_queries, "recent_errors": state.recent_errors,
@@ -74,7 +75,7 @@ fn empty_summary() -> Value {
         "p50_ms": 0.0, "p95_ms": 0.0, "avg_ms": 0.0, "saved_tokens": 0, "saved_dollars": 0.0,
         "graph_calls": 0, "graph_errors": 0, "graph_reliability_pct": 100.0,
         "graph_p50_ms": 0.0, "graph_p95_ms": 0.0, "graph_avg_ms": 0.0,
-        "graph_saved_tokens": 0, "graph_saved_dollars": 0.0, "reuse_hits": 0,
+        "graph_saved_tokens": 0, "graph_saved_dollars": 0.0, "reuse_hits": 0, "judged_calls": 0,
         "session_count": 0, "memory_session_count": 0, "session_recall_pct": 0.0,
         "tool_aggs": {}, "repo_aggs": {}, "agent_aggs": {},
         "recent_queries": [], "recent_errors": [],
@@ -115,6 +116,7 @@ struct SummaryState {
     agent_aggs: HashMap<String, AgentAgg>,
     recent_errors: Vec<Value>,
     graph_recent_errors: Vec<Value>,
+    judged_calls: usize,
 }
 
 impl SummaryState {
@@ -136,6 +138,9 @@ impl SummaryState {
         let result_count = e.get("result_count").and_then(Value::as_u64).unwrap_or(0) as usize;
         let lat_us = e.get("latency_us").and_then(Value::as_f64);
         let ts = e.get("ts").and_then(Value::as_f64).unwrap_or(0.0);
+        if e.get("judged").and_then(Value::as_bool).unwrap_or(false) {
+            self.judged_calls += 1;
+        }
         let repo_name = e
             .get("repo_name")
             .and_then(Value::as_str)

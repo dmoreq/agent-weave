@@ -34,7 +34,7 @@ pub struct ReuseCandidate {
     pub canonical_callers: i64,
     pub overlap_pct: u64,
     pub shared_items: Vec<String>,
-    /// Semantic verdict from `eg-laya`, present only with `--judge`.
+    /// Semantic verdict from `eg-judge`, present only with `--judge`.
     pub verdict: Option<crate::query::judge::Verdict>,
 }
 
@@ -175,10 +175,14 @@ fn arbitrate(ctx: &QueryCtx<'_>, candidates: &mut [ReuseCandidate]) -> String {
         if let Some(verdict) = judge::arbitrate(&setup, ctx.conn, ctx.root, candidate) {
             candidate.verdict = Some(verdict);
             judged += 1;
+            if judged == 1 {
+                // Stamp the usage log once so the dashboard can count judged invocations.
+                crate::journal::set_judged();
+            }
         }
     }
     if gray > 0 && judged == 0 {
-        return "eg: judge: eg-laya returned no verdict (timeout or model error)\n".to_string();
+        return "eg: judge: eg-judge returned no verdict (timeout or model error)\n".to_string();
     }
     if gray > judged {
         return format!(

@@ -752,3 +752,13 @@ details.minimal-details[open] summary.details-summary {
   font-size: 0.82rem;
   line-height: 1.5;
 }
+
+.badge-judge {
+  background: var(--accent-secondary, #6b7280);
+  color: var(--surface, #fff);
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-left: 4px;
+}

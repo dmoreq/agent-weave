@@ -50,6 +50,19 @@ struct Pending {
     session: String,
     arm: String,
     agent: String,
+    judged: bool,
+}
+
+/// Stamp this invocation as having dispatched `eg-judge` successfully.
+///
+/// Called at most once per process from the reuse arbitration path; a no-op when no
+/// journal entry is pending.
+pub fn set_judged() {
+    PENDING.with(|pending| {
+        if let Some(entry) = pending.borrow_mut().as_mut() {
+            entry.judged = true;
+        }
+    });
 }
 
 thread_local! {
@@ -126,6 +139,7 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
             session: env_tag(&["ENGRAM_SESSION", "AW_SESSION"]),
             arm: env_tag(&["ENGRAM_ARM", "AW_ARM"]),
             agent: detect_agent(),
+            judged: false,
         });
     });
 }
@@ -164,6 +178,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "repo": repo_path,
         "repo_name": repo_name,
         "worktree": is_worktree,
+        "judged": pending.judged,
     });
     let line_str = format!("{line}\n");
 

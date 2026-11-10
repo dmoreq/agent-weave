@@ -197,7 +197,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "judge",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Ask the local eg-laya model to arbitrate 45-75% overlap candidates",
+                description: "Ask the local eg-judge model to arbitrate 45-75% overlap candidates",
             },
         ],
         core: true,

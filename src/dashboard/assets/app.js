@@ -192,6 +192,9 @@ function loadReuseData() {
         kpiPrewrite.textContent = count.toLocaleString();
       }
 
+      const kpiJudge = document.getElementById('reuse-kpi-judge');
+      if (kpiJudge) kpiJudge.textContent = (summary.judged_calls || 0).toLocaleString();
+
       const counts = summary.detector_counts || {};
       const kpiDetectors = document.getElementById('reuse-kpi-detectors');
       if (kpiDetectors) {
@@ -844,7 +847,9 @@ function createRecentRow(q) {
     '<td class="num-col text-muted">' + ts + '</td>' +
     '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
     '<td><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span></td>' +
-    '<td><code>' + escapeHtml(q.tool || '—') + '</code></td>' +
+    '<td><code>' + escapeHtml(q.tool || '—') + '</code>' +
+      (q.judged ? ' <span class="badge badge-judge" title="eg-judge dispatched">judge</span>' : '') +
+      '</td>' +
     '<td class="text-right num-col">' + (q.shown || q.result_count || 0) + '</td>' +
     '<td class="text-right num-col">' + latStr + '</td>' +
     '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +

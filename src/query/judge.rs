@@ -1,7 +1,7 @@
-//! Optional semantic arbitration of gray-zone reuse candidates by a local `eg-laya` binary.
+//! Optional semantic arbitration of gray-zone reuse candidates by a local `eg-judge` binary.
 //!
 //! The static detectors are precise at the extremes and blind in the middle band. With
-//! `eg reuse --judge`, candidates whose overlap sits in 45-75% are sent to `eg-laya`, which
+//! `eg reuse --judge`, candidates whose overlap sits in 45-75% are sent to `eg-judge`, which
 //! answers from either a proposition head (`judge-duplicate`) or a bi-encoder cosine
 //! (`similarity`). Every failure — missing binary, missing model, timeout, malformed output —
 //! leaves the static verdict untouched and surfaces one stderr note.
@@ -44,26 +44,26 @@ pub fn is_gray(overlap_pct: u64) -> bool {
 
 /// Resolve the binary and model, or explain once why the judge is unavailable.
 pub fn detect_setup() -> Result<Setup, String> {
-    let binary = match std::env::var("EG_LAYA_BIN") {
+    let binary = match std::env::var("EG_JUDGE_BIN") {
         Ok(value) if !value.is_empty() => PathBuf::from(value),
-        _ => which("eg-laya").ok_or_else(|| {
-            "eg-laya binary not found; set EG_LAYA_BIN or add it to PATH".to_string()
+        _ => which("eg-judge").ok_or_else(|| {
+            "eg-judge binary not found; set EG_JUDGE_BIN or add it to PATH".to_string()
         })?,
     };
-    let model = match std::env::var("EG_LAYA_MODEL") {
+    let model = match std::env::var("EG_JUDGE_MODEL") {
         Ok(value) if !value.is_empty() => PathBuf::from(value),
         _ => {
             let home = std::env::var("HOME")
-                .map_err(|_| "HOME is unset; set EG_LAYA_MODEL".to_string())?;
+                .map_err(|_| "HOME is unset; set EG_JUDGE_MODEL".to_string())?;
             PathBuf::from(home)
                 .join(".engram")
-                .join("laya")
+                .join("judge")
                 .join("model")
         }
     };
     if !model.join("lazy.json").exists() {
         return Err(format!(
-            "no checkpoint at {}; set EG_LAYA_MODEL",
+            "no checkpoint at {}; set EG_JUDGE_MODEL",
             model.display()
         ));
     }
@@ -163,7 +163,7 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<(String, f32)> {
     parse_verdict(&raw)
 }
 
-/// `eg-laya` prints one JSON line; both subcommands carry `decision` plus either
+/// `eg-judge` prints one JSON line; both subcommands carry `decision` plus either
 /// `probability` (proposition head) or `similarity` (bi-encoder cosine).
 pub(crate) fn parse_verdict(raw: &str) -> Option<(String, f32)> {
     let value: Value = serde_json::from_str(raw.trim()).ok()?;
