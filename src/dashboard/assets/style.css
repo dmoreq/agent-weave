@@ -12,7 +12,7 @@
   --intent-primary-soft: rgba(158, 88, 59, 0.10);
   --intent-success: #246A49;
   --intent-success-soft: rgba(36, 106, 73, 0.10);
-  --intent-warning: #A86408;
+  --intent-warning: #945807;
   --intent-warning-soft: rgba(168, 100, 8, 0.10);
   --intent-danger: #B8322C;
   --intent-danger-soft: rgba(184, 50, 44, 0.10);
@@ -145,7 +145,7 @@ h1 {
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   box-shadow: var(--shadow-card);
   margin-bottom: 1.75rem;
   overflow: hidden;
@@ -404,7 +404,7 @@ tr.agent-row-item { cursor: pointer; }
   border-radius: 12px;
   padding: 1.35rem;
   box-shadow: var(--shadow-card);
-  max-height: 860px;
+  max-height: 820px;
   overflow-y: auto;
 }
 
@@ -643,105 +643,7 @@ tr.agent-row-item { cursor: pointer; }
   100% { opacity: 1; transform: scale(1); }
 }
 
-/* Minimalist Accordion / Details */
-details.minimal-details {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color var(--transition-fast);
-}
-details.minimal-details:hover {
-  border-color: var(--border-strong);
-}
-details.minimal-details summary.details-summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.9rem 1.25rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  outline: none;
-}
-details.minimal-details summary.details-summary::-webkit-details-marker {
-  display: none;
-}
-details.minimal-details summary.details-summary::after {
-  content: "▾";
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  transition: transform var(--transition-fast);
-}
-details.minimal-details[open] summary.details-summary::after {
-  transform: rotate(180deg);
-}
-details.minimal-details[open] summary.details-summary {
-  border-bottom: 1px solid var(--border-subtle);
-}
-.details-summary-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.details-summary-hint {
-  font-size: 0.75rem;
-  font-weight: normal;
-}
-.details-body {
-  padding: 1rem 1.25rem;
-  background: var(--bg-canvas);
-}
-
-/* Anti-Reinvention Policy & Detector Matrix */
-.detector-matrix-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
-  margin-top: 0.5rem;
-}
-@media (max-width: 960px) {
-  .detector-matrix-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 520px) {
-  .detector-matrix-grid { grid-template-columns: 1fr; }
-}
-.detector-matrix-card {
-  background: var(--bg-canvas);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 0.9rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.detector-matrix-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-}
-.detector-matrix-desc {
-  font-size: 0.78rem;
-  line-height: 1.45;
-  flex: 1;
-}
-.detector-matrix-spec {
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  background: var(--bg-subtle);
-  padding: 0.35rem 0.55rem;
-  border-radius: 4px;
-}
-.detector-matrix-action {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 0.4rem;
-}
+/* Action recommendation */
 .action-recommendation {
   background: var(--bg-canvas);
   border: 1px solid var(--border-subtle);
@@ -761,4 +663,40 @@ details.minimal-details[open] summary.details-summary {
   border-radius: 3px;
   vertical-align: middle;
   margin-left: 4px;
+}
+
+/* Hover help: one shared node, delegated listeners, copy in app.js */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.eg-tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 280px;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.eg-tip.visible { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .eg-tip { transition: none; }
 }

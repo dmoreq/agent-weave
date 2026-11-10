@@ -8,6 +8,8 @@
 #    - Hard fail on ANY .rs file > 500 lines (Zero exception / Zero allowlist).
 #    - Forbids 'unsafe { ... }', 'unsafe fn', 'unsafe trait', 'unsafe impl' blocks in src/.
 #    - Forbids stray 'dbg!' macros in src/.
+# 4. Stylesheet sanity: balanced comments and braces in every .css file. An
+#    unterminated comment silently drops every rule after the break point.
 
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -109,9 +111,29 @@ for f in "${FILES[@]}"; do
   fi
 done
 
+# 4. Stylesheet Sanity: unterminated comment or unbalanced brace
+python3 - "${FILES[@]}" <<'PY' || ERRORS=$((ERRORS + 1))
+import re, sys, pathlib
+failed = False
+for arg in sys.argv[1:]:
+    if not arg.endswith(".css"):
+        continue
+    text = pathlib.Path(arg).read_text(encoding="utf-8", errors="replace")
+    opens, closes = text.count("/*"), text.count("*/")
+    body = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    if opens != closes:
+        print(f"HYGIENE ERROR [stylesheet]: {arg}: unterminated comment ({opens} openings, {closes} closings)", file=sys.stderr)
+        failed = True
+    elif body.count("{") != body.count("}"):
+        print(f"HYGIENE ERROR [stylesheet]: {arg}: unbalanced braces ({body.count('{')} open, {body.count('}')} close)", file=sys.stderr)
+        failed = True
+if failed:
+    sys.exit(1)
+PY
+
 if [ "$ERRORS" -gt 0 ]; then
   echo "hygiene_check: $ERRORS code-smell check(s) failed." >&2
   exit 1
 fi
 
-echo "hygiene_check: all files clean (leakage, emoji, LOC <= 500, unsafe, dbg) — PASS"
+echo "hygiene_check: all files clean (leakage, emoji, LOC <= 500, unsafe, dbg, css) — PASS"

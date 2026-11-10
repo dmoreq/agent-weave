@@ -318,3 +318,49 @@ fn monitor_tui_render_all_tabs_coverage() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn dashboard_summary_drops_deleted_temp_repo_rows() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let temp_dir = std::env::temp_dir().join(format!("test_summary_stale_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let temp_log = temp_dir.join("usage.log");
+    // The stale row names a temp-root repository that does not exist. The live
+    // row names an ordinary absent path, which keeps its history on purpose.
+    let gone = temp_dir.join("eg-reuse-bench-gone");
+    let live = r#"{"tool":"symbols","exit_code":0,"repo":"/nonexistent-eg-live/archived","repo_name":"archived-repo","latency_us":1000}"#;
+    let stale = format!(
+        r#"{{"tool":"build","exit_code":0,"repo":"{}","repo_name":"eg-reuse-bench-gone","latency_us":2000}}"#,
+        gone.display()
+    );
+    std::fs::write(&temp_log, format!("{live}\n{stale}\n")).unwrap();
+
+    let log_clone = temp_log.clone();
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = handle_client(stream, &log_clone, None, false);
+    });
+
+    let mut client = TcpStream::connect(addr).unwrap();
+    client
+        .write_all(b"GET /api/summary HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).unwrap();
+    assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+    let body_start = resp.find("\r\n\r\n").unwrap() + 4;
+    let json_val: serde_json::Value = serde_json::from_str(&resp[body_start..]).unwrap();
+    assert_eq!(json_val["total_calls"], 1, "{json_val}");
+    // Rows are keyed by the journaled path; the label lives in `display`.
+    let archived = &json_val["repo_aggs"]["/nonexistent-eg-live/archived"];
+    assert!(archived.is_object(), "{json_val}");
+    assert_eq!(archived["display"], "archived-repo", "{json_val}");
+    assert!(
+        json_val["repo_aggs"]["eg-reuse-bench-gone"].is_null(),
+        "{json_val}"
+    );
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}

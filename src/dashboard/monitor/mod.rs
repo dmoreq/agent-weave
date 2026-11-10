@@ -336,7 +336,7 @@ fn is_event_matched(val: &Value, repo_filter: Option<&str>, errors_only: bool) -
             let r_name = val
                 .get("repo_name")
                 .and_then(Value::as_str)
-                .unwrap_or("workspace");
+                .unwrap_or(crate::repo::UNATTRIBUTED);
             if r_name != rf {
                 return false;
             }

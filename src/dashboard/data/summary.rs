@@ -2,10 +2,12 @@
 //! token-savings accounting folded per tool and repository.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
 use serde_json::{json, Value};
 
 use crate::error::ExitClass;
+use crate::repo::UNATTRIBUTED;
 
 pub fn compute_summary(entries: &[Value]) -> Value {
     if entries.is_empty() {
@@ -54,6 +56,7 @@ fn summary_json(mut state: SummaryState, entries: &[Value]) -> Value {
         "graph_saved_tokens": state.graph_saved_tokens, "graph_saved_dollars": graph_saved_dollars,
         "reuse_hits": state.reuse_hits, "judged_calls": state.judged_calls,
         "session_count": total_sessions,
+        "session_tagged_count": state.session_tagged,
         "memory_session_count": memory_sessions, "session_recall_pct": session_recall_pct,
         "tool_aggs": tool_aggs_json, "repo_aggs": repo_aggs_json, "agent_aggs": agent_aggs_json,
         "recent_queries": recent_queries, "recent_errors": state.recent_errors,
@@ -87,6 +90,7 @@ fn empty_summary() -> Value {
         "graph_p50_ms": 0.0, "graph_p95_ms": 0.0, "graph_avg_ms": 0.0,
         "graph_saved_tokens": 0, "graph_saved_dollars": 0.0, "reuse_hits": 0, "judged_calls": 0,
         "session_count": 0, "memory_session_count": 0, "session_recall_pct": 0.0,
+        "session_tagged_count": 0,
         "tool_aggs": {}, "repo_aggs": {}, "agent_aggs": {},
         "recent_queries": [], "recent_errors": [],
         "graph_recent_queries": [], "graph_recent_errors": []
@@ -119,9 +123,13 @@ struct EntryView<'a> {
     lat_us: Option<f64>,
     ts: f64,
     repo_name: &'a str,
+    /// Aggregation key: the journaled absolute path when present, else the
+    /// name. A path keeps two repositories with the same directory name apart.
+    repo_key: &'a str,
     is_worktree: bool,
     agent_name: &'a str,
     session_name: &'a str,
+    session_tagged: bool,
     judged: bool,
     facts: EntryFacts,
 }
@@ -129,6 +137,17 @@ struct EntryView<'a> {
 impl<'a> EntryView<'a> {
     fn parse(e: &'a Value) -> EntryView<'a> {
         let tool = e.get("tool").and_then(Value::as_str).unwrap_or("unknown");
+        // Legacy lines carry `.`, `/`, or a relative path. None of them names a
+        // repository, so they share the unattributed bucket instead of adding
+        // one row per spelling.
+        let repo_path = e
+            .get("repo")
+            .and_then(Value::as_str)
+            .filter(|s| Path::new(s).is_absolute() && *s != "/");
+        let repo_name = e
+            .get("repo_name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty());
         EntryView {
             tool,
             exit_code: e.get("exit_code").and_then(Value::as_i64).unwrap_or(0),
@@ -140,10 +159,8 @@ impl<'a> EntryView<'a> {
             result_count: e.get("result_count").and_then(Value::as_u64).unwrap_or(0) as usize,
             lat_us: e.get("latency_us").and_then(Value::as_f64),
             ts: e.get("ts").and_then(Value::as_f64).unwrap_or(0.0),
-            repo_name: e
-                .get("repo_name")
-                .and_then(Value::as_str)
-                .unwrap_or("workspace"),
+            repo_name: repo_name.unwrap_or(UNATTRIBUTED),
+            repo_key: repo_path.or(repo_name).unwrap_or(UNATTRIBUTED),
             is_worktree: e.get("worktree").and_then(Value::as_bool).unwrap_or(false),
             agent_name: e
                 .get("agent")
@@ -155,6 +172,10 @@ impl<'a> EntryView<'a> {
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
                 .unwrap_or("default"),
+            session_tagged: e
+                .get("session")
+                .and_then(Value::as_str)
+                .is_some_and(|s| !s.is_empty()),
             judged: e.get("judged").and_then(Value::as_bool).unwrap_or(false),
             facts: EntryFacts {
                 is_graph: is_graph_tool(tool),
@@ -180,6 +201,10 @@ struct SummaryState {
     graph_latencies_ms: Vec<f64>,
     sessions: HashSet<String>,
     memory_sessions: HashSet<String>,
+    /// Entries that carried a real `ENGRAM_SESSION` tag. Without one, every
+    /// entry collapses into the synthetic `default` session and the recall
+    /// rate measures nothing.
+    session_tagged: usize,
     tool_aggs: HashMap<String, ToolAgg>,
     repo_aggs: HashMap<String, RepoAgg>,
     agent_aggs: HashMap<String, RepoAgg>,
@@ -211,8 +236,12 @@ impl SummaryState {
         self.tool_aggs.entry(tool.to_string()).or_default()
     }
 
-    fn repo_mut(&mut self, repo: &str) -> &mut RepoAgg {
-        self.repo_aggs.entry(repo.to_string()).or_default()
+    fn repo_mut(&mut self, key: &str, display: &str) -> &mut RepoAgg {
+        let entry = self.repo_aggs.entry(key.to_string()).or_default();
+        if entry.display.is_empty() {
+            entry.display = display.to_string();
+        }
+        entry
     }
 
     fn agent_mut(&mut self, agent: &str) -> &mut RepoAgg {
@@ -224,6 +253,9 @@ impl SummaryState {
             self.graph_calls += 1;
         }
         self.sessions.insert(v.session_name.to_string());
+        if v.session_tagged {
+            self.session_tagged += 1;
+        }
         if v.facts.is_mem_read {
             self.memory_sessions.insert(v.session_name.to_string());
         }
@@ -233,7 +265,7 @@ impl SummaryState {
         let t = self.tool_mut(v.tool);
         t.calls += 1;
         t.shown += v.shown;
-        let r = self.repo_mut(v.repo_name);
+        let r = self.repo_mut(v.repo_key, v.repo_name);
         record_entry_into(r, v.facts, v.ts, v.is_worktree);
         let a = self.agent_mut(v.agent_name);
         record_entry_into(a, v.facts, v.ts, false);
@@ -255,20 +287,20 @@ impl SummaryState {
         self.errors += 1;
         self.recent_errors.push(e.clone());
         self.tool_mut(v.tool).errors += 1;
-        self.repo_mut(v.repo_name).errors += 1;
+        self.repo_mut(v.repo_key, v.repo_name).errors += 1;
         self.agent_mut(v.agent_name).errors += 1;
         if v.facts.is_graph {
             self.graph_errors += 1;
             self.graph_recent_errors.push(e.clone());
-            self.repo_mut(v.repo_name).graph_errors += 1;
+            self.repo_mut(v.repo_key, v.repo_name).graph_errors += 1;
             self.agent_mut(v.agent_name).graph_errors += 1;
         }
         if v.facts.is_reuse {
-            self.repo_mut(v.repo_name).reuse_errors += 1;
+            self.repo_mut(v.repo_key, v.repo_name).reuse_errors += 1;
             self.agent_mut(v.agent_name).reuse_errors += 1;
         }
         if v.facts.is_mem {
-            self.repo_mut(v.repo_name).memory_errors += 1;
+            self.repo_mut(v.repo_key, v.repo_name).memory_errors += 1;
             self.agent_mut(v.agent_name).memory_errors += 1;
         }
     }
@@ -282,19 +314,19 @@ impl SummaryState {
         };
         if reuse_hit > 0 {
             self.reuse_hits += reuse_hit;
-            self.repo_mut(v.repo_name).reuse_hits += reuse_hit;
+            self.repo_mut(v.repo_key, v.repo_name).reuse_hits += reuse_hit;
             self.agent_mut(v.agent_name).reuse_hits += reuse_hit;
         }
         self.saved_tokens += saved;
-        self.repo_mut(v.repo_name).tokens_saved += saved;
+        self.repo_mut(v.repo_key, v.repo_name).tokens_saved += saved;
         self.agent_mut(v.agent_name).tokens_saved += saved;
         if v.facts.is_graph {
             self.graph_saved_tokens += saved;
-            self.repo_mut(v.repo_name).graph_tokens_saved += saved;
+            self.repo_mut(v.repo_key, v.repo_name).graph_tokens_saved += saved;
             self.agent_mut(v.agent_name).graph_tokens_saved += saved;
         }
         if v.facts.is_reuse {
-            self.repo_mut(v.repo_name).reuse_tokens_saved += saved;
+            self.repo_mut(v.repo_key, v.repo_name).reuse_tokens_saved += saved;
             self.agent_mut(v.agent_name).reuse_tokens_saved += saved;
         }
     }
@@ -363,6 +395,7 @@ fn format_aggs(aggs: HashMap<String, RepoAgg>, with_worktree: bool) -> BTreeMap<
     let mut out = BTreeMap::new();
     for (k, v) in aggs {
         let mut entry = json!({
+            "display": v.display,
             "calls": v.calls,
             "errors": v.errors,
             "graph_calls": v.graph_calls,
@@ -401,6 +434,8 @@ struct ToolAgg {
 
 #[derive(Default)]
 struct RepoAgg {
+    /// Label for this row: the journaled `repo_name`, or `(unattributed)`.
+    display: String,
     calls: usize,
     errors: usize,
     graph_calls: usize,
@@ -452,3 +487,6 @@ fn record_entry_into(agg: &mut RepoAgg, facts: EntryFacts, ts: f64, worktree: bo
         agg.memory_writes += 1;
     }
 }
+
+#[cfg(test)]
+mod tests;

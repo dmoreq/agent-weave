@@ -11,7 +11,6 @@
   <header>
     <div class="header-left">
       <h1 id="header-title">Engram Console</h1>
-      <span class="header-meta" id="header-meta">Deterministic Code Graph &middot; Real-Time Anti-Reinvention &middot; Zero-Token Memory</span>
     </div>
     <div class="header-right">
       <span id="live-indicator" class="badge status-ok" style="display: none;"><span class="live-dot"></span>LIVE</span>
@@ -26,11 +25,9 @@
     </button>
     <button class="tab-btn" id="tab-reuse-btn" onclick="switchTab('reuse')">
       <span class="tab-num">02</span> Anti-Reinvention Engine
-      <span class="tab-badge" id="nav-reuse-count">0</span>
     </button>
     <button class="tab-btn" id="tab-memory-btn" onclick="switchTab('memory')">
       <span class="tab-num">03</span> Persistent Project Memory
-      <span class="tab-badge" id="nav-mem-count">0</span>
     </button>
   </nav>
 
@@ -38,22 +35,22 @@
   <div id="tab-telemetry-content">
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Deterministic Graph Queries</div>
+        <div class="kpi-label" data-tip="kpi.graph_queries">Deterministic Graph Queries</div>
         <div id="metric-total-calls" class="kpi-value">0</div>
         <div id="metric-reliability" class="kpi-sub">100.0% clean (0 errors)</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Median Latency (p50)</div>
+        <div class="kpi-label" data-tip="kpi.p50">Median Latency (p50)</div>
         <div id="metric-p50" class="kpi-value text-success">0.0ms</div>
         <div id="metric-latency-sub" class="kpi-sub">p95 = 0.0ms &middot; avg = 0.0ms</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Context Window Token Avoidance</div>
+        <div class="kpi-label" data-tip="kpi.tokens_saved">Context Window Token Avoidance</div>
         <div id="metric-tokens" class="kpi-value">~0</div>
         <div id="metric-dollars" class="kpi-sub">Avoided model context overhead</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Graph Workspace Scope</div>
+        <div class="kpi-label" data-tip="kpi.scope">Graph Workspace Scope</div>
         <div class="kpi-value"><span id="metric-active-repos">0</span> <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: normal;">repos</span></div>
         <div id="metric-active-worktrees" class="kpi-sub">Multi-repository graph index</div>
       </div>
@@ -70,9 +67,9 @@
           <thead>
             <tr>
               <th>Repository / Branch</th>
-              <th class="text-right">Queries</th>
-              <th>Status</th>
-              <th class="text-right">Last Active</th>
+              <th class="text-right">Calls</th>
+              <th data-tip="col.reliability">Status</th>
+              <th class="text-right" data-tip="col.last_active">Last Active</th>
             </tr>
           </thead>
           <tbody id="repos-tbody">
@@ -91,9 +88,9 @@
           <thead>
             <tr>
               <th>Agent Identity</th>
-              <th class="text-right">Queries</th>
-              <th>Reliability</th>
-              <th class="text-right">Tokens Saved</th>
+              <th class="text-right">Calls</th>
+              <th data-tip="col.reliability">Reliability</th>
+              <th class="text-right" data-tip="col.tokens_saved">Graph Tokens Saved</th>
             </tr>
           </thead>
           <tbody id="agents-tbody">
@@ -114,7 +111,7 @@
           <tr>
             <th>Tool Command</th>
             <th class="text-right">Calls</th>
-            <th class="text-right">p50 Latency</th>
+            <th class="text-right" data-tip="col.p50">p50 Latency</th>
           </tr>
         </thead>
         <tbody id="tools-tbody">
@@ -141,7 +138,7 @@
           <option value="ALL">All Agents</option>
         </select>
 
-        <label for="status-filter" class="text-muted" style="font-size: 0.78rem;">Status:</label>
+        <label for="status-filter" class="text-muted" style="font-size: 0.78rem;" data-tip="filter.status">Status:</label>
         <select id="status-filter" class="filter-select" onchange="applyTelemetryFilters()">
           <option value="ALL">All Statuses</option>
           <option value="0">OK (Exit 0)</option>
@@ -160,7 +157,7 @@
             <th>Repository</th>
             <th>Agent</th>
             <th>Tool</th>
-            <th class="text-right">Items</th>
+            <th class="text-right" data-tip="col.items">Items</th>
             <th class="text-right">Latency</th>
             <th>Status</th>
             <th>Arguments</th>
@@ -171,29 +168,6 @@
         </tbody>
       </table>
     </div>
-
-    <!-- Triage Log -->
-    <div class="card">
-      <div class="card-title">
-        <span>Graph Diagnostics &amp; Exceptions</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Non-zero exit resolutions on graph navigation queries (Exit &gt;= 3)</span>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Repository</th>
-            <th>Tool</th>
-            <th>Exit Code</th>
-            <th class="text-right">Latency</th>
-            <th>Arguments</th>
-          </tr>
-        </thead>
-        <tbody id="errors-tbody">
-          <tr><td colspan="6" class="empty-cell">Zero critical errors recorded</td></tr>
-        </tbody>
-      </table>
-    </div>
   </div>
 
   <!-- ==================== TAB 02: REAL-TIME ANTI-REINVENTION ENGINE ==================== -->
@@ -201,29 +175,14 @@
     <!-- Prevention KPI Strip -->
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Duplicate Candidates Identified</div>
+        <div class="kpi-label" data-tip="kpi.candidates">Duplicate Candidates Identified</div>
         <div class="kpi-value text-success" id="reuse-kpi-count">0</div>
         <div class="kpi-sub" id="reuse-kpi-count-sub">Syntactic &amp; structural duplicate twins</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Preventable Excess Code</div>
+        <div class="kpi-label" data-tip="kpi.excess_loc">Preventable Excess Code</div>
         <div class="kpi-value" id="reuse-kpi-loc">~0</div>
-        <div class="kpi-sub">Redundant lines eliminated via consolidation</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="kpi-label">Authoritative Concentration</div>
-        <div class="kpi-value"><span id="reuse-kpi-callers">0.0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">callers</span></div>
-        <div class="kpi-sub">Average caller volume on canonical helpers</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="kpi-label">Pre-Write Helper Discovery</div>
-        <div class="kpi-value"><span id="reuse-kpi-prewrite">0</span> <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: normal;">queries</span></div>
-        <div class="kpi-sub" id="reuse-kpi-detectors">D1: 0 &middot; D2: 0 &middot; D3: 0 &middot; D4: 0</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="kpi-label">Semantic Judge</div>
-        <div class="kpi-value" id="reuse-kpi-judge">0</div>
-        <div class="kpi-sub">Reuse runs with eg-judge verdicts</div>
+        <div class="kpi-sub">Estimated potential, from sampled candidates</div>
       </div>
     </div>
 
@@ -238,9 +197,9 @@
           <thead>
             <tr>
               <th>Repository / Branch</th>
-              <th class="text-right">Invocations</th>
-              <th class="text-right">Duplicate Hits</th>
-              <th class="text-right">Tokens Saved</th>
+              <th class="text-right">Calls</th>
+              <th class="text-right" data-tip="col.hits">Duplicate Hits</th>
+              <th class="text-right" data-tip="col.tokens_saved">Reuse Tokens Saved</th>
             </tr>
           </thead>
           <tbody id="reuse-repos-tbody">
@@ -258,9 +217,9 @@
           <thead>
             <tr>
               <th>Agent Identity</th>
-              <th class="text-right">Invocations</th>
+              <th class="text-right">Calls</th>
               <th class="text-right">Duplicate Hits</th>
-              <th class="text-right">Tokens Saved</th>
+              <th class="text-right">Reuse Tokens Saved</th>
             </tr>
           </thead>
           <tbody id="reuse-agents-tbody">
@@ -279,11 +238,11 @@
 
       <span class="text-muted" style="font-size: 0.78rem;">Detector:</span>
       <div class="pill-group" id="reuse-detector-pills">
-        <button class="filter-pill active" data-det="ALL" onclick="setReuseDetectorFilter('ALL')">All</button>
-        <button class="filter-pill" data-det="D1" onclick="setReuseDetectorFilter('D1')">D1 Callee</button>
-        <button class="filter-pill" data-det="D2" onclick="setReuseDetectorFilter('D2')">D2 Interface</button>
-        <button class="filter-pill" data-det="D3" onclick="setReuseDetectorFilter('D3')">D3 Bypass</button>
-        <button class="filter-pill" data-det="D4" onclick="setReuseDetectorFilter('D4')">D4 Wrapper</button>
+        <button class="filter-pill active" data-det="ALL" data-tip="det.all" onclick="setReuseDetectorFilter('ALL')">All</button>
+        <button class="filter-pill" data-det="D1" data-tip="det.d1" onclick="setReuseDetectorFilter('D1')">D1 Callee</button>
+        <button class="filter-pill" data-det="D2" data-tip="det.d2" onclick="setReuseDetectorFilter('D2')">D2 Interface</button>
+        <button class="filter-pill" data-det="D3" data-tip="det.d3" onclick="setReuseDetectorFilter('D3')">D3 Bypass</button>
+        <button class="filter-pill" data-det="D4" data-tip="det.d4" onclick="setReuseDetectorFilter('D4')">D4 Wrapper</button>
       </div>
 
       <input type="text" id="reuse-search" class="search-input" placeholder="Search candidate, canonical, or evidence..." oninput="renderReuseList()">
@@ -299,86 +258,11 @@
       </div>
     </div>
 
-    <!-- Collapsible Anti-Reinvention Policy & Detector Reference -->
-    <details class="minimal-details" style="margin-top: 1.5rem;">
-      <summary class="details-summary">
-        <span class="details-summary-title">Anti-Reinvention Detector Rules (D1–D4 Specifications)</span>
-        <span class="details-summary-hint text-muted">Click to view deterministic consolidation policies and thresholds</span>
-      </summary>
-      <div class="details-body">
-        <div class="detector-matrix-grid">
-          <div class="detector-matrix-card">
-            <div class="detector-matrix-header">
-              <span class="badge badge-d1">D1</span>
-              <strong>Callee Footprint Overlap</strong>
-            </div>
-            <div class="detector-matrix-desc text-muted">
-              Flags parallel functions calling identical downstream subroutines with shared topological graph dependencies.
-            </div>
-            <div class="detector-matrix-spec">
-              <span class="text-muted">Threshold:</span> <code>&gt;= 70% shared callees</code>
-            </div>
-            <div class="detector-matrix-action">
-              Consolidate into canonical helper with highest caller volume.
-            </div>
-          </div>
-
-          <div class="detector-matrix-card">
-            <div class="detector-matrix-header">
-              <span class="badge badge-d2">D2</span>
-              <strong>Interface Token Similarity</strong>
-            </div>
-            <div class="detector-matrix-desc text-muted">
-              Flags twin utility definitions with identical parameter types, return signatures, and identifier token bags.
-            </div>
-            <div class="detector-matrix-spec">
-              <span class="text-muted">Threshold:</span> <code>&gt;= 80% token overlap</code>
-            </div>
-            <div class="detector-matrix-action">
-              Adopt authoritative signature; deprecate redundant utility copy.
-            </div>
-          </div>
-
-          <div class="detector-matrix-card">
-            <div class="detector-matrix-header">
-              <span class="badge badge-d3">D3</span>
-              <strong>Raw Client Bypass</strong>
-            </div>
-            <div class="detector-matrix-desc text-muted">
-              Flags functions constructing or invoking raw HTTP, database, or external client primitives directly.
-            </div>
-            <div class="detector-matrix-spec">
-              <span class="text-muted">Rule:</span> <code>Bypasses canonical client wrapper</code>
-            </div>
-            <div class="detector-matrix-action">
-              Route access through shared managed client wrapper with pooling &amp; retry.
-            </div>
-          </div>
-
-          <div class="detector-matrix-card">
-            <div class="detector-matrix-header">
-              <span class="badge badge-d4">D4</span>
-              <strong>Pass-Through Wrapper</strong>
-            </div>
-            <div class="detector-matrix-desc text-muted">
-              Flags single-caller forwarding wrappers that introduce layer indirection without validation, transforms, or caching.
-            </div>
-            <div class="detector-matrix-spec">
-              <span class="text-muted">Rule:</span> <code>1 caller &middot; 0 added logic</code>
-            </div>
-            <div class="detector-matrix-action">
-              Inline invocation directly to target; delete redundant intermediate layer.
-            </div>
-          </div>
-        </div>
-      </div>
-    </details>
-
     <!-- Pre-Write Helper Discovery & Duplicate Audits Feed -->
     <div class="card" style="margin-top: 1.5rem;">
       <div class="card-title">
         <span>Pre-Write Discovery &amp; Verification Feed</span>
-        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;">Agent search and reuse queries executed to discover canonical helpers and verify duplicate avoidance</span>
+        <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;"><span id="reuse-feed-count">0</span> queries recorded &middot; agent search and reuse to find canonical helpers</span>
       </div>
       <table>
         <thead>
@@ -403,24 +287,14 @@
     <!-- Memory KPI Strip (4 Core KPIs) -->
     <div class="kpi-strip">
       <div class="kpi-tile">
-        <div class="kpi-label">Read:Write Ratio</div>
-        <div class="kpi-value text-success" id="mem-kpi-rw">0.0&times;</div>
-        <div class="kpi-sub" id="mem-kpi-rw-sub">0 reads &middot; 0 writes</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="kpi-label">Session Recall Rate</div>
+        <div class="kpi-label" data-tip="kpi.recall">Session Recall Rate</div>
         <div class="kpi-value text-success" id="mem-kpi-recall-pct">0.0%</div>
         <div class="kpi-sub" id="mem-kpi-recall-pct-sub">Sessions recalling memory</div>
       </div>
       <div class="kpi-tile">
-        <div class="kpi-label">Anchor Currency Rate</div>
+        <div class="kpi-label" data-tip="kpi.currency">Anchor Currency Rate</div>
         <div class="kpi-value text-success" id="mem-kpi-currency">100.0%</div>
         <div class="kpi-sub" id="mem-kpi-currency-sub">0 fresh &middot; 0 modified &middot; 0 broken</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="kpi-label">Guarded Symbols &amp; Hotspots</div>
-        <div class="kpi-value"><span id="mem-kpi-guarded">0</span> <span style="font-size: 0.85rem; color: var(--text-muted);">anchors</span></div>
-        <div class="kpi-sub" id="mem-kpi-guarded-sub">0 gotchas &middot; 0 decisions</div>
       </div>
     </div>
 
@@ -435,9 +309,9 @@
           <thead>
             <tr>
               <th>Repository / Store</th>
-              <th class="text-right">Operations</th>
-              <th class="text-right">Reads / Writes</th>
-              <th>Reliability</th>
+              <th class="text-right">Calls</th>
+              <th class="text-right" data-tip="col.reads_writes">Reads / Writes</th>
+              <th data-tip="col.reliability">Reliability</th>
             </tr>
           </thead>
           <tbody id="mem-repos-tbody">
@@ -455,7 +329,7 @@
           <thead>
             <tr>
               <th>Agent Identity</th>
-              <th class="text-right">Operations</th>
+              <th class="text-right">Calls</th>
               <th class="text-right">Reads / Writes</th>
               <th>Reliability</th>
             </tr>
@@ -502,7 +376,7 @@
 
       <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
         <input type="checkbox" id="mem-show-superseded" onchange="renderMemoryList()">
-        <span class="text-muted">Include superseded revisions</span>
+        <span class="text-muted" data-tip="filter.superseded">Include superseded revisions</span>
       </label>
     </div>
 

@@ -20,7 +20,7 @@ use serde_json::Value;
 /// explicit root short-circuits the scan (its entry replaces any same-named
 /// one); otherwise every journaled repo with `.engram/<db_rel>` present is added
 /// without displacing existing entries, and the current directory joins last
-/// as "workspace". Shared by the reuse and memories panels so their store
+/// under its own name. Shared by the reuse and memories panels so their store
 /// discovery cannot drift.
 fn discover_repos(
     root: Option<&Path>,
@@ -31,7 +31,10 @@ fn discover_repos(
     if let Some(r) = root {
         let db_path = r.join(".engram").join(db_rel);
         if db_path.is_file() {
-            let name = r.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
+            let name = r
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(crate::repo::UNATTRIBUTED);
             repos.insert(name.to_string(), r.to_path_buf());
         }
     } else {
@@ -50,7 +53,7 @@ fn discover_repos(
             let name = cwd
                 .file_name()
                 .and_then(|n| n.to_str())
-                .unwrap_or("workspace");
+                .unwrap_or(crate::repo::UNATTRIBUTED);
             if cwd.join(".engram").join(db_rel).is_file() && !repos.contains_key(name) {
                 repos.insert(name.to_string(), cwd);
             }
@@ -78,16 +81,8 @@ pub fn read_usage_entries(log_path: &Path) -> Vec<Value> {
                     continue;
                 }
                 if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                    let is_worktree = val
-                        .get("worktree")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false);
-                    if is_worktree {
-                        if let Some(repo) = val.get("repo").and_then(Value::as_str) {
-                            if !Path::new(repo).exists() {
-                                continue;
-                            }
-                        }
+                    if crate::journal::liveness::entry_is_stale(&val) {
+                        continue;
                     }
                     entries.push(val);
                 }

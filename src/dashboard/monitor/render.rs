@@ -377,7 +377,7 @@ pub fn render_event_row<W: Write>(w: &mut W, val: &Value, safe_cols: usize) -> i
     let repo_name = val
         .get("repo_name")
         .and_then(Value::as_str)
-        .unwrap_or("workspace");
+        .unwrap_or(crate::repo::UNATTRIBUTED);
     let r_trunc = truncate_chars(repo_name, 9);
 
     let agent_name = val

@@ -91,7 +91,9 @@ function loadSummaryData() {
       const relEl = document.getElementById('metric-reliability');
       if (relEl) {
         const rel = data.graph_reliability_pct !== undefined ? data.graph_reliability_pct : (data.reliability_pct || 100.0);
-        relEl.textContent = rel.toFixed(1) + '% clean (' + totalErrors + ' errs)';
+        relEl.textContent = totalErrors > 0
+          ? rel.toFixed(1) + '% clean (' + totalErrors + ' errs)'
+          : 'No errors recorded';
       }
 
       const p50El = document.getElementById('metric-p50');
@@ -148,7 +150,7 @@ function loadSummaryData() {
       // Render Recent Queries (Graph only)
       renderRecentQueries(data.graph_recent_queries || data.recent_queries || []);
       // Render Errors Triage (Graph only)
-      renderErrorsTriage(data.graph_recent_errors || data.recent_errors || []);
+
       // Update Memory KPIs
       updateMemoryKpis();
     })
@@ -165,9 +167,6 @@ function loadReuseData() {
       const summary = data.summary || {};
       const totalCandidates = summary.total_candidates !== undefined ? summary.total_candidates : reuseCandidates.length;
 
-      const countBadge = document.getElementById('nav-reuse-count');
-      if (countBadge) countBadge.textContent = totalCandidates.toLocaleString();
-
       const kpiCount = document.getElementById('reuse-kpi-count');
       if (kpiCount) kpiCount.textContent = totalCandidates.toLocaleString();
 
@@ -183,24 +182,13 @@ function loadReuseData() {
       const kpiLoc = document.getElementById('reuse-kpi-loc');
       if (kpiLoc) kpiLoc.textContent = '~' + (summary.preventable_loc || 0).toLocaleString() + ' LOC';
 
-      const kpiCallers = document.getElementById('reuse-kpi-callers');
-      if (kpiCallers) kpiCallers.textContent = (summary.avg_callers || 0.0).toFixed(1);
-
-      const kpiPrewrite = document.getElementById('reuse-kpi-prewrite');
-      if (kpiPrewrite) {
+      const feedCount = document.getElementById('reuse-feed-count');
+      if (feedCount) {
         const count = summary.prewrite_count !== undefined ? summary.prewrite_count : prewriteSearches.length;
-        kpiPrewrite.textContent = count.toLocaleString();
+        feedCount.textContent = count.toLocaleString();
       }
-
-      const kpiJudge = document.getElementById('reuse-kpi-judge');
-      if (kpiJudge) kpiJudge.textContent = (summary.judged_calls || 0).toLocaleString();
 
       const counts = summary.detector_counts || {};
-      const kpiDetectors = document.getElementById('reuse-kpi-detectors');
-      if (kpiDetectors) {
-        kpiDetectors.textContent = 'D1: ' + (counts.D1 || 0) + ' · D2: ' + (counts.D2 || 0) + ' · D3: ' + (counts.D3 || 0) + ' · D4: ' + (counts.D4 || 0);
-      }
-
       updateDetectorPills(counts, reuseCandidates.length);
       populateReuseRepoFilter();
       renderReuseList();
@@ -237,35 +225,27 @@ function loadMemoriesData() {
 function updateMemoryKpis() {
   const currentNotes = allMemories.filter(m => m.is_current);
 
-  const navCount = document.getElementById('nav-mem-count');
-  if (navCount) navCount.textContent = currentNotes.length;
-
-  // KPI 1: Read:Write Ratio
-  let reads = 0;
-  let writes = 0;
-  if (latestSummaryData && latestSummaryData.tool_aggs) {
-    const aggs = latestSummaryData.tool_aggs;
-    reads = (aggs['mem_query'] ? aggs['mem_query'].calls : 0) + (aggs['mem_get'] ? aggs['mem_get'].calls : 0);
-    writes = (aggs['mem_write'] ? aggs['mem_write'].calls : 0) + (aggs['mem_touch'] ? aggs['mem_touch'].calls : 0);
-  }
-  const rwRatio = writes === 0 ? (reads > 0 ? reads.toFixed(1) + '×' : '0.0×') : (reads / writes).toFixed(1) + '×';
-  const rwEl = document.getElementById('mem-kpi-rw');
-  if (rwEl) rwEl.textContent = rwRatio;
-  const rwSubEl = document.getElementById('mem-kpi-rw-sub');
-  if (rwSubEl) rwSubEl.textContent = reads + ' reads · ' + writes + ' writes';
-
-  // KPI 2: Session Recall Rate
-  const recallPct = latestSummaryData ? (latestSummaryData.session_recall_pct || 0.0).toFixed(1) + '%' : '0.0%';
+  // KPI 1: Session Recall Rate
+  // The rate only means something when callers tag their sessions: without a
+  // tag every run collapses into the synthetic `default` bucket.
+  const taggedSessions = latestSummaryData ? (latestSummaryData.session_tagged_count || 0) : 0;
+  const recallPct = taggedSessions === 0
+    ? '—'
+    : (latestSummaryData ? (latestSummaryData.session_recall_pct || 0.0).toFixed(1) + '%' : '0.0%');
   const recallEl = document.getElementById('mem-kpi-recall-pct');
   if (recallEl) recallEl.textContent = recallPct;
   const recallSubEl = document.getElementById('mem-kpi-recall-pct-sub');
   if (recallSubEl) {
-    const memSessions = latestSummaryData ? (latestSummaryData.memory_session_count || 0) : 0;
-    const totalSessions = latestSummaryData ? (latestSummaryData.session_count || 0) : 0;
-    recallSubEl.textContent = memSessions + ' of ' + totalSessions + ' sessions';
+    if (taggedSessions === 0) {
+      recallSubEl.textContent = 'Set ENGRAM_SESSION to measure';
+    } else {
+      const memSessions = latestSummaryData ? (latestSummaryData.memory_session_count || 0) : 0;
+      const totalSessions = latestSummaryData ? (latestSummaryData.session_count || 0) : 0;
+      recallSubEl.textContent = memSessions + ' of ' + totalSessions + ' sessions';
+    }
   }
 
-  // KPI 3: Anchor Currency Rate
+  // KPI 2: Anchor Currency Rate
   const notesWithRefs = currentNotes.filter(m => m.refs && m.refs.length > 0);
   let freshCount = 0;
   let modifiedCount = 0;
@@ -281,25 +261,6 @@ function updateMemoryKpis() {
   const currencySubEl = document.getElementById('mem-kpi-currency-sub');
   if (currencySubEl) {
     currencySubEl.textContent = freshCount + ' fresh · ' + modifiedCount + ' modified · ' + brokenCount + ' broken';
-  }
-
-  // KPI 4: Guarded Symbols & Hotspots
-  const gotchas = currentNotes.filter(m => m.kind === 'gotcha').length;
-  const decisions = currentNotes.filter(m => m.kind === 'decision').length;
-  const facts = currentNotes.filter(m => m.kind === 'fact').length;
-  const tasks = currentNotes.filter(m => m.kind === 'task').length;
-  const procedures = currentNotes.filter(m => m.kind === 'procedure').length;
-  const guardedEl = document.getElementById('mem-kpi-guarded');
-  if (guardedEl) guardedEl.textContent = currentNotes.length;
-  const guardedSub = document.getElementById('mem-kpi-guarded-sub');
-  if (guardedSub) {
-    const details = [];
-    if (gotchas > 0) details.push(gotchas + ' gotchas');
-    if (decisions > 0) details.push(decisions + ' decisions');
-    if (facts > 0) details.push(facts + ' facts');
-    if (tasks > 0) details.push(tasks + ' tasks');
-    if (procedures > 0) details.push(procedures + ' procedures');
-    guardedSub.textContent = details.length > 0 ? details.join(' · ') : currentNotes.length + ' active notes';
   }
 
   updateActionCenter(currentNotes, modifiedCount, brokenCount);
@@ -406,7 +367,7 @@ function renderReposTable(repoAggs) {
   entries.forEach(([rName, rData]) => {
     if (select) {
       const opt = document.createElement('option');
-      opt.value = rName;
+      opt.value = rData.display || rName;
       opt.textContent = rName;
       select.appendChild(opt);
     }
@@ -426,7 +387,7 @@ function renderReposTable(repoAggs) {
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rName) + '</strong> ' + wtBadge + '</div>' +
+      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rData.display || rName) + '</strong> ' + wtBadge + '</div>' +
       '  <div class="row-track"><div class="row-track-fill" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -543,7 +504,7 @@ function renderReuseReposTable(repoAggs) {
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rName) + '</strong> ' + wtBadge + '</div>' +
+      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rData.display || rName) + '</strong> ' + wtBadge + '</div>' +
       '  <div class="row-track"><div class="row-track-fill" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -654,7 +615,7 @@ function renderMemoryReposTable(repoAggs) {
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rName) + '</strong> ' + wtBadge + '</div>' +
+      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rData.display || rName) + '</strong> ' + wtBadge + '</div>' +
       '  <div class="row-track"><div class="row-track-fill" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -781,36 +742,6 @@ function renderRecentQueries(queries) {
   tbody.innerHTML = '';
   graphQueries.forEach(q => {
     tbody.appendChild(createRecentRow(q));
-  });
-}
-
-function renderErrorsTriage(errors) {
-  const tbody = document.getElementById('errors-tbody');
-  if (!tbody) return;
-
-  const graphErrors = errors.filter(e => GRAPH_TOOLS.includes(e.tool));
-  if (graphErrors.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">Zero critical graph errors recorded</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = '';
-  graphErrors.forEach(e => {
-    const tr = document.createElement('tr');
-    const ts = e.ts ? new Date(e.ts * 1000).toLocaleTimeString() : '—';
-    const rName = e.repo_name || 'workspace';
-    const latStr = e.latency_us ? (e.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
-    const argsStr = JSON.stringify(e.args || {});
-
-    tr.innerHTML =
-      '<td class="num-col text-muted">' + ts + '</td>' +
-      '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
-      '<td><code>' + escapeHtml(e.tool || '—') + '</code></td>' +
-      '<td><span class="badge status-err">Exit ' + e.exit_code + '</span></td>' +
-      '<td class="text-right num-col">' + latStr + '</td>' +
-      '<td class="args-cell"><code>' + escapeHtml(argsStr) + '</code></td>';
-
-    tbody.appendChild(tr);
   });
 }
 
@@ -959,19 +890,19 @@ function renderReuseList() {
 
     const detBadgeClass = 'badge badge-' + c.detector.toLowerCase();
     const repoBadge = '<span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>';
-    const locBadge = '<span class="badge status-warn">-' + c.loc_saving + ' LOC</span>';
+    const locBadge = '<span class="badge status-warn" data-tip="card.loc_saving">-' + c.loc_saving + ' LOC</span>';
 
     card.innerHTML =
       '<div class="item-card-head">' +
       '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
-      '    <span class="' + detBadgeClass + '">' + c.detector + '</span>' +
-      '    <span class="badge" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' +
+      '    <span class="' + detBadgeClass + '" data-tip="det.' + c.detector.toLowerCase() + '">' + c.detector + '</span>' +
+      '    <span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' +
       '    ' + locBadge +
       '  </div>' +
       '  ' + repoBadge +
       '</div>' +
       '<div class="item-key">' + escapeHtml(c.symbol) + '</div>' +
-      '<div class="item-snippet">&rarr; canonical: <code>' + escapeHtml(c.canonical) + '</code> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span></div>' +
+      '<div class="item-snippet">&rarr; canonical: <code>' + escapeHtml(c.canonical) + '</code> <span class="badge status-ok" data-tip="card.callers">[callers=' + c.canonical_callers + ']</span></div>' +
       '<div class="item-meta">' +
       '  <span>' + escapeHtml(c.canonical_file) + ':' + c.canonical_line + '</span>' +
       (c.shared_evidence ? '<span>&bull;</span><span>' + escapeHtml(c.shared_evidence) + '</span>' : '') +
@@ -981,9 +912,11 @@ function renderReuseList() {
   });
 
   if (filtered[selectedReuseIndex]) {
+    attachTipDescriptions(container);
     renderReuseDossier(filtered[selectedReuseIndex]);
   } else {
     selectedReuseIndex = 0;
+    attachTipDescriptions(container);
     renderReuseDossier(filtered[0] || null);
   }
 }
@@ -1004,11 +937,11 @@ function renderReuseDossier(c) {
     '<div class="dossier-head">' +
     '  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">' +
     '    <div style="display:flex; gap:0.45rem; align-items:center;">' +
-    '      <span class="' + detBadgeClass + '">' + c.detector + '</span>' +
-    '      <span class="badge status-ok">' + c.overlap_pct + '% OVERLAP</span>' +
+    '      <span class="' + detBadgeClass + '" data-tip="det.' + c.detector.toLowerCase() + '">' + c.detector + '</span>' +
+    '      <span class="badge status-ok" data-tip="card.overlap">' + c.overlap_pct + '% OVERLAP</span>' +
     '      <span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>' +
     '    </div>' +
-    '    <span class="badge status-warn">Save ~' + c.loc_saving + ' LOC</span>' +
+    '    <span class="badge status-warn" data-tip="card.loc_saving">Save ~' + c.loc_saving + ' LOC</span>' +
     '  </div>' +
     '  <div class="dossier-title">' + escapeHtml(c.symbol) + '</div>' +
     '  <div class="text-muted" style="font-size:0.82rem;">Authoritative Target: <strong>' + escapeHtml(c.canonical) + '</strong> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span></div>' +
@@ -1035,8 +968,10 @@ function renderReuseDossier(c) {
     '  </div>' +
     '</div>' +
     '<div class="action-recommendation">' +
-    '  <strong>Consolidation Recommendation:</strong> Import authoritative helper <code>' + escapeHtml(c.canonical) + '</code> <span class="badge status-ok">[callers=' + c.canonical_callers + ']</span> and remove redundant definition <code>' + escapeHtml(c.symbol) + '</code> to eliminate drift and save ~' + c.loc_saving + ' LOC.' +
+    '  <strong>Consolidation Recommendation:</strong> Import authoritative helper <code>' + escapeHtml(c.canonical) + '</code> <span class="badge status-ok" data-tip="card.callers">[callers=' + c.canonical_callers + ']</span> and remove redundant definition <code>' + escapeHtml(c.symbol) + '</code> to eliminate drift and save ~' + c.loc_saving + ' LOC.' +
     '</div>';
+
+  attachTipDescriptions(container);
 }
 
 function renderPrewriteTable() {
@@ -1527,30 +1462,6 @@ function handleLiveEvent(q) {
         recentTbody.removeChild(recentTbody.lastChild);
       }
     }
-
-    if (exitCode >= 3) {
-      const errorsTbody = document.getElementById('errors-tbody');
-      if (errorsTbody) {
-        const emptyRow = errorsTbody.querySelector('.empty-cell');
-        if (emptyRow) errorsTbody.innerHTML = '';
-        const ts = q.ts ? new Date(q.ts * 1000).toLocaleTimeString() : '—';
-        const rName = q.repo_name || 'workspace';
-        const latStr = q.latency_us ? (q.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
-        const argsStr = JSON.stringify(q.args || {});
-        const errRow = document.createElement('tr');
-        errRow.innerHTML =
-          '<td class="num-col text-muted">' + ts + '</td>' +
-          '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
-          '<td><code>' + escapeHtml(q.tool || '—') + '</code></td>' +
-          '<td><span class="badge status-err">Exit ' + exitCode + '</span></td>' +
-          '<td class="text-right num-col">' + latStr + '</td>' +
-          '<td class="args-cell"><code>' + escapeHtml(argsStr) + '</code></td>';
-        errorsTbody.insertBefore(errRow, errorsTbody.firstChild);
-        while (errorsTbody.children.length > 25) {
-          errorsTbody.removeChild(errorsTbody.lastChild);
-        }
-      }
-    }
   } else if (tool === 'search' || tool === 'reuse') {
     // 3. Real-time updates for Tab 02 (Anti-Reinvention)
     const args = q.args || {};
@@ -1566,17 +1477,16 @@ function handleLiveEvent(q) {
     prewriteSearches.unshift(newSearch);
     if (prewriteSearches.length > 40) prewriteSearches.pop();
     renderPrewriteTable();
-    const kpiPrewrite = document.getElementById('reuse-kpi-prewrite');
-    if (kpiPrewrite) {
-      const cur = parseInt(kpiPrewrite.textContent.replace(/,/g, ''), 10) || 0;
-      kpiPrewrite.textContent = (cur + 1).toLocaleString();
-      flashElement(kpiPrewrite);
+    const feedCountEl = document.getElementById('reuse-feed-count');
+    if (feedCountEl) {
+      const cur = parseInt(feedCountEl.textContent.replace(/,/g, ''), 10) || 0;
+      feedCountEl.textContent = (cur + 1).toLocaleString();
+      flashElement(feedCountEl);
     }
   } else if (tool.startsWith('mem_')) {
-    // 4. Real-time updates for Tab 03 (Project Memory)
     updateMemoryKpis();
-    const rwEl = document.getElementById('mem-kpi-rw');
-    if (rwEl) flashElement(rwEl);
+    const currencyEl = document.getElementById('mem-kpi-currency');
+    if (currencyEl) flashElement(currencyEl);
   }
 
   // 5. Update the active tab breakdown tables immediately using in-memory state
@@ -1603,8 +1513,122 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// Hover help. One copy table, one shared node, delegated listeners.
+const TIP = {
+  'kpi.graph_queries': 'Code lookups agents ran against the index instead of reading files.',
+  'kpi.p50': 'Half of all queries finished faster than this.',
+  'kpi.tokens_saved': 'Tokens an agent did not spend reading source files.',
+  'kpi.scope': 'Repositories and worktrees with an index in this log.',
+  'kpi.candidates': 'Functions that look like near-copies of another function.',
+  'kpi.excess_loc': 'Lines you could delete by merging duplicates. Estimated from sampled candidates.',
+  'kpi.recall': 'Share of tagged sessions that read memory before acting.',
+  'kpi.currency': 'Share of memory refs that still point at existing code.',
+  'col.last_active': 'Most recent run recorded for this row.',
+  'col.p50': 'Half of runs were faster than this.',
+  'col.items': 'Results returned by the query.',
+  'col.reliability': 'Share of runs that finished without error.',
+  'col.tokens_saved': 'Tokens saved versus reading the source files.',
+  'col.hits': 'Duplicate candidates found in those runs.',
+  'col.reads_writes': 'Memory reads versus notes written.',
+  'card.overlap': 'How much evidence the two functions share.',
+  'card.callers': 'Places that already call the recommended helper.',
+  'card.loc_saving': 'Lines removed if the duplicate is merged away.',
+  'det.all': 'Show every detection rule.',
+  'det.d1': 'Both functions call the same downstream functions.',
+  'det.d2': 'Same parameter types and name tokens.',
+  'det.d3': 'Calls a raw client the project already wraps.',
+  'det.d4': 'One-caller wrapper that only forwards a call.',
+  'filter.status': 'Show only runs with these exit codes.',
+  'filter.superseded': 'Show older revisions replaced by a newer note.'
+};
+
+let tipSeq = 0;
+
+function attachTipDescriptions(root) {
+  const scope = root || document;
+  scope.querySelectorAll('[data-tip]').forEach((el) => {
+    const text = TIP[el.getAttribute('data-tip')];
+    if (!text || el.querySelector('.sr-only')) return;
+    tipSeq += 1;
+    const id = 'tip-' + tipSeq;
+    const span = document.createElement('span');
+    span.className = 'sr-only';
+    span.id = id;
+    span.textContent = text;
+    el.appendChild(span);
+    el.setAttribute('aria-describedby', id);
+  });
+}
+
+function initTips() {
+  const tip = document.createElement('div');
+  tip.className = 'eg-tip';
+  tip.id = 'eg-tip';
+  tip.setAttribute('role', 'tooltip');
+  document.body.appendChild(tip);
+
+  // Static hosts get their description up front so a screen reader reads it on
+  // focus, before any hover happens. Re-rendered content calls this again.
+  attachTipDescriptions(document);
+
+  let timer = null;
+  let current = null;
+
+  const place = (el) => {
+    const r = el.getBoundingClientRect();
+    const t = tip.getBoundingClientRect();
+    let top = r.top - t.height - 8;
+    if (top < 8) top = r.bottom + 8;
+    let left = r.left + r.width / 2 - t.width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - t.width - 8));
+    tip.style.top = Math.round(top) + 'px';
+    tip.style.left = Math.round(left) + 'px';
+  };
+
+  const show = (el) => {
+    const text = TIP[el.getAttribute('data-tip')];
+    if (!text) return;
+    current = el;
+    tip.textContent = text;
+    tip.classList.add('visible');
+    place(el);
+  };
+
+  const hide = () => {
+    clearTimeout(timer);
+    current = null;
+    tip.classList.remove('visible');
+  };
+
+  document.addEventListener('mouseover', (e) => {
+    if (window.matchMedia('(pointer: coarse)').matches) return;
+    const el = e.target.closest('[data-tip]');
+    if (!el || el === current) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => show(el), 250);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const el = e.target.closest('[data-tip]');
+    if (!el) return;
+    if (el === current) hide();
+    else clearTimeout(timer);
+  });
+
+  document.addEventListener('focusin', (e) => {
+    const el = e.target.closest('[data-tip]');
+    if (el) show(el);
+  });
+  document.addEventListener('focusout', hide);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hide();
+  });
+  window.addEventListener('scroll', hide, true);
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  initTips();
   loadSummaryData();
   loadReuseData();
   loadMemoriesData();

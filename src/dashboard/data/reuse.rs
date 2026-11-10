@@ -84,10 +84,24 @@ pub fn collect_reuse_candidates(
             )
         })
         .count();
+    let judged_calls = count_judged(entries);
 
-    let summary =
-        summarize_reuse_metrics(&candidates_json, total_corpus_candidates, prewrite_count);
+    let summary = summarize_reuse_metrics(
+        &candidates_json,
+        total_corpus_candidates,
+        prewrite_count,
+        judged_calls,
+    );
     Ok((candidates_json, summary, prewrite_searches))
+}
+
+/// Journaled reuse runs that dispatched the semantic judge. The dashboard tile
+/// reads this field, so it must be emitted even when the count is zero.
+fn count_judged(entries: &[Value]) -> usize {
+    entries
+        .iter()
+        .filter(|e| e.get("judged").and_then(Value::as_bool).unwrap_or(false))
+        .count()
 }
 
 fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
@@ -247,6 +261,7 @@ fn summarize_reuse_metrics(
     candidates_json: &[Value],
     total_corpus_candidates: usize,
     prewrite_count: usize,
+    judged_calls: usize,
 ) -> Value {
     let sample_cands = candidates_json.len();
     let total_cands = total_corpus_candidates.max(sample_cands);
@@ -278,6 +293,7 @@ fn summarize_reuse_metrics(
         "sample_candidates": sample_cands,
         "preventable_loc": prev_loc,
         "prewrite_count": prewrite_count,
+        "judged_calls": judged_calls,
         "avg_callers": (avg_callers * 10.0).round() / 10.0,
         "detector_counts": {
             "D1": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D1"))).count(),
@@ -286,4 +302,29 @@ fn summarize_reuse_metrics(
             "D4": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D4"))).count(),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn counts_only_judged_entries() {
+        let entries = vec![
+            json!({"tool": "reuse", "judged": true}),
+            json!({"tool": "reuse", "judged": false}),
+            json!({"tool": "search"}),
+            json!({"tool": "reuse", "judged": true}),
+        ];
+        assert_eq!(count_judged(&entries), 2);
+    }
+
+    #[test]
+    fn summary_always_emits_judged_calls() {
+        let summary = summarize_reuse_metrics(&[], 0, 0, 7);
+        assert_eq!(summary["judged_calls"], 7);
+        assert_eq!(summary["total_candidates"], 0);
+        assert_eq!(summary["prewrite_count"], 0);
+    }
 }
