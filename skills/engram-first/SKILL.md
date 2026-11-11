@@ -78,6 +78,7 @@ Reach for these when the routed commands do not answer the question:
 | Where did resolution fail | `eg unresolved` — summaries; `eg unresolved --names` lists sites; `[internal]` indicates resolver gaps |
 | Repository totals | `eg stats [--path <dir>]` — build-time summary, not a freshness check |
 | Telemetry & Quality | `eg usage [--global] [--quality]` — query counts, latency distributions, token savings, and duplicate warnings |
+| Health & Effectiveness | `eg audit [--global] [--json]` — read-only check registry over telemetry, index, and memory refs; see `docs/health.md` |
 
 ---
 

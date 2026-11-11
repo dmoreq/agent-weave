@@ -59,7 +59,14 @@ Verify index health and coverage:
 eg doctor
 ```
 
-`eg doctor` checks database integrity, parser health, and changed file ratios.
+`eg doctor` checks database integrity, parser health, and changed file ratios. For a read-only health report that also covers telemetry and memory refs, run:
+
+```bash
+eg audit
+eg audit --json
+```
+
+`eg audit` separates health from data coverage and applies the standards in [health](health.md).
 
 ---
 

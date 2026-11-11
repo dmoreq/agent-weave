@@ -147,6 +147,7 @@ The 10 core command surfaces cover complete code navigation, anti-reinvention, a
 - `eg stats [--path <dir>]`: Build-time summary of files, symbols, edges, and index bytes.
 - `eg unresolved [--names]`: Inspect where static resolution could not resolve call sites.
 - `eg usage [--global] [--quality]`: View latency distribution, token savings, and query success telemetry (local or machine-wide).
+- `eg audit [--global] [--json] [--days N]`: Read-only health report with fixed check thresholds, baseline comparison, and redacted JSON for automation. See [Health](docs/health.md).
 - `eg dashboard [--port 7890] [--open]`: Native live streaming Web SSE dashboard (Telemetry, Anti-Reinvention, Memory).
 - `eg monitor [--repo <NAME>] [--errors-only]`: Real-time terminal ANSI query event stream.
 - `eg-dashboard`: Convenience launcher for native web dashboard.
