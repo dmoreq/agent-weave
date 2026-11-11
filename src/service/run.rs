@@ -28,10 +28,39 @@ fn run_diag(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
                 stdout: format!("{line}\n"),
                 stderr,
                 shown: Some(shown),
+                exit_code: None,
             })
         }
         CommandRequest::Doctor { invalidate } => run_doctor(root_arg, *invalidate),
         CommandRequest::Usage { quality, global } => run_usage(root_arg, *quality, *global),
+        CommandRequest::Audit {
+            json,
+            global,
+            days,
+            baseline_days,
+            all_checks,
+            reveal_paths,
+            fail_on,
+        } => {
+            let out = crate::audit::execute(
+                &crate::audit::AuditRequest {
+                    json: *json,
+                    global: *global,
+                    days: *days,
+                    baseline_days: *baseline_days,
+                    all_checks: *all_checks,
+                    reveal_paths: *reveal_paths,
+                    fail_on: fail_on.clone(),
+                },
+                root_arg,
+            )?;
+            Ok(ArmOut {
+                stdout: out.stdout,
+                stderr: String::new(),
+                shown: None,
+                exit_code: Some(out.exit_code),
+            })
+        }
         _ => unreachable!("run_diag called with a non-diagnostic request"),
     }
 }
@@ -164,6 +193,7 @@ fn run_analysis_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<A
                 stdout: format!("{line}\n"),
                 stderr: String::new(),
                 shown: Some(1),
+                exit_code: None,
             })
         }
         _ => unreachable!("run_analysis_query called with a non-analysis request"),

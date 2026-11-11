@@ -1,5 +1,6 @@
 //! Library surface for integration tests (binary entry lives in main.rs).
 
+pub mod audit;
 pub mod build;
 pub mod cli;
 pub mod dashboard;

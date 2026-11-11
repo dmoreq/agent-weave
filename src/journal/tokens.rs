@@ -30,9 +30,10 @@ const QUERY_CALL_TOKENS: usize = 100;
 /// by `service::tests::estimated_tokens_saved_covers_every_journaled_tool`.
 pub const UNPRICED_TOOLS: &[&str] = &[
     "doctor",
+    "usage",
+    "audit",
     "unresolved",
     "stats",
-    "usage",
     "mem_write",
     "mem_query",
     "mem_touch",

@@ -11,6 +11,12 @@ use error::EgError;
 fn main() {
     quiet_pipe_hook();
     let cli = cli::Cli::parse();
+    // `--global` reads one machine-wide journal; an explicit --root would be
+    // silently ignored, so reject the combination at the CLI boundary.
+    if matches!(&cli.cmd, cli::Cmd::Audit { global: true, .. }) && cli.root.is_some() {
+        eprintln!("eg: usage: audit --global does not accept --root");
+        std::process::exit(2);
+    }
     let root_arg = cli.root.clone();
     let no_journal = cli.no_journal;
     // The MCP server is a protocol loop, not a one-shot command; it journals
@@ -20,6 +26,7 @@ fn main() {
             cli.cmd,
             cli::Cmd::Doctor { .. }
                 | cli::Cmd::Usage { .. }
+                | cli::Cmd::Audit { .. }
                 | cli::Cmd::Mcp { .. }
                 | cli::Cmd::Dashboard { .. }
                 | cli::Cmd::Monitor { .. }

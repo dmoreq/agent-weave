@@ -4,17 +4,8 @@
 use super::*;
 use crate::repo::UNATTRIBUTED;
 
-/// Bounded reader for one journal generation: reject non-regular files and
-/// cap allocation at 16 MiB even when the file is oversized or growing.
-const MAX_LOG_READ: u64 = 16 * 1024 * 1024;
-
-fn read_log_bounded(path: &Path) -> Option<String> {
-    let file = crate::walk::open_regular_file(path).ok().flatten()?;
-    let mut reader = file.take(MAX_LOG_READ);
-    let mut out = String::new();
-    reader.read_to_string(&mut out).ok()?;
-    Some(out)
-}
+mod read;
+pub(crate) use read::*;
 
 /// Parsed usage line. Queries and signatures can contain quotes, backslashes,
 /// and control characters, so this must go through serde_json rather than
@@ -118,17 +109,18 @@ pub fn global_summary(quality: bool) -> crate::error::Result<Vec<String>> {
 }
 
 fn load_usage_lines_from_path(base_log: &Path) -> crate::error::Result<String> {
+    let log = read_usage_log(base_log);
     let mut lines = String::new();
-    for gen in [".1", ""] {
-        let path = if gen.is_empty() {
-            base_log.to_path_buf()
-        } else {
-            let mut p = base_log.to_path_buf().into_os_string();
-            p.push(gen);
-            PathBuf::from(p)
-        };
-        if let Some(content) = read_log_bounded(&path) {
-            lines.push_str(&content);
+    for gen in log.generations {
+        if gen.status != GenerationStatus::Read {
+            continue;
+        }
+        lines.push_str(&gen.text);
+        // A generation boundary is a line boundary. Without this, a rotated
+        // file that does not end in `\n` splices its last record into the
+        // current file's first record.
+        if !lines.is_empty() && !lines.ends_with('\n') {
+            lines.push('\n');
         }
     }
     if lines.trim().is_empty() {

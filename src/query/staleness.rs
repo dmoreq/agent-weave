@@ -36,11 +36,20 @@ pub(crate) fn file_changed(ctx: &QueryCtx<'_>, rel: &str) -> bool {
     let Ok((stored_mtime, stored_size, stored_hash)) = row else {
         return false;
     };
+    // Index rows are attacker-authored in a cloned repository. Never join an
+    // absolute, parent-traversing, or backslash path onto the root, and never
+    // follow a symlink out of the repository.
+    if !safe_index_path(rel) {
+        return true;
+    }
     let abs = root.join(rel);
-    let Some(size) = db::stat_size(&abs) else {
+    let Ok(meta) = std::fs::symlink_metadata(&abs) else {
         return true;
     };
-    if size != stored_size {
+    if !meta.is_file() || meta.file_type().is_symlink() {
+        return true;
+    }
+    if meta.len() != stored_size as u64 {
         return true;
     }
     let Some(mtime) = db::stat_mtime(&abs) else {
@@ -57,4 +66,35 @@ pub(crate) fn file_changed(ctx: &QueryCtx<'_>, rel: &str) -> bool {
         return hash != stored_hash;
     }
     false
+}
+
+/// A repo-relative indexed path may contain only normal components. This
+/// mirrors the write-path containment rule and rejects Windows separators on
+/// every platform so an index built elsewhere cannot escape the root.
+fn safe_index_path(rel: &str) -> bool {
+    if rel.is_empty() || rel.contains('\\') {
+        return false;
+    }
+    let path = std::path::Path::new(rel);
+    if path.is_absolute() {
+        return false;
+    }
+    path.components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_index_path;
+
+    #[test]
+    fn index_paths_must_stay_relative_and_contained() {
+        assert!(safe_index_path("src/main.rs"));
+        assert!(safe_index_path("a/b/c.ts"));
+        assert!(!safe_index_path(""));
+        assert!(!safe_index_path("/etc/passwd"));
+        assert!(!safe_index_path("../outside"));
+        assert!(!safe_index_path("a/../../outside"));
+        assert!(!safe_index_path("a\\b"));
+    }
 }

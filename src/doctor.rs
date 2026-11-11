@@ -74,18 +74,31 @@ fn clear_eg_dir(dir: &Path, keep: impl Fn(&str) -> bool) -> Result<bool> {
 
 pub fn report(root: &Path) -> Result<Vec<String>> {
     let conn = db::open_for_query(root)?;
+    let snap = snapshot_from_conn(&conn, root)?;
     let mut out = vec![format!("eg: doctor report for {}", root.display())];
 
-    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-    out.push(format!("  integrity: {integrity}"));
-
-    push_meta_lines(&conn, &mut out)?;
-    push_parse_coverage(&conn, &mut out)?;
-
-    let stale = stale_ratio(&conn, root)?;
+    out.push(format!("  integrity: {}", snap.integrity));
+    out.push(format!("  schema version: {}", snap.schema_version));
+    for (label, value) in [
+        ("eg version", &snap.engram_version),
+        ("grammar version", &snap.grammar_version),
+        ("built at", &snap.built_at),
+        ("source rev", &snap.source_rev),
+    ] {
+        out.push(format!(
+            "  {label}: {}",
+            value.clone().unwrap_or_else(|| "<missing>".into())
+        ));
+    }
+    out.push(format!(
+        "  parse coverage: {}/{} files with errors ({:.1}%)",
+        snap.parse_errors,
+        snap.files,
+        snap.parse_error_rate * 100.0
+    ));
     out.push(format!(
         "  stale ratio: {:.1}% of indexed files changed on disk",
-        stale * 100.0
+        snap.stale_ratio * 100.0
     ));
 
     report_orphans(root, &mut out);
@@ -96,51 +109,66 @@ pub fn report(root: &Path) -> Result<Vec<String>> {
         let _ = crate::journal::prune_stale_entries_all(&global_log);
     }
 
-    let size = db::file_size(&db::db_path(root));
-    out.push(format!("  db size: {size} bytes (target < 52428800)"));
+    out.push(format!(
+        "  db size: {} bytes (target < 52428800)",
+        snap.db_bytes
+    ));
 
     out.push(memory_report_line(root));
 
     Ok(out)
 }
 
-/// The schema-version row and the four meta rows (`eg version`, grammar,
-/// built-at, source rev).
-fn push_meta_lines(conn: &Connection, out: &mut Vec<String>) -> Result<()> {
-    let user_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    out.push(format!("  schema version: {user_version}"));
-    for (key, label) in [
-        (db::meta_keys::ENGRAM_VERSION, "eg version"),
-        (db::meta_keys::GRAMMAR_VERSION, "grammar version"),
-        (db::meta_keys::BUILT_AT, "built at"),
-        (db::meta_keys::SOURCE_REV, "source rev"),
-    ] {
-        let v = db::meta_get(conn, key);
-        out.push(format!(
-            "  {label}: {}",
-            v.unwrap_or_else(|| "<missing>".into())
-        ));
-    }
-    Ok(())
+/// Read-only index facts shared by `eg doctor` and `eg audit`. No pruning,
+/// no writes, no cache: the caller owns the connection lifetime.
+pub struct IndexSnapshot {
+    pub integrity: String,
+    pub schema_version: i32,
+    pub engram_version: Option<String>,
+    pub grammar_version: Option<String>,
+    pub built_at: Option<String>,
+    pub source_rev: Option<String>,
+    pub files: i64,
+    pub symbols: i64,
+    pub parse_errors: i64,
+    pub parse_error_rate: f64,
+    pub stale_ratio: f64,
+    pub db_bytes: u64,
 }
 
-/// The parse-error ratio over all indexed files.
-fn push_parse_coverage(conn: &Connection, out: &mut Vec<String>) -> Result<()> {
-    let (total, bad): (i64, i64) = conn.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(parse_status != 'ok'), 0) FROM files",
+pub fn snapshot(root: &Path) -> Result<IndexSnapshot> {
+    let conn = db::open_for_query(root)?;
+    snapshot_from_conn(&conn, root)
+}
+
+pub(crate) fn snapshot_from_conn(conn: &Connection, root: &Path) -> Result<IndexSnapshot> {
+    let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+    let schema_version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let meta = |key: &str| db::meta_get(conn, key);
+    let (files, symbols, parse_errors): (i64, i64, i64) = conn.query_row(
+        "SELECT COUNT(*), (SELECT COUNT(*) FROM symbols), COALESCE(SUM(parse_status != 'ok'), 0) FROM files",
         [],
-        |r| Ok((r.get(0)?, r.get(1)?)),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
-    let rate = if total > 0 {
-        bad as f64 / total as f64
+    let parse_error_rate = if files > 0 {
+        parse_errors as f64 / files as f64
     } else {
         0.0
     };
-    out.push(format!(
-        "  parse coverage: {bad}/{total} files with errors ({:.1}%)",
-        rate * 100.0
-    ));
-    Ok(())
+    Ok(IndexSnapshot {
+        integrity,
+        schema_version,
+        engram_version: meta(db::meta_keys::ENGRAM_VERSION),
+        grammar_version: meta(db::meta_keys::GRAMMAR_VERSION),
+        built_at: meta(db::meta_keys::BUILT_AT),
+        source_rev: meta(db::meta_keys::SOURCE_REV),
+        files,
+        symbols,
+        parse_errors,
+        parse_error_rate,
+        stale_ratio: stale_ratio(conn, root)?,
+        db_bytes: db::file_size(&db::db_path(root)),
+    })
 }
 
 /// One read-only line about the project-memory store: presence, integrity,
