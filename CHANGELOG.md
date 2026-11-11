@@ -16,6 +16,8 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-11-11
+
 ### Added
 - `eg audit` is a read-only health report over the retained journal, index
   snapshots, and memory refs. It separates `status` (pass/warn/critical) from
