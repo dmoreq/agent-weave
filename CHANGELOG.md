@@ -16,23 +16,91 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Changed
+- Reuse candidates now carry per-candidate usage: each `eg reuse` run
+  journals the surfaced `symbol->canonical` pairs (capped at 25) in
+  `args.candidates`, and the dashboard aggregates `reuse_count` and
+  `last_reused_ts` from the retained journal. Tab 02 cards show
+  "surfaced N× · last used <date>" (or "never surfaced in retained journal").
+- Both live feeds (Recent Queries on tab 01, Pre-Write Discovery on tab 02)
+  show only the newest ten rows, with a "Showing X of Y" counter; the full
+  journal stays queryable through the CLI.
+- Command lists now say what the tool did in plain words ("Find who calls
+  _read", "Look for duplicate code in every file") instead of raw JSON or
+  "(all paths)"; the raw arguments stay available in the cell tooltip.
+- The Anti-Reinvention filter bar no longer carries a free-text search box;
+  repo, detector, and view filters remain.
+- Memory and reuse lists collapse to a view selector: Memory defaults to the
+  10 notes with the latest activity (created, verified, or recalled), with
+  Top 3, Most used, and All available; Reuse defaults to the 10 candidates by
+  canonical call-site usage, with Top 3 and All. Each list shows
+  "Showing X of Y", and memory cards now carry `created`, `recalled N×`,
+  `last used`, and `verified` timestamps instead of a bare recall badge.
+- The dashboard now renders only server payloads and tells the truth about
+  every number. The client-side aggregate mirror (including its 10x-off token
+  coefficients) is deleted; KPIs refresh from a bounded scheduler instead. The
+  Session Recall KPI counts tagged sessions only, per-tool savings are
+  success-only (`sum(tool saved) == saved_tokens`), D3/D4 carry an evidence
+  label instead of a fabricated 100% overlap, and payloads declare
+  `schema_version: 2`, `generated_at`, `window: "retained_journal"`, and
+  `*_estimated` flags. Memory payloads are `{notes, degraded, errors}` so an
+  unreadable store is visible instead of rendering as empty. The monitor TUI
+  reads the canonical tool keys (real p50/OK%/saved), reports its real version,
+  and shows "—" for recall when nothing is tagged.
+- Interaction fixes: agent drill-down can no longer blank the console
+  (`switchTab` allowlists its keys), filters survive SSE refetches, selection
+  is keyed by stable ids, and a log shrink or rotation emits a named SSE
+  `reset` event instead of replaying the journal. Memory Verify (formerly
+  Touch Anchor) addresses one store by canonical `memory.db` path, requires
+  the displayed revision (409 on skew, applied atomically), and refreshes a
+  new `anchored_at` column (memory schema v2, additive) instead of rewriting
+  `created_at`. Refs in stores without an index are `unverified`, not broken.
+- Security: the dashboard binds loopback only, rejects foreign `Host` headers,
+  sends CSP/nosniff/frame-ancestors headers, refuses cross-origin or
+  non-JSON Touch requests, removes the wildcard CORS header from `/events`,
+  caps connections/headers/journal lines, and contains snippet paths to the
+  repository root. All inline event handlers are gone in favor of delegated
+  listeners.
+- Performance: the reuse detector scan is cached on index mtimes (2.2 s cold,
+  ~2 ms warm), journal parsing is cached per log generation, snippets read
+  only the requested window, and `/api/reuse` is fetched only when its tab is
+  active.
+- Accessibility: full tabs pattern (ARIA state, roving tabindex, arrow keys),
+  keyboard-activatable rows and cards, live-region announcements for state
+  transitions, visible focus rings, reduced-motion guards, AA contrast fixes,
+  and truncation for long refs/args.
+
 ### Fixed
 - Integration-test fixtures now delete their temporary repositories on drop.
   A full `cargo test` run previously left ~6,000 `eg-*` directories (933 MB) in
   the system temp dir; the MCP suite left another eleven per run.
-- Usage entries for deleted scratch repositories no longer reach the dashboard or
-  `eg usage`. Pruning and both read-time filters keyed on the linked-worktree
-  flag, which benchmark temp roots never set; one predicate now drops an entry
-  whose absolute repo path is gone and whose root is a worktree or a temp
-  directory. Relative repo paths are never judged, and benchmark builds pass
+- Usage entries of deleted scratch repositories no longer reach the dashboard or
+  `eg usage`. The staleness predicate originally keyed on the linked-worktree
+  flag, which benchmark temp roots never set; benchmark builds now pass
   `--no-journal` so they stop writing these lines at all.
+- Deleted repositories now vanish from every telemetry surface. One staleness
+  predicate decides it all: an entry whose absolute repo root is no longer a
+  real directory is dropped by every reader (CLI global summary, dashboard APIs,
+  Recent Queries, the SSE stream, and `eg monitor`'s live feed) and purged from
+  `usage.log` on the next `eg dashboard` or `eg doctor` run. A path that has
+  been replaced by a symlink counts as gone, since the journal records
+  canonical paths and the symlink aliases a different repository. The same
+  rule retires the `(unattributed)` bucket: identityless legacy lines and
+  relative-path test artifacts are pruned and skipped, and an invocation that
+  resolves no repository is no longer journaled at all, so totals contain only
+  live, attributed calls. The active-worktree KPI can no longer count deleted
+  worktrees, and dashboard responses send `Cache-Control: no-store` so a
+  long-lived tab never reuses a stale asset bundle.
 - Agent attribution now recognizes the calling CLI. `CLAUDECODE`,
-  `CODEX_TOOL_CALL_ID`, `ZCODE_MANAGED_PACKAGE`, `OPENCODE_CLIENT`, and
-  `ZED_ENVIRONMENT=worktree-shell` are read as markers, with agent markers taking
-  precedence over editor markers; `ENGRAM_AGENT` still overrides every marker.
-  `TERM_PROGRAM=zed` is deliberately ignored, since Zed sets it for terminals a
-  person opens too. Caller names are canonicalized, so `antigravity-client`,
-  `claude`, and `CLAUDE_CODE` resolve to one slug each.
+  `CODEX_TOOL_CALL_ID`, `ZCODE_MANAGED_PACKAGE`, `ZCODE_APP_VERSION`,
+  `ZCODE_PROCESS_LABEL`, `OPENCODE_CLIENT`, and `ZED_ENVIRONMENT=worktree-shell`
+  are read as markers, with agent markers taking precedence over editor
+  markers; `ENGRAM_AGENT` still overrides every marker. `TERM_PROGRAM=zed` is
+  deliberately ignored, since Zed sets it for terminals a person opens too.
+  Caller names are canonicalized, so `antigravity-client`, `claude`, and
+  `CLAUDE_CODE` resolve to one slug each. The dashboard tags the `user`
+  fallback with hover help: no marker was detected, so the invoker may be a
+  human terminal or an unidentified agent.
 - Anti-Reinvention tab: the Semantic Judge tile now reports the real judged-run
   count instead of always zero, the detector card states the implemented
   thresholds (D1 80%, D2 60%), and the excess-code subtitle marks the figure as

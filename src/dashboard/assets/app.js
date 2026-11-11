@@ -1,6 +1,25 @@
 // eg Native Rust Dashboard Client (Zero External Dependencies)
 
 const GRAPH_TOOLS = ['callers', 'callees', 'path', 'context', 'impact', 'symbols', 'imports', 'build'];
+const FEED_LIMIT = 10; // both live feeds show the newest ten rows only
+const UNATTRIBUTED = '(unattributed)';
+
+// One builder for every agent tag so the copy cannot drift between tables.
+// `user` is the fallback when no agent marker was detected, so its tag has to
+// say what it does not know instead of claiming a human typed the command.
+// Evidence label for detectors that carry no measured overlap (D3/D4).
+function detectorEvidenceLabel(detector) {
+  if (detector === 'D3') return 'shared guard';
+  if (detector === 'D4') return 'pass-through wrapper';
+  return 'evidence';
+}
+
+function agentTagHtml(aName) {
+  const title = aName === 'user'
+    ? ' title="No agent marker detected — a human terminal or an unidentified invoker (ENGRAM_AGENT=<name> labels it precisely)"'
+    : '';
+  return '<span class="agent-tag agent-tag-' + escapeHtml(aName) + '"' + title + '>' + escapeHtml(aName) + '</span>';
+}
 
 let allMemories = [];
 let recentQueries = [];
@@ -10,8 +29,78 @@ let totalCalls = 0;
 let totalErrors = 0;
 let latestSummaryData = null;
 
-let selectedMemoryIndex = 0;
-let selectedReuseIndex = 0;
+let selectedMemoryId = null;   // store_id:key:rev — survives list rebuilds
+let selectedReuseId = null;    // candidate id (repo:symbol->canonical)
+function memorySelectionId(m) { return (m.store_id || m.store) + ':' + m.key + ':' + m.rev; }
+
+// Collapsed list views. "Recent" means latest activity: created, verified, or
+// recalled. Reuse has no per-candidate timestamp in the payload, so its
+// ranking is call-site usage only; nothing here claims recency it cannot know.
+const MEMORY_VIEWS = {
+  recent10: { label: 'Top 10 recent', limit: 10, sort: 'activity' },
+  recent3: { label: 'Top 3 recent', limit: 3, sort: 'activity' },
+  used: { label: 'Most used', limit: 10, sort: 'used' },
+  all: { label: 'All', limit: 0, sort: 'activity' },
+};
+const REUSE_VIEWS = {
+  used10: { label: 'Top 10 by callers', limit: 10 },
+  used3: { label: 'Top 3 by callers', limit: 3 },
+  all: { label: 'All', limit: 0 },
+};
+let memView = 'recent3';
+let reuseView = 'used3';
+
+function memoryActivity(m) {
+  return Math.max(m.created_at || 0, m.anchored_at || 0, m.last_recalled_ts || 0);
+}
+
+function viewMemories(items) {
+  const spec = MEMORY_VIEWS[memView] || MEMORY_VIEWS.recent3;
+  const sorted = items.slice().sort((a, b) => {
+    if (spec.sort === 'used') {
+      const used = (b.recall_count || 0) - (a.recall_count || 0);
+      if (used !== 0) return used;
+    }
+    const activity = memoryActivity(b) - memoryActivity(a);
+    if (activity !== 0) return activity;
+    const recalled = (b.last_recalled_ts || 0) - (a.last_recalled_ts || 0);
+    if (recalled !== 0) return recalled;
+    const created = (b.created_at || 0) - (a.created_at || 0);
+    if (created !== 0) return created;
+    return String(a.key).localeCompare(String(b.key));
+  });
+  const visible = spec.limit > 0 ? sorted.slice(0, spec.limit) : sorted;
+  return { items: visible, total: items.length, label: spec.label };
+}
+
+function viewReuseCandidates(items) {
+  const spec = REUSE_VIEWS[reuseView] || REUSE_VIEWS.used3;
+  const sorted = items.slice().sort((a, b) => {
+    const callers = (b.canonical_callers || 0) - (a.canonical_callers || 0);
+    if (callers !== 0) return callers;
+    const ap = a.overlap_applicable ? (a.overlap_pct || 0) : -1;
+    const bp = b.overlap_applicable ? (b.overlap_pct || 0) : -1;
+    if (bp !== ap) return bp - ap;
+    return String(a.id).localeCompare(String(b.id));
+  });
+  const visible = spec.limit > 0 ? sorted.slice(0, spec.limit) : sorted;
+  return { items: visible, total: items.length, label: spec.label };
+}
+
+// Reuse "last used" comes from the retained journal: an `eg reuse` run that
+// surfaced this candidate. Zero means no run in the retained window.
+function reuseUsageText(c) {
+  if (!c.reuse_count) return 'never surfaced in retained journal';
+  const when = c.last_reused_ts
+    ? new Date(c.last_reused_ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '—';
+  return 'surfaced ' + c.reuse_count + '\u00d7 \u00b7 last used ' + when;
+}
+
+function updateListCount(id, shown, total, label) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = 'Showing ' + shown + ' of ' + total + ' · ' + label;
+}
 let activeReuseDetector = 'ALL';
 
 // Theme Toggle
@@ -36,20 +125,26 @@ function updateThemeButtonText(theme) {
 
 let activeTab = 'telemetry';
 
-// Tab Switching
+// Tab Switching. The allowlist is the guard: an unknown key would otherwise
+// hide every panel and leave the console blank.
+const TAB_KEYS = ['telemetry', 'reuse', 'memory'];
 function switchTab(tab) {
+  if (!TAB_KEYS.includes(tab)) {
+    console.warn('switchTab: unknown tab "' + tab + '" — falling back to telemetry');
+    tab = 'telemetry';
+  }
   activeTab = tab;
-  const tabs = ['telemetry', 'reuse', 'memory'];
+  const tabs = TAB_KEYS;
   tabs.forEach(t => {
     const btn = document.getElementById('tab-' + t + '-btn');
     const content = document.getElementById('tab-' + t + '-content');
-    if (t === tab) {
-      if (btn) btn.classList.add('active');
-      if (content) content.classList.remove('hidden');
-    } else {
-      if (btn) btn.classList.remove('active');
-      if (content) content.classList.add('hidden');
+    const selected = t === tab;
+    if (btn) {
+      btn.classList.toggle('active', selected);
+      btn.setAttribute('aria-selected', selected ? 'true' : 'false');
+      btn.tabIndex = selected ? 0 : -1;
     }
+    if (content) content.classList.toggle('hidden', !selected);
   });
 
   if (tab === 'reuse') {
@@ -79,8 +174,13 @@ function switchTab(tab) {
 // Data Fetching
 function loadSummaryData() {
   fetch('/api/summary')
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(data => {
+      clearFetchError('telemetry');
+      setDataAge(data.generated_at);
       latestSummaryData = data;
       totalCalls = data.graph_calls !== undefined ? data.graph_calls : (data.total_calls || 0);
       totalErrors = data.graph_errors !== undefined ? data.graph_errors : (data.error_count || 0);
@@ -121,20 +221,6 @@ function loadSummaryData() {
         dolEl.textContent = '~$' + dollars.toFixed(2) + ' avoided vs full reads';
       }
 
-      const activeReposEl = document.getElementById('metric-active-repos');
-      if (activeReposEl) {
-        const repoCount = Object.keys(data.repo_aggs || {}).length;
-        activeReposEl.textContent = repoCount.toLocaleString();
-      }
-
-      const activeWorktreesEl = document.getElementById('metric-active-worktrees');
-      if (activeWorktreesEl) {
-        const wtCount = Object.values(data.repo_aggs || {}).filter(r => r.worktree).length;
-        activeWorktreesEl.textContent = wtCount > 0
-          ? wtCount + ' worktree' + (wtCount > 1 ? 's' : '') + ' active'
-          : 'Multi-repository graph index';
-      }
-
       // Render Repositories Table
       renderReposTable(data.repo_aggs || {});
       // Render Agents Table
@@ -147,20 +233,25 @@ function loadSummaryData() {
       renderMemoryAgentsTable(data.agent_aggs || {});
       // Render Tools Table
       renderToolsTable(data.tool_aggs || {}, totalCalls);
-      // Render Recent Queries (Graph only)
-      renderRecentQueries(data.graph_recent_queries || data.recent_queries || []);
-      // Render Errors Triage (Graph only)
+      // Render Recent Queries (Graph only); re-apply active filters so a
+      // refetch cannot silently widen the view.
+      renderRecentQueries(data.graph_recent_queries || []);
+      applyTelemetryFilters();
 
       // Update Memory KPIs
       updateMemoryKpis();
     })
-    .catch(() => {});
+    .catch(err => showFetchError('telemetry', err.message));
 }
 
 function loadReuseData() {
   fetch('/api/reuse')
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(data => {
+      clearFetchError('reuse');
       reuseCandidates = data.candidates || [];
       prewriteSearches = data.prewrite_searches || [];
 
@@ -172,10 +263,13 @@ function loadReuseData() {
 
       const kpiCountSub = document.getElementById('reuse-kpi-count-sub');
       if (kpiCountSub) {
+        const cacheNote = summary.cache_hit
+          ? ' · cached ' + Math.round((summary.cache_age_ms || 0) / 1000) + 's'
+          : '';
         if (totalCandidates > reuseCandidates.length) {
-          kpiCountSub.textContent = 'Top ' + reuseCandidates.length + ' of ' + totalCandidates.toLocaleString() + ' duplicate twins';
+          kpiCountSub.textContent = 'Top ' + reuseCandidates.length + ' of ' + totalCandidates.toLocaleString() + ' duplicate twins' + cacheNote;
         } else {
-          kpiCountSub.textContent = 'Syntactic & structural duplicate twins';
+          kpiCountSub.textContent = 'Syntactic & structural duplicate twins' + cacheNote;
         }
       }
 
@@ -194,7 +288,7 @@ function loadReuseData() {
       renderReuseList();
       renderPrewriteTable();
     })
-    .catch(() => {});
+    .catch(err => showFetchError('reuse', err.message));
 }
 
 function updateDetectorPills(counts, total) {
@@ -212,14 +306,21 @@ function updateDetectorPills(counts, total) {
 
 function loadMemoriesData() {
   fetch('/api/memories')
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(data => {
-      allMemories = data || [];
+      clearFetchError('memory');
+      if (data.degraded) {
+        showFetchError('memory', (data.errors || []).map(e => e.store + ': ' + e.message).join('; '));
+      }
+      allMemories = data.notes || [];
       updateMemoryKpis();
       populateMemoryStoreFilter();
       renderMemoryList();
     })
-    .catch(() => {});
+    .catch(err => showFetchError('memory', err.message));
 }
 
 function updateMemoryKpis() {
@@ -228,7 +329,7 @@ function updateMemoryKpis() {
   // KPI 1: Session Recall Rate
   // The rate only means something when callers tag their sessions: without a
   // tag every run collapses into the synthetic `default` bucket.
-  const taggedSessions = latestSummaryData ? (latestSummaryData.session_tagged_count || 0) : 0;
+  const taggedSessions = latestSummaryData ? (latestSummaryData.session_count || 0) : 0;
   const recallPct = taggedSessions === 0
     ? '—'
     : (latestSummaryData ? (latestSummaryData.session_recall_pct || 0.0).toFixed(1) + '%' : '0.0%');
@@ -241,26 +342,35 @@ function updateMemoryKpis() {
     } else {
       const memSessions = latestSummaryData ? (latestSummaryData.memory_session_count || 0) : 0;
       const totalSessions = latestSummaryData ? (latestSummaryData.session_count || 0) : 0;
-      recallSubEl.textContent = memSessions + ' of ' + totalSessions + ' sessions';
+      recallSubEl.textContent = memSessions + ' of ' + totalSessions + ' sessions'
+        + (totalSessions < 5 ? ' — low sample; set ENGRAM_SESSION on agent runs' : '');
     }
   }
 
   // KPI 2: Anchor Currency Rate
   const notesWithRefs = currentNotes.filter(m => m.refs && m.refs.length > 0);
-  let freshCount = 0;
+  let validCount = 0;
   let modifiedCount = 0;
   let brokenCount = 0;
+  let unverifiedCount = 0;
   notesWithRefs.forEach(m => {
-    if (m.ref_status === 'broken') brokenCount++;
+    if (m.ref_status === 'valid') validCount++;
+    else if (m.ref_status === 'broken') brokenCount++;
     else if (m.ref_status === 'modified') modifiedCount++;
-    else freshCount++;
+    else if (m.ref_status === 'unverified') unverifiedCount++;
   });
-  const currencyRate = notesWithRefs.length > 0 ? (100.0 * freshCount / notesWithRefs.length).toFixed(1) + '%' : '100.0%';
+  // No anchored note means the ratio is unmeasurable, not 100%.
+  const currencyRate = notesWithRefs.length > 0
+    ? (100.0 * validCount / notesWithRefs.length).toFixed(1) + '%'
+    : '—';
   const currencyEl = document.getElementById('mem-kpi-currency');
   if (currencyEl) currencyEl.textContent = currencyRate;
   const currencySubEl = document.getElementById('mem-kpi-currency-sub');
   if (currencySubEl) {
-    currencySubEl.textContent = freshCount + ' fresh · ' + modifiedCount + ' modified · ' + brokenCount + ' broken';
+    currencySubEl.textContent = notesWithRefs.length === 0
+      ? 'No notes with code refs'
+      : validCount + ' valid · ' + modifiedCount + ' modified · ' + brokenCount + ' broken'
+        + (unverifiedCount > 0 ? ' · ' + unverifiedCount + ' unverified' : '');
   }
 
   updateActionCenter(currentNotes, modifiedCount, brokenCount);
@@ -281,7 +391,10 @@ function updateActionCenter(currentNotes, modifiedCount, brokenCount) {
 
   centerEl.classList.remove('hidden');
   if (summaryEl) {
-    summaryEl.textContent = modifiedCount + ' modified · ' + brokenCount + ' broken requiring attention';
+    const verifyAll = modifiedCount > 0
+      ? '<button class="btn-touch" id="verify-all-btn" style="margin-left:0.5rem;">Verify all ' + modifiedCount + '</button>'
+      : '';
+    summaryEl.innerHTML = modifiedCount + ' modified · ' + brokenCount + ' broken requiring attention' + verifyAll;
   }
 
   itemsEl.innerHTML = '';
@@ -291,10 +404,10 @@ function updateActionCenter(currentNotes, modifiedCount, brokenCount) {
       ? '<span class="badge status-warn">[MODIFIED REF]</span>'
       : '<span class="badge status-err">[BROKEN REF]</span>';
     const explanation = isModified
-      ? 'Target file was modified after note creation. Review note and touch to confirm currency.'
-      : 'Referenced symbol or file path is missing from current code index (.engram/index.db).';
+      ? 'Target file was modified after the last verify. Review the note, then Verify to refresh its anchor.'
+      : 'Referenced symbol or file path is missing from the current code index. Re-run <code>eg build</code> in that repository, or edit the note refs.';
     const touchBtn = isModified
-      ? '<button class="btn-touch" onclick="touchMemory(\'' + escapeHtml(m.key) + '\', ' + (m.store === 'global') + ')">Touch Anchor</button>'
+      ? '<button class="btn-touch" data-key="' + escapeHtml(m.key) + '" data-store-id="' + escapeHtml(m.store_id || m.store) + '" data-rev="' + m.rev + '">Verify</button>'
       : '';
 
     const refsList = (m.refs || []).map(r => '<code>' + escapeHtml(r) + '</code>').join(', ');
@@ -318,23 +431,64 @@ function updateActionCenter(currentNotes, modifiedCount, brokenCount) {
   });
 }
 
-function touchMemory(key, isGlobal) {
+function touchMemory(btn) {
+  const key = btn.dataset.key;
+  const storeId = btn.dataset.storeId;
+  const rev = parseInt(btn.dataset.rev || '0', 10);
   fetch('/api/memory/touch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: key, global: !!isGlobal })
+    body: JSON.stringify({ key: key, store_id: storeId, rev: rev })
   })
-    .then(r => r.json())
+    .then(r => r.json().then(body => ({ status: r.status, body: body })))
     .then(res => {
-      if (res.ok) {
+      if (res.body && res.body.ok) {
+        btn.disabled = true;
+        btn.textContent = 'Verified';
         loadMemoriesData();
-      } else {
-        alert('Failed to touch memory note: ' + (res.error || 'unknown error'));
+        return;
       }
+      const msg = (res.body && res.body.error) || ('HTTP ' + res.status);
+      showTouchError(btn, msg);
     })
-    .catch(err => {
-      alert('Network error touching memory note: ' + err.message);
-    });
+    .catch(err => showTouchError(btn, 'network error: ' + err.message));
+}
+
+function showTouchError(btn, message) {
+  let el = btn.parentElement ? btn.parentElement.querySelector('.touch-error') : null;
+  if (!el) {
+    el = document.createElement('span');
+    el.className = 'touch-error text-muted';
+    el.style.fontSize = '0.72rem';
+    el.style.marginLeft = '0.5rem';
+    if (btn.parentElement) btn.parentElement.appendChild(el);
+  }
+  el.textContent = message;
+}
+
+function verifyAllModified() {
+  const currentNotes = allMemories.filter(m => m.is_current && m.ref_status === 'modified');
+  if (currentNotes.length === 0) return;
+  if (!confirm('Verify all ' + currentNotes.length + ' modified note(s)? This refreshes their anchor timestamps.')) return;
+  let pending = currentNotes.length;
+  let failed = 0;
+  currentNotes.forEach(m => {
+    fetch('/api/memory/touch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: m.key, store_id: m.store_id || m.store, rev: m.rev })
+    })
+      .then(r => r.json())
+      .then(res => { if (!res.ok) failed++; })
+      .catch(() => { failed++; })
+      .finally(() => {
+        pending--;
+        if (pending === 0) {
+          announce(failed === 0 ? 'Verified ' + currentNotes.length + ' notes' : failed + ' of ' + currentNotes.length + ' verifies failed');
+          loadMemoriesData();
+        }
+      });
+  });
 }
 
 // Telemetry Views Rendering
@@ -365,16 +519,23 @@ function renderReposTable(repoAggs) {
   }
 
   entries.forEach(([rName, rData]) => {
+    // The dropdown matches recent-row `data-repo` labels (the repo name), so
+    // value and text must both be the display label, never the path key.
+    const label = rData.display || rName;
     if (select) {
       const opt = document.createElement('option');
-      opt.value = rData.display || rName;
-      opt.textContent = rName;
+      opt.value = label;
+      opt.textContent = label;
       select.appendChild(opt);
     }
 
     const tr = document.createElement('tr');
     tr.className = 'repo-row-item';
-    tr.onclick = () => filterByRepo(rName);
+    tr.tabIndex = 0;
+    tr.setAttribute('role', 'row');
+    tr.setAttribute('aria-label', 'Filter by repository ' + label);
+    tr.onclick = () => filterByRepo(label);
+    tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); filterByRepo(label); } };
 
     const calls = rData.calls;
     const errs = rData.errors || 0;
@@ -396,8 +557,13 @@ function renderReposTable(repoAggs) {
 
     tbody.appendChild(tr);
   });
-  if (select && curRepoVal) {
-    select.value = curRepoVal;
+  if (select) {
+    if (curRepoVal && Array.from(select.options).some(o => o.value === curRepoVal)) {
+      select.value = curRepoVal;
+    } else {
+      select.value = 'ALL';
+      if (curRepoVal && curRepoVal !== 'ALL') announce('Filter "' + curRepoVal + '" reset: repository no longer active');
+    }
   }
 }
 
@@ -426,19 +592,23 @@ function renderAgentsTable(agentAggs, totalCalls) {
   const curAgentVal = select ? select.value : 'ALL';
   if (select) {
     select.innerHTML = '<option value="ALL">All Agents</option>';
-  }
-
-  entries.forEach(([aName, aData]) => {
-    if (select) {
+    Object.keys(agentAggs).sort().forEach(aName => {
       const opt = document.createElement('option');
       opt.value = aName;
       opt.textContent = aName;
       select.appendChild(opt);
-    }
+    });
+  }
+
+  entries.forEach(([aName, aData]) => {
 
     const tr = document.createElement('tr');
     tr.className = 'agent-row-item';
+    tr.tabIndex = 0;
+    tr.setAttribute('role', 'row');
+    tr.setAttribute('aria-label', 'Filter by agent ' + aName);
     tr.onclick = () => filterByAgent(aName);
+    tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); filterByAgent(aName); } };
 
     const calls = aData.calls;
     const errs = aData.errors || 0;
@@ -451,7 +621,7 @@ function renderAgentsTable(agentAggs, totalCalls) {
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span> <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
+      '  <div class="repo-name-wrap">' + agentTagHtml(aName) + ' <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
       '  <div class="row-track"><div class="row-track-fill row-track-fill-agent" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -460,8 +630,13 @@ function renderAgentsTable(agentAggs, totalCalls) {
 
     tbody.appendChild(tr);
   });
-  if (select && curAgentVal) {
-    select.value = curAgentVal;
+  if (select) {
+    if (curAgentVal && Array.from(select.options).some(o => o.value === curAgentVal)) {
+      select.value = curAgentVal;
+    } else {
+      select.value = 'ALL';
+      if (curAgentVal && curAgentVal !== 'ALL') announce('Filter "' + curAgentVal + '" reset: agent no longer active');
+    }
   }
 }
 
@@ -492,7 +667,13 @@ function renderReuseReposTable(repoAggs) {
   entries.forEach(([rName, rData]) => {
     const tr = document.createElement('tr');
     tr.className = 'repo-row-item';
-    tr.onclick = () => filterReuseByRepo(rName);
+    tr.tabIndex = 0;
+    tr.setAttribute('role', 'row');
+    tr.setAttribute('aria-label', 'Filter by repository ' + (rData.display || rName));
+    // Candidate filters match store basenames; the path key would append a
+    // ghost option and empty the list.
+    tr.onclick = () => filterReuseByRepo(rData.display || rName);
+    tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); filterReuseByRepo(rData.display || rName); } };
 
     const calls = rData.reuse_calls || 0;
     const hits = rData.reuse_hits || 0;
@@ -536,7 +717,7 @@ function renderReuseAgentsTable(agentAggs) {
     const tr = document.createElement('tr');
     tr.className = 'agent-row-item';
     tr.onclick = () => {
-      switchTab('graph');
+      switchTab('telemetry');
       filterByAgent(aName);
     };
 
@@ -550,7 +731,7 @@ function renderReuseAgentsTable(agentAggs) {
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span> <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
+      '  <div class="repo-name-wrap">' + agentTagHtml(aName) + ' <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
       '  <div class="row-track"><div class="row-track-fill row-track-fill-agent" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -601,7 +782,13 @@ function renderMemoryReposTable(repoAggs) {
   entries.forEach(([rName, rData]) => {
     const tr = document.createElement('tr');
     tr.className = 'repo-row-item';
-    tr.onclick = () => filterMemoryByRepo(rName);
+    tr.tabIndex = 0;
+    tr.setAttribute('role', 'row');
+    tr.setAttribute('aria-label', 'Filter by store ' + (rData.display || rName));
+    // Store filters match store basenames; the path key would append a ghost
+    // option and empty the list.
+    tr.onclick = () => filterMemoryByRepo(rData.display || rName);
+    tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); filterMemoryByRepo(rData.display || rName); } };
 
     const calls = rData.memory_calls || 0;
     const errs = rData.memory_errors || 0;
@@ -647,7 +834,7 @@ function renderMemoryAgentsTable(agentAggs) {
     const tr = document.createElement('tr');
     tr.className = 'agent-row-item';
     tr.onclick = () => {
-      switchTab('graph');
+      switchTab('telemetry');
       filterByAgent(aName);
     };
 
@@ -663,7 +850,7 @@ function renderMemoryAgentsTable(agentAggs) {
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span> <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
+      '  <div class="repo-name-wrap">' + agentTagHtml(aName) + ' <span class="text-muted" style="font-size: 0.75rem;">(' + shareStr + ')</span></div>' +
       '  <div class="row-track"><div class="row-track-fill row-track-fill-agent" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -729,26 +916,87 @@ function renderToolsTable(toolAggs, totalCalls) {
   });
 }
 
+let recentQueryTotal = 0;
+
 function renderRecentQueries(queries) {
   const tbody = document.getElementById('recent-tbody');
   if (!tbody) return;
 
   const graphQueries = queries.filter(q => GRAPH_TOOLS.includes(q.tool));
+  recentQueryTotal = graphQueries.length;
   if (graphQueries.length === 0) {
     tbody.innerHTML = '<tr><td colspan="8" class="empty-cell">No graph navigation queries recorded</td></tr>';
+    updateListCount('recent-list-count', 0, 0, 'newest first');
     return;
   }
 
+  const visible = graphQueries.slice(0, FEED_LIMIT);
   tbody.innerHTML = '';
-  graphQueries.forEach(q => {
+  visible.forEach(q => {
     tbody.appendChild(createRecentRow(q));
   });
+  updateListCount('recent-list-count', visible.length, recentQueryTotal, 'newest first');
+}
+
+// Plain-language summary of what a command did, from its journaled tool and
+// args. The raw JSON stays in the cell title for anyone who needs it.
+function explainToolArgs(tool, args) {
+  const a = args || {};
+  const name = a.name || a.symbol || '';
+  const terms = a.terms || '';
+  const paths = a.paths || '';
+  switch (tool) {
+    case 'callers':
+      return name ? 'Find who calls ' + name : 'Find who calls a function';
+    case 'callees':
+      return name ? 'Find what ' + name + ' calls' : 'Find what a function calls';
+    case 'path':
+      return a.from && a.to ? 'Route from ' + a.from + ' to ' + a.to : 'Call route between two functions';
+    case 'context':
+      return name ? 'Show the code around ' + name : 'Show code around a function';
+    case 'impact':
+      return name ? 'Show what breaks if ' + name + ' changes' : 'Show the blast radius of a change';
+    case 'symbols':
+      return a.file ? 'List symbols in ' + a.file : (name ? 'Find ' + name : 'Find symbols');
+    case 'imports':
+      return a.file ? 'Show imports of ' + a.file : 'Show the import map';
+    case 'build':
+      return 'Refresh the code index';
+    case 'search':
+      return terms ? 'Search the code for "' + terms + '"' : 'Search the code';
+    case 'reuse':
+      return paths ? 'Look for duplicate code in ' + paths : 'Look for duplicate code in every file';
+    case 'mem_write':
+      return a.key ? 'Save the note "' + a.key + '"' : 'Save a memory note';
+    case 'mem_get':
+      return a.key ? 'Read the note "' + a.key + '"' : 'Read a memory note';
+    case 'mem_query':
+      return terms ? 'Search notes for "' + terms + '"' : 'List memory notes';
+    case 'mem_delete':
+      return a.key ? 'Delete the note "' + a.key + '"' : 'Delete a memory note';
+    case 'mem_touch':
+      return a.key ? 'Mark the note "' + a.key + '" as verified' : 'Verify a memory note';
+    case 'mem_export':
+      return 'Back up memory notes';
+    case 'mem_import':
+      return 'Load memory notes from a backup';
+    case 'stats':
+      return 'Show repository statistics';
+    case 'doctor':
+      return 'Run a health check';
+    case 'usage':
+      return 'Show usage report';
+    case 'unresolved':
+      return 'List unresolved call sites';
+    default:
+      return '';
+  }
 }
 
 function createRecentRow(q) {
   const tr = document.createElement('tr');
   tr.className = 'query-row';
-  const rName = q.repo_name || 'workspace';
+  const rName = q.repo_name || UNATTRIBUTED;
   const aName = q.agent || 'user';
   const exitCode = parseInt(q.exit_code || 0, 10);
   tr.setAttribute('data-repo', rName);
@@ -765,7 +1013,7 @@ function createRecentRow(q) {
     statusText = 'empty';
   } else if (exitCode === 2) {
     statusClass = 'status-ambig';
-    statusText = 'ambig';
+    statusText = 'ambiguous';
   } else if (exitCode >= 3) {
     statusClass = 'status-err';
     statusText = 'err ' + exitCode;
@@ -773,18 +1021,19 @@ function createRecentRow(q) {
 
   const argsRaw = JSON.stringify(q.args || {});
   const argsShort = argsRaw.length > 85 ? argsRaw.substring(0, 82) + '...' : argsRaw;
+  const argsHuman = explainToolArgs(q.tool, q.args) || argsShort;
 
   tr.innerHTML =
     '<td class="num-col text-muted">' + ts + '</td>' +
     '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
-    '<td><span class="agent-tag agent-tag-' + escapeHtml(aName) + '">' + escapeHtml(aName) + '</span></td>' +
+    '<td>' + agentTagHtml(aName) + '</td>' +
     '<td><code>' + escapeHtml(q.tool || '—') + '</code>' +
       (q.judged ? ' <span class="badge badge-judge" title="eg-judge dispatched">judge</span>' : '') +
       '</td>' +
     '<td class="text-right num-col">' + (q.shown || q.result_count || 0) + '</td>' +
     '<td class="text-right num-col">' + latStr + '</td>' +
     '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
-    '<td class="args-cell" title="' + escapeHtml(argsRaw) + '"><code>' + escapeHtml(argsShort) + '</code></td>';
+    '<td class="args-cell" title="' + escapeHtml(argsRaw) + '"><code>' + escapeHtml(argsHuman) + '</code></td>';
 
   return tr;
 }
@@ -828,6 +1077,7 @@ function filterByRepo(repoName) {
 function populateReuseRepoFilter() {
   const select = document.getElementById('reuse-repo-filter');
   if (!select) return;
+  const keep = select.value || 'ALL';
   const repos = new Set();
   reuseCandidates.forEach(c => repos.add(c.repo));
 
@@ -838,6 +1088,12 @@ function populateReuseRepoFilter() {
     opt.textContent = r;
     select.appendChild(opt);
   });
+  if (Array.from(select.options).some(o => o.value === keep)) {
+    select.value = keep;
+  } else {
+    select.value = 'ALL';
+    if (keep !== 'ALL') announce('Filter "' + keep + '" reset: repository no longer active');
+  }
 }
 
 function setReuseDetectorFilter(det) {
@@ -845,24 +1101,15 @@ function setReuseDetectorFilter(det) {
   document.querySelectorAll('.filter-pill[data-det]').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-det') === det);
   });
-  selectedReuseIndex = 0;
+  selectedReuseId = null;
   renderReuseList();
 }
 
 function getFilteredReuseCandidates() {
   const repo = document.getElementById('reuse-repo-filter') ? document.getElementById('reuse-repo-filter').value : 'ALL';
-  const search = document.getElementById('reuse-search') ? document.getElementById('reuse-search').value.toLowerCase().trim() : '';
-
   return reuseCandidates.filter(c => {
     if (repo !== 'ALL' && c.repo !== repo) return false;
     if (activeReuseDetector !== 'ALL' && c.detector !== activeReuseDetector) return false;
-    if (search) {
-      const matchSym = c.symbol.toLowerCase().includes(search);
-      const matchCan = c.canonical.toLowerCase().includes(search);
-      const matchEv = (c.shared_evidence || '').toLowerCase().includes(search);
-      const matchFile = (c.canonical_file || '').toLowerCase().includes(search);
-      if (!matchSym && !matchCan && !matchEv && !matchFile) return false;
-    }
     return true;
   });
 }
@@ -870,22 +1117,42 @@ function getFilteredReuseCandidates() {
 function renderReuseList() {
   const container = document.getElementById('reuse-cards-container');
   if (!container) return;
-  const filtered = getFilteredReuseCandidates();
+  const filteredAll = getFilteredReuseCandidates();
+  const view = viewReuseCandidates(filteredAll);
+  const filtered = view.items;
+  updateListCount('reuse-list-count', filtered.length, view.total, view.label);
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty-cell">Zero duplicate candidates match current criteria.<br><span style="font-size: 0.8rem; opacity: 0.7;">Codebase is clean of duplicate helpers.</span></div>';
+    const trulyEmpty = reuseCandidates.length === 0 && activeReuseDetector === 'ALL';
+    container.innerHTML = trulyEmpty
+      ? '<div class="empty-cell">No duplicate candidates found in the indexed corpus.</div>'
+      : '<div class="empty-cell">No candidates match the current filters.</div>';
     renderReuseDossier(null);
     return;
   }
 
+  let selIdx = filtered.findIndex(c => c.id === selectedReuseId);
+  if (selIdx < 0) {
+    const stillVisible = filteredAll.some(c => c.id === selectedReuseId);
+    selIdx = 0;
+    selectedReuseId = filtered[0] ? filtered[0].id : null;
+    if (stillVisible) announce('Selection moved: the previous candidate is outside the current view');
+  }
   container.innerHTML = '';
   filtered.forEach((c, idx) => {
-    const isSelected = idx === selectedReuseIndex;
+    const isSelected = c.id === selectedReuseId;
     const card = document.createElement('div');
     card.className = 'select-item-card' + (isSelected ? ' selected' : '');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    card.setAttribute('aria-label', 'Candidate ' + c.symbol + ' to ' + c.canonical);
     card.onclick = () => {
-      selectedReuseIndex = idx;
+      selectedReuseId = c.id;
       renderReuseList();
+    };
+    card.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectedReuseId = c.id; renderReuseList(); }
     };
 
     const detBadgeClass = 'badge badge-' + c.detector.toLowerCase();
@@ -896,7 +1163,7 @@ function renderReuseList() {
       '<div class="item-card-head">' +
       '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
       '    <span class="' + detBadgeClass + '" data-tip="det.' + c.detector.toLowerCase() + '">' + c.detector + '</span>' +
-      '    <span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' +
+          (c.overlap_applicable ? '<span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' : '<span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + escapeHtml(detectorEvidenceLabel(c.detector)) + '</span>') +
       '    ' + locBadge +
       '  </div>' +
       '  ' + repoBadge +
@@ -906,19 +1173,14 @@ function renderReuseList() {
       '<div class="item-meta">' +
       '  <span>' + escapeHtml(c.canonical_file) + ':' + c.canonical_line + '</span>' +
       (c.shared_evidence ? '<span>&bull;</span><span>' + escapeHtml(c.shared_evidence) + '</span>' : '') +
+      '<span>&bull;</span><span data-tip="card.usage">' + escapeHtml(reuseUsageText(c)) + '</span>' +
       '</div>';
 
     container.appendChild(card);
   });
 
-  if (filtered[selectedReuseIndex]) {
-    attachTipDescriptions(container);
-    renderReuseDossier(filtered[selectedReuseIndex]);
-  } else {
-    selectedReuseIndex = 0;
-    attachTipDescriptions(container);
-    renderReuseDossier(filtered[0] || null);
-  }
+  attachTipDescriptions(container);
+  renderReuseDossier(filtered[selIdx] || null);
 }
 
 function renderReuseDossier(c) {
@@ -938,7 +1200,7 @@ function renderReuseDossier(c) {
     '  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">' +
     '    <div style="display:flex; gap:0.45rem; align-items:center;">' +
     '      <span class="' + detBadgeClass + '" data-tip="det.' + c.detector.toLowerCase() + '">' + c.detector + '</span>' +
-    '      <span class="badge status-ok" data-tip="card.overlap">' + c.overlap_pct + '% OVERLAP</span>' +
+          (c.overlap_applicable ? '<span class="badge status-ok" data-tip="card.overlap">' + c.overlap_pct + '% overlap</span>' : '<span class="badge status-ok" data-tip="card.overlap">' + escapeHtml(detectorEvidenceLabel(c.detector)) + '</span>') +
     '      <span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>' +
     '    </div>' +
     '    <span class="badge status-warn" data-tip="card.loc_saving">Save ~' + c.loc_saving + ' LOC</span>' +
@@ -979,40 +1241,56 @@ function renderPrewriteTable() {
   if (!tbody) return;
   if (!prewriteSearches || prewriteSearches.length === 0) {
     tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No pre-write helper searches recorded yet</td></tr>';
+    updateListCount('prewrite-list-count', 0, 0, 'newest first');
     return;
   }
 
+  const visible = prewriteSearches.slice(0, FEED_LIMIT);
   tbody.innerHTML = '';
-  prewriteSearches.forEach(s => {
+  visible.forEach(s => {
     const tr = document.createElement('tr');
     const ts = s.ts ? new Date(s.ts * 1000).toLocaleTimeString() : '—';
     const latStr = s.latency_us ? (s.latency_us / 1000.0).toFixed(1) + 'ms' : '—';
-    const rName = s.repo_name || 'workspace';
+    const rName = s.repo_name || UNATTRIBUTED;
     tr.innerHTML =
       '<td class="num-col text-muted">' + ts + '</td>' +
       '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
       '<td><code>' + escapeHtml(s.tool) + '</code></td>' +
-      '<td class="args-cell"><code>' + escapeHtml(s.terms || '(all paths)') + '</code></td>' +
+      '<td class="args-cell" title="' + escapeHtml(s.terms || '') + '"><code>' + escapeHtml(
+        explainToolArgs(s.tool, s.tool === 'reuse' ? { paths: s.terms } : { terms: s.terms })
+        || s.terms || 'Every file'
+      ) + '</code></td>' +
       '<td class="text-right num-col">' + (s.shown || 0) + '</td>' +
       '<td class="text-right num-col">' + latStr + '</td>';
     tbody.appendChild(tr);
   });
+  updateListCount('prewrite-list-count', visible.length, prewriteSearches.length, 'newest first');
 }
 
 // Agent Memory UI
 function populateMemoryStoreFilter() {
   const select = document.getElementById('mem-store-filter');
   if (!select) return;
-  const stores = new Set();
-  allMemories.forEach(m => stores.add(m.store));
+  const keep = select.value || 'ALL';
+  const stores = new Map();
+  allMemories.forEach(m => {
+    const id = m.store_id || m.store;
+    if (!stores.has(id)) stores.set(id, m.store);
+  });
 
   select.innerHTML = '<option value="ALL">All Stores</option>';
-  Array.from(stores).sort().forEach(s => {
+  Array.from(stores.keys()).sort().forEach(id => {
     const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
+    opt.value = id;
+    opt.textContent = stores.get(id);
     select.appendChild(opt);
   });
+  if (Array.from(select.options).some(o => o.value === keep)) {
+    select.value = keep;
+  } else {
+    select.value = 'ALL';
+    if (keep !== 'ALL') announce('Filter "' + keep + '" reset: store no longer active');
+  }
 }
 
 function getFilteredMemories() {
@@ -1023,7 +1301,7 @@ function getFilteredMemories() {
 
   return allMemories.filter(m => {
     if (!showSuperseded && !m.is_current) return false;
-    if (store !== 'ALL' && m.store !== store) return false;
+    if (store !== 'ALL' && (m.store_id || m.store) !== store) return false;
     if (kind !== 'ALL' && m.kind !== kind) return false;
     if (search) {
       const matchKey = m.key.toLowerCase().includes(search);
@@ -1039,29 +1317,53 @@ function getFilteredMemories() {
 function renderMemoryList() {
   const container = document.getElementById('memory-cards-container');
   if (!container) return;
-  const filtered = getFilteredMemories();
+  const filteredAll = getFilteredMemories();
+  const view = viewMemories(filteredAll);
+  const filtered = view.items;
+  updateListCount('mem-list-count', filtered.length, view.total, view.label);
 
   if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty-cell">No memory notes match the filter.<br><span style="font-size: 0.8rem; opacity: 0.7;">Agents write memories via <code>eg mem write --body "..." --kind gotcha &lt;key&gt;</code></span></div>';
+    container.innerHTML = allMemories.length === 0
+      ? '<div class="empty-cell">No memory notes recorded yet. Agents write them with <code>eg mem write --body "..." --kind gotcha &lt;key&gt;</code></div>'
+      : '<div class="empty-cell">No memory notes match the current filters.</div>';
     renderMemoryDossier(null);
     return;
   }
 
+  let selIdx = filtered.findIndex(m => memorySelectionId(m) === selectedMemoryId);
+  if (selIdx < 0) {
+    const stillVisible = filteredAll.some(m => memorySelectionId(m) === selectedMemoryId);
+    selIdx = 0;
+    selectedMemoryId = filtered[0] ? memorySelectionId(filtered[0]) : null;
+    if (stillVisible) announce('Selection moved: the previous note is outside the current view');
+  }
   container.innerHTML = '';
-  filtered.forEach((m, idx) => {
-    const isSelected = idx === selectedMemoryIndex;
+  filtered.forEach((m) => {
+    const isSelected = memorySelectionId(m) === selectedMemoryId;
     const card = document.createElement('div');
     card.className = 'select-item-card' + (isSelected ? ' selected' : '');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    card.setAttribute('aria-label', 'Memory note ' + m.key);
     card.onclick = () => {
-      selectedMemoryIndex = idx;
+      selectedMemoryId = memorySelectionId(m);
       renderMemoryList();
+    };
+    card.onkeydown = (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); selectedMemoryId = memorySelectionId(m); renderMemoryList(); }
     };
 
     const kindClass = 'badge status-' + (m.kind === 'decision' ? 'ambig' : m.kind === 'gotcha' ? 'warn' : m.kind === 'fact' ? 'ok' : m.kind === 'procedure' ? 'neutral' : 'err');
-    const timeStr = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString() : '—';
+    const createdStr = m.created_at ? new Date(m.created_at * 1000).toLocaleDateString() : '—';
+    const lastUsedStr = m.last_recalled_ts
+      ? new Date(m.last_recalled_ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'never';
+    const verifiedStr = m.anchored_at
+      ? new Date(m.anchored_at * 1000).toLocaleDateString()
+      : '';
     const storeBadge = '<span class="badge badge-repo">' + escapeHtml(m.store) + '</span>';
     const revPill = '<span class="badge" style="background: var(--bg-subtle);">r' + m.rev + '</span>';
-    const recallsBadge = m.recall_count > 0 ? '<span class="badge status-ok">' + m.recall_count + ' recalls</span>' : '';
     const refBadge = m.ref_status === 'broken'
       ? '<span class="badge status-err">[broken-ref]</span>'
       : m.ref_status === 'modified'
@@ -1073,7 +1375,6 @@ function renderMemoryList() {
       '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
       '    <span class="' + kindClass + '">' + m.kind.toUpperCase() + '</span>' +
       '    ' + revPill +
-      '    ' + recallsBadge +
       '    ' + refBadge +
       '  </div>' +
       '  ' + storeBadge +
@@ -1081,21 +1382,22 @@ function renderMemoryList() {
       '<div class="item-key">' + escapeHtml(m.key) + '</div>' +
       '<div class="item-snippet">' + escapeHtml(m.body) + '</div>' +
       '<div class="item-meta">' +
-      '  <span>' + m.scope + '</span>' +
+      '  <span>' + escapeHtml(m.scope) + '</span>' +
       '  <span>&bull;</span>' +
-      '  <span>' + timeStr + '</span>' +
-      (m.refs && m.refs.length ? '<span>&bull;</span><span>' + m.refs.length + ' refs</span>' : '') +
+      '  <span>created ' + createdStr + '</span>' +
+      '  <span>&bull;</span>' +
+      '  <span data-tip="card.recalled">recalled ' + (m.recall_count || 0) + '&times;</span>' +
+      '  <span>&bull;</span>' +
+      '  <span>last used ' + lastUsedStr + '</span>' +
+      (verifiedStr ? '<span>&bull;</span><span data-tip="card.verified">verified ' + verifiedStr + '</span>' : '') +
+      (m.refs && m.refs.length ? '<span>&bull;</span><span>' + m.refs.length + (m.refs.length === 1 ? ' ref' : ' refs') + '</span>' : '') +
       '</div>';
 
     container.appendChild(card);
   });
+  attachTipDescriptions(container);
 
-  if (filtered[selectedMemoryIndex]) {
-    renderMemoryDossier(filtered[selectedMemoryIndex]);
-  } else {
-    selectedMemoryIndex = 0;
-    renderMemoryDossier(filtered[0] || null);
-  }
+  renderMemoryDossier(filtered[selIdx] || null);
 }
 
 function renderMemoryDossier(m) {
@@ -1121,8 +1423,15 @@ function renderMemoryDossier(m) {
   if (m.resolved_refs && m.resolved_refs.length) {
     refsHtml = '<div class="dossier-section-title">Guarded Code References (.engram/index.db verified)</div><div class="chips-row">';
     m.resolved_refs.forEach(r => {
-      const verClass = !r.verified ? 'chip-ref broken' : r.modified ? 'chip-ref modified' : 'chip-ref verified';
-      const verBadge = !r.verified ? ' [BROKEN REF]' : r.modified ? ' [MODIFIED REF]' : ' [VERIFIED ' + r.type.toUpperCase() + ']';
+      const status = r.status || (r.verified ? 'valid' : 'broken');
+      const verClass = status === 'broken' ? 'chip-ref broken'
+        : status === 'modified' ? 'chip-ref modified'
+        : status === 'unverified' ? 'chip-ref unverified'
+        : 'chip-ref verified';
+      const verBadge = status === 'broken' ? ' [BROKEN REF]'
+        : status === 'modified' ? ' [MODIFIED REF]'
+        : status === 'unverified' ? ' [UNVERIFIED — NO INDEX]'
+        : ' [VERIFIED ' + escapeHtml(r.type || 'file').toUpperCase() + ']';
       const locStr = r.location ? ' &middot; ' + escapeHtml(r.location) : '';
       refsHtml += '<span class="' + verClass + '"><strong>' + escapeHtml(r.ref) + '</strong>' + verBadge + locStr + '</span>';
     });
@@ -1133,8 +1442,8 @@ function renderMemoryDossier(m) {
     refsHtml += '</div>';
   }
 
-  const touchBtn = m.ref_status === 'modified'
-    ? '<button class="btn-touch" style="padding: 0.15rem 0.5rem; font-size: 0.72rem; margin-left: 0.5rem;" onclick="touchMemory(\'' + escapeHtml(m.key) + '\', ' + (m.store === 'global') + ')">Touch Anchor</button>'
+  const touchBtn = m.ref_status === 'modified' && m.is_current
+    ? '<button class="btn-touch" style="padding: 0.15rem 0.5rem; font-size: 0.72rem; margin-left: 0.5rem;" data-key="' + escapeHtml(m.key) + '" data-store-id="' + escapeHtml(m.store_id || m.store) + '" data-rev="' + m.rev + '">Verify</button>'
     : '';
 
   container.innerHTML =
@@ -1161,7 +1470,6 @@ function renderMemoryDossier(m) {
     tagsHtml;
 }
 
-let liveEventCount = 0;
 let isDocumentVisible = true;
 
 // Selective Invalidation Debounce Timers
@@ -1169,19 +1477,79 @@ let summaryDebounceTimer = null;
 let reuseDebounceTimer = null;
 let memoriesDebounceTimer = null;
 
+// Screen-reader announcements: state transitions only, never ordinary rows.
+let lastAnnounce = 0;
+function announce(text) {
+  const region = document.getElementById('live-region');
+  if (!region) return;
+  const now = Date.now();
+  if (now - lastAnnounce < 1000) return;
+  lastAnnounce = now;
+  region.textContent = text;
+}
+
+function showFetchError(tab, message) {
+  const el = document.getElementById('data-error-' + tab);
+  if (!el) return;
+  el.textContent = 'Data unavailable: ' + message + ' — retry with the button.';
+  el.classList.remove('hidden');
+  if (!el.querySelector('button')) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-touch';
+    btn.style.marginLeft = '0.5rem';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => {
+      if (tab === 'telemetry') loadSummaryData();
+      else if (tab === 'reuse') loadReuseData();
+      else loadMemoriesData();
+    });
+    el.appendChild(btn);
+  }
+}
+
+function clearFetchError(tab) {
+  const el = document.getElementById('data-error-' + tab);
+  if (el) {
+    el.classList.add('hidden');
+    el.textContent = '';
+  }
+}
+
+function setDataAge(generatedAt) {
+  const el = document.getElementById('data-age');
+  if (!el) return;
+  if (!generatedAt) {
+    el.textContent = '';
+    return;
+  }
+  el.textContent = 'Data as of ' + new Date(generatedAt * 1000).toLocaleTimeString();
+}
+
 function triggerSummaryRefresh() {
-  if (summaryDebounceTimer) clearTimeout(summaryDebounceTimer);
-  summaryDebounceTimer = setTimeout(loadSummaryData, 3000);
+  // No reset on later events: the timer fires once per window. A trailing
+  // debounce that resets on every event starves under a steady stream.
+  if (summaryDebounceTimer) return;
+  summaryDebounceTimer = setTimeout(() => {
+    summaryDebounceTimer = null;
+    loadSummaryData();
+  }, 3000);
 }
 
 function triggerReuseRefresh() {
-  if (reuseDebounceTimer) clearTimeout(reuseDebounceTimer);
-  reuseDebounceTimer = setTimeout(loadReuseData, 1000);
+  if (activeTab !== 'reuse') return;
+  if (reuseDebounceTimer) return;
+  reuseDebounceTimer = setTimeout(() => {
+    reuseDebounceTimer = null;
+    loadReuseData();
+  }, 1000);
 }
 
 function triggerMemoriesRefresh() {
-  if (memoriesDebounceTimer) clearTimeout(memoriesDebounceTimer);
-  memoriesDebounceTimer = setTimeout(loadMemoriesData, 500);
+  if (memoriesDebounceTimer) return;
+  memoriesDebounceTimer = setTimeout(() => {
+    memoriesDebounceTimer = null;
+    loadMemoriesData();
+  }, 500);
 }
 
 function flashElement(el) {
@@ -1191,290 +1559,39 @@ function flashElement(el) {
   el.classList.add('metric-flash');
 }
 
-function estimateEventTokens(tool, shown, resultCount) {
-  switch (tool) {
-    case 'context':
-    case 'callers':
-    case 'callees':
-    case 'path':
-    case 'impact':
-    case 'imports':
-      return shown * 35 + 800;
-    case 'search':
-      return shown * 25 + 800;
-    case 'reuse':
-      return resultCount * 350 + 1200;
-    case 'symbols':
-      return shown * 15;
-    case 'build':
-      return 1500;
-    default:
-      return 0;
-  }
-}
-
-function patchSummaryState(q) {
-  if (!latestSummaryData) return;
-
-  const tool = q.tool || '';
-  const repoName = q.repo_name || 'workspace';
-  const agentName = q.agent || 'user';
-  const exitCode = parseInt(q.exit_code || 0, 10);
-  const isError = exitCode >= 3;
-  const shown = q.shown || 0;
-  const resultCount = q.result_count || 0;
-  const isGraph = GRAPH_TOOLS.includes(tool);
-  const isReuse = tool === 'reuse' || tool === 'search';
-  const isMem = tool.startsWith('mem_');
-  const isMemRead = tool === 'mem_query' || tool === 'mem_get' || tool === 'mem_export';
-  const isMemWrite = tool === 'mem_write' || tool === 'mem_delete' || tool === 'mem_touch' || tool === 'mem_gc';
-
-  const savedTokens = estimateEventTokens(tool, shown, resultCount);
-
-  // 1. Overall & Graph Totals
-  latestSummaryData.total_calls = (latestSummaryData.total_calls || 0) + 1;
-  if (isError) {
-    latestSummaryData.error_count = (latestSummaryData.error_count || 0) + 1;
-  }
-  const tot = latestSummaryData.total_calls;
-  const err = latestSummaryData.error_count || 0;
-  latestSummaryData.reliability_pct = tot > 0 ? (100.0 * (tot - err) / tot) : 100.0;
-  latestSummaryData.saved_tokens = (latestSummaryData.saved_tokens || 0) + savedTokens;
-  latestSummaryData.saved_dollars = (latestSummaryData.saved_tokens / 1000000.0) * 3.0;
-
-  if (isGraph) {
-    latestSummaryData.graph_calls = (latestSummaryData.graph_calls || 0) + 1;
-    if (isError) {
-      latestSummaryData.graph_errors = (latestSummaryData.graph_errors || 0) + 1;
-    }
-    const gTot = latestSummaryData.graph_calls;
-    const gErr = latestSummaryData.graph_errors || 0;
-    latestSummaryData.graph_reliability_pct = gTot > 0 ? (100.0 * (gTot - gErr) / gTot) : 100.0;
-    latestSummaryData.graph_saved_tokens = (latestSummaryData.graph_saved_tokens || 0) + savedTokens;
-    latestSummaryData.graph_saved_dollars = (latestSummaryData.graph_saved_tokens / 1000000.0) * 3.0;
-  }
-
-  if (tool === 'reuse' && exitCode === 0) {
-    const hits = Math.max(shown, resultCount);
-    if (hits > 0) {
-      latestSummaryData.reuse_hits = (latestSummaryData.reuse_hits || 0) + hits;
-    }
-  }
-
-  // 2. Tool Aggs
-  if (!latestSummaryData.tool_aggs) latestSummaryData.tool_aggs = {};
-  if (!latestSummaryData.tool_aggs[tool]) {
-    latestSummaryData.tool_aggs[tool] = { calls: 0, errors: 0, shown: 0 };
-  }
-  const tEntry = latestSummaryData.tool_aggs[tool];
-  tEntry.calls = (tEntry.calls || 0) + 1;
-  tEntry.shown = (tEntry.shown || 0) + shown;
-  if (isError) tEntry.errors = (tEntry.errors || 0) + 1;
-
-  // 3. Repo Aggs
-  if (!latestSummaryData.repo_aggs) latestSummaryData.repo_aggs = {};
-  if (!latestSummaryData.repo_aggs[repoName]) {
-    latestSummaryData.repo_aggs[repoName] = {
-      calls: 0, errors: 0, graph_calls: 0, graph_errors: 0,
-      saved_tokens: 0, graph_saved_tokens: 0,
-      reuse_calls: 0, reuse_errors: 0, reuse_hits: 0, reuse_saved_tokens: 0,
-      memory_calls: 0, memory_errors: 0, memory_reads: 0, memory_writes: 0,
-      worktree: Boolean(q.worktree),
-    };
-  }
-  const rEntry = latestSummaryData.repo_aggs[repoName];
-  rEntry.calls = (rEntry.calls || 0) + 1;
-  if (isError) rEntry.errors = (rEntry.errors || 0) + 1;
-  rEntry.saved_tokens = (rEntry.saved_tokens || 0) + savedTokens;
-  rEntry.worktree = rEntry.worktree || Boolean(q.worktree);
-  if (q.ts) rEntry.last_ts = q.ts;
-  if (isGraph) {
-    rEntry.graph_calls = (rEntry.graph_calls || 0) + 1;
-    if (isError) rEntry.graph_errors = (rEntry.graph_errors || 0) + 1;
-    rEntry.graph_saved_tokens = (rEntry.graph_saved_tokens || 0) + savedTokens;
-    rEntry.graph_reliability_pct = rEntry.graph_calls ? 100.0 * (rEntry.graph_calls - rEntry.graph_errors) / rEntry.graph_calls : 100.0;
-  }
-  if (isReuse) {
-    rEntry.reuse_calls = (rEntry.reuse_calls || 0) + 1;
-    if (isError) rEntry.reuse_errors = (rEntry.reuse_errors || 0) + 1;
-    rEntry.reuse_saved_tokens = (rEntry.reuse_saved_tokens || 0) + savedTokens;
-    if (tool === 'reuse' && exitCode === 0) {
-      const hits = Math.max(shown, resultCount);
-      rEntry.reuse_hits = (rEntry.reuse_hits || 0) + hits;
-    }
-    rEntry.reuse_reliability_pct = rEntry.reuse_calls ? 100.0 * (rEntry.reuse_calls - rEntry.reuse_errors) / rEntry.reuse_calls : 100.0;
-  }
-  if (isMem) {
-    rEntry.memory_calls = (rEntry.memory_calls || 0) + 1;
-    if (isError) rEntry.memory_errors = (rEntry.memory_errors || 0) + 1;
-    if (isMemRead) rEntry.memory_reads = (rEntry.memory_reads || 0) + 1;
-    if (isMemWrite) rEntry.memory_writes = (rEntry.memory_writes || 0) + 1;
-    rEntry.memory_reliability_pct = rEntry.memory_calls ? 100.0 * (rEntry.memory_calls - rEntry.memory_errors) / rEntry.memory_calls : 100.0;
-  }
-
-  // 4. Agent Aggs
-  if (!latestSummaryData.agent_aggs) latestSummaryData.agent_aggs = {};
-  if (!latestSummaryData.agent_aggs[agentName]) {
-    latestSummaryData.agent_aggs[agentName] = {
-      calls: 0, errors: 0, graph_calls: 0, graph_errors: 0,
-      saved_tokens: 0, graph_saved_tokens: 0,
-      reuse_calls: 0, reuse_errors: 0, reuse_hits: 0, reuse_saved_tokens: 0,
-      memory_calls: 0, memory_errors: 0, memory_reads: 0, memory_writes: 0,
-    };
-  }
-  const aEntry = latestSummaryData.agent_aggs[agentName];
-  aEntry.calls = (aEntry.calls || 0) + 1;
-  if (isError) aEntry.errors = (aEntry.errors || 0) + 1;
-  aEntry.saved_tokens = (aEntry.saved_tokens || 0) + savedTokens;
-  if (q.ts) aEntry.last_ts = q.ts;
-  if (isGraph) {
-    aEntry.graph_calls = (aEntry.graph_calls || 0) + 1;
-    if (isError) aEntry.graph_errors = (aEntry.graph_errors || 0) + 1;
-    aEntry.graph_saved_tokens = (aEntry.graph_saved_tokens || 0) + savedTokens;
-    aEntry.graph_reliability_pct = aEntry.graph_calls ? 100.0 * (aEntry.graph_calls - aEntry.graph_errors) / aEntry.graph_calls : 100.0;
-  }
-  if (isReuse) {
-    aEntry.reuse_calls = (aEntry.reuse_calls || 0) + 1;
-    if (isError) aEntry.reuse_errors = (aEntry.reuse_errors || 0) + 1;
-    aEntry.reuse_saved_tokens = (aEntry.reuse_saved_tokens || 0) + savedTokens;
-    if (tool === 'reuse' && exitCode === 0) {
-      const hits = Math.max(shown, resultCount);
-      aEntry.reuse_hits = (aEntry.reuse_hits || 0) + hits;
-    }
-    aEntry.reuse_reliability_pct = aEntry.reuse_calls ? 100.0 * (aEntry.reuse_calls - aEntry.reuse_errors) / aEntry.reuse_calls : 100.0;
-  }
-  if (isMem) {
-    aEntry.memory_calls = (aEntry.memory_calls || 0) + 1;
-    if (isError) aEntry.memory_errors = (aEntry.memory_errors || 0) + 1;
-    if (isMemRead) aEntry.memory_reads = (aEntry.memory_reads || 0) + 1;
-    if (isMemWrite) aEntry.memory_writes = (aEntry.memory_writes || 0) + 1;
-    aEntry.memory_reliability_pct = aEntry.memory_calls ? 100.0 * (aEntry.memory_calls - aEntry.memory_errors) / aEntry.memory_calls : 100.0;
-  }
-}
-
-// Live Server-Sent Events (SSE)
-function initEventSource() {
-  const liveBadge = document.getElementById('live-indicator');
-  if (liveBadge) liveBadge.style.display = 'inline-block';
-
-  const source = new EventSource('/events');
-
-  source.onopen = function() {
-    const dot = document.querySelector('.live-dot');
-    if (dot) {
-      dot.className = 'live-dot live-active';
-    }
-    if (liveBadge) liveBadge.title = 'Live stream connected';
-  };
-
-  source.onerror = function() {
-    const dot = document.querySelector('.live-dot');
-    if (dot) {
-      dot.className = 'live-dot live-reconnecting';
-    }
-    if (liveBadge) liveBadge.title = 'Reconnecting to live stream...';
-  };
-
-  source.onmessage = function(e) {
-    try {
-      const q = JSON.parse(e.data);
-      handleLiveEvent(q);
-      liveEventCount++;
-
-      // Lazy background drift reconciliation (debounced 3s)
-      triggerSummaryRefresh();
-
-      // Mutation-selective endpoint invalidation
-      const tool = q.tool || '';
-      if (tool === 'build') {
-        triggerReuseRefresh();
-      } else if (tool === 'mem_write' || tool === 'mem_delete' || tool === 'mem_touch') {
-        triggerMemoriesRefresh();
-      }
-    } catch(err) {}
-  };
-
-  // Page Visibility API to save battery and sync on foreground
-  document.addEventListener('visibilitychange', () => {
-    isDocumentVisible = !document.hidden;
-    const dot = document.querySelector('.live-dot');
-    if (isDocumentVisible) {
-      if (dot) dot.className = 'live-dot live-active';
-      loadSummaryData();
-      if (activeTab === 'reuse') loadReuseData();
-      if (activeTab === 'memory') loadMemoriesData();
-    } else {
-      if (dot) dot.className = 'live-dot live-paused';
-    }
-  });
-
-  // Background fallback poll every 15s to keep metrics fresh when visible
-  setInterval(() => {
-    if (!isDocumentVisible) return;
-    loadSummaryData();
-    if (activeTab === 'reuse') loadReuseData();
-    if (activeTab === 'memory') loadMemoriesData();
-  }, 15000);
-}
-
 function handleLiveEvent(q) {
   const tool = q.tool || '';
   const isGraph = GRAPH_TOOLS.includes(tool);
   const exitCode = parseInt(q.exit_code || 0, 10);
 
-  // 1. Immediately patch in-memory aggregation state
-  patchSummaryState(q);
-
-  // 2. Real-time updates for Tab 01 (Graph Navigation)
+  // Numbers are owned by the server payload: the scheduler refetches, and the
+  // rows below are the only client-side state.
   if (isGraph) {
-    totalCalls = latestSummaryData ? latestSummaryData.graph_calls : (totalCalls + 1);
-    totalErrors = latestSummaryData ? latestSummaryData.graph_errors : (exitCode >= 3 ? totalErrors + 1 : totalErrors);
-
-    const totalCallsEl = document.getElementById('metric-total-calls');
-    if (totalCallsEl) {
-      totalCallsEl.textContent = totalCalls.toLocaleString();
-      flashElement(totalCallsEl);
-    }
-
-    const relEl = document.getElementById('metric-reliability');
-    if (relEl) {
-      const rel = latestSummaryData ? latestSummaryData.graph_reliability_pct : (totalCalls > 0 ? (100.0 * (totalCalls - totalErrors) / totalCalls) : 100.0);
-      relEl.textContent = rel.toFixed(1) + "% clean (" + totalErrors + " errs)";
-    }
-
-    const tokEl = document.getElementById('metric-tokens');
-    if (tokEl && latestSummaryData) {
-      tokEl.textContent = '~' + (latestSummaryData.graph_saved_tokens || 0).toLocaleString();
-    }
-
-    const dolEl = document.getElementById('metric-dollars');
-    if (dolEl && latestSummaryData) {
-      dolEl.textContent = '~$' + (latestSummaryData.graph_saved_dollars || 0.0).toFixed(2) + ' avoided vs full reads';
-    }
-
     const recentTbody = document.getElementById('recent-tbody');
     if (recentTbody) {
       const emptyRow = recentTbody.querySelector('.empty-cell');
       if (emptyRow) recentTbody.innerHTML = '';
       const row = createRecentRow(q);
       recentTbody.insertBefore(row, recentTbody.firstChild);
-      while (recentTbody.children.length > 50) {
+      recentQueryTotal += 1;
+      while (recentTbody.children.length > FEED_LIMIT) {
         recentTbody.removeChild(recentTbody.lastChild);
       }
+      updateListCount('recent-list-count', recentTbody.children.length, recentQueryTotal, 'newest first');
+      applyTelemetryFilters();
     }
+    flashElement(document.getElementById('metric-total-calls'));
   } else if (tool === 'search' || tool === 'reuse') {
-    // 3. Real-time updates for Tab 02 (Anti-Reinvention)
     const args = q.args || {};
     const terms = args.terms || args.paths || '';
-    const newSearch = {
+    prewriteSearches.unshift({
       ts: q.ts,
       repo_name: q.repo_name,
       tool: tool,
       terms: terms,
       shown: q.shown || q.result_count || 0,
       latency_us: q.latency_us || 0,
-    };
-    prewriteSearches.unshift(newSearch);
+    });
     if (prewriteSearches.length > 40) prewriteSearches.pop();
     renderPrewriteTable();
     const feedCountEl = document.getElementById('reuse-feed-count');
@@ -1485,23 +1602,16 @@ function handleLiveEvent(q) {
     }
   } else if (tool.startsWith('mem_')) {
     updateMemoryKpis();
-    const currencyEl = document.getElementById('mem-kpi-currency');
-    if (currencyEl) flashElement(currencyEl);
+    flashElement(document.getElementById('mem-kpi-currency'));
   }
 
-  // 5. Update the active tab breakdown tables immediately using in-memory state
-  if (latestSummaryData) {
-    if (activeTab === 'telemetry') {
-      renderReposTable(latestSummaryData.repo_aggs || {});
-      renderAgentsTable(latestSummaryData.agent_aggs || {}, latestSummaryData.graph_calls || latestSummaryData.total_calls);
-      renderToolsTable(latestSummaryData.tool_aggs || {}, latestSummaryData.graph_calls || latestSummaryData.total_calls);
-    } else if (activeTab === 'reuse') {
-      renderReuseReposTable(latestSummaryData.repo_aggs || {});
-      renderReuseAgentsTable(latestSummaryData.agent_aggs || {});
-    } else if (activeTab === 'memory') {
-      renderMemoryReposTable(latestSummaryData.repo_aggs || {});
-      renderMemoryAgentsTable(latestSummaryData.agent_aggs || {});
-    }
+  // Bounded reconciliation: debounce without reset, so a steady event stream
+  // still refreshes at least every window instead of starving the timer.
+  triggerSummaryRefresh();
+  if (tool === 'build') {
+    triggerReuseRefresh();
+  } else if (tool === 'mem_write' || tool === 'mem_delete' || tool === 'mem_touch') {
+    triggerMemoriesRefresh();
   }
 }
 
@@ -1510,28 +1620,33 @@ function escapeHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // Hover help. One copy table, one shared node, delegated listeners.
 const TIP = {
   'kpi.graph_queries': 'Code lookups agents ran against the index instead of reading files.',
   'kpi.p50': 'Half of all queries finished faster than this.',
-  'kpi.tokens_saved': 'Tokens an agent did not spend reading source files.',
-  'kpi.scope': 'Repositories and worktrees with an index in this log.',
+  'kpi.tokens_saved': 'Estimated tokens an agent avoided spending on source reads (coefficients, not a measurement).',
   'kpi.candidates': 'Functions that look like near-copies of another function.',
-  'kpi.excess_loc': 'Lines you could delete by merging duplicates. Estimated from sampled candidates.',
-  'kpi.recall': 'Share of tagged sessions that read memory before acting.',
-  'kpi.currency': 'Share of memory refs that still point at existing code.',
+  'kpi.excess_loc': 'Estimated deletable lines, extrapolated from the sampled candidates.',
+  'kpi.recall': 'Share of tagged sessions (ENGRAM_SESSION set) whose calls read memory. Untagged sessions are not measured.',
+  'kpi.currency': 'Share of current notes whose code refs resolve to the current index. Notes without refs are excluded; notes in stores without an index are unverified.',
   'col.last_active': 'Most recent run recorded for this row.',
   'col.p50': 'Half of runs were faster than this.',
   'col.items': 'Results returned by the query.',
   'col.reliability': 'Share of runs that finished without error.',
-  'col.tokens_saved': 'Tokens saved versus reading the source files.',
-  'col.hits': 'Duplicate candidates found in those runs.',
+  'col.tokens_saved': 'Estimated tokens saved by search and reuse runs together.',
+  'col.hits': 'Search results shown to the agent in that repository.',
   'col.reads_writes': 'Memory reads versus notes written.',
-  'card.overlap': 'How much evidence the two functions share.',
-  'card.callers': 'Places that already call the recommended helper.',
+  'card.overlap': 'Measured evidence overlap for D1/D2; D3/D4 show their evidence class instead of a percentage.',
+  'card.callers': 'Call sites using the canonical helper.',
+  'card.usage': 'How many eg reuse runs in the retained journal surfaced this candidate, and when the last one ran.',
+  'card.recalled': 'Exact-key mem_get recalls in the retained journal.',
+  'card.verified': 'Last Verify (anchor) timestamp; the creation date never changes.',
+  'view.memory': 'Collapse the note list: Top 10 or 3 by latest activity (created, verified, or recalled), most recalled, or all notes.',
+  'view.reuse': 'Collapse the candidate list by canonical call-site usage, or show all sampled candidates.',
   'card.loc_saving': 'Lines removed if the duplicate is merged away.',
   'det.all': 'Show every detection rule.',
   'det.d1': 'Both functions call the same downstream functions.',
@@ -1630,7 +1745,120 @@ window.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initTips();
   loadSummaryData();
-  loadReuseData();
   loadMemoriesData();
   initEventSource();
+  initDelegation();
+  initTabKeyboard();
 });
+
+// One delegated listener replaces every inline handler (CSP: no unsafe-inline).
+function initDelegation() {
+  document.addEventListener('click', (e) => {
+    const themeBtn = e.target.closest('#theme-toggle-btn');
+    if (themeBtn) { toggleTheme(); return; }
+    const tabBtn = e.target.closest('[data-tab]');
+    if (tabBtn) { switchTab(tabBtn.dataset.tab); return; }
+    const pill = e.target.closest('[data-det]');
+    if (pill) { setReuseDetectorFilter(pill.dataset.det); return; }
+    const touchBtn = e.target.closest('.btn-touch[data-key]');
+    if (touchBtn) { touchMemory(touchBtn); return; }
+    const verifyAll = e.target.closest('#verify-all-btn');
+    if (verifyAll) { verifyAllModified(); return; }
+  });
+  document.addEventListener('input', (e) => {
+    const id = e.target.id;
+    if (id === 'query-search') applyTelemetryFilters();
+    else if (id === 'mem-search') renderMemoryList();
+  });
+  document.addEventListener('change', (e) => {
+    const id = e.target.id;
+    if (id === 'repo-filter' || id === 'agent-filter' || id === 'status-filter') applyTelemetryFilters();
+    else if (id === 'reuse-repo-filter') renderReuseList();
+    else if (id === 'mem-store-filter' || id === 'mem-kind-filter' || id === 'mem-show-superseded') renderMemoryList();
+    else if (id === 'mem-view' && MEMORY_VIEWS[e.target.value]) { memView = e.target.value; renderMemoryList(); }
+    else if (id === 'reuse-view' && REUSE_VIEWS[e.target.value]) { reuseView = e.target.value; renderReuseList(); }
+  });
+}
+
+function initTabKeyboard() {
+  const nav = document.querySelector('.nav-tabs');
+  if (!nav) return;
+  nav.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const idx = TAB_KEYS.indexOf(activeTab);
+    let next = idx;
+    if (e.key === 'ArrowLeft') next = (idx + TAB_KEYS.length - 1) % TAB_KEYS.length;
+    else if (e.key === 'ArrowRight') next = (idx + 1) % TAB_KEYS.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = TAB_KEYS.length - 1;
+    e.preventDefault();
+    switchTab(TAB_KEYS[next]);
+    const btn = document.getElementById('tab-' + activeTab + '-btn');
+    if (btn) btn.focus();
+  });
+}
+
+function refreshVisibleData() {
+  loadSummaryData();
+  if (activeTab === 'reuse') loadReuseData();
+  if (activeTab === 'memory') loadMemoriesData();
+}
+
+function initEventSource() {
+  const liveBadge = document.getElementById('live-indicator');
+  if (liveBadge) liveBadge.style.display = 'inline-block';
+  let isDocumentVisible = !document.hidden;
+
+  const source = new EventSource('/events');
+
+  source.onopen = function () {
+    const dot = document.querySelector('.live-dot');
+    if (dot) dot.className = 'live-dot live-active';
+    if (liveBadge) {
+      liveBadge.title = 'Live stream connected';
+      liveBadge.className = 'badge status-ok';
+      liveBadge.lastChild.nodeValue = 'LIVE';
+    }
+    // Events missed while disconnected are covered by a full refetch.
+    refreshVisibleData();
+  };
+
+  source.onerror = function () {
+    const dot = document.querySelector('.live-dot');
+    if (dot) dot.className = 'live-dot live-reconnecting';
+    if (liveBadge) {
+      liveBadge.title = 'Reconnecting to live stream...';
+      liveBadge.className = 'badge status-warn';
+      liveBadge.lastChild.nodeValue = 'RECONNECTING';
+    }
+  };
+
+  source.addEventListener('reset', function () {
+    announce('Live stream reset; data reloaded.');
+    refreshVisibleData();
+  });
+
+  source.onmessage = function (e) {
+    try {
+      const q = JSON.parse(e.data);
+      handleLiveEvent(q);
+    } catch (err) {}
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    isDocumentVisible = !document.hidden;
+    const dot = document.querySelector('.live-dot');
+    if (isDocumentVisible) {
+      if (dot) dot.className = 'live-dot live-active';
+      refreshVisibleData();
+    } else if (dot) {
+      dot.className = 'live-dot live-paused';
+    }
+  });
+
+  // Fallback poll: keeps KPIs fresh when the stream is quiet or degraded.
+  setInterval(() => {
+    if (!isDocumentVisible) return;
+    refreshVisibleData();
+  }, 15000);
+}
