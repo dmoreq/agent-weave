@@ -16,6 +16,8 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-11
+
 ### Changed
 - Reuse candidates now carry per-candidate usage: each `eg reuse` run
   journals the surfaced `symbol->canonical` pairs (capped at 25) in
