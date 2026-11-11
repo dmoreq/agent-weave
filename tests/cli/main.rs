@@ -1,6 +1,7 @@
 //! Integration tests: CUJs 1-8, G4 staleness, and the read-only tree
 //! snapshot invariant, exercised against a throwaway fixture repo.
 
+mod audit;
 mod common;
 mod cuj;
 mod dashboard;

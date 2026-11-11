@@ -158,7 +158,7 @@ fn like_escape(raw: &str) -> String {
     out
 }
 
-fn resolve_single_ref(r: &str, index_conn: Option<&Connection>, anchor: i64) -> Value {
+pub(crate) fn resolve_single_ref(r: &str, index_conn: Option<&Connection>, anchor: i64) -> Value {
     let Some(iconn) = index_conn else {
         // No index for this store (global, or a repo that was never built):
         // verification is impossible, not failed.

@@ -175,6 +175,36 @@ pub enum Cmd {
         #[arg(long)]
         global: bool,
     },
+    /// Read-only health and effectiveness report from telemetry, index, and memory
+    Audit {
+        /// Emit one JSON document on stdout; diagnostics stay on stderr
+        #[arg(long)]
+        json: bool,
+
+        /// Audit the machine-wide journal instead of the current repository
+        #[arg(long, conflicts_with = "root")]
+        global: bool,
+
+        /// Evaluation window in days (1..=90)
+        #[arg(long, default_value_t = 7)]
+        days: u32,
+
+        /// Baseline window immediately before the evaluation window (3..=90)
+        #[arg(long, default_value_t = 7)]
+        baseline_days: u32,
+
+        /// Human output includes passing checks
+        #[arg(long, conflicts_with = "json")]
+        all_checks: bool,
+
+        /// Human output shows repository paths instead of aliases
+        #[arg(long, conflicts_with = "json")]
+        reveal_paths: bool,
+
+        /// Exit 1 when the report reaches this severity (warn or critical)
+        #[arg(long)]
+        fail_on: Option<String>,
+    },
     /// Project memory: agent-authored notes persisted in .engram/memory.db
     /// (write/query/get/delete/export/gc). Notes are candidates, never proof.
     #[command(alias = "memory")]

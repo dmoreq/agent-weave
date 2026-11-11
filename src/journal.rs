@@ -6,7 +6,7 @@
 
 use std::cell::RefCell;
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;

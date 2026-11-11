@@ -119,7 +119,7 @@ By default, `eg mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 ### Extended Surface (`--all-tools`)
 Passing `--all-tools` exposes 6 additional memory maintenance tools (19 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, `mem_export` (JSONL or Markdown), and `mem_import` (reject-on-conflict restore; confined to the project store).
 
-*Note*: `doctor`, `stats`, and `unresolved` are intentionally reserved for human CLI inspection and omitted from MCP stdio dispatch.
+*Note*: `doctor`, `audit`, `stats`, and `unresolved` are intentionally reserved for human CLI inspection and omitted from MCP stdio dispatch. `eg audit --json` is the machine-readable health surface; it is read-only and redacted by default.
 
 ---
 

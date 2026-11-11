@@ -1,7 +1,7 @@
 //! Data aggregation engine for the native dashboard.
 //! Queries `.engram/usage.log`, `.engram/index.db`, and `.engram/memory.db` with sub-millisecond latency.
 
-mod memories;
+pub(crate) mod memories;
 mod reuse;
 mod summary;
 

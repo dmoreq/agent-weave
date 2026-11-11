@@ -296,6 +296,23 @@ eg usage [--global] [--quality]
 - `--global`: Aggregates telemetry across all repositories and worktrees on the machine (`~/.engram/usage.log`), listing live repositories and recent errors for triage. Entries without a live repository identity — deleted repositories, legacy lines, calls that resolved no repository — are skipped by the read and purged from the log on the next `eg dashboard` or `eg doctor` run.
 - `--quality`: Appends breakdown of empty results (`empty_ok` vs `empty_error`), capped queries, and p50/p95 latency percentiles.
 
+### `eg audit`
+Read-only health and effectiveness report over telemetry, index snapshots, and memory refs. Unlike `eg usage`, it applies the published windows, baselines, and thresholds in [health](health.md), and never prunes or writes.
+
+```bash
+eg audit [--json] [--global] [--days N] [--baseline-days N]
+         [--all-checks] [--reveal-paths] [--fail-on warn|critical]
+```
+
+- `--json`: One JSON document on stdout; diagnostics are fixed codes on stderr.
+- `--global`: Use `~/.engram/usage.log` across live repositories. Local scope is the default and conflicts with `--root`.
+- `--days N` / `--baseline-days N`: Evaluation and preceding baseline windows (defaults 7 and 7; `--days` 1–90, `--baseline-days` 3–90).
+- `--all-checks`: Human output includes passing checks. Journal arguments and absolute repository paths are never printed.
+- `--reveal-paths`: Human output replaces `repo-<hash16>` aliases with paths; rejected with `--json`.
+- `--fail-on`: Exit 1 when health reaches `warn` or `critical`. A normal report exits 0 even when warnings exist; missing telemetry exits 1.
+
+The command is CLI-only, like `doctor`; it is not an MCP tool and does not appear in mandatory agent routing. See [health](health.md) for the check registry, baseline rules, redaction, and daily automation contract.
+
 ### Dashboard Launcher (`eg-dashboard`)
 Convenience launcher for the native dashboard: it resolves the installed `eg`
 binary (falling back to `cargo run` in a source checkout) and executes

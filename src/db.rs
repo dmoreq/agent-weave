@@ -284,6 +284,41 @@ pub fn check_schema_version(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Non-aborting index open for read-only observers (`eg audit`). Unlike
+/// [`open_for_query`], a missing, symlinked, corrupt, or skewed index is a
+/// value the caller can report per repository instead of an exit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexOpenError {
+    Missing,
+    Symlink,
+    Corrupt,
+    Schema { have: i32 },
+}
+
+pub fn try_open_index(root: &Path) -> std::result::Result<Connection, IndexOpenError> {
+    let dir = eg_dir(root);
+    let path = db_path(root);
+    for candidate in [&dir, &path] {
+        match fs::symlink_metadata(candidate) {
+            Ok(meta) if meta.file_type().is_symlink() => return Err(IndexOpenError::Symlink),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(IndexOpenError::Missing)
+            }
+            Err(_) => return Err(IndexOpenError::Corrupt),
+        }
+    }
+    let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|_| IndexOpenError::Corrupt)?;
+    let have: i32 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|_| IndexOpenError::Corrupt)?;
+    if have != SCHEMA_VERSION {
+        return Err(IndexOpenError::Schema { have });
+    }
+    Ok(conn)
+}
+
 /// Fresh DB at `.engram/index.db.new` with tables, FTS, and user_version stamped.
 /// Secondary indexes are created later by `create_secondary_indexes` (after
 /// the bulk insert) so each index is sorted once instead of maintained per row.

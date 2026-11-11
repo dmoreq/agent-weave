@@ -16,6 +16,27 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-11-11
+
+### Added
+- `eg audit` is a read-only health report over the retained journal, index
+  snapshots, and memory refs. It separates `status` (pass/warn/critical) from
+  `data_status` (sufficient/partial/insufficient), applies fixed windows and
+  hard floors plus a baseline, and exposes a versioned JSON document for the
+  daily automation. Repositories are printed as aliases; `--reveal-paths` is
+  human-only. The command is excluded from journaling and never prunes,
+  rotates, or writes. See [health](docs/health.md).
+- The audit standards and the daily ZCode automation are documented in
+  [health](docs/health.md). The daily note uses a fixed path-free template and
+  is written with journaling disabled.
+
+### Changed
+- `eg doctor` now computes its index facts through a shared read-only
+  snapshot. Its printed output is unchanged.
+- Indexed-path staleness rejects absolute paths, `..`, backslashes, symlinks,
+  and non-regular files before reading, so a hostile index cannot probe
+  outside the repository.
+
 ## [1.0.3] - 2026-11-11
 
 ### Changed

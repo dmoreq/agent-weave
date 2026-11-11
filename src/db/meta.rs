@@ -147,11 +147,6 @@ pub fn stat_mtime(path: &Path) -> Option<i64> {
     fs::metadata(path).ok().and_then(|m| metadata_mtime(&m))
 }
 
-/// stat size as i64.
-pub fn stat_size(path: &Path) -> Option<i64> {
-    fs::metadata(path).ok().map(|m| m.len() as i64)
-}
-
 // ---------------------------------------------------------------------------
 // Project memory store (`.engram/memory.db`) — companion design:
 // docs/architecture/memory-store.md. All memory.db

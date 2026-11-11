@@ -3,6 +3,8 @@
 
 use super::*;
 
+mod audit;
+
 /// Coarse routing family shared by the CLI, journaling, and execution
 /// dispatch. `family()` is exhaustive, so a new variant cannot be added
 /// without choosing a family; the dispatchers then only match this enum.
@@ -24,6 +26,7 @@ fn cli_family(cmd: &crate::cli::Cmd) -> Family {
         crate::cli::Cmd::Build { .. }
         | crate::cli::Cmd::Doctor { .. }
         | crate::cli::Cmd::Usage { .. }
+        | crate::cli::Cmd::Audit { .. }
         | crate::cli::Cmd::Mcp { .. }
         | crate::cli::Cmd::Dashboard { .. }
         | crate::cli::Cmd::Monitor { .. } => Family::Diag,
@@ -99,6 +102,7 @@ impl CommandRequest {
             },
             crate::cli::Cmd::Doctor { invalidate } => CommandRequest::Doctor { invalidate },
             crate::cli::Cmd::Usage { quality, global } => CommandRequest::Usage { quality, global },
+            cmd @ crate::cli::Cmd::Audit { .. } => audit::from_cmd(cmd),
             crate::cli::Cmd::Mcp { .. } => {
                 unreachable!("mcp is a protocol loop, handled before dispatch")
             }
@@ -288,7 +292,8 @@ impl CommandRequest {
         match self {
             CommandRequest::Build { .. }
             | CommandRequest::Doctor { .. }
-            | CommandRequest::Usage { .. } => Family::Diag,
+            | CommandRequest::Usage { .. }
+            | CommandRequest::Audit { .. } => Family::Diag,
             CommandRequest::Callers { .. }
             | CommandRequest::Callees { .. }
             | CommandRequest::Context { .. }
@@ -328,6 +333,7 @@ impl CommandRequest {
             CommandRequest::Stats { .. } => "stats",
             CommandRequest::Doctor { .. } => "doctor",
             CommandRequest::Usage { .. } => "usage",
+            CommandRequest::Audit { .. } => "audit",
             CommandRequest::MemWrite { .. } => "mem_write",
             CommandRequest::MemTouch { .. } => "mem_touch",
             CommandRequest::MemQuery { .. } => "mem_query",
@@ -367,6 +373,12 @@ impl CommandRequest {
                 ("quality", quality.to_string()),
                 ("global", global.to_string()),
             ],
+            CommandRequest::Audit {
+                days,
+                baseline_days,
+                global,
+                ..
+            } => audit::journal_args(*days, *baseline_days, *global),
             _ => unreachable!("journal_args_diag called with a non-matching request"),
         }
     }

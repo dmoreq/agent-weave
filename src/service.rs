@@ -95,6 +95,15 @@ pub enum CommandRequest {
         quality: bool,
         global: bool,
     },
+    Audit {
+        json: bool,
+        global: bool,
+        days: u32,
+        baseline_days: u32,
+        all_checks: bool,
+        reveal_paths: bool,
+        fail_on: Option<String>,
+    },
     MemWrite {
         key: String,
         body: String,
@@ -166,6 +175,7 @@ fn emit(out: crate::query::QueryOutput) -> Result<ArmOut> {
         shown: Some(out.shown),
         stdout: crate::query::render_output(&out),
         stderr,
+        exit_code: None,
     })
 }
 
@@ -202,12 +212,12 @@ pub fn execute(
     let latency_us = started.elapsed().as_micros() as u64;
     let (stdout, stderr, exit_code, shown) = match outcome {
         Ok(arm) => {
+            let code = arm.exit_code.unwrap_or(0);
             if journal {
-                // record_result for the query shapes ran inside the arm; the
-                // exit is 0 here.
-                crate::journal::finalize(resolved_root.as_deref(), 0, latency_us);
+                // record_result for the query shapes ran inside the arm.
+                crate::journal::finalize(resolved_root.as_deref(), code, latency_us);
             }
-            (arm.stdout, arm.stderr, 0, arm.shown)
+            (arm.stdout, arm.stderr, code, arm.shown)
         }
         Err(e) => {
             let mut stdout = String::new();
@@ -244,6 +254,9 @@ pub struct ArmOut {
     pub stdout: String,
     pub stderr: String,
     pub shown: Option<usize>,
+    /// Optional process exit for arms whose document is still valid on a
+    /// non-zero code (audit's no-data and `--fail-on` paths).
+    pub exit_code: Option<i32>,
 }
 
 impl ArmOut {
@@ -253,6 +266,7 @@ impl ArmOut {
             stdout,
             stderr,
             shown: None,
+            exit_code: None,
         }
     }
 
@@ -263,6 +277,7 @@ impl ArmOut {
             shown: Some(out.shown),
             stdout: join_lines(out.lines),
             stderr: out.stderr,
+            exit_code: None,
         }
     }
 }
@@ -351,6 +366,15 @@ mod tests {
                 quality: false,
                 global: false,
             },
+            CommandRequest::Audit {
+                json: false,
+                global: false,
+                days: 7,
+                baseline_days: 7,
+                all_checks: false,
+                reveal_paths: false,
+                fail_on: None,
+            },
             CommandRequest::MemWrite {
                 key: "k".into(),
                 body: "b".into(),
@@ -407,7 +431,9 @@ mod tests {
             .filter(|r| {
                 !matches!(
                     r,
-                    CommandRequest::Unresolved { .. } | CommandRequest::Stats { .. }
+                    CommandRequest::Unresolved { .. }
+                        | CommandRequest::Stats { .. }
+                        | CommandRequest::Audit { .. }
                 )
             })
             .map(CommandRequest::tool_name)
