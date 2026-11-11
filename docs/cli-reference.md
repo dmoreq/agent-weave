@@ -293,7 +293,7 @@ Display local performance telemetry, query distribution, latency percentiles, an
 eg usage [--global] [--quality]
 ```
 
-- `--global`: Aggregates telemetry across all repositories and worktrees on the machine (`~/.engram/usage.log`), listing active repositories and recent errors for triage.
+- `--global`: Aggregates telemetry across all repositories and worktrees on the machine (`~/.engram/usage.log`), listing live repositories and recent errors for triage. Entries without a live repository identity — deleted repositories, legacy lines, calls that resolved no repository — are skipped by the read and purged from the log on the next `eg dashboard` or `eg doctor` run.
 - `--quality`: Appends breakdown of empty results (`empty_ok` vs `empty_error`), capped queries, and p50/p95 latency percentiles.
 
 ### Dashboard Launcher (`eg-dashboard`)
@@ -319,6 +319,8 @@ eg dashboard [--port 7890] [--host 127.0.0.1] [--open] [--local]
 - `--host <HOST>`: Loopback interface to bind (default: 127.0.0.1).
 - `--open`: Automatically opens the dashboard in your default browser.
 - `--local`: Scope telemetry exclusively to the current repository (`.engram/usage.log`) instead of global.
+
+Entries without a live repository identity — deleted repositories, legacy lines, calls that resolved no repository — disappear from the repository tables, the active-repo count, the Recent Queries feed, and the live SSE stream, and are purged from the log at startup, matching `eg usage --global`.
 
 ### Live Query Monitor (`eg monitor`)
 Stream real-time query events directly in your terminal with colored ANSI output, agent attribution tags, and zero dependencies. Defaults to global telemetry across all repositories with an initial backlog of recent events.

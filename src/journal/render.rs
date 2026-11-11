@@ -2,6 +2,7 @@
 //! folds, summary rendering, telemetry totals, and bounded log loading.
 
 use super::*;
+use crate::repo::UNATTRIBUTED;
 
 /// Bounded reader for one journal generation: reject non-regular files and
 /// cap allocation at 16 MiB even when the file is oversized or growing.
@@ -64,6 +65,8 @@ pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
 
 #[derive(Default)]
 struct RepoAgg {
+    /// Row label: the journaled `repo_name`, or `(unattributed)`.
+    display: String,
     calls: usize,
     errors: usize,
     worktree: bool,
@@ -152,7 +155,9 @@ fn load_global_usage_lines() -> crate::error::Result<String> {
 /// error/empty/capped/stale semantics cannot drift apart.
 fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
     agg.calls += 1;
-    if fields.exit_code != 0 {
+    // One exit-code classification for the CLI and the dashboard: empty and
+    // ambiguous results are not failures, so they must not inflate `errors`.
+    if crate::error::ExitClass::of(fields.exit_code) == crate::error::ExitClass::Error {
         agg.errors += 1;
     }
     if fields.result_count == 0 {
@@ -177,14 +182,16 @@ fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
     }
 }
 
-/// Fold every parsed line into one `ToolAgg` per tool.
+/// Fold every parsed line into one `ToolAgg` per tool. Only calls against a
+/// live repository contribute: dead roots and identityless legacy lines are
+/// the same non-entities here as on every other surface.
 fn aggregate_usage(lines: &str) -> std::collections::BTreeMap<String, ToolAgg> {
     let mut aggs: std::collections::BTreeMap<String, ToolAgg> = Default::default();
     for line in lines.lines().filter(|l| !l.trim().is_empty()) {
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        if fields.is_stale() {
+        if !liveness::repo_is_live(fields.repo.as_deref()) {
             continue;
         }
         fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
@@ -303,19 +310,28 @@ fn aggregate_global_usage(
         let Some(fields) = parse_usage_line(line) else {
             continue;
         };
-        if fields.is_stale() {
+        // One live-inventory rule for every surface: a row needs an absolute
+        // root that still exists as a real directory. Dead roots and
+        // identityless legacy lines are the same non-entities here as on the
+        // dashboard, so both surfaces always list the same repositories.
+        let Some(repo_key) = fields
+            .repo
+            .clone()
+            .filter(|repo| liveness::repo_is_live(Some(repo)))
+        else {
             continue;
-        }
+        };
         fold_tool(&fields, aggs.entry(fields.tool.clone()).or_default());
 
-        let repo_key = fields
-            .repo_name
-            .clone()
-            .or_else(|| fields.repo.clone())
-            .unwrap_or_else(|| "global".to_string());
         let r_agg = repo_aggs.entry(repo_key).or_default();
+        if r_agg.display.is_empty() {
+            r_agg.display = fields
+                .repo_name
+                .clone()
+                .unwrap_or_else(|| UNATTRIBUTED.to_string());
+        }
         r_agg.calls += 1;
-        if fields.exit_code != 0 {
+        if crate::error::ExitClass::of(fields.exit_code) == crate::error::ExitClass::Error {
             r_agg.errors += 1;
             errors.push(ErrorRecord {
                 ts: fields.ts,
@@ -346,7 +362,7 @@ fn render_global_summary(
     )];
     out.extend(kpi_section(aggs, " across all repos"));
 
-    if !repo_aggs.is_empty() {
+    if repo_count > 0 {
         out.extend(active_repos_section(repo_aggs));
     }
 
@@ -366,7 +382,7 @@ fn active_repos_section(repo_aggs: &std::collections::BTreeMap<String, RepoAgg>)
     let mut out = vec!["  ├─ Active Repositories:".to_string()];
     let mut repos: Vec<(&String, &RepoAgg)> = repo_aggs.iter().collect();
     repos.sort_by(|a, b| b.1.calls.cmp(&a.1.calls).then(a.0.cmp(b.0)));
-    for (repo_name, r_agg) in repos {
+    for (_, r_agg) in repos {
         let rel = if r_agg.calls > 0 {
             100.0 * (r_agg.calls.saturating_sub(r_agg.errors) as f64) / (r_agg.calls as f64)
         } else {
@@ -374,8 +390,8 @@ fn active_repos_section(repo_aggs: &std::collections::BTreeMap<String, RepoAgg>)
         };
         let wt_tag = if r_agg.worktree { " [worktree]" } else { "" };
         out.push(format!(
-            "  │   ├─ {repo_name}{wt_tag}: {} calls ({rel:.1}% ok, {} errors)",
-            r_agg.calls, r_agg.errors
+            "  │   ├─ {}{wt_tag}: {} calls ({rel:.1}% ok, {} errors)",
+            r_agg.display, r_agg.calls, r_agg.errors
         ));
     }
     out
@@ -388,7 +404,7 @@ fn recent_errors_section(recent_errors: &[ErrorRecord]) -> Vec<String> {
     let now = crate::db::unix_now();
     let mut out = vec!["  └─ Recent Errors (latest first):".to_string()];
     for err in recent_errors.iter().take(5) {
-        let repo_label = err.repo_name.as_deref().unwrap_or("unknown");
+        let repo_label = err.repo_name.as_deref().unwrap_or(UNATTRIBUTED);
         let agent_label = err.agent.as_deref().unwrap_or("user");
         let age_str = err
             .ts
@@ -457,3 +473,6 @@ fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

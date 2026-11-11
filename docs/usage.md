@@ -232,4 +232,4 @@ eg --no-journal callers run_build
 export ENGRAM_NO_JOURNAL=1
 ```
 
-Telemetry logs are strictly local and automatically rotate at 5 MiB.
+Memory stores gain an additive `anchored_at` column (memory schema v2) on the next write; `eg mem touch` refreshes that anchor and preserves the note's creation date. Telemetry logs are strictly local and automatically rotate at 5 MiB. Repository rows are a live inventory: an entry without a live repository identity — a deleted repository, a legacy line, a call that resolved no repository — is skipped by every read and purged from the log on the next `eg dashboard` or `eg doctor` run, so it disappears from `eg usage --global`, `eg monitor`, and the dashboard, totals included. There is no unattributed bucket.

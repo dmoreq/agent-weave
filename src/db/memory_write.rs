@@ -358,8 +358,34 @@ fn supersede_cross_key(
     supersede_current(tx, new_id, now, target_id)
 }
 
-/// Refresh `created_at = now` on the current active revision of `key`.
-/// Returns `Ok(Some(rev))` if active revision was updated, or `Ok(None)` if key does not exist.
+/// Refresh `anchored_at = now` only when the active revision still equals
+/// `expected_rev`, in one transaction. `Ok(None)` means the key is gone or the
+/// revision moved; the caller maps that to 409/404.
+pub fn memory_touch_if_rev(
+    conn: &mut Connection,
+    key: &str,
+    expected_rev: i64,
+    now: i64,
+) -> Result<Option<i64>> {
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(map_memory_err)?;
+    let updated = tx
+        .execute(
+            "UPDATE memories SET anchored_at = ?1 WHERE key = ?2 AND rev = ?3 AND superseded_by IS NULL",
+            rusqlite::params![now, key, expected_rev],
+        )
+        .map_err(map_memory_err)?;
+    if updated == 0 {
+        return Ok(None);
+    }
+    tx.commit().map_err(map_memory_err)?;
+    Ok(Some(expected_rev))
+}
+
+/// Refresh `anchored_at = now` on the current active revision of `key`,
+/// leaving `created_at` (the authorship date) untouched.
+/// Returns `Ok(Some(rev))` if the active revision was updated, or `Ok(None)` if the key does not exist.
 pub fn memory_touch(conn: &mut Connection, key: &str, now: i64) -> Result<Option<i64>> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -369,7 +395,7 @@ pub fn memory_touch(conn: &mut Connection, key: &str, now: i64) -> Result<Option
         return Ok(None);
     };
     tx.execute(
-        "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+        "UPDATE memories SET anchored_at = ?1 WHERE id = ?2",
         rusqlite::params![now, rev_info.id],
     )
     .map_err(map_memory_err)?;

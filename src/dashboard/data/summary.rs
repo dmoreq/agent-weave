@@ -2,114 +2,55 @@
 //! token-savings accounting folded per tool and repository.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
 
 use serde_json::{json, Value};
 
 use crate::error::ExitClass;
 use crate::repo::UNATTRIBUTED;
 
+mod payload;
+
 pub fn compute_summary(entries: &[Value]) -> Value {
     if entries.is_empty() {
-        return empty_summary();
+        return payload::empty_summary();
     }
     let mut state = SummaryState::with_capacity(entries.len());
     for e in entries {
         state.record_entry(e);
     }
-    summary_json(state, entries)
+    payload::summary_json(state, entries)
 }
 
-/// Assemble the dashboard payload: percentiles, reliability, token savings,
-/// session recall, the recent windows, and the per-dimension rollups.
-fn summary_json(mut state: SummaryState, entries: &[Value]) -> Value {
-    let total_calls = entries.len();
-    let (p50, p95, avg) = compute_percentiles(&mut state.latencies_ms);
-    let (graph_p50, graph_p95, graph_avg) = compute_percentiles(&mut state.graph_latencies_ms);
-    let (recent_queries, graph_recent_queries) = recent_windows(&mut state, entries);
-    let tool_aggs_json = format_tool_aggs(state.tool_aggs);
-    let repo_aggs_json = format_aggs(state.repo_aggs, true);
-    let agent_aggs_json = format_aggs(state.agent_aggs, false);
-    let reliability = 100.0 * (total_calls - state.errors) as f64 / total_calls as f64;
-    let graph_reliability = if state.graph_calls > 0 {
-        100.0 * (state.graph_calls - state.graph_errors) as f64 / state.graph_calls as f64
-    } else {
-        100.0
-    };
-    let saved_dollars = state.saved_tokens as f64 * crate::journal::PRICE_PER_TOKEN;
-    let graph_saved_dollars = state.graph_saved_tokens as f64 * crate::journal::PRICE_PER_TOKEN;
-    let total_sessions = state.sessions.len();
-    let memory_sessions = state.memory_sessions.len();
-    let session_recall_pct = if total_sessions > 0 {
-        100.0 * memory_sessions as f64 / total_sessions as f64
-    } else {
-        0.0
-    };
-
-    json!({
-        "total_calls": total_calls, "error_count": state.errors, "warning_count": state.warnings,
-        "reliability_pct": reliability, "p50_ms": p50, "p95_ms": p95, "avg_ms": avg,
-        "saved_tokens": state.saved_tokens, "saved_dollars": saved_dollars,
-        "graph_calls": state.graph_calls, "graph_errors": state.graph_errors,
-        "graph_reliability_pct": graph_reliability, "graph_p50_ms": graph_p50,
-        "graph_p95_ms": graph_p95, "graph_avg_ms": graph_avg,
-        "graph_saved_tokens": state.graph_saved_tokens, "graph_saved_dollars": graph_saved_dollars,
-        "reuse_hits": state.reuse_hits, "judged_calls": state.judged_calls,
-        "session_count": total_sessions,
-        "session_tagged_count": state.session_tagged,
-        "memory_session_count": memory_sessions, "session_recall_pct": session_recall_pct,
-        "tool_aggs": tool_aggs_json, "repo_aggs": repo_aggs_json, "agent_aggs": agent_aggs_json,
-        "recent_queries": recent_queries, "recent_errors": state.recent_errors,
-        "graph_recent_queries": graph_recent_queries, "graph_recent_errors": state.graph_recent_errors,
-    })
+/// One classification table for every consumer: the summary fold, the
+/// monitor TUI, and the client parity test. Adding a tool means editing this
+/// table once, not three divergent copies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ToolClass {
+    pub(crate) graph: bool,
+    pub(crate) reuse: bool,
+    pub(crate) memory: bool,
+    pub(crate) mem_read: bool,
+    pub(crate) mem_write: bool,
 }
 
-/// The recent query windows (all tools, then graph tools only) plus the
-/// bounded error windows, newest first.
-fn recent_windows(state: &mut SummaryState, entries: &[Value]) -> (Vec<Value>, Vec<Value>) {
-    let recent_queries: Vec<Value> = entries.iter().rev().take(50).cloned().collect();
-    let graph_recent_queries: Vec<Value> = entries
-        .iter()
-        .rev()
-        .filter(|e| is_graph_tool(e.get("tool").and_then(Value::as_str).unwrap_or("")))
-        .take(50)
-        .cloned()
-        .collect();
-    state.recent_errors.reverse();
-    state.recent_errors.truncate(25);
-    state.graph_recent_errors.reverse();
-    state.graph_recent_errors.truncate(25);
-    (recent_queries, graph_recent_queries)
-}
-
-fn empty_summary() -> Value {
-    json!({
-        "total_calls": 0, "error_count": 0, "warning_count": 0, "reliability_pct": 100.0,
-        "p50_ms": 0.0, "p95_ms": 0.0, "avg_ms": 0.0, "saved_tokens": 0, "saved_dollars": 0.0,
-        "graph_calls": 0, "graph_errors": 0, "graph_reliability_pct": 100.0,
-        "graph_p50_ms": 0.0, "graph_p95_ms": 0.0, "graph_avg_ms": 0.0,
-        "graph_saved_tokens": 0, "graph_saved_dollars": 0.0, "reuse_hits": 0, "judged_calls": 0,
-        "session_count": 0, "memory_session_count": 0, "session_recall_pct": 0.0,
-        "session_tagged_count": 0,
-        "tool_aggs": {}, "repo_aggs": {}, "agent_aggs": {},
-        "recent_queries": [], "recent_errors": [],
-        "graph_recent_queries": [], "graph_recent_errors": []
-    })
+pub(crate) fn classify(tool: &str) -> ToolClass {
+    ToolClass {
+        graph: matches!(
+            tool,
+            "callers" | "callees" | "path" | "context" | "impact" | "symbols" | "imports" | "build"
+        ),
+        reuse: matches!(tool, "search" | "reuse"),
+        memory: tool.starts_with("mem_"),
+        mem_read: matches!(tool, "mem_query" | "mem_get" | "mem_export"),
+        mem_write: matches!(
+            tool,
+            "mem_write" | "mem_touch" | "mem_delete" | "mem_gc" | "mem_import"
+        ),
+    }
 }
 
 fn is_graph_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "callers" | "callees" | "path" | "context" | "impact" | "symbols" | "imports" | "build"
-    )
-}
-
-fn is_reuse_tool(tool: &str) -> bool {
-    matches!(tool, "search" | "reuse")
-}
-
-fn is_memory_tool(tool: &str) -> bool {
-    tool.starts_with("mem_")
+    classify(tool).graph
 }
 
 /// One parsed usage entry: every field the record phases need, plus the
@@ -130,25 +71,25 @@ struct EntryView<'a> {
     agent_name: &'a str,
     session_name: &'a str,
     session_tagged: bool,
-    judged: bool,
     facts: EntryFacts,
 }
 
 impl<'a> EntryView<'a> {
-    fn parse(e: &'a Value) -> EntryView<'a> {
+    /// `None` when the entry does not name a live repository: only live
+    /// repositories contribute to the summary, so there is no unattributed
+    /// bucket to fold into. The readers and the pruner already drop dead and
+    /// identityless lines; this keeps direct callers honest.
+    fn parse(e: &'a Value) -> Option<EntryView<'a>> {
         let tool = e.get("tool").and_then(Value::as_str).unwrap_or("unknown");
-        // Legacy lines carry `.`, `/`, or a relative path. None of them names a
-        // repository, so they share the unattributed bucket instead of adding
-        // one row per spelling.
-        let repo_path = e
+        let repo_key = e
             .get("repo")
             .and_then(Value::as_str)
-            .filter(|s| Path::new(s).is_absolute() && *s != "/");
+            .filter(|s| crate::journal::liveness::repo_is_live(Some(s)))?;
         let repo_name = e
             .get("repo_name")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty());
-        EntryView {
+        Some(EntryView {
             tool,
             exit_code: e.get("exit_code").and_then(Value::as_i64).unwrap_or(0),
             shown: e
@@ -160,7 +101,7 @@ impl<'a> EntryView<'a> {
             lat_us: e.get("latency_us").and_then(Value::as_f64),
             ts: e.get("ts").and_then(Value::as_f64).unwrap_or(0.0),
             repo_name: repo_name.unwrap_or(UNATTRIBUTED),
-            repo_key: repo_path.or(repo_name).unwrap_or(UNATTRIBUTED),
+            repo_key,
             is_worktree: e.get("worktree").and_then(Value::as_bool).unwrap_or(false),
             agent_name: e
                 .get("agent")
@@ -176,41 +117,40 @@ impl<'a> EntryView<'a> {
                 .get("session")
                 .and_then(Value::as_str)
                 .is_some_and(|s| !s.is_empty()),
-            judged: e.get("judged").and_then(Value::as_bool).unwrap_or(false),
-            facts: EntryFacts {
-                is_graph: is_graph_tool(tool),
-                is_reuse: is_reuse_tool(tool),
-                is_mem: is_memory_tool(tool),
-                is_mem_read: matches!(tool, "mem_query" | "mem_get"),
-                is_mem_write: matches!(tool, "mem_write" | "mem_touch"),
+            facts: {
+                let class = classify(tool);
+                EntryFacts {
+                    is_graph: class.graph,
+                    is_reuse: class.reuse,
+                    is_mem: class.memory,
+                    is_mem_read: class.mem_read,
+                    is_mem_write: class.mem_write,
+                }
             },
-        }
+        })
     }
 }
 
 #[derive(Default)]
 struct SummaryState {
+    /// Entries that survived the live-repository guard. `total_calls` counts
+    /// these, never the raw slice.
+    recorded: usize,
     errors: usize,
-    warnings: usize,
-    reuse_hits: usize,
     saved_tokens: usize,
     latencies_ms: Vec<f64>,
     graph_calls: usize,
     graph_errors: usize,
     graph_saved_tokens: usize,
     graph_latencies_ms: Vec<f64>,
+    /// Distinct sessions that carried a real `ENGRAM_SESSION` tag. Untagged
+    /// calls create no synthetic session: the recall rate would measure the
+    /// tagging discipline, not memory use.
     sessions: HashSet<String>,
     memory_sessions: HashSet<String>,
-    /// Entries that carried a real `ENGRAM_SESSION` tag. Without one, every
-    /// entry collapses into the synthetic `default` session and the recall
-    /// rate measures nothing.
-    session_tagged: usize,
     tool_aggs: HashMap<String, ToolAgg>,
     repo_aggs: HashMap<String, RepoAgg>,
     agent_aggs: HashMap<String, RepoAgg>,
-    recent_errors: Vec<Value>,
-    graph_recent_errors: Vec<Value>,
-    judged_calls: usize,
 }
 
 impl SummaryState {
@@ -222,13 +162,13 @@ impl SummaryState {
     }
 
     fn record_entry(&mut self, e: &Value) {
-        let v = EntryView::parse(e);
-        if v.judged {
-            self.judged_calls += 1;
-        }
+        let Some(v) = EntryView::parse(e) else {
+            return;
+        };
+        self.recorded += 1;
         self.record_session(&v);
         self.record_calls(&v);
-        self.record_outcome(&v, e);
+        self.record_outcome(&v);
         self.record_latency(&v);
     }
 
@@ -252,10 +192,10 @@ impl SummaryState {
         if v.facts.is_graph {
             self.graph_calls += 1;
         }
-        self.sessions.insert(v.session_name.to_string());
-        if v.session_tagged {
-            self.session_tagged += 1;
+        if !v.session_tagged {
+            return;
         }
+        self.sessions.insert(v.session_name.to_string());
         if v.facts.is_mem_read {
             self.memory_sessions.insert(v.session_name.to_string());
         }
@@ -265,33 +205,30 @@ impl SummaryState {
         let t = self.tool_mut(v.tool);
         t.calls += 1;
         t.shown += v.shown;
+        t.results += v.result_count;
         let r = self.repo_mut(v.repo_key, v.repo_name);
         record_entry_into(r, v.facts, v.ts, v.is_worktree);
         let a = self.agent_mut(v.agent_name);
         record_entry_into(a, v.facts, v.ts, false);
     }
 
-    fn record_outcome(&mut self, v: &EntryView<'_>, e: &Value) {
+    fn record_outcome(&mut self, v: &EntryView<'_>) {
         match ExitClass::of(v.exit_code) {
-            ExitClass::Error => self.record_error(v, e),
-            ExitClass::Empty | ExitClass::Ambiguous => self.record_warning(),
+            ExitClass::Error => self.record_error(v),
+            // Empty and ambiguous calls are not failures and carry no savings;
+            // there is nothing to count.
+            ExitClass::Empty | ExitClass::Ambiguous => {}
             ExitClass::Ok => self.record_success(v),
         }
     }
 
-    fn record_warning(&mut self) {
-        self.warnings += 1;
-    }
-
-    fn record_error(&mut self, v: &EntryView<'_>, e: &Value) {
+    fn record_error(&mut self, v: &EntryView<'_>) {
         self.errors += 1;
-        self.recent_errors.push(e.clone());
         self.tool_mut(v.tool).errors += 1;
         self.repo_mut(v.repo_key, v.repo_name).errors += 1;
         self.agent_mut(v.agent_name).errors += 1;
         if v.facts.is_graph {
             self.graph_errors += 1;
-            self.graph_recent_errors.push(e.clone());
             self.repo_mut(v.repo_key, v.repo_name).graph_errors += 1;
             self.agent_mut(v.agent_name).graph_errors += 1;
         }
@@ -307,13 +244,18 @@ impl SummaryState {
 
     fn record_success(&mut self, v: &EntryView<'_>) {
         let saved = crate::journal::estimated_tokens_saved(v.tool, v.shown, v.result_count, 1);
+        {
+            let t = self.tool_mut(v.tool);
+            t.ok_calls += 1;
+            t.ok_shown += v.shown;
+            t.ok_results += v.result_count;
+        }
         let reuse_hit = if v.tool == "reuse" {
             v.shown.max(v.result_count)
         } else {
             0
         };
         if reuse_hit > 0 {
-            self.reuse_hits += reuse_hit;
             self.repo_mut(v.repo_key, v.repo_name).reuse_hits += reuse_hit;
             self.agent_mut(v.agent_name).reuse_hits += reuse_hit;
         }
@@ -370,6 +312,15 @@ fn format_tool_aggs(tool_aggs: HashMap<String, ToolAgg>) -> BTreeMap<String, Val
         } else {
             0.0
         };
+        let p95_t = if vn > 0 {
+            v.latencies[(0.95 * vn as f64).ceil() as usize - 1]
+        } else {
+            0.0
+        };
+        // Success-only inputs: the fold prices a call exactly as the global
+        // KPI does, so `sum(tool saved_tokens) == saved_tokens` always holds.
+        let saved_tokens =
+            crate::journal::estimated_tokens_saved(&k, v.ok_shown, v.ok_results, v.ok_calls);
         out.insert(
             k,
             json!({
@@ -377,6 +328,8 @@ fn format_tool_aggs(tool_aggs: HashMap<String, ToolAgg>) -> BTreeMap<String, Val
                 "errors": v.errors,
                 "shown": v.shown,
                 "p50": p50_t,
+                "p95": p95_t,
+                "saved_tokens": saved_tokens,
             }),
         );
     }
@@ -429,6 +382,11 @@ struct ToolAgg {
     calls: usize,
     errors: usize,
     shown: usize,
+    results: usize,
+    /// Success-only inputs for the token-savings arm; mirrors the global fold.
+    ok_calls: usize,
+    ok_shown: usize,
+    ok_results: usize,
     latencies: Vec<f64>,
 }
 

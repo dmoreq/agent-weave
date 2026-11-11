@@ -23,6 +23,7 @@ CREATE TABLE memories(
     content_hash INTEGER NOT NULL,  -- FNV-1a 64 over (kind, body, tags, refs, scope) — idempotent replay
     source TEXT NOT NULL,           -- cli | mcp | import
     created_at INTEGER NOT NULL,    -- unix seconds
+    anchored_at INTEGER NOT NULL DEFAULT 0, -- unix secs of the last verify; 0 = never (readers fall back to created_at)
     expires_at INTEGER NOT NULL DEFAULT 0,   -- 0 = never; session rows carry the TTL deadline
     superseded_by INTEGER,          -- id of the replacing rev; NULL = current row
     superseded_at INTEGER NOT NULL DEFAULT 0 -- unix secs when superseded; 0 = current; the gc retention clock

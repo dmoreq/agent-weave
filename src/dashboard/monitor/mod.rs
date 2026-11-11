@@ -5,7 +5,7 @@ pub mod render;
 pub mod state;
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, IsTerminal, Read, Seek, SeekFrom, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use self::render::render_screen;
 use self::state::{MonitorTab, TuiState};
+use crate::dashboard::data;
 use crate::db;
 use crate::error::Result;
 
@@ -134,7 +135,7 @@ fn run_interactive(
         }
     });
 
-    let mut last_pos = file_len(&log_path);
+    let mut tail = data::Tail::new(&log_path);
     let mut last_refresh = std::time::Instant::now();
     let mut last_size_check = std::time::Instant::now();
     let root_path = root.map(Path::to_path_buf);
@@ -170,10 +171,8 @@ fn run_interactive(
             }
         }
 
-        if let Ok(file) = File::open(&log_path) {
-            if poll_log_new_events(file, &mut last_pos, &mut state) {
-                need_render = true;
-            }
+        if poll_log_new_events(&mut tail, &log_path, &mut state, root_path.as_deref()) {
+            need_render = true;
         }
 
         if last_refresh.elapsed() >= Duration::from_secs(5) {
@@ -207,43 +206,30 @@ fn file_len(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn poll_log_new_events(file: File, last_pos: &mut u64, state: &mut TuiState) -> bool {
-    let Ok(meta) = file.metadata() else {
-        return false;
-    };
-    let cur_len = meta.len();
-    if cur_len < *last_pos {
-        *last_pos = 0;
-    }
-    if cur_len <= *last_pos {
-        return false;
-    }
-
-    let mut reader = BufReader::new(file);
-    if reader.seek(SeekFrom::Start(*last_pos)).is_err() {
-        return false;
-    }
-
+fn poll_log_new_events(
+    tail: &mut data::Tail,
+    log_path: &Path,
+    state: &mut TuiState,
+    root: Option<&Path>,
+) -> bool {
     let mut new_event_found = false;
-    let mut line = String::new();
-    while let Ok(n) = reader.read_line(&mut line) {
-        if n == 0 {
-            break;
-        }
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+    let mut reset = false;
+    // Same choke point as every log reader: dead roots dropped, legacy lines
+    // normalized before matching or rendering.
+    tail.poll(log_path, |event| match event {
+        data::TailEvent::Reset => reset = true,
+        data::TailEvent::Line(line) => {
+            if let Some(val) = data::live_event(line) {
                 state.push_event(val);
                 new_event_found = true;
             }
         }
-        line.clear();
+    });
+    if reset {
+        // Prune or rotation: reload the state instead of replaying lines.
+        state.refresh(root);
+        new_event_found = true;
     }
-
-    if let Ok(pos) = reader.stream_position() {
-        *last_pos = pos;
-    }
-
     new_event_found
 }
 
@@ -271,57 +257,33 @@ fn stream_linear(log_path: &Path, repo_filter: Option<&str>, errors_only: bool) 
         "eg: query monitor (linear streaming) from {}",
         log_path.display()
     );
-    let mut last_pos = file_len(log_path).saturating_sub(4096);
+    let tail_start = file_len(log_path).saturating_sub(4096);
+    let mut tail = data::Tail::starting_at(log_path, tail_start);
     loop {
-        if let Ok(file) = File::open(log_path) {
-            poll_linear_events(file, &mut last_pos, repo_filter, errors_only);
-        }
+        poll_linear_events(&mut tail, log_path, repo_filter, errors_only);
         thread::sleep(Duration::from_millis(250));
     }
 }
 
 fn poll_linear_events(
-    file: File,
-    last_pos: &mut u64,
+    tail: &mut data::Tail,
+    log_path: &Path,
     repo_filter: Option<&str>,
     errors_only: bool,
 ) {
-    let Ok(meta) = file.metadata() else {
-        return;
-    };
-    let cur_len = meta.len();
-    if cur_len < *last_pos {
-        *last_pos = 0;
-    }
-    if cur_len <= *last_pos {
-        return;
-    }
-
-    let mut reader = BufReader::new(file);
-    if reader.seek(SeekFrom::Start(*last_pos)).is_err() {
-        return;
-    }
-
     let mut stdout = io::stdout();
-    let mut line = String::new();
-    while let Ok(n) = reader.read_line(&mut line) {
-        if n == 0 {
-            break;
+    tail.poll(log_path, |event| match event {
+        data::TailEvent::Reset => {
+            let _ = writeln!(stdout, "eg: log reset (pruned or rotated) — tail resumes");
         }
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+        data::TailEvent::Line(line) => {
+            if let Some(val) = data::live_event(line) {
                 if is_event_matched(&val, repo_filter, errors_only) {
                     let _ = render::render_event_row(&mut stdout, &val, 78);
                 }
             }
         }
-        line.clear();
-    }
-
-    if let Ok(pos) = reader.stream_position() {
-        *last_pos = pos;
-    }
+    });
 }
 
 fn is_event_matched(val: &Value, repo_filter: Option<&str>, errors_only: bool) -> bool {

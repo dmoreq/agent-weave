@@ -1,6 +1,6 @@
 [package]
 name = "engram"
-version = "1.0.2"
+version = "1.0.3"
 edition = "2021"
 description = "Local deterministic code graph, real-time anti-reinvention engine, and zero-token persistent memory for AI coding agents."
 license = "MIT OR Apache-2.0"

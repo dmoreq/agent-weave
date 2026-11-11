@@ -350,3 +350,57 @@ fn inverted_index_preserves_detector_results() {
         assert_eq!(flat_d2, indexed_d2, "D2 parity for {}", target.qualname);
     }
 }
+
+#[test]
+fn d4_emits_no_measured_overlap_and_keeps_its_rank() {
+    // D4: a 3-line single-caller pass-through wrapper around a canonical symbol.
+    let mut canonical = make_test_symbol(1, "mod.canonical", 1, 5, &[]);
+    canonical.line_start = 1;
+    canonical.line_end = 3;
+    let mut wrapper = make_test_symbol(2, "mod.wrapper", 2, 1, &["canonical"]);
+    wrapper.line_start = 1;
+    wrapper.line_end = 3;
+    wrapper.callee_ids.insert(1);
+
+    let mut symbols = HashMap::new();
+    symbols.insert(1, canonical);
+    symbols.insert(2, wrapper);
+    let corpus = Corpus {
+        symbols: &symbols,
+        index: None,
+        deep_callee: false,
+    };
+    let cand = check_d4(&symbols[&2], &corpus).expect("D4 wrapper");
+    assert!(
+        cand.overlap_pct.is_none(),
+        "D4 carries an evidence label, not a fabricated percentage"
+    );
+    // The historical rank is preserved so the default --limit still surfaces
+    // wrappers; only the displayed metric was removed.
+    assert_eq!(cand.sort_rank(), 100);
+}
+
+#[test]
+fn d3_emits_no_measured_overlap() {
+    let mut canonical = make_test_symbol(1, "mod.fetch_json", 1, 5, &["reqwest.Client"]);
+    canonical.line_start = 1;
+    canonical.line_end = 3;
+    let mut target = make_test_symbol(2, "mod.get_data", 2, 1, &["reqwest.Client"]);
+    target.line_start = 5;
+    target.line_end = 8;
+    target.callee_ids.insert(1);
+    target.name_tokens = ["get", "data"].iter().map(|t| t.to_string()).collect();
+
+    let mut symbols = HashMap::new();
+    symbols.insert(1, canonical);
+    symbols.insert(2, target);
+    let corpus = Corpus {
+        symbols: &symbols,
+        index: None,
+        deep_callee: false,
+    };
+    if let Some(cand) = check_d3(&symbols[&2], &corpus) {
+        assert!(cand.overlap_pct.is_none(), "D3 carries no percentage");
+        assert_eq!(cand.sort_rank(), 90);
+    }
+}

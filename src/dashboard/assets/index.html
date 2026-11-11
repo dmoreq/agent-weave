@@ -8,31 +8,34 @@
 </head>
 <body>
 <div class="container">
+  <div id="live-region" class="sr-only" aria-live="polite"></div>
   <header>
     <div class="header-left">
       <h1 id="header-title">Engram Console</h1>
+      <span id="data-age" class="text-muted" style="font-size:0.75rem; margin-left:0.75rem;"></span>
     </div>
     <div class="header-right">
       <span id="live-indicator" class="badge status-ok" style="display: none;"><span class="live-dot"></span>LIVE</span>
-      <button class="theme-btn" id="theme-toggle-btn" onclick="toggleTheme()">Theme: Light</button>
+      <button class="theme-btn" id="theme-toggle-btn">Theme: Light</button>
     </div>
   </header>
 
   <!-- Primary Tab Bar (3 Dedicated Tabs) -->
   <nav class="nav-tabs" role="tablist">
-    <button class="tab-btn active" id="tab-telemetry-btn" onclick="switchTab('telemetry')">
+    <button class="tab-btn active" id="tab-telemetry-btn" data-tab="telemetry" role="tab" aria-selected="true" aria-controls="tab-telemetry-content" tabindex="0">
       <span class="tab-num">01</span> Code Graph &amp; Navigation
     </button>
-    <button class="tab-btn" id="tab-reuse-btn" onclick="switchTab('reuse')">
+    <button class="tab-btn" id="tab-reuse-btn" data-tab="reuse" role="tab" aria-selected="false" aria-controls="tab-reuse-content" tabindex="-1">
       <span class="tab-num">02</span> Anti-Reinvention Engine
     </button>
-    <button class="tab-btn" id="tab-memory-btn" onclick="switchTab('memory')">
+    <button class="tab-btn" id="tab-memory-btn" data-tab="memory" role="tab" aria-selected="false" aria-controls="tab-memory-content" tabindex="-1">
       <span class="tab-num">03</span> Persistent Project Memory
     </button>
   </nav>
 
   <!-- ==================== TAB 01: DETERMINISTIC CODE GRAPH & NAVIGATION ==================== -->
-  <div id="tab-telemetry-content">
+  <div id="tab-telemetry-content" role="tabpanel" aria-labelledby="tab-telemetry-btn">
+    <div id="data-error-telemetry" class="hidden" role="status"></div>
     <div class="kpi-strip">
       <div class="kpi-tile">
         <div class="kpi-label" data-tip="kpi.graph_queries">Deterministic Graph Queries</div>
@@ -48,11 +51,6 @@
         <div class="kpi-label" data-tip="kpi.tokens_saved">Context Window Token Avoidance</div>
         <div id="metric-tokens" class="kpi-value">~0</div>
         <div id="metric-dollars" class="kpi-sub">Avoided model context overhead</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="kpi-label" data-tip="kpi.scope">Graph Workspace Scope</div>
-        <div class="kpi-value"><span id="metric-active-repos">0</span> <span style="font-size: 0.9rem; color: var(--text-muted); font-weight: normal;">repos</span></div>
-        <div id="metric-active-worktrees" class="kpi-sub">Multi-repository graph index</div>
       </div>
     </div>
 
@@ -129,17 +127,17 @@
 
       <div class="filter-bar">
         <label for="repo-filter" class="text-muted" style="font-size: 0.78rem;">Scope:</label>
-        <select id="repo-filter" class="filter-select" onchange="applyTelemetryFilters()">
+        <select id="repo-filter" class="filter-select">
           <option value="ALL">All Repositories</option>
         </select>
 
         <label for="agent-filter" class="text-muted" style="font-size: 0.78rem;">Agent:</label>
-        <select id="agent-filter" class="filter-select" onchange="applyTelemetryFilters()">
+        <select id="agent-filter" class="filter-select">
           <option value="ALL">All Agents</option>
         </select>
 
         <label for="status-filter" class="text-muted" style="font-size: 0.78rem;" data-tip="filter.status">Status:</label>
-        <select id="status-filter" class="filter-select" onchange="applyTelemetryFilters()">
+        <select id="status-filter" class="filter-select">
           <option value="ALL">All Statuses</option>
           <option value="0">OK (Exit 0)</option>
           <option value="1">Empty (Exit 1)</option>
@@ -147,9 +145,10 @@
           <option value="ERR">Errors (Exit &gt;= 3)</option>
         </select>
 
-        <input type="text" id="query-search" class="search-input" placeholder="Search tool or argument..." oninput="applyTelemetryFilters()">
+        <input type="text" id="query-search" class="search-input" placeholder="Search tool or argument...">
       </div>
 
+      <div class="list-count text-muted" id="recent-list-count"></div>
       <table>
         <thead>
           <tr>
@@ -171,7 +170,8 @@
   </div>
 
   <!-- ==================== TAB 02: REAL-TIME ANTI-REINVENTION ENGINE ==================== -->
-  <div id="tab-reuse-content" class="hidden">
+  <div id="tab-reuse-content" class="hidden" role="tabpanel" aria-labelledby="tab-reuse-btn">
+    <div id="data-error-reuse" class="hidden" role="status"></div>
     <!-- Prevention KPI Strip -->
     <div class="kpi-strip">
       <div class="kpi-tile">
@@ -232,21 +232,27 @@
     <!-- Filter Bar -->
     <div class="filter-bar">
       <label for="reuse-repo-filter" class="text-muted" style="font-size: 0.78rem;">Repo:</label>
-      <select id="reuse-repo-filter" class="filter-select" onchange="renderReuseList()">
+      <select id="reuse-repo-filter" class="filter-select">
         <option value="ALL">All Repositories</option>
       </select>
 
       <span class="text-muted" style="font-size: 0.78rem;">Detector:</span>
       <div class="pill-group" id="reuse-detector-pills">
-        <button class="filter-pill active" data-det="ALL" data-tip="det.all" onclick="setReuseDetectorFilter('ALL')">All</button>
-        <button class="filter-pill" data-det="D1" data-tip="det.d1" onclick="setReuseDetectorFilter('D1')">D1 Callee</button>
-        <button class="filter-pill" data-det="D2" data-tip="det.d2" onclick="setReuseDetectorFilter('D2')">D2 Interface</button>
-        <button class="filter-pill" data-det="D3" data-tip="det.d3" onclick="setReuseDetectorFilter('D3')">D3 Bypass</button>
-        <button class="filter-pill" data-det="D4" data-tip="det.d4" onclick="setReuseDetectorFilter('D4')">D4 Wrapper</button>
+        <button class="filter-pill active" data-det="ALL" data-tip="det.all">All</button>
+        <button class="filter-pill" data-det="D1" data-tip="det.d1">D1 Callee</button>
+        <button class="filter-pill" data-det="D2" data-tip="det.d2">D2 Interface</button>
+        <button class="filter-pill" data-det="D3" data-tip="det.d3">D3 Bypass</button>
+        <button class="filter-pill" data-det="D4" data-tip="det.d4">D4 Wrapper</button>
       </div>
 
-      <input type="text" id="reuse-search" class="search-input" placeholder="Search candidate, canonical, or evidence..." oninput="renderReuseList()">
+      <label for="reuse-view" class="text-muted" style="font-size: 0.78rem;">View:</label>
+      <select id="reuse-view" class="filter-select" data-tip="view.reuse">
+        <option value="used10">Top 10 by callers</option>
+        <option value="used3" selected>Top 3 by callers</option>
+        <option value="all">All</option>
+      </select>
     </div>
+    <div class="list-count text-muted" id="reuse-list-count"></div>
 
     <!-- Master-Detail Split Pane -->
     <div class="master-detail-split">
@@ -264,6 +270,7 @@
         <span>Pre-Write Discovery &amp; Verification Feed</span>
         <span class="text-muted" style="font-size: 0.75rem; font-weight: normal;"><span id="reuse-feed-count">0</span> queries recorded &middot; agent search and reuse to find canonical helpers</span>
       </div>
+      <div class="list-count text-muted" id="prewrite-list-count"></div>
       <table>
         <thead>
           <tr>
@@ -283,7 +290,8 @@
   </div>
 
   <!-- ==================== TAB 03: AGENT MEMORY INSPECTOR ==================== -->
-  <div id="tab-memory-content" class="hidden">
+  <div id="tab-memory-content" class="hidden" role="tabpanel" aria-labelledby="tab-memory-btn">
+    <div id="data-error-memory" class="hidden" role="status"></div>
     <!-- Memory KPI Strip (4 Core KPIs) -->
     <div class="kpi-strip">
       <div class="kpi-tile">
@@ -358,12 +366,12 @@
     <!-- Memory Filter Bar -->
     <div class="filter-bar">
       <label for="mem-store-filter" class="text-muted" style="font-size: 0.78rem;">Store:</label>
-      <select id="mem-store-filter" class="filter-select" onchange="renderMemoryList()">
+      <select id="mem-store-filter" class="filter-select">
         <option value="ALL">All Stores</option>
       </select>
 
       <label for="mem-kind-filter" class="text-muted" style="font-size: 0.78rem;">Kind:</label>
-      <select id="mem-kind-filter" class="filter-select" onchange="renderMemoryList()">
+      <select id="mem-kind-filter" class="filter-select">
         <option value="ALL">All Kinds</option>
         <option value="decision">Decision</option>
         <option value="gotcha">Gotcha</option>
@@ -372,13 +380,22 @@
         <option value="procedure">Procedure</option>
       </select>
 
-      <input type="text" id="mem-search" class="search-input" placeholder="Search key, prose body, #tag or ref..." oninput="renderMemoryList()">
+      <input type="text" id="mem-search" class="search-input" placeholder="Search key, prose body, #tag or ref...">
 
       <label style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
-        <input type="checkbox" id="mem-show-superseded" onchange="renderMemoryList()">
+        <input type="checkbox" id="mem-show-superseded">
         <span class="text-muted" data-tip="filter.superseded">Include superseded revisions</span>
       </label>
+
+      <label for="mem-view" class="text-muted" style="font-size: 0.78rem;">View:</label>
+      <select id="mem-view" class="filter-select" data-tip="view.memory">
+        <option value="recent10">Top 10 recent</option>
+        <option value="recent3" selected>Top 3</option>
+        <option value="used">Most used</option>
+        <option value="all">All</option>
+      </select>
     </div>
+    <div class="list-count text-muted" id="mem-list-count"></div>
 
     <!-- Master-Detail Split Pane -->
     <div class="master-detail-split">

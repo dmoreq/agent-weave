@@ -85,6 +85,51 @@ fn global_usage_dual_writes_and_summarizes_cross_repo() {
 }
 
 #[test]
+fn global_usage_drops_dead_and_identityless_lines() {
+    let live_repo = temp_repo("global-usage-live");
+    let global_dir = temp_repo("global-usage-dead-store");
+    write(&live_repo, "a.py", "def func_a(): pass\n");
+
+    // One live entry through a real eg run.
+    eg(&live_repo)
+        .env("ENGRAM_GLOBAL_DIR", &global_dir)
+        .env_remove("ENGRAM_NO_JOURNAL")
+        .args(["build"])
+        .output()
+        .unwrap();
+
+    // Append a deleted repository and an identityless legacy line to the
+    // global journal.
+    let global_log = global_dir.join("usage.log");
+    let mut content = fs::read_to_string(&global_log).unwrap();
+    content.push_str(
+        r#"{"tool":"callers","exit_code":0,"repo":"/nonexistent-eg-global/deleted","repo_name":"agent-skills"}
+{"tool":"callers","exit_code":0,"repo":".tmp/verify/repo1","repo_name":"repo1"}
+"#,
+    );
+    fs::write(&global_log, content).unwrap();
+
+    let out = eg(&live_repo)
+        .env("ENGRAM_GLOBAL_DIR", &global_dir)
+        .args(["usage", "--global"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Everything without a live repository is dropped from the totals: only
+    // the live build survives, and no unattributed bucket is printed.
+    assert!(
+        stdout.contains("eg global usage: 1 journaled calls across 1 repositories"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("unattributed"), "{stdout}");
+    assert!(stdout.contains("Active Repositories:"), "{stdout}");
+    assert!(stdout.contains("global-usage-live"), "{stdout}");
+    assert!(!stdout.contains("agent-skills"), "{stdout}");
+    assert!(!stdout.contains("repo1"), "{stdout}");
+}
+
+#[test]
 fn mem_query_finds_note_via_refs_when_terms_absent_from_body() {
     let repo = temp_repo("mem-refs-query");
     let (code, stdout, stderr) = mem_out(

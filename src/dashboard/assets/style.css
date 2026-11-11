@@ -8,7 +8,7 @@
   --text-muted: #666059;
   --border-subtle: rgba(30, 28, 26, 0.09);
   --border-strong: rgba(30, 28, 26, 0.18);
-  --intent-primary: #9E583B;
+  --intent-primary: #8A4A2E;
   --intent-primary-soft: rgba(158, 88, 59, 0.10);
   --intent-success: #246A49;
   --intent-success-soft: rgba(36, 106, 73, 0.10);
@@ -78,7 +78,6 @@ h1 {
   letter-spacing: -0.02em;
   color: var(--text-primary);
 }
-.header-meta { color: var(--text-muted); font-size: 0.85rem; }
 .header-right { display: flex; align-items: center; gap: 0.75rem; }
 
 .theme-btn {
@@ -129,14 +128,6 @@ h1 {
   font-family: var(--font-display);
   font-size: 0.95rem;
   opacity: 0.75;
-}
-.tab-badge {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  padding: 0.1rem 0.45rem;
-  border-radius: 999px;
-  background: var(--border-strong);
-  color: var(--text-primary);
 }
 
 /* KPI Strip */
@@ -274,6 +265,7 @@ tr:hover td { background: var(--bg-subtle); }
 .badge-d4 { background: var(--intent-info-soft); color: var(--intent-info); }
 
 .repo-tag {
+  display: inline-block;
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text-secondary);
@@ -298,13 +290,17 @@ tr.agent-row-item { cursor: pointer; }
 .agent-tag-antigravity {
   background: var(--intent-primary-soft);
   color: var(--intent-primary);
-  border-color: rgba(9, 105, 218, 0.25);
+  border-color: var(--intent-primary-soft);
 }
 
 .agent-tag-user {
   background: rgba(168, 85, 247, 0.12);
-  color: #9333ea;
+  color: #7A2BB5;
   border-color: rgba(168, 85, 247, 0.25);
+}
+
+[data-theme="dark"] .btn-touch {
+  color: #241D18;
 }
 
 [data-theme="dark"] .agent-tag-user {
@@ -391,8 +387,7 @@ tr.agent-row-item { cursor: pointer; }
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  max-height: 820px;
-  overflow-y: auto;
+
   padding-right: 0.35rem;
 }
 
@@ -404,8 +399,7 @@ tr.agent-row-item { cursor: pointer; }
   border-radius: 12px;
   padding: 1.35rem;
   box-shadow: var(--shadow-card);
-  max-height: 820px;
-  overflow-y: auto;
+
 }
 
 .select-item-card {
@@ -553,7 +547,8 @@ tr.agent-row-item { cursor: pointer; }
   gap: 0.3rem;
 }
 .chip-tag { background: var(--intent-primary-soft); color: var(--intent-primary); }
-.chip-ref { background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+.chip-ref {
+  display: inline-block; background: var(--bg-subtle); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
 .chip-ref.verified { border-color: var(--intent-success); color: var(--intent-success); }
 .chip-ref.modified { border-color: var(--intent-warning); color: var(--intent-warning); }
 .chip-ref.broken { border-color: var(--intent-danger); color: var(--intent-danger); }
@@ -582,9 +577,6 @@ tr.agent-row-item { cursor: pointer; }
   font-size: 0.78rem;
   margin-top: 0.2rem;
   color: var(--text-muted);
-}
-.action-item-actions {
-  flex-shrink: 0;
 }
 .btn-touch {
   background: var(--intent-primary);
@@ -622,7 +614,7 @@ tr.agent-row-item { cursor: pointer; }
   background: var(--intent-success);
 }
 .live-dot.live-reconnecting {
-  background: var(--intent-warn);
+  background: var(--intent-warning);
 }
 .live-dot.live-paused {
   background: var(--text-muted);
@@ -699,4 +691,38 @@ tr.agent-row-item { cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   .eg-tip { transition: none; }
+}
+
+
+/* Keyboard focus is always visible: rows, cards, buttons, pills. */
+:focus-visible {
+  outline: 2px solid var(--intent-info);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metric-flash,
+  .live-dot {
+    animation: none !important;
+  }
+  #eg-tip {
+    transition: none !important;
+  }
+}
+
+.chip-ref,
+.action-item-refs,
+.repo-tag,
+.item-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+
+/* List view counter: how much of the filtered set is visible. */
+.list-count {
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
 }

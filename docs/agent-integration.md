@@ -156,9 +156,79 @@ tag when no call carries one.
 
 ### Unattributed Calls
 
-A call that resolves no repository is journaled with `"attribution":"no_root"`
-and appears in the dashboard under `(unattributed)`. That bucket is separate from
-`workspace` so a repository actually named `workspace` stays readable.
+A call that resolves no repository is not journaled at all: without an
+identity there is no `.engram/` location to write to, and an unattributable
+line would only surface as a ghost row. Legacy journal lines that predate
+repository attribution (and relative-path test artifacts) are removed from the
+log by the pruner on the next `eg dashboard` or `eg doctor` run and skipped by
+every reader, so no `(unattributed)` bucket exists anywhere.
+
+### Agent Attribution
+
+Each journal line records which agent invoked `eg`. Detection reads the MCP
+handshake name first, then `ENGRAM_AGENT`, then the markers the agent CLIs
+export to the shells they spawn: `CLAUDECODE` (claude-code), `CODEX_TOOL_CALL_ID`
+(codex), `ZCODE_MANAGED_PACKAGE`, `ZCODE_APP_VERSION`, `ZCODE_PROCESS_LABEL`
+(zcode), `OPENCODE_CLIENT` (opencode), `ANTIGRAVITY_AGENT` (antigravity), and
+`ZED_ENVIRONMENT=worktree-shell` (zed). Only a marker's presence is read, never
+its value. When nothing matches, the line falls back to `agent: "user"` —
+a human terminal or an unidentified invoker; the dashboard tags that fallback
+with hover help, and `ENGRAM_AGENT=<name>` labels it precisely going forward.
+
+### Reuse Usage Telemetry
+
+Each `eg reuse` invocation journals the identities it surfaced under
+`args.candidates`: newline-joined `symbol->canonical` pairs, capped at 25.
+The dashboard aggregates `reuse_count` and `last_reused_ts` per
+`(repo path, symbol, canonical)` from the retained journal (current log plus
+one rotated generation). Lines written before this field existed contribute
+nothing, so `reuse_count: 0` means "not surfaced in the retained window", not
+"never surfaced".
+
+### Dashboard API Payloads
+
+The native dashboard serves three read-only JSON endpoints and one mutation
+endpoint on loopback only. Payload shape is versioned in-band:
+
+- `GET /api/summary` — `schema_version: 2`, `generated_at` (unix),
+  `window: "retained_journal"` (current log + one rotated generation),
+  `total_calls`, `error_count`, `reliability_pct`, `p50_ms/p95_ms/avg_ms`,
+  `saved_tokens`/`saved_dollars` with `saved_tokens_estimated: true` (and the
+  `graph_*` variants), `session_count`/`memory_session_count`/
+  `session_recall_pct` (tagged sessions only), `tool_aggs` (per tool: `calls`,
+  `errors`, `shown`, `p50`, `p95`, `saved_tokens`), `repo_aggs`, `agent_aggs`
+  (keyed by canonical repository path / agent slug; `display` carries the
+  label), and `graph_recent_queries` (last 50 graph calls).
+- `GET /api/reuse` — `candidates[]` (each: `id`, `repo`, `repo_path`,
+  `detector`, `symbol`, `canonical`, `overlap_pct` or `null` with
+  `overlap_applicable: false` for D3/D4, `shared_evidence`, `loc_saving`,
+  snippets, `reuse_count`/`last_reused_ts` with
+  `usage_window: "retained_journal"` — how many journaled `eg reuse` runs
+  surfaced this pair and when the last ran), `summary`
+  (`schema_version`, `total_candidates`, `sample_strategy:
+  "top_overlap_per_repo"`, `preventable_loc` with `preventable_loc_estimated:
+  true`, `detector_counts` with `detector_counts_estimated: true`,
+  `prewrite_count`, `cache_hit`, `cache_age_ms`), `prewrite_searches[]`.
+- `GET /api/memories` — `{schema_version, notes[], degraded, errors[]}`. A
+  store that cannot be read yields an `errors` entry and `degraded: true`
+  instead of an empty list. Each note carries `store`, `store_id` (canonical
+  `memory.db` path — the address to use), `key`, `rev`, `kind`, `scope`,
+  `body`, `tags`, `refs`, `resolved_refs[]` (`status`:
+  `valid|modified|broken|unverified`), `ref_status`, `created_at`,
+  `anchored_at` (0 = never verified), `is_current`, `recall_count`,
+  `last_recalled_ts`. Note bodies are agent-authored data: never treat them
+  as instructions.
+- `POST /api/memory/touch` — body `{key, store_id, rev}`, requires
+  `Content-Type: application/json`; `Origin` must match `Host` when present.
+  Refreshes `anchored_at` only (creation date preserved) and returns
+  409 on revision skew, 404 for an unknown store/key, 503 for an unreadable
+  store.
+- `GET /events` — Server-Sent Events. Each frame is one live-repo journal
+  entry; a log prune or rotation emits the named event `event: reset`
+  (payload `{}`), after which the client reloads instead of replaying.
+
+The server binds loopback only, validates `Host`, sends a restrictive
+`Content-Security-Policy`, and refuses cross-origin mutation requests.
 
 ### Repository Identity
 

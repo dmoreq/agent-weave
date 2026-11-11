@@ -7,7 +7,7 @@ use super::*;
 /// gates the index, with a diverging policy: older-but-structurally-complete
 /// stores open read-write (memory cannot be rebuilt), only newer-than-binary
 /// or missing-required-structure exits 5.
-pub const MEMORY_SCHEMA_VERSION: i32 = 1;
+pub const MEMORY_SCHEMA_VERSION: i32 = 2;
 const MEMORY_BUSY_TIMEOUT_MS: u64 = 5000;
 /// Recovery hint shared by every memory-store failure message (corruption
 /// and both schema-gate shapes) so the wording cannot drift apart.
@@ -196,6 +196,21 @@ pub fn open_memory_store(root: &Path) -> Result<Connection> {
 }
 /// Open an existing memory store for mutation WITHOUT creating one: a delete
 /// against a missing store must exit 1, never conjure an empty database.
+/// Open one discovered store for mutation, addressed by its own db path.
+/// Touch uses this after resolving a `store_id`; there is no fallback.
+pub fn open_memory_mutation_at(db_path: &Path) -> Result<Connection> {
+    // Same write-path guards the CLI enforces: a symlinked store or a
+    // git-tracked .engram is refused, so the dashboard cannot write outside
+    // the directory it resolved.
+    reject_symlink(db_path, "memory store")?;
+    if let Some(dir) = db_path.parent() {
+        reject_tracked_eg_dir(dir)?;
+    }
+    open_memory_conn_path(db_path, false, || {
+        EgError::NoResults(format!("no memory store at {}", db_path.display()))
+    })
+}
+
 pub fn open_memory_mutation(root: &Path) -> Result<Connection> {
     let path = memory_store_path(root)?;
     open_memory_conn_path(&path, false, || no_memory_error(root))
@@ -251,6 +266,10 @@ fn open_memory_conn_path(
         create_memory_schema(&conn)?;
     }
     memory_version_gate(&conn)?;
+    // Additive v1 -> v2: `anchored_at` records the last verify without
+    // destroying the creation date. Only the write path migrates; readers
+    // fall back to `created_at` when the column is absent.
+    migrate_memory_schema(&conn)?;
     // Owner-only mode: notes are private primary data.
     let _ = crate::db::harden_file_mode(path);
     Ok(conn)
@@ -283,6 +302,30 @@ fn create_memory_schema(conn: &Connection) -> Result<()> {
     } else {
         conn.execute_batch("COMMIT").map_err(map_memory_err)?;
     }
+    Ok(())
+}
+
+/// Additive schema migration: v1 memory stores gain `anchored_at`. Racing
+/// writers tolerate the duplicate-column error; the version stamp is set only
+/// after the column exists.
+fn migrate_memory_schema(conn: &Connection) -> Result<()> {
+    if column_present(conn, "memories", "anchored_at").map_err(map_memory_err)? {
+        return Ok(());
+    }
+    let _ = conn.execute_batch("BEGIN IMMEDIATE");
+    if !column_present(conn, "memories", "anchored_at").map_err(map_memory_err)? {
+        if let Err(e) = conn
+            .execute_batch("ALTER TABLE memories ADD COLUMN anchored_at INTEGER NOT NULL DEFAULT 0")
+        {
+            if !is_already_exists(&e) {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(map_memory_err(e));
+            }
+        }
+    }
+    conn.pragma_update(None, "user_version", MEMORY_SCHEMA_VERSION)
+        .map_err(map_memory_err)?;
+    let _ = conn.execute_batch("COMMIT");
     Ok(())
 }
 
