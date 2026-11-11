@@ -298,7 +298,7 @@ fn mem_schema_gates_newer_incomplete_and_corrupt() {
     let (code, _stdout, stderr) = mem_out(&repo, &["query", "--all"]);
     assert_eq!(code, 5);
     assert!(
-        stderr.contains("memory.db schema v99 is newer than the binary expects (v1)"),
+        stderr.contains("memory.db schema v99 is newer than the binary expects (v2)"),
         "{stderr}"
     );
     assert!(

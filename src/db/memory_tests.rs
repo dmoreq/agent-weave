@@ -176,11 +176,11 @@ fn schema_memory_columns(sql: &str) -> Vec<String> {
 
 #[test]
 fn memory_required_manifest_matches_schema_file() {
-    // MEMORY_REQUIRED is the hand-copied "required structure" manifest the
-    // open gates check; this pins it to schema/memory.sql in both
-    // directions, so a schema bump that forgets the manifest (or a
-    // manifest edit that outlives a column) fails here instead of pushing
-    // a valid store to exit 5 or opening a short store read-write.
+    // MEMORY_REQUIRED is the MINIMUM compatible structure the open gates
+    // check. The schema may be a superset: v2 added `anchored_at`, and a v1
+    // store without it must still open (readers fall back to created_at).
+    // The pin is one-directional: every required column must exist in the
+    // schema file, so a manifest edit that outlives a column fails here.
     let sql = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("schema")
@@ -195,18 +195,17 @@ fn memory_required_manifest_matches_schema_file() {
             *column
         })
         .collect();
-    for column in &schema_columns {
-        assert!(
-            required.contains(&column.as_str()),
-            "schema/memory.sql column '{column}' is missing from MEMORY_REQUIRED"
-        );
-    }
     for column in &required {
         assert!(
             schema_columns.iter().any(|c| c == column),
             "MEMORY_REQUIRED column '{column}' is missing from schema/memory.sql"
         );
     }
+    // The additive v2 column must exist in the create schema.
+    assert!(
+        schema_columns.iter().any(|c| c == "anchored_at"),
+        "schema/memory.sql must carry the v2 anchored_at column"
+    );
 }
 
 #[test]
@@ -312,4 +311,61 @@ fn cross_key_supersede_removes_target_fts() {
         .unwrap();
     assert_eq!(orphan, 0);
     remove_tree(&root);
+}
+
+#[test]
+fn memory_touch_migrates_v1_store_and_keeps_created_at() {
+    // A v1 store predates anchored_at: the write path adds the column and the
+    // next touch records the anchor without rewriting the creation date.
+    let dir = crate::db::test_support::temp_root("mem-migrate-v2");
+    let db = dir.join("memory.db");
+    let mut conn = crate::db::open_memory_store(&dir).unwrap();
+    crate::db::memory_write(
+        &mut conn,
+        &crate::db::MemNoteInput {
+            key: "k",
+            kind: "fact",
+            scope: "durable",
+            session: "",
+            body: "b",
+            tags: "",
+            refs: "",
+            source: "cli",
+            expires_at: 0,
+            supersedes: None,
+            touch: false,
+        },
+        500,
+    )
+    .unwrap();
+    // Simulate v1: drop the additive column and stamp the old version.
+    conn.execute_batch("ALTER TABLE memories DROP COLUMN anchored_at; PRAGMA user_version = 1;")
+        .unwrap();
+    drop(conn);
+
+    let mut conn = crate::db::open_memory_mutation(&dir).unwrap();
+    let cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(memories)")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .flatten()
+        .collect();
+    assert!(
+        cols.iter().any(|c| c == "anchored_at"),
+        "migration adds the column"
+    );
+    crate::db::memory_touch(&mut conn, "k", 900).unwrap();
+    let (created, anchored): (i64, i64) = conn
+        .query_row(
+            "SELECT created_at, anchored_at FROM memories WHERE key = 'k' AND superseded_by IS NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(created, 500, "creation date is preserved");
+    assert_eq!(anchored, 900, "touch records the anchor");
+    drop(conn);
+    crate::db::test_support::remove_tree(&dir);
+    let _ = db;
 }

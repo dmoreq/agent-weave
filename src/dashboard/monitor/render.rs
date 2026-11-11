@@ -36,16 +36,33 @@ pub fn render_screen<W: Write>(
 fn render_header<W: Write>(w: &mut W, state: &TuiState, safe_cols: usize) -> io::Result<()> {
     let mode_str = if state.errors_only { " | ERRORS" } else { "" };
     let filter_str = match &state.repo_filter {
-        Some(f) if f != "ALL" => format!(" | Repo: {f}"),
+        Some(f) if f != "ALL" => format!(" | Stream repo: {f}"),
         _ => String::new(),
     };
 
     let title = format!(
-        "eg monitor v0.5.3 | Repos: {}{}{}",
-        state.total_repos, filter_str, mode_str
+        "eg monitor v{} | Repos: {}{}{}",
+        env!("CARGO_PKG_VERSION"),
+        state.total_repos,
+        filter_str,
+        mode_str
     );
     let title_trunc = truncate_chars(&title, safe_cols);
     write!(w, "\r\x1b[2K\x1b[1;37m{title_trunc}\x1b[0m\r\n")?;
+    if state
+        .summary
+        .get("total_calls")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        == 0
+    {
+        let hint = format!(
+            "no journal entries yet — watching {}",
+            state.log_path.display()
+        );
+        let hint = truncate_chars(&hint, safe_cols);
+        write!(w, "\r\x1b[2K\x1b[90m{hint}\x1b[0m\r\n")?;
+    }
 
     write!(w, "\r\x1b[2K")?;
     let tabs = [
@@ -104,10 +121,7 @@ fn render_tab_graph<W: Write>(
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
 
-    write!(
-        w,
-        "\r\x1b[2K\x1b[1;36m[USP 1: DETERMINISTIC CODE GRAPH & NAVIGATION]\x1b[0m\r\n"
-    )?;
+    write!(w, "\r\x1b[2K\x1b[1;36m[GRAPH]\x1b[0m\r\n")?;
     write!(
         w,
         "\r\x1b[2K  Calls: \x1b[1;32m{graph_calls}\x1b[0m ({graph_pct:.1}%)  Rel: \x1b[1;32m{rel_pct:.1}%\x1b[0m ok  Errors: \x1b[33m{graph_errors}\x1b[0m\r\n"
@@ -140,23 +154,31 @@ fn render_tab_graph<W: Write>(
         if idx >= max_rows {
             break;
         }
-        let (calls, ok_pct, p50_ms, saved) = if let Some(tag) = tool_aggs.and_then(|m| m.get(*tool))
-        {
-            let c = tag.get("calls").and_then(Value::as_u64).unwrap_or(0);
-            let rel = tag
-                .get("reliability_pct")
-                .and_then(Value::as_f64)
-                .unwrap_or(100.0);
-            let p = tag.get("p50_ms").and_then(Value::as_f64).unwrap_or(0.0);
-            let s_tok = tag.get("saved_tokens").and_then(Value::as_u64).unwrap_or(0);
-            (c, rel, p, s_tok)
-        } else {
-            (0, 100.0, 0.0, 0)
-        };
+        let (calls, ok_str, p50_str, saved) =
+            if let Some(tag) = tool_aggs.and_then(|m| m.get(*tool)) {
+                let c = tag.get("calls").and_then(Value::as_u64).unwrap_or(0);
+                let errors = tag.get("errors").and_then(Value::as_u64).unwrap_or(0);
+                let ok = if c > 0 {
+                    format!(
+                        "{:.1}%",
+                        100.0 * (c.saturating_sub(errors)) as f64 / c as f64
+                    )
+                } else {
+                    "-".to_string()
+                };
+                let p = match tag.get("p50").and_then(Value::as_f64) {
+                    Some(v) if c > 0 => format!("{v:.1}ms"),
+                    _ => "-".to_string(),
+                };
+                let s_tok = tag.get("saved_tokens").and_then(Value::as_u64).unwrap_or(0);
+                (c, ok, p, s_tok)
+            } else {
+                (0, "-".to_string(), "-".to_string(), 0)
+            };
         write!(
             w,
-            "\r\x1b[2K{:<9} {:>6} {:>6.1}% {:>6.1}ms {:>10}  \x1b[90m{:<24}\x1b[0m\r\n",
-            tool, calls, ok_pct, p50_ms, saved, desc
+            "\r\x1b[2K{:<9} {:>6} {:>7} {:>7} {:>10}  \x1b[90m{:<24}\x1b[0m\r\n",
+            tool, calls, ok_str, p50_str, saved, desc
         )?;
     }
 
@@ -199,10 +221,7 @@ fn render_tab_reuse<W: Write>(
         .and_then(Value::as_u64)
         .unwrap_or(0);
 
-    write!(
-        w,
-        "\r\x1b[2K\x1b[1;32m[USP 2: REAL-TIME ANTI-REINVENTION ENGINE]\x1b[0m\r\n"
-    )?;
+    write!(w, "\r\x1b[2K\x1b[1;32m[ANTI-REINVENTION]\x1b[0m\r\n")?;
     write!(
         w,
         "\r\x1b[2K  Duplicates: \x1b[1;32m{total_cands}\x1b[0m twins  Preventable: ~\x1b[1;32m{prev_loc}\x1b[0m LOC\r\n"
@@ -266,16 +285,21 @@ fn render_tab_memory<W: Write>(
         .count();
 
     let tool_aggs = s.get("tool_aggs").and_then(Value::as_object);
-    let reads = tool_aggs
-        .and_then(|m| m.get("mem_query").or_else(|| m.get("mem_get")))
-        .and_then(|a| a.get("calls"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let writes = tool_aggs
-        .and_then(|m| m.get("mem_write").or_else(|| m.get("mem_touch")))
-        .and_then(|a| a.get("calls"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    // Reads and writes are summed over every memory tool in the shared
+    // classification table: an OR-picked single tool undercounts.
+    let sum_calls = |classify: fn(&str) -> crate::dashboard::data::ToolClass,
+                     want: fn(&crate::dashboard::data::ToolClass) -> bool| {
+        tool_aggs
+            .map(|m| {
+                m.iter()
+                    .filter(|(tool, _)| want(&classify(tool)))
+                    .filter_map(|(_, agg)| agg.get("calls").and_then(Value::as_u64))
+                    .sum::<u64>()
+            })
+            .unwrap_or(0)
+    };
+    let reads = sum_calls(crate::dashboard::data::classify, |c| c.mem_read);
+    let writes = sum_calls(crate::dashboard::data::classify, |c| c.mem_write);
     let rw_ratio = if writes > 0 {
         format!("{:.1}x", reads as f64 / writes as f64)
     } else if reads > 0 {
@@ -284,18 +308,23 @@ fn render_tab_memory<W: Write>(
         "0.0x".to_string()
     };
 
-    let session_recall_pct = s
-        .get("session_recall_pct")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
+    // No tagged session means the metric is unmeasurable, not zero.
+    let has_sessions = s.get("session_count").and_then(Value::as_u64).unwrap_or(0) > 0;
+    let recall = if has_sessions {
+        format!(
+            "{:.1}%",
+            s.get("session_recall_pct")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+        )
+    } else {
+        "—".to_string()
+    };
 
+    write!(w, "\r\x1b[2K\x1b[1;35m[MEMORY]\x1b[0m\r\n")?;
     write!(
         w,
-        "\r\x1b[2K\x1b[1;35m[USP 3: ZERO-TOKEN PERSISTENT PROJECT MEMORY]\x1b[0m\r\n"
-    )?;
-    write!(
-        w,
-        "\r\x1b[2K  R:W Ratio: \x1b[1;32m{rw_ratio}\x1b[0m ({reads}r/{writes}w)  Session Recall: \x1b[1;32m{session_recall_pct:.1}%\x1b[0m\r\n"
+        "\r\x1b[2K  R:W Ratio: \x1b[1;32m{rw_ratio}\x1b[0m ({reads}r/{writes}w)  Session Recall: \x1b[1;32m{recall}\x1b[0m\r\n"
     )?;
     write!(
         w,
@@ -328,16 +357,19 @@ fn render_tab_memory<W: Write>(
             .unwrap_or("valid");
 
         let k_trunc = truncate_chars(key, 27);
+        let store_trunc = truncate_chars(store, 7);
         let (status_str, status_color) = match status {
-            "valid" | "none" => ("fresh", "\x1b[32m"),
+            "valid" => ("fresh", "\x1b[32m"),
+            "none" => ("no-refs", "\x1b[90m"),
             "modified" => ("modified", "\x1b[33m"),
+            "unverified" => ("unverif", "\x1b[90m"),
             _ => ("broken", "\x1b[31;1m"),
         };
 
         write!(
             w,
             "\r\x1b[2K{:<7} {:<28} {:<9} {:>3}r {:>7}  {}{:<8}\x1b[0m\r\n",
-            store, k_trunc, kind, rev, recalls, status_color, status_str
+            store_trunc, k_trunc, kind, rev, recalls, status_color, status_str
         )?;
     }
 
@@ -353,7 +385,7 @@ fn render_tab_stream<W: Write>(
     write!(
         w,
         "\r\x1b[2K\x1b[1m{:<8} {:<8} {:<10} {:<10} {:<10} {:<7} {:<6} ARGS\x1b[0m\r\n",
-        "TIME", "USP", "TOOL", "REPO", "AGENT", "LAT", "STATUS"
+        "UTC", "PILLAR", "TOOL", "REPO", "AGENT", "LAT", "STATUS"
     )?;
     write!(w, "\r\x1b[2K\x1b[90m{}\x1b[0m\r\n", "─".repeat(safe_cols))?;
 
@@ -377,7 +409,13 @@ pub fn render_event_row<W: Write>(w: &mut W, val: &Value, safe_cols: usize) -> i
     let repo_name = val
         .get("repo_name")
         .and_then(Value::as_str)
-        .unwrap_or(crate::repo::UNATTRIBUTED);
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            val.get("repo")
+                .and_then(Value::as_str)
+                .and_then(|p| std::path::Path::new(p).file_name().and_then(|n| n.to_str()))
+        })
+        .unwrap_or("-");
     let r_trunc = truncate_chars(repo_name, 9);
 
     let agent_name = val
@@ -387,10 +425,17 @@ pub fn render_event_row<W: Write>(w: &mut W, val: &Value, safe_cols: usize) -> i
         .unwrap_or("user");
     let a_trunc = truncate_chars(agent_name, 9);
 
+    // Latency never exceeds the 7-column budget: seconds above 999 ms.
     let lat_str = val
         .get("latency_us")
         .and_then(Value::as_f64)
-        .map(|us| format!("{:.1}ms", us / 1000.0))
+        .map(|us| {
+            if us >= 1_000_000.0 {
+                format!("{:.2}s", us / 1_000_000.0)
+            } else {
+                format!("{:.1}ms", us / 1000.0)
+            }
+        })
         .unwrap_or_else(|| "-".to_string());
 
     let exit_code = val.get("exit_code").and_then(Value::as_i64).unwrap_or(0);
@@ -403,7 +448,8 @@ pub fn render_event_row<W: Write>(w: &mut W, val: &Value, safe_cols: usize) -> i
 
     let args_val = val.get("args").cloned().unwrap_or(Value::Null);
     let args_str = serde_json::to_string(&args_val).unwrap_or_default();
-    let max_args_len = safe_cols.saturating_sub(64).max(8);
+    // Prefix is 67 columns; keep one spare column so an 80-col terminal never wraps.
+    let max_args_len = safe_cols.saturating_sub(68).max(4);
     let short_args = if args_str.len() > max_args_len {
         format!("{}...", truncate_chars(&args_str, max_args_len - 3))
     } else {

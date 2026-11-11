@@ -470,3 +470,5 @@ fn reuse_d3_raw_client_bypass_detects_matching_canonical_wrapper() {
         "post_data calling requests.post must not match requests.get wrapper: {stdout}"
     );
 }
+
+mod journal_ids;

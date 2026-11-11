@@ -97,15 +97,23 @@ impl TuiState {
             self.reuse_summary = summary;
         }
 
-        if let Ok(notes) = data::collect_memories(root, &entries) {
-            self.memories = notes;
+        if let Ok(payload) = data::collect_memories(root, &entries) {
+            self.memories = payload
+                .get("notes")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
         }
 
         self.total_repos = self
             .summary
             .get("repo_aggs")
             .and_then(Value::as_object)
-            .map(|m| m.len())
+            .map(|m| {
+                m.keys()
+                    .filter(|key| key.as_str() != crate::repo::UNATTRIBUTED)
+                    .count()
+            })
             .unwrap_or(0);
 
         self.recent_events.clear();
@@ -129,6 +137,12 @@ impl TuiState {
                 let r_name = val
                     .get("repo_name")
                     .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        val.get("repo").and_then(Value::as_str).and_then(|p| {
+                            std::path::Path::new(p).file_name().and_then(|n| n.to_str())
+                        })
+                    })
                     .unwrap_or(crate::repo::UNATTRIBUTED);
                 if r_name != rf {
                     return false;
@@ -150,12 +164,16 @@ impl TuiState {
 }
 
 pub fn classify_usp_pillar(tool: &str) -> (&'static str, &'static str) {
-    if tool.starts_with("mem_") {
+    let class = data::classify(tool);
+    if class.memory {
         ("MEMORY", "\x1b[35m")
-    } else if tool == "search" || tool == "reuse" {
+    } else if class.reuse {
         ("REUSE", "\x1b[32m")
-    } else {
+    } else if class.graph {
         ("GRAPH", "\x1b[36m")
+    } else {
+        // stats/doctor/unresolved are diagnostics, not graph queries.
+        ("DIAG", "\x1b[90m")
     }
 }
 

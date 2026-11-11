@@ -12,7 +12,10 @@ use crate::error::Result;
 use crate::query::reuse::{DetectorId, ReuseCandidate};
 
 use super::discover_repos;
+
+mod usage;
 use super::read_snippet;
+use usage::{aggregate_candidate_usage, decorate_usage};
 
 /// A resolved source location for a reuse candidate or its canonical twin:
 /// backed by the symbol index when the qualname exists, an estimate from the
@@ -61,6 +64,83 @@ fn symbol_loc(conn: &Connection, qualname: &str, estimate: Loc) -> Loc {
     }
 }
 
+/// One cached detector scan: candidates plus the corpus-wide total, keyed by
+/// the index files it read. The journal is NOT part of the key — prewrite
+/// metrics are recomputed per request — so appending a journal line never
+/// forces a 2.2 s rescan.
+struct ScanCache {
+    key: u64,
+    computed_at: std::time::Instant,
+    candidates: Vec<Value>,
+    total_candidates: usize,
+}
+
+fn scan_key(repos: &HashMap<String, PathBuf>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut items: Vec<(String, u64, u64)> = repos
+        .values()
+        .map(|root| {
+            let db = root.join(".engram").join("index.db");
+            let meta = std::fs::metadata(&db);
+            let mtime = meta
+                .as_ref()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let len = meta.map(|m| m.len()).unwrap_or(0);
+            (db.to_string_lossy().into_owned(), mtime, len)
+        })
+        .collect();
+    items.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    items.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn cache_enabled() -> bool {
+    std::env::var("ENGRAM_DASHBOARD_NO_CACHE").as_deref() != Ok("1")
+}
+
+fn cached_scan(repos: &HashMap<String, PathBuf>) -> ((Vec<Value>, usize), bool, u64) {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<Option<ScanCache>>> = OnceLock::new();
+    let cell = CACHE.get_or_init(|| Mutex::new(None));
+    let key = scan_key(repos);
+    if cache_enabled() {
+        if let Ok(guard) = cell.lock() {
+            if let Some(cached) = guard.as_ref().filter(|c| c.key == key) {
+                return (
+                    (cached.candidates.clone(), cached.total_candidates),
+                    true,
+                    cached.computed_at.elapsed().as_millis() as u64,
+                );
+            }
+        }
+    }
+    // Compute outside the lock; publish only a complete scan.
+    let mut candidates_json = Vec::new();
+    let mut total = 0usize;
+    for (r_name, r_root) in repos {
+        total += collect_repo_candidates(r_name, r_root, &mut candidates_json);
+    }
+    if cache_enabled() {
+        if let Ok(mut guard) = cell.lock() {
+            *guard = Some(ScanCache {
+                key,
+                computed_at: std::time::Instant::now(),
+                candidates: candidates_json.clone(),
+                total_candidates: total,
+            });
+        }
+    }
+    ((candidates_json, total), false, 0)
+}
+
+/// Attach usage from the current journal to cached candidates. The scan cache
+/// is keyed on index files only, so usage is applied after the cache on every
+/// request instead of being frozen into the cached JSON.
 pub fn collect_reuse_candidates(
     root: Option<&Path>,
     entries: &[Value],
@@ -68,11 +148,10 @@ pub fn collect_reuse_candidates(
     let mut repos: HashMap<String, PathBuf> = HashMap::new();
     discover_repos(root, entries, "index.db", &mut repos);
 
-    let mut candidates_json = Vec::new();
-    let mut total_corpus_candidates = 0;
-    for (r_name, r_root) in &repos {
-        total_corpus_candidates += collect_repo_candidates(r_name, r_root, &mut candidates_json);
-    }
+    let usage = aggregate_candidate_usage(entries);
+    let ((mut candidates_json, total_corpus_candidates), cache_hit, cache_age_ms) =
+        cached_scan(&repos);
+    decorate_usage(&mut candidates_json, &usage);
 
     let prewrite_searches = collect_prewrite_searches(entries);
     let prewrite_count = entries
@@ -84,24 +163,12 @@ pub fn collect_reuse_candidates(
             )
         })
         .count();
-    let judged_calls = count_judged(entries);
 
-    let summary = summarize_reuse_metrics(
-        &candidates_json,
-        total_corpus_candidates,
-        prewrite_count,
-        judged_calls,
-    );
+    let mut summary =
+        summarize_reuse_metrics(&candidates_json, total_corpus_candidates, prewrite_count);
+    summary["cache_hit"] = json!(cache_hit);
+    summary["cache_age_ms"] = json!(cache_age_ms);
     Ok((candidates_json, summary, prewrite_searches))
-}
-
-/// Journaled reuse runs that dispatched the semantic judge. The dashboard tile
-/// reads this field, so it must be emitted even when the count is zero.
-fn count_judged(entries: &[Value]) -> usize {
-    entries
-        .iter()
-        .filter(|e| e.get("judged").and_then(Value::as_bool).unwrap_or(false))
-        .count()
 }
 
 fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
@@ -125,39 +192,34 @@ fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) ->
     total
 }
 
-fn format_detector_metadata(c: &ReuseCandidate) -> (&'static str, String, String) {
-    let (title, summary) = match c.detector {
-        DetectorId::D1 => (
-            "D1 Callee Footprint Overlap",
-            format!("Workflow '{}' calls identical downstream functions as canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-        ),
-        DetectorId::D2 => (
-            "D2 Interface Token Overlap",
-            format!("Signature and parameters of '{}' duplicate canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-        ),
-        DetectorId::D3 => (
-            "D3 Raw Client Bypass",
-            format!("Symbol '{}' calls raw external clients directly instead of canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-        ),
-        DetectorId::D4 => (
-            "D4 Redundant Pass-Through Wrapper",
-            format!("Single-caller wrapper '{}' adds zero logic around canonical '{}' ([callers={}]).", c.symbol, c.canonical, c.canonical_callers),
-        ),
-    };
-
+/// Evidence chip text for one candidate: the detector-specific noun plus the
+/// shared items. The narrative title/summary fields were removed from the
+/// payload; the UI derives its label from `detector`.
+fn format_shared_evidence(c: &ReuseCandidate) -> String {
     let evidence_kind = match c.detector {
         DetectorId::D1 => "shared callees",
         DetectorId::D2 => "shared tokens",
         DetectorId::D3 => "client bypass",
         DetectorId::D4 => "details",
     };
-    let shared = if c.shared_items.is_empty() {
+    if c.shared_items.is_empty() {
         String::new()
     } else {
         format!("{}: [{}]", evidence_kind, c.shared_items.join(", "))
-    };
+    }
+}
 
-    (title, summary, shared)
+/// Resolve one snippet path inside the repository root. Absolute paths and
+/// `..` components come from the index and must never reach a file read.
+fn contained_path(root: &Path, rel: &str) -> Option<std::path::PathBuf> {
+    let p = Path::new(rel);
+    if p.is_absolute() || rel.split('/').any(|c| c == "..") {
+        return None;
+    }
+    let joined = root.join(p);
+    let canon_root = std::fs::canonicalize(root).ok()?;
+    let canon = std::fs::canonicalize(&joined).ok()?;
+    canon.starts_with(&canon_root).then_some(canon)
 }
 
 fn resolve_candidate_snippets(
@@ -171,13 +233,12 @@ fn resolve_candidate_snippets(
         &c.canonical,
         Loc::estimated(c.canonical_file.clone(), c.canonical_line),
     );
-    let cand_snippet = read_snippet(
-        &r_root.join(&cand_loc.file),
-        cand_loc.start,
-        cand_loc.end,
-        30,
-    );
-    let can_snippet = read_snippet(&r_root.join(&can_loc.file), can_loc.start, can_loc.end, 30);
+    let cand_snippet = contained_path(r_root, &cand_loc.file)
+        .map(|p| read_snippet(&p, cand_loc.start, cand_loc.end, 30))
+        .unwrap_or_default();
+    let can_snippet = contained_path(r_root, &can_loc.file)
+        .map(|p| read_snippet(&p, can_loc.start, can_loc.end, 30))
+        .unwrap_or_default();
     (cand_loc, can_loc, cand_snippet, can_snippet)
 }
 
@@ -187,7 +248,7 @@ fn format_candidate_json(
     conn: &Connection,
     c: &ReuseCandidate,
 ) -> Value {
-    let (det_title, det_summary, shared_evidence) = format_detector_metadata(c);
+    let shared_evidence = format_shared_evidence(c);
     let (cand_loc, can_loc, cand_snippet, can_snippet) =
         resolve_candidate_snippets(r_root, conn, c);
 
@@ -201,14 +262,15 @@ fn format_candidate_json(
         "id": format!("{}:{}->{}", r_name, c.symbol, c.canonical),
         "repo": r_name,
         "detector": c.detector.as_str(),
-        "detector_title": det_title,
-        "detector_summary": det_summary,
         "symbol": c.symbol,
         "canonical": c.canonical,
         "canonical_callers": c.canonical_callers,
         "canonical_file": c.canonical_file,
         "canonical_line": c.canonical_line,
+        // D3/D4 emit no overlap metric: their match is an evidence class, not
+        // a measured percentage. The UI renders a label from `detector`.
         "overlap_pct": c.overlap_pct,
+        "overlap_applicable": c.overlap_pct.is_some(),
         "shared_evidence": shared_evidence,
         "candidate_info": json!({
             "file": cand_loc.file,
@@ -226,6 +288,7 @@ fn format_candidate_json(
         "canonical_snippet": can_snippet,
         "loc_saving": loc_saving,
         "prevention_narrative": narrative,
+        "repo_path": r_root.to_string_lossy(),
     })
 }
 
@@ -261,7 +324,6 @@ fn summarize_reuse_metrics(
     candidates_json: &[Value],
     total_corpus_candidates: usize,
     prewrite_count: usize,
-    judged_calls: usize,
 ) -> Value {
     let sample_cands = candidates_json.len();
     let total_cands = total_corpus_candidates.max(sample_cands);
@@ -269,11 +331,6 @@ fn summarize_reuse_metrics(
         .iter()
         .map(|c| c.get("loc_saving").and_then(Value::as_i64).unwrap_or(0))
         .sum();
-    let prev_loc = if sample_cands > 0 && total_cands > sample_cands {
-        (sample_loc as f64 * (total_cands as f64 / sample_cands as f64)).round() as i64
-    } else {
-        sample_loc
-    };
     let avg_callers = if sample_cands > 0 {
         let callers_sum: i64 = candidates_json
             .iter()
@@ -283,48 +340,97 @@ fn summarize_reuse_metrics(
                     .unwrap_or(0)
             })
             .sum();
-        callers_sum as f64 / sample_cands as f64
+        (callers_sum as f64 / sample_cands as f64 * 10.0).round() / 10.0
     } else {
         0.0
     };
+    let prev_loc = if sample_cands > 0 && total_cands > sample_cands {
+        (sample_loc as f64 * (total_cands as f64 / sample_cands as f64)).round() as i64
+    } else {
+        sample_loc
+    };
 
     json!({
+        "schema_version": 2,
         "total_candidates": total_cands,
-        "sample_candidates": sample_cands,
+        "sample_strategy": "top_overlap_per_repo",
+        // Extrapolated from the sampled candidates; flag it in-band so a
+        // consumer cannot quote it as a measured figure.
         "preventable_loc": prev_loc,
+        "preventable_loc_estimated": true,
         "prewrite_count": prewrite_count,
-        "judged_calls": judged_calls,
-        "avg_callers": (avg_callers * 10.0).round() / 10.0,
+        "avg_callers": avg_callers,
+        "avg_callers_estimated": true,
+        // Counts come from the sampled candidate list, not the whole corpus.
         "detector_counts": {
             "D1": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D1"))).count(),
             "D2": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D2"))).count(),
             "D3": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D3"))).count(),
             "D4": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D4"))).count(),
-        }
+        },
+        "detector_counts_estimated": true,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
-    fn counts_only_judged_entries() {
-        let entries = vec![
-            json!({"tool": "reuse", "judged": true}),
-            json!({"tool": "reuse", "judged": false}),
-            json!({"tool": "search"}),
-            json!({"tool": "reuse", "judged": true}),
-        ];
-        assert_eq!(count_judged(&entries), 2);
+    fn reuse_scan_cache_hits_until_the_index_changes() {
+        let dir = crate::db::test_support::temp_root("reuse-scan-cache");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        crate::db::test_support::write_file(repo.join(".engram").join("index.db"), b"").unwrap();
+        let mut repos: HashMap<String, PathBuf> = HashMap::new();
+        repos.insert("repo".to_string(), repo.clone());
+
+        let (_, first_hit, _) = cached_scan(&repos);
+        let (_, second_hit, _) = cached_scan(&repos);
+        assert!(!first_hit, "first scan must compute");
+        assert!(second_hit, "second scan with an unchanged index must hit");
+
+        // A changed index mtime invalidates the cache.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        crate::db::test_support::write_file(repo.join(".engram").join("index.db"), b"x").unwrap();
+        let (_, third_hit, _) = cached_scan(&repos);
+        assert!(!third_hit, "changed index must recompute");
+        crate::db::test_support::remove_tree(&dir);
     }
 
     #[test]
-    fn summary_always_emits_judged_calls() {
-        let summary = summarize_reuse_metrics(&[], 0, 0, 7);
-        assert_eq!(summary["judged_calls"], 7);
+    fn summary_emits_sample_markers_and_estimate_flags() {
+        let summary = summarize_reuse_metrics(&[], 0, 0);
+        assert_eq!(summary["schema_version"], 2);
         assert_eq!(summary["total_candidates"], 0);
         assert_eq!(summary["prewrite_count"], 0);
+        assert_eq!(summary["sample_strategy"], "top_overlap_per_repo");
+        assert_eq!(summary["preventable_loc_estimated"], true);
+        assert_eq!(summary["detector_counts_estimated"], true);
+        assert!(summary.get("judged_calls").is_none());
+        assert_eq!(summary["avg_callers"], 0.0);
+        assert_eq!(summary["avg_callers_estimated"], true);
+    }
+}
+
+#[cfg(test)]
+mod containment_tests {
+    use super::*;
+
+    #[test]
+    fn snippet_paths_stay_inside_the_repository_root() {
+        let root = crate::db::test_support::temp_root("reuse-contain");
+        crate::db::test_support::write_file(root.join("ok.rs"), b"fn a() {}\n").unwrap();
+        crate::db::test_support::make_dir_all(root.join("src")).unwrap();
+        crate::db::test_support::write_file(root.join("src").join("in.rs"), b"fn b() {}\n")
+            .unwrap();
+
+        assert!(contained_path(&root, "ok.rs").is_some());
+        assert!(contained_path(&root, "src/in.rs").is_some());
+        // Escapes and absolute paths never resolve.
+        assert!(contained_path(&root, "../outside.rs").is_none());
+        assert!(contained_path(&root, "/etc/passwd").is_none());
+        assert!(contained_path(&root, "src/../../outside.rs").is_none());
+        crate::db::test_support::remove_tree(&root);
     }
 }

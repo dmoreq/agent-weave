@@ -123,7 +123,7 @@ fn make_candidate(
     detector: DetectorId,
     target: &SymbolData,
     candidate: &SymbolData,
-    overlap_pct: u64,
+    overlap_pct: Option<u64>,
     shared: &[String],
 ) -> ReuseCandidate {
     let mut shared_items: Vec<String> = shared.to_vec();
@@ -183,7 +183,9 @@ fn best_by_overlap(
             best = Some((pct, candidate, shared));
         }
     }
-    best.map(|(pct, candidate, shared)| make_candidate(detector, target, candidate, pct, &shared))
+    best.map(|(pct, candidate, shared)| {
+        make_candidate(detector, target, candidate, Some(pct), &shared)
+    })
 }
 
 /// Detector D1: Callee Footprint Containment.
@@ -392,7 +394,7 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         DetectorId::D3,
         target,
         canonical,
-        90,
+        None,
         &[format!("raw_client={raw_client}")],
     ))
 }
@@ -418,7 +420,7 @@ fn check_d4(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         DetectorId::D4,
         target,
         callee,
-        100,
+        None,
         std::slice::from_ref(&callee.name),
     ))
 }

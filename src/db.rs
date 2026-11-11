@@ -356,12 +356,29 @@ pub(crate) mod test_support {
         fs::write(path, bytes)
     }
 
+    /// Append bytes, mirroring a live journal writer in tail tests.
+    pub(crate) fn append_file(path: impl AsRef<Path>, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new().append(true).open(path)?;
+        f.write_all(bytes)
+    }
+
     pub(crate) fn rename_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> std::io::Result<()> {
         fs::rename(from, to)
     }
 
     pub(crate) fn make_dir_all(path: impl AsRef<Path>) -> std::io::Result<()> {
         fs::create_dir_all(path)
+    }
+
+    /// Symlink fixture for liveness tests (`link` -> `target`). Unix-only;
+    /// journal paths are POSIX filesystem identities.
+    #[cfg(unix)]
+    pub(crate) fn make_symlink(
+        target: impl AsRef<Path>,
+        link: impl AsRef<Path>,
+    ) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
     }
 
     pub(crate) fn remove_tree(path: impl AsRef<Path>) {

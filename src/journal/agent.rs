@@ -59,10 +59,17 @@ fn canonical_agent(raw: &str) -> Option<String> {
 /// Env markers the agent CLIs export to the shells they spawn, innermost agent
 /// first: Claude Code hosted inside Zed sets both `CLAUDECODE` and the Zed
 /// marker, and the agent must win over the editor.
+///
+/// ZCode desktop exports `ZCODE_APP_VERSION` and `ZCODE_PROCESS_LABEL` into
+/// every shell its tools spawn; without them an agent-driven call falls back
+/// to `user` and the dashboard cannot tell the driver from a human terminal.
+/// `ZCODE_MANAGED_PACKAGE` covers the packaged-agent variant.
 const AGENT_MARKERS: &[(&str, &str)] = &[
     ("CLAUDECODE", "claude-code"),
     ("CODEX_TOOL_CALL_ID", "codex"),
     ("ZCODE_MANAGED_PACKAGE", "zcode"),
+    ("ZCODE_APP_VERSION", "zcode"),
+    ("ZCODE_PROCESS_LABEL", "zcode"),
     ("OPENCODE_CLIENT", "opencode"),
     ("ANTIGRAVITY_AGENT", "antigravity"),
 ];
@@ -141,6 +148,8 @@ mod tests {
             ("CLAUDECODE", "claude-code"),
             ("CODEX_TOOL_CALL_ID", "codex"),
             ("ZCODE_MANAGED_PACKAGE", "zcode"),
+            ("ZCODE_APP_VERSION", "zcode"),
+            ("ZCODE_PROCESS_LABEL", "zcode"),
             ("OPENCODE_CLIENT", "opencode"),
             ("ANTIGRAVITY_AGENT", "antigravity"),
         ] {

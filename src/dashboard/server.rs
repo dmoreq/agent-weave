@@ -1,18 +1,21 @@
 //! Native synchronous HTTP 1.1 and Server-Sent Events server in Rust stdlib.
 //! Zero async runtimes, zero external web crates, zero Python dependency.
 
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+pub(crate) mod http;
+pub(crate) mod touch;
+
 use crate::dashboard::data;
 use crate::db;
 use crate::error::{EgError, Result};
+use http::{host_allowed, read_http_request, send_response, RequestLog};
 
 static INDEX_HTML: &str = include_str!("assets/index.html");
 static STYLE_CSS: &str = include_str!("assets/style.css");
@@ -25,6 +28,11 @@ pub fn serve_dashboard(
     open: bool,
     local: bool,
 ) -> Result<()> {
+    if !matches!(host, "127.0.0.1" | "localhost") {
+        return Err(EgError::Usage(format!(
+            "dashboard binds loopback only (got --host {host}); telemetry carries local paths"
+        )));
+    }
     let bind_addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&bind_addr).map_err(|e| {
         EgError::Internal(format!(
@@ -40,21 +48,43 @@ pub fn serve_dashboard(
         open_browser(&url);
     }
 
-    let log_path = if local {
-        if let Some(r) = root {
-            crate::journal::usage_log_path(r)
-        } else if let Ok(cwd) = std::env::current_dir() {
-            crate::journal::usage_log_path(&cwd)
-        } else {
-            db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log"))
+    // `--local` must isolate one repository: resolve its root once, at
+    // startup, instead of letting discovery scan every journaled repo.
+    let root_path: Option<PathBuf> = if local && root.is_none() {
+        match crate::walk::discover_root(None) {
+            Ok(root) => Some(root),
+            Err(e) => {
+                return Err(EgError::Usage(format!(
+                    "--local needs a resolvable repository root: {e}"
+                )))
+            }
         }
+    } else {
+        root.map(Path::to_path_buf)
+    };
+
+    let log_path = if local {
+        let r = root_path
+            .as_deref()
+            .ok_or_else(|| EgError::Usage("--local needs a repository root".to_string()))?;
+        crate::journal::usage_log_path(r)
     } else {
         db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log"))
     };
 
-    let _ = crate::journal::prune_deleted_worktrees_all(&log_path);
+    let _ = crate::journal::prune_stale_entries_all(&log_path);
+    let mode = if local { "local" } else { "global" };
+    eprintln!(
+        "eg dashboard: mode={mode} root={} log={}",
+        root_path
+            .as_deref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        log_path.display()
+    );
 
-    let root_path = root.map(|r| r.to_path_buf());
+    let _ = crate::journal::prune_stale_entries_all(&log_path);
+
     let running = Arc::new(AtomicBool::new(true));
 
     for stream in listener.incoming() {
@@ -90,45 +120,8 @@ fn open_browser(url: &str) {
     let _ = std::process::Command::new(cmd).args(&args).spawn();
 }
 
-fn read_http_request(stream: &mut TcpStream) -> std::io::Result<Option<(String, String, Vec<u8>)>> {
-    let mut reader = BufReader::new(stream);
-    let mut request_line = String::new();
-    if reader.read_line(&mut request_line)? == 0 {
-        return Ok(None);
-    }
-
-    let parts: Vec<&str> = request_line.split_whitespace().collect();
-    if parts.len() < 2 {
-        return Ok(None);
-    }
-    let method = parts[0].to_string();
-    let path = parts[1].to_string();
-
-    let mut content_length = 0usize;
-    let mut line = String::new();
-    loop {
-        line.clear();
-        if reader.read_line(&mut line)? == 0 || line.trim().is_empty() {
-            break;
-        }
-        let lower = line.to_lowercase();
-        if lower.starts_with("content-length:") {
-            if let Some(val) = line.split(':').nth(1) {
-                content_length = val.trim().parse().unwrap_or(0);
-            }
-        }
-    }
-
-    let mut body = Vec::new();
-    if content_length > 0 && content_length < 1_000_000 {
-        use std::io::Read;
-        body.resize(content_length, 0);
-        reader.read_exact(&mut body)?;
-    }
-
-    Ok(Some((method, path, body)))
-}
-
+/// One parsed HTTP request. Header totals are bounded so a hostile local page
+/// cannot hold a thread with an endless header block.
 fn serve_static_asset(stream: &mut TcpStream, path: &str, is_head: bool) -> std::io::Result<bool> {
     match path {
         "/" | "/index.html" => {
@@ -213,8 +206,13 @@ fn serve_api_route(
         }
         "/api/memories" => {
             let entries = data::read_usage_entries(log_path);
-            let notes = data::collect_memories(root, &entries).unwrap_or_default();
-            let encoded = serde_json::to_vec_pretty(&notes).unwrap_or_default();
+            let payload = data::collect_memories(root, &entries).unwrap_or_else(|e| {
+                serde_json::json!({
+                    "schema_version": 2, "notes": [], "degraded": true,
+                    "errors": [{ "store": "-", "stage": "collect", "message": e.to_string() }]
+                })
+            });
+            let encoded = serde_json::to_vec_pretty(&payload).unwrap_or_default();
             send_response(
                 stream,
                 200,
@@ -231,18 +229,17 @@ fn serve_api_route(
 fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result<()> {
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
-    let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
+    // Same-origin only: the stream carries repository paths and search terms.
+    let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
     stream.write_all(header.as_bytes())?;
     stream.flush()?;
 
-    let mut last_pos = std::fs::metadata(log_path).map(|m| m.len()).unwrap_or(0);
+    let mut tail = data::Tail::new(log_path);
     let mut last_keepalive = Instant::now();
 
     loop {
         let now = Instant::now();
-        if let Ok(file) = File::open(log_path) {
-            poll_sse_file(stream, file, &mut last_pos, &mut last_keepalive, now)?;
-        }
+        poll_sse_file(stream, &mut tail, log_path, &mut last_keepalive, now)?;
 
         if now.duration_since(last_keepalive) >= Duration::from_secs(15) {
             stream.write_all(b": keepalive\n\n")?;
@@ -254,47 +251,38 @@ fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result
     }
 }
 
+/// Pump one tail poll to the SSE client. A shrink or rotation emits the named
+/// `reset` event and no replayed frames.
 pub fn poll_sse_file(
     stream: &mut TcpStream,
-    file: File,
-    last_pos: &mut u64,
+    tail: &mut data::Tail,
+    log_path: &Path,
     last_keepalive: &mut Instant,
     now: Instant,
 ) -> std::io::Result<()> {
-    let Ok(meta) = file.metadata() else {
-        return Ok(());
-    };
-    let cur_len = meta.len();
-    if cur_len < *last_pos {
-        *last_pos = 0;
-    }
-    if cur_len <= *last_pos {
-        return Ok(());
-    }
-
-    let mut buf_reader = BufReader::new(file);
-    if buf_reader.seek(SeekFrom::Start(*last_pos)).is_err() {
-        return Ok(());
-    }
-
-    let mut event_line = String::new();
-    while let Ok(n) = buf_reader.read_line(&mut event_line) {
-        if n == 0 {
-            break;
+    let mut frames: Vec<String> = Vec::new();
+    let mut reset = false;
+    tail.poll(log_path, |event| match event {
+        data::TailEvent::Reset => reset = true,
+        data::TailEvent::Line(line) => {
+            if let Some(val) = data::live_event(line) {
+                if let Ok(payload) = serde_json::to_string(&val) {
+                    frames.push(format!("data: {payload}\n\n"));
+                }
+            }
         }
-        let trimmed = event_line.trim();
-        if !trimmed.is_empty() {
-            let msg = format!("data: {trimmed}\n\n");
-            stream.write_all(msg.as_bytes())?;
-            stream.flush()?;
-            *last_keepalive = now;
-        }
-        event_line.clear();
+    });
+    if reset {
+        // Named event: a pre-upgrade tab's default onmessage handler ignores
+        // it instead of treating it as a journal row.
+        stream.write_all(b"event: reset\ndata: {}\n\n")?;
+        *last_keepalive = now;
     }
-    if let Ok(pos) = buf_reader.stream_position() {
-        *last_pos = pos;
+    for frame in frames {
+        stream.write_all(frame.as_bytes())?;
+        *last_keepalive = now;
     }
-    Ok(())
+    stream.flush()
 }
 
 pub fn handle_client(
@@ -304,14 +292,26 @@ pub fn handle_client(
     global: bool,
 ) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let Some((method, raw_path, body)) = read_http_request(&mut stream)? else {
+    let Some(req) = read_http_request(&mut stream)? else {
         return Ok(());
     };
-
-    let path = raw_path.split('?').next().unwrap_or(&raw_path);
+    let method = req.method.as_str();
+    let path = req.path.split('?').next().unwrap_or(&req.path);
+    // One stderr line per request: the only way to see a stuck or failing
+    // route on a console dashboard.
+    let _log = RequestLog {
+        method: method.to_string(),
+        path: path.to_string(),
+        started: Instant::now(),
+    };
+    if !host_allowed(req.host.as_deref()) {
+        let resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        stream.write_all(resp.as_bytes())?;
+        return Ok(());
+    }
 
     if method == "POST" && path == "/api/memory/touch" {
-        return handle_memory_touch(&mut stream, root, &body);
+        return touch::handle_memory_touch(&mut stream, root, log_path, &req);
     }
 
     if method != "GET" && method != "HEAD" {
@@ -331,6 +331,13 @@ pub fn handle_client(
     }
 
     if path == "/events" {
+        if SSE_CLIENTS.fetch_add(1, Ordering::SeqCst) >= MAX_SSE_CLIENTS {
+            SSE_CLIENTS.fetch_sub(1, Ordering::SeqCst);
+            let resp = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream.write_all(resp.as_bytes())?;
+            return Ok(());
+        }
+        let _guard = SseGuard;
         if is_head {
             let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
             stream.write_all(header.as_bytes())?;
@@ -343,102 +350,14 @@ pub fn handle_client(
     stream.write_all(resp.as_bytes())
 }
 
-fn handle_memory_touch(
-    stream: &mut TcpStream,
-    root: Option<&Path>,
-    body: &[u8],
-) -> std::io::Result<()> {
-    let val: serde_json::Value = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
-    let key = val
-        .get("key")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-    let is_global = val
-        .get("global")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if key.is_empty() {
-        let resp_body = serde_json::json!({ "ok": false, "error": "missing key" });
-        let encoded = serde_json::to_vec(&resp_body).unwrap_or_default();
-        return send_response(
-            stream,
-            400,
-            "application/json; charset=utf-8",
-            &encoded,
-            false,
-        );
-    }
+static SSE_CLIENTS: AtomicUsize = AtomicUsize::new(0);
+const MAX_SSE_CLIENTS: usize = 8;
 
-    let now = crate::db::unix_now();
-    let mut touched_rev = None;
+/// Releases the SSE slot when the connection thread ends.
+struct SseGuard;
 
-    if is_global {
-        if let Ok(mut conn) = crate::db::open_global_memory_mutation() {
-            if let Ok(rev) = crate::db::memory_touch(&mut conn, key, now) {
-                touched_rev = rev;
-            }
-        }
-    } else {
-        if let Some(r) = root {
-            if let Ok(mut conn) = crate::db::open_memory_mutation(r) {
-                if let Ok(rev) = crate::db::memory_touch(&mut conn, key, now) {
-                    touched_rev = rev;
-                }
-            }
-        }
-        if touched_rev.is_none() {
-            if let Ok(mut conn) = crate::db::open_global_memory_mutation() {
-                if let Ok(rev) = crate::db::memory_touch(&mut conn, key, now) {
-                    touched_rev = rev;
-                }
-            }
-        }
+impl Drop for SseGuard {
+    fn drop(&mut self) {
+        SSE_CLIENTS.fetch_sub(1, Ordering::SeqCst);
     }
-
-    if let Some(rev) = touched_rev {
-        let resp_body = serde_json::json!({ "ok": true, "key": key, "rev": rev });
-        let encoded = serde_json::to_vec(&resp_body).unwrap_or_default();
-        send_response(
-            stream,
-            200,
-            "application/json; charset=utf-8",
-            &encoded,
-            false,
-        )
-    } else {
-        let resp_body = serde_json::json!({ "ok": false, "error": format!("unknown key '{key}'") });
-        let encoded = serde_json::to_vec(&resp_body).unwrap_or_default();
-        send_response(
-            stream,
-            404,
-            "application/json; charset=utf-8",
-            &encoded,
-            false,
-        )
-    }
-}
-
-fn send_response(
-    stream: &mut TcpStream,
-    status: u16,
-    content_type: &str,
-    body: &[u8],
-    is_head: bool,
-) -> std::io::Result<()> {
-    let status_line = match status {
-        200 => "200 OK",
-        400 => "400 Bad Request",
-        404 => "404 Not Found",
-        405 => "405 Method Not Allowed",
-        _ => "200 OK",
-    };
-    let header = format!(
-        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(header.as_bytes())?;
-    if !is_head {
-        stream.write_all(body)?;
-    }
-    stream.flush()
 }

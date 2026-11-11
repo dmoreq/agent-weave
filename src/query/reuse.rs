@@ -32,7 +32,7 @@ pub struct ReuseCandidate {
     pub canonical_file: String,
     pub canonical_line: i64,
     pub canonical_callers: i64,
-    pub overlap_pct: u64,
+    pub overlap_pct: Option<u64>,
     pub shared_items: Vec<String>,
     /// Semantic verdict from `eg-judge`, present only with `--judge`.
     pub verdict: Option<crate::query::judge::Verdict>,
@@ -50,7 +50,7 @@ impl ReuseCandidate {
             DetectorId::D1 | DetectorId::D2 => format!(
                 "symbol '{}' shares {}% {} with existing '{}' {}",
                 self.symbol,
-                self.overlap_pct,
+                self.overlap_pct.unwrap_or(0),
                 if self.detector == DetectorId::D1 {
                     "callee footprint"
                 } else {
@@ -92,6 +92,17 @@ impl ReuseCandidate {
             ));
         }
         line
+    }
+    /// Ordering rank used by the CLI and dashboard lists. D3/D4 carry no
+    /// measured overlap, but they keep the historical rank (90/100) so the
+    /// default `--limit` still surfaces wrappers; only the displayed metric
+    /// was removed.
+    fn sort_rank(&self) -> u64 {
+        self.overlap_pct.unwrap_or(match self.detector {
+            DetectorId::D3 => 90,
+            DetectorId::D4 => 100,
+            DetectorId::D1 | DetectorId::D2 => 0,
+        })
     }
 }
 
@@ -147,6 +158,14 @@ pub fn run_reuse(
         }
     }
     let shown = candidates.len();
+    // The dashboard counts per-candidate usage from the retained journal; the
+    // identity must ride the invocation line. Cap at the emitted list size.
+    let surfaced: Vec<String> = candidates
+        .iter()
+        .take(25)
+        .map(|c| format!("{}->{}", c.symbol, c.canonical))
+        .collect();
+    crate::journal::set_candidate_ids(&surfaced.join("\n"));
     crate::journal::record_result(crate::journal::OutcomeCounts::of(shown, total), false, 0);
     Ok(crate::query::LineQuery {
         lines: out,
@@ -165,7 +184,10 @@ fn arbitrate(ctx: &QueryCtx<'_>, candidates: &mut [ReuseCandidate]) -> String {
     let mut judged = 0usize;
     let mut gray = 0usize;
     for candidate in candidates.iter_mut() {
-        if !judge::is_gray(candidate.overlap_pct) {
+        let Some(pct) = candidate.overlap_pct else {
+            continue;
+        };
+        if !judge::is_gray(pct) {
             continue;
         }
         gray += 1;
@@ -245,8 +267,8 @@ pub(crate) fn analyze_corpus(
     }
 
     candidates.sort_by(|a, b| {
-        b.overlap_pct
-            .cmp(&a.overlap_pct)
+        b.sort_rank()
+            .cmp(&a.sort_rank())
             .then_with(|| b.canonical_callers.cmp(&a.canonical_callers))
             .then_with(|| a.symbol.cmp(&b.symbol))
     });

@@ -63,6 +63,19 @@ pub fn set_judged() {
     });
 }
 
+/// Record which candidates this invocation surfaced, so the dashboard can
+/// count per-candidate usage from the retained journal. Overwrites any prior
+/// value in this process (one invocation = one list).
+pub fn set_candidate_ids(list: &str) {
+    PENDING.with(|pending| {
+        if let Some(entry) = pending.borrow_mut().as_mut() {
+            entry
+                .args
+                .insert("candidates".to_string(), Value::String(list.to_string()));
+        }
+    });
+}
+
 thread_local! {
     static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
     static DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -116,23 +129,24 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
 
 /// Serialize and append the usage line. Called exactly once per process,
 /// after the outcome is known. All I/O failures are swallowed by contract.
-/// A `None` root (repo discovery failed) skips the write — there is no
-/// `.engram/` location.
+/// An invocation that resolved no repository (a `None` root, or any root
+/// without an identity) skips the write entirely: there is no `.engram/`
+/// location, and an unattributable line would only surface as a ghost row.
 pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
     };
-    let ts = crate::db::unix_now();
     // One identity for every surface. The `file_name` and `.git` probes that
     // used to live here belong to `repo::RepoRef`.
     let repo = root.map(crate::repo::RepoRef::from_root);
-    let repo_path = repo.as_ref().and_then(crate::repo::RepoRef::journal_repo);
+    let Some(repo_path) = repo.as_ref().and_then(crate::repo::RepoRef::journal_repo) else {
+        return;
+    };
     let repo_name = repo.as_ref().map(|r| r.name().to_string());
     let is_worktree = repo.as_ref().is_some_and(crate::repo::RepoRef::is_worktree);
-    let unattributed = repo_path.is_none();
 
-    let mut line = serde_json::json!({
-        "ts": ts,
+    let line = serde_json::json!({
+        "ts": crate::db::unix_now(),
         "surface": pending.surface,
         "tool": pending.tool,
         "args": Value::Object(pending.args),
@@ -152,12 +166,6 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "worktree": is_worktree,
         "judged": pending.judged,
     });
-    // A line with no repository name cannot be attributed anywhere. Mark why so
-    // a reader does not have to guess between "outside a git repository" and
-    // "the root failed to resolve".
-    if unattributed {
-        line["attribution"] = Value::String("no_root".to_string());
-    }
     let line_str = format!("{line}\n");
 
     if let Some(root) = root {
@@ -248,9 +256,12 @@ fn rotate_if_needed(path: &Path, max: u64) {
     let _ = fs::rename(path, PathBuf::from(rotated));
 }
 
-/// Prune usage.log entries belonging to git worktrees that no longer exist on disk.
-/// Rewrites the log file in place. Returns the count of pruned lines.
-pub fn prune_deleted_worktrees(log_path: &Path) -> std::io::Result<usize> {
+/// Prune usage.log entries that carry no live repository: dead absolute roots
+/// (deleted worktrees, temp scratch repos, ordinary repositories — the purge
+/// policy) and unjudgeable lines without a usable `repo` identity (legacy
+/// binaries, test artifacts). Rewrites the log file in place. Returns the
+/// count of pruned lines.
+pub fn prune_stale_entries(log_path: &Path) -> std::io::Result<usize> {
     if !log_path.is_file() {
         return Ok(0);
     }
@@ -268,7 +279,7 @@ pub fn prune_deleted_worktrees(log_path: &Path) -> std::io::Result<usize> {
             continue;
         }
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if liveness::entry_is_stale(&val) {
+            if liveness::entry_is_stale(&val) || liveness::entry_is_unattributed(&val) {
                 pruned += 1;
                 continue;
             }
@@ -287,13 +298,13 @@ pub fn prune_deleted_worktrees(log_path: &Path) -> std::io::Result<usize> {
     Ok(pruned)
 }
 
-/// Prune deleted worktree entries from both current and rotated (.1) generations.
-pub fn prune_deleted_worktrees_all(base_path: &Path) -> std::io::Result<usize> {
-    let mut total = prune_deleted_worktrees(base_path)?;
+/// Prune stale entries from both current and rotated (.1) generations.
+pub fn prune_stale_entries_all(base_path: &Path) -> std::io::Result<usize> {
+    let mut total = prune_stale_entries(base_path)?;
     if let Some(parent) = base_path.parent() {
         let rotated = parent.join("usage.log.1");
         if rotated.is_file() {
-            total += prune_deleted_worktrees(&rotated)?;
+            total += prune_stale_entries(&rotated)?;
         }
     }
     Ok(total)
@@ -358,17 +369,27 @@ mod tests {
     fn summary_quality_splits_empty_and_cap() {
         let root = crate::db::temp_root("journal-quality");
         fs::create_dir_all(root.join(".engram")).unwrap();
+        let repo = root.to_string_lossy();
         let lines = [
-            r#"{"tool":"callers","result_count":2,"shown":2,"total":2,"exit_code":0,"latency_us":1000}"#,
-            r#"{"tool":"callers","result_count":0,"shown":0,"total":0,"exit_code":0,"latency_us":2000}"#,
-            r#"{"tool":"callers","result_count":0,"shown":0,"total":0,"exit_code":2,"latency_us":3000}"#,
-            r#"{"tool":"callers","result_count":50,"shown":50,"total":60,"exit_code":0,"latency_us":4000}"#,
+            format!(
+                r#"{{"tool":"callers","repo":"{repo}","result_count":2,"shown":2,"total":2,"exit_code":0,"latency_us":1000}}"#
+            ),
+            format!(
+                r#"{{"tool":"callers","repo":"{repo}","result_count":0,"shown":0,"total":0,"exit_code":0,"latency_us":2000}}"#
+            ),
+            format!(
+                r#"{{"tool":"callers","repo":"{repo}","result_count":0,"shown":0,"total":0,"exit_code":2,"latency_us":3000}}"#
+            ),
+            format!(
+                r#"{{"tool":"callers","repo":"{repo}","result_count":50,"shown":50,"total":60,"exit_code":0,"latency_us":4000}}"#
+            ),
         ];
+        let lines = lines.iter().map(|l| l.as_str()).collect::<Vec<_>>();
         fs::write(usage_log_path(&root), lines.join("\n")).unwrap();
 
         let default = summary(&root, false).unwrap().join("\n");
         assert!(
-            default.contains("callers: 4 calls, errors=1 empty=2 stale=0 ambiguous=0"),
+            default.contains("callers: 4 calls, errors=0 empty=2 stale=0 ambiguous=0"),
             "{default}"
         );
         assert!(!default.contains("empty_ok"), "{default}");
@@ -424,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_deleted_worktrees_removes_missing_paths() {
+    fn prune_stale_entries_removes_dead_repos_and_unjudgeable_lines() {
         let dir = crate::db::temp_root("prune-wt");
         let active_wt = dir.join("active-wt");
         let deleted_wt = dir.join("deleted-wt");
@@ -440,16 +461,29 @@ mod tests {
             deleted_wt.display()
         );
         let line3 = r#"{"tool":"symbols","repo":"/persistent/repo","worktree":false}"#.to_string();
+        // Identityless legacy lines (pre-repo-field binaries, test artifacts)
+        // are pruned alongside the dead roots.
+        let line4 =
+            r#"{"tool":"symbols","repo":".tmp/verify/repo1","repo_name":"repo1"}"#.to_string();
+        let line5 = r#"{"tool":"mem_query","exit_code":0}"#.to_string();
 
-        fs::write(&log_path, format!("{line1}\n{line2}\n{line3}\n")).unwrap();
+        fs::write(
+            &log_path,
+            format!("{line1}\n{line2}\n{line3}\n{line4}\n{line5}\n"),
+        )
+        .unwrap();
 
-        let pruned = prune_deleted_worktrees(&log_path).unwrap();
-        assert_eq!(pruned, 1);
+        let pruned = prune_stale_entries(&log_path).unwrap();
+        assert_eq!(
+            pruned, 4,
+            "deleted worktree, dead repo, relative and missing repo"
+        );
 
         let remaining = fs::read_to_string(&log_path).unwrap();
         assert!(remaining.contains(&active_wt.to_string_lossy().to_string()));
         assert!(!remaining.contains(&deleted_wt.to_string_lossy().to_string()));
-        assert!(remaining.contains("/persistent/repo"));
+        assert!(!remaining.contains("/persistent/repo"));
+        assert!(!remaining.contains(".tmp/verify/repo1"));
 
         let _ = fs::remove_dir_all(&dir);
     }
