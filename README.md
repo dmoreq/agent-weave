@@ -29,7 +29,7 @@ Single native binary. Zero background daemons. Zero runtime network access. Zero
 | • < 2ms query latency |  | • Pre-write: eg search interface  |  |                       |
 | • 0.02s rebuild       |  |   cards with [callers=N]          |  | • 0 LLM tokens tax    |
 | • -27.3% input tokens |  | • Post-edit: instant build hints  |  | • Local: repo context |
-| • 98.6% recall        |  | • Calibrated detector (Cdup >= 80%)|  | • Global: dev profile |
+| • 98.6% recall        |  | • Structural detector (Cdup >= 80%)|  | • Global: dev profile |
 +-----------------------+  +-----------------------------------+  +-----------------------+
 ```
 
@@ -43,7 +43,7 @@ Large Language Models waste context windows dumping whole source files to find c
 ### 2. Real-Time Anti-Reinvention Engine (Prevents Duplicate Code & Exploration Collapse)
 Unguided AI coding agents duplicate existing logic at alarming rates (up to 50.8% duplicate code by Turn 5 under multi-turn benchmarks, as documented in RepoReuse, [arXiv:2609.35357](https://arxiv.org/abs/2609.35357)). Furthermore, RepoReuse proved the **Historical Memory Paradox**: dumping full source code into the agent's context window increases duplicate logic ($C_{dup}$ jumps to 70.7%–94.7%) because models copy-paste instead of importing. Conversely, providing structured **Interface Memory** (signatures, types, and caller counts) maintains clean reuse and minimizes duplication ($C_{dup} = 46.7\%$). `eg` provides two-moment protection:
 - **Pre-write Discovery**: `eg search` returns zero-body Concise Interface Cards ranked by `BM25 + log(1 + callers)` to surface canonical functions before agents author new code, closing the exploration gap without context bloat.
-- **Post-edit Defense**: Incremental `eg build` emits instant stderr hints (< 1ms), while `eg reuse` executes four calibrated detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, raw client bypass, and 1-caller wrappers). Powered by an in-memory inverted posting index (< 3ms scan on 5,000 symbols) an opt-in transitive 2-hop footprint (`--deep-callee`) to catch indirect wrappers, and an opt-in semantic judge (`--judge`) that asks a local `eg-judge` model to arbitrate the 45-75% overlap band.
+- **Post-edit Defense**: Incremental `eg build` emits instant stderr hints (< 1ms), while `eg reuse` executes four structural detectors ($C_{dup}$ callee footprint $\ge 80\%$, interface token overlap $\ge 60\%$, raw client bypass, and 1-caller wrappers), with an opt-in transitive 2-hop footprint (`--deep-callee`) to catch indirect wrappers.
 
 ### 3. Zero-Token Code-Anchored Project & Global Memory (Unified Single Binary)
 External memory MCP servers introduce an expensive "Memory Tax" through prompt-injected summaries and LLM-based extractions. Furthermore, benchmark auditing by Zhou et al. ([arXiv:2606.24775](https://arxiv.org/abs/2606.24775)) proves that write-time LLM summarization causes irrecoverable information loss, while local deterministic maintenance sits on the Pareto efficiency frontier ($30\text{--}40\times$ faster than global LLM graph rebuilding). Based on Zero-Mem ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377)) and Agent Zero Memory ([arXiv:2608.29606](https://arxiv.org/abs/2608.29606)), `eg` implements zero-token persistent memory:
@@ -111,7 +111,8 @@ eg callers read_bounded --depth 2
 eg reuse
 # Optional: extend D1 to second-hop callees for wrappers through a helper
 eg reuse --deep-callee
-EG_JUDGE_BIN=eg-judge EG_JUDGE_MODEL=~/.engram/judge/model eg reuse --judge
+# Optional: append detector and reason codes to each candidate
+eg reuse --explain
 
 # 5. USP 3: Persist cross-project developer preferences (0 tokens)
 eg mem write dev-profile --kind decision --global \
@@ -140,7 +141,7 @@ The 10 core command surfaces cover complete code navigation, anti-reinvention, a
 | `eg imports <file>` | Outbound resolved imports for a file | Module import targets |
 | `eg search <terms>` | BM25 + caller-weighted symbol discovery | Interface cards with `[callers=N]` |
 | `eg symbols <path>` | File/directory outline with signatures | `path:line kind qualname (signature)` |
-| `eg reuse [paths...]` | Detect duplicate functions and wrappers | 4 calibrated anti-reinvention detectors |
+| `eg reuse [paths...]` | Detect duplicate functions and wrappers | 4 structural anti-reinvention detectors |
 
 ### Platform & Maintenance Commands
 
@@ -243,7 +244,7 @@ See [Security Policy](SECURITY.md) for full audit parameters.
 
 | Paper & Citation | Key Discovery | How `engram` Realizes the Insight |
 |---|---|---|
-| **RepoReuse** ([arXiv:2609.35357](https://arxiv.org/abs/2609.35357))<br>*D. Ma et al., 2026* | Exploration gap ($\text{recall}_{\text{repo}}$ drops from 83.6% to 35.4%) and execution gap cause duplicate code in 50.8% of multi-turn tasks. Dumping source code into prompts increases duplication ($C_{dup} = 70.7\%$), while **Interface Memory** preserves clean reuse ($C_{dup} = 46.7\%$). | `eg search` provides zero-body Interface Cards ranked by caller popularity. `eg reuse` applies calibrated detectors ($C_{dup} \ge 80\%$, `--deep-callee` for 2-hop reach) backed by an in-memory inverted posting index. |
+| **RepoReuse** ([arXiv:2609.35357](https://arxiv.org/abs/2609.35357))<br>*D. Ma et al., 2026* | Exploration gap ($\text{recall}_{\text{repo}}$ drops from 83.6% to 35.4%) and execution gap cause duplicate code in 50.8% of multi-turn tasks. Dumping source code into prompts increases duplication ($C_{dup} = 70.7\%$), while **Interface Memory** preserves clean reuse ($C_{dup} = 46.7\%$). | `eg search` provides zero-body Interface Cards ranked by caller popularity. `eg reuse` applies structural detectors ($C_{dup} \ge 80\%$, `--deep-callee` for 2-hop reach) backed by an in-memory inverted posting index. |
 | **Zero-Mem** ([arXiv:2607.29377](https://arxiv.org/abs/2607.29377))<br>*Y. Xiao et al., 2026* | Eliminating LLM calls from all memory operations (indexing, retrieval, conflict resolution) cuts latency by 57.6% and token waste to zero while outperforming prompt-based memory on benchmarks. | All `eg mem` operations consume **0 LLM tokens**. Hybrid retrieval combines SQLite FTS5 BM25, recency decay, and bounded call-graph expansion ($0.5^{depth}$ decay over resolved AST edges). |
 | **Agent Zero Memory** ([arXiv:2608.29606](https://arxiv.org/abs/2608.29606))<br>*M. Wu & P. Zhu, 2026* | Memory hallucinations stem from lossy summarization and ungrounded statements. Enforces immutable provenance triples $\pi(x)$ and **Citation-Locked Answers**. | `eg mem write --refs <symbols\|paths>` binds notes directly to AST entities. `eg mem query` and `eg context` cross-reference the live code index to emit `[stale-ref]`, `[broken-ref]`, or `[modified-ref]` alerts. |
 | **Agent-Native Memory Systems** ([arXiv:2606.24775](https://arxiv.org/abs/2606.24775))<br>*W. Zhou et al., 2026* | Benchmarking 12 memory systems shows raw interaction preservation preserves 2× more information than LLM summaries, and local deterministic maintenance sits on the Pareto frontier ($30\text{--}40\times$ faster than global LLM re-indexing). | Dual SQLite store (`.engram/memory.db`, `~/.engram/memory.db`) with content-hash deduplication, revision chains (`--supersedes`), advisory Jaccard consolidation, and offline Markdown/JSONL import/export. |

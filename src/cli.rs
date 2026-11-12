@@ -132,15 +132,18 @@ pub enum Cmd {
         /// Target file paths or symbol names to inspect for reuse candidates
         #[arg(required = false)]
         paths: Vec<String>,
-        /// Maximum candidates shown (default 10, max 100)
+        /// Maximum candidates shown (default 10, range 1..=100)
         #[arg(long, default_value_t = crate::query::DEFAULT_REUSE_LIMIT)]
         limit: usize,
         /// Extend the callee footprint to second-hop callees (weight 0.5)
         #[arg(long)]
         deep_callee: bool,
-        /// Ask the local eg-judge model to arbitrate 45-75% overlap candidates
+        /// Minimum confidence to show: low or provisional
+        #[arg(long, default_value = "low", value_parser = ["low", "provisional"])]
+        min_confidence: String,
+        /// Append detector and reason codes to each candidate
         #[arg(long)]
-        judge: bool,
+        explain: bool,
     },
     /// Symbol-level search: bm25-ranked FTS5 over identifier tokens with interface cards
     Search {

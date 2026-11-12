@@ -109,11 +109,7 @@ fn render_context(ctx: &QueryCtx<'_>, data: &ContextData) -> Result<LineQuery> {
         data.callees_total
     ));
     out.extend(callee_lines);
-    Ok(LineQuery {
-        lines: out,
-        stderr: String::new(),
-        shown,
-    })
+    Ok(LineQuery::new(out, String::new(), shown))
 }
 
 fn context_file_set(data: &ContextData) -> BTreeSet<String> {

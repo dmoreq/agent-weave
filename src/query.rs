@@ -12,6 +12,8 @@ use crate::error::{EgError, Result};
 use crate::extract::{Confidence, EdgeKind, SymbolKind};
 use crate::hash::fnv1a64;
 
+use self::reuse::ReuseMode;
+
 pub const DEFAULT_LIMIT: usize = 50;
 /// Shared CLI/MCP surface defaults, so `cli.rs` and `service.rs::from_tool_args`
 /// cannot drift apart on the same flag's default.
@@ -74,7 +76,6 @@ use staleness::*;
 mod analysis;
 mod callgraph;
 mod impact;
-pub mod judge;
 pub mod reuse;
 
 pub use analysis::{search, symbols, unresolved, unresolved_names, SymbolsOpts};
@@ -182,6 +183,24 @@ pub struct LineQuery {
     pub lines: Vec<String>,
     pub stderr: String,
     pub shown: usize,
+    /// Which reuse surface produced this result; every non-reuse query is
+    /// `Scan` for journal compatibility.
+    pub mode: ReuseMode,
+    /// True when a limit or output cap omitted candidates from the result.
+    pub truncated: bool,
+}
+
+impl LineQuery {
+    /// Default constructor for non-reuse surfaces and the current reuse scan.
+    pub fn new(lines: Vec<String>, stderr: String, shown: usize) -> Self {
+        Self {
+            lines,
+            stderr,
+            shown,
+            mode: ReuseMode::Scan,
+            truncated: false,
+        }
+    }
 }
 
 /// Prepend a caveat to any existing header without changing the default
@@ -231,11 +250,11 @@ pub(crate) fn journal_output(out: &QueryOutput, ambiguous: usize) -> String {
 /// notice rides the stderr channel, not `eprintln!`.
 fn search_lines(out: QueryOutput) -> Result<LineQuery> {
     let stderr = journal_output(&out, 0);
-    Ok(LineQuery {
-        lines: render_output(&out).lines().map(str::to_string).collect(),
+    Ok(LineQuery::new(
+        render_output(&out).lines().map(str::to_string).collect(),
         stderr,
-        shown: out.shown,
-    })
+        out.shown,
+    ))
 }
 
 /// Resolve a repo-relative file path and fail with the shared not-indexed

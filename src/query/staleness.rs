@@ -71,7 +71,7 @@ pub(crate) fn file_changed(ctx: &QueryCtx<'_>, rel: &str) -> bool {
 /// A repo-relative indexed path may contain only normal components. This
 /// mirrors the write-path containment rule and rejects Windows separators on
 /// every platform so an index built elsewhere cannot escape the root.
-fn safe_index_path(rel: &str) -> bool {
+pub(crate) fn safe_index_path(rel: &str) -> bool {
     if rel.is_empty() || rel.contains('\\') {
         return false;
     }

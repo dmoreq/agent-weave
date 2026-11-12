@@ -28,12 +28,21 @@ pub struct MemRow {
     pub refs: String,
     pub source: String,
     pub created_at: i64,
+    pub anchored_at: i64,
     pub expires_at: i64,
     pub superseded_by: Option<i64>,
 }
 
 pub(super) const MEM_ROW_SQL: &str =
-    "id, key, rev, kind, scope, session, body, tags, refs, source, created_at, expires_at, superseded_by";
+    "id, key, rev, kind, scope, session, body, tags, refs, source, created_at, expires_at, superseded_by, anchored_at";
+
+impl MemRow {
+    /// The freshness anchor: a verified note uses `anchored_at`, otherwise it
+    /// falls back to `created_at`.
+    pub fn anchor(&self) -> i64 {
+        self.anchored_at.max(self.created_at)
+    }
+}
 
 pub(super) fn mem_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemRow> {
     Ok(MemRow {
@@ -50,6 +59,7 @@ pub(super) fn mem_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemRow> {
         created_at: r.get(10)?,
         expires_at: r.get(11)?,
         superseded_by: r.get(12)?,
+        anchored_at: r.get(13)?,
     })
 }
 
@@ -230,7 +240,7 @@ fn try_write_revision(
         if row.content_hash == hash {
             if note.touch {
                 tx.execute(
-                    "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                    "UPDATE memories SET created_at = ?1, anchored_at = ?1 WHERE id = ?2",
                     rusqlite::params![now, row.id],
                 )
                 .map_err(map_memory_err)?;

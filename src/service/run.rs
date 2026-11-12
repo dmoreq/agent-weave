@@ -99,6 +99,23 @@ pub(super) fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) ->
 
 /// Index-only query arms: graph traversal, analysis, and inventory.
 fn run_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
+    if let CommandRequest::Reuse {
+        limit,
+        min_confidence,
+        ..
+    } = req
+    {
+        if !(1..=100).contains(limit) {
+            return Err(EgError::Usage("limit must be 1..=100".to_string()));
+        }
+        if !min_confidence.is_empty()
+            && crate::query::reuse::ReuseConfidence::parse(min_confidence).is_none()
+        {
+            return Err(EgError::Usage(
+                "min-confidence must be low|provisional".to_string(),
+            ));
+        }
+    }
     match req.family() {
         Family::Graph => run_graph_query(req, root_arg),
         Family::Analysis => run_analysis_query(req, root_arg),
@@ -226,8 +243,18 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
             paths,
             limit,
             deep_callee,
-            judge,
-        } => crate::query::run_reuse(ctx, paths, *limit, *deep_callee, *judge)?,
+            min_confidence,
+            explain,
+        } => {
+            let min_confidence = if min_confidence.is_empty() {
+                crate::query::reuse::ReuseConfidence::Low
+            } else {
+                crate::query::reuse::ReuseConfidence::parse(min_confidence).ok_or_else(|| {
+                    EgError::Usage("min-confidence must be low|provisional".to_string())
+                })?
+            };
+            crate::query::run_reuse(ctx, paths, *limit, *deep_callee, min_confidence, *explain)?
+        }
         CommandRequest::Search { terms, limit } => crate::query::search(ctx, terms, *limit)?,
         _ => unreachable!("run_line_query called with a non-line request"),
     };

@@ -348,7 +348,9 @@ pub(crate) const EDGE_SRC_FILE_JOIN: &str =
 /// Resolved-caller subquery for the outer symbol `s` — the single definition
 /// of "number of callers", shared by search ranking and reuse calibration.
 pub(crate) const CALLER_COUNT_SQL: &str =
-    "(SELECT COUNT(*) FROM edges e WHERE e.dst_id = s.id AND e.kind = 'calls')";
+    "(SELECT COUNT(DISTINCT e.src_id) FROM edges e JOIN symbols src ON src.id = e.src_id \
+      WHERE e.dst_id = s.id AND e.kind = 'calls' AND e.src_id != s.id \
+      AND src.is_test = s.is_test)";
 
 /// Quoted edge-kind SQL literals joined with commas — the one renderer for
 /// every `kind IN (...)` fragment built from the enum, so a new kind joins

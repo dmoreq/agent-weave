@@ -79,6 +79,22 @@ pub(super) fn load_callees(
     map_unresolved_callees(conn, symbols)
 }
 
+/// `df_all_excl(c)`: distinct callers per resolved destination, including test
+/// callers. One prefetch feeds the D1 distinctive-callee guard.
+pub(super) fn load_df_all(conn: &Connection) -> Result<HashMap<i64, i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT dst_id, COUNT(DISTINCT src_id) FROM edges
+         WHERE kind = 'calls' AND dst_id IS NOT NULL GROUP BY dst_id",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let mut out = HashMap::new();
+    for row in rows {
+        let (id, count) = row?;
+        out.insert(id, count);
+    }
+    Ok(out)
+}
+
 /// Build the weighted two-hop footprint after the stoplist filter: direct
 /// resolved callees weigh 1.0, callees of those callees weigh 0.5. A callee
 /// reachable both ways keeps the direct 1.0 weight.
@@ -128,11 +144,15 @@ fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDat
         ))
     })?;
 
+    let mut caller_sets: HashMap<i64, HashSet<i64>> = HashMap::new();
     for row in rows {
         let (src_id, dst_id, dst_name) = row?;
         if let Some(did) = dst_id {
-            if let Some(dst) = symbols.get_mut(&did) {
-                dst.inbound_callers += 1;
+            // Distinct production callers only: exclude self-edges and any
+            // source outside the corpus (tests). The final count is set after
+            // the edge scan so duplicate call sites cannot inflate it.
+            if did != src_id && symbols.contains_key(&src_id) {
+                caller_sets.entry(did).or_default().insert(src_id);
             }
         }
         if let Some(sym) = symbols.get_mut(&src_id) {
@@ -142,6 +162,11 @@ fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDat
                 sym.callee_ids.insert(did);
                 sym.resolved_callees.insert(callee);
             }
+        }
+    }
+    for (did, callers) in caller_sets {
+        if let Some(dst) = symbols.get_mut(&did) {
+            dst.inbound_callers = callers.len() as i64;
         }
     }
     Ok(())
@@ -223,7 +248,7 @@ pub(super) fn select_targets<'a>(
                 }
             }
             if let Some(paths) = path_filter {
-                if !paths.iter().any(|p| s.file_path.starts_with(p)) {
+                if !super::target::path_matches(&s.file_path, paths) {
                     return false;
                 }
             }

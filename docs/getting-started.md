@@ -127,7 +127,7 @@ Verify that your changes did not introduce duplicate logic or bypass existing he
 eg reuse
 ```
 
-`eg reuse` analyzes callee footprints and interface similarities across four calibrated detectors to surface duplicate function candidates.
+`eg reuse` analyzes callee footprints and interface similarities across four structural detectors to surface duplicate function candidates.
 
 ---
 

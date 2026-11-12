@@ -16,6 +16,33 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Changed
+- `eg reuse` is now a Phase 1 truthfulness pass: confidence is `low|provisional`
+  (no calibrated/medium/high), `--min-confidence` filters low candidates,
+  `--limit` is 1..100, output adds a count summary and a 30 KiB cap, and stale
+  files downgrade confidence with a reuse-specific header.
+- Path typos and absolute paths are rejected explicitly; file, directory,
+  `file:line`, and unique symbol scopes resolve before the scan. Directory
+  matches stop at a path-component boundary, and ambiguous bare names list
+  their candidates with exit 2.
+- Freshness distinguishes `fresh`, `stale`, and `unknown` (new file, 16 MiB
+  hash budget, walk/stat/unsafe path, or deleted file). Unknown pairs downgrade
+  to `low`; empty scopes emit `eg: freshness unknown (<reason>)`.
+- Caller counts are distinct production callers (`COUNT(DISTINCT src_id)`,
+  self/test excluded), shared by `eg search` and `eg reuse`.
+- `mem touch` and `mem write --touch` use `max(anchored_at, created_at)` for
+  ref staleness; `[stale-ref] [modified-ref]` clears after verification.
+- Removed `--judge` and the MCP `judge` parameter from the shipped surface. The
+  semantic judge returns in Phase 5 with a hardened protocol.
+- Reuse journal lines carry `mode`, `truncated`, and typed `reuse` counts;
+  dashboard candidates carry `confidence` and `reasons`. `guarded_out` now
+  counts explicit guard rejections instead of a hardcoded zero.
+- `eg reuse --explain` appends `detector=D#; reasons=[...]`, with candidate
+  reasons covering caller-callee, same-name subsets, zero-name, size
+  imbalance, stale/unknown freshness, and unsafe paths. CLI, MCP, dashboard
+  JSON, and journal candidate IDs escape control characters.
+- Empty reuse output is `eg: reuse — 0 duplication candidate(s) found`.
+
 ## [1.0.5] - 2026-11-12
 
 ### Added

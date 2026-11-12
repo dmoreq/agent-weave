@@ -88,7 +88,7 @@ pub(crate) enum RefStatus {
 pub(crate) fn check_ref_status(
     index_conn: &rusqlite::Connection,
     r: &str,
-    created_at: i64,
+    anchor: i64,
 ) -> RefStatus {
     let file_check: rusqlite::Result<(String, i64)> = index_conn.query_row(
         "SELECT path, mtime FROM files WHERE path = ?1 OR path LIKE ?2 LIMIT 1",
@@ -96,7 +96,7 @@ pub(crate) fn check_ref_status(
         |row| Ok((row.get(0)?, row.get(1)?)),
     );
     if let Ok((_path, mtime_nanos)) = file_check {
-        return if (mtime_nanos / 1_000_000_000) > created_at {
+        return if (mtime_nanos / 1_000_000_000) > anchor {
             RefStatus::Modified
         } else {
             RefStatus::Valid
@@ -110,7 +110,7 @@ pub(crate) fn check_ref_status(
         |row| row.get(0),
     );
     if let Ok(mtime_nanos) = sym_check {
-        return if (mtime_nanos / 1_000_000_000) > created_at {
+        return if (mtime_nanos / 1_000_000_000) > anchor {
             RefStatus::Modified
         } else {
             RefStatus::Valid
@@ -132,7 +132,7 @@ pub(super) fn check_note_ref_status(
     }
     let mut has_modified = false;
     for r in row.refs.split_whitespace() {
-        match check_ref_status(conn, r, row.created_at) {
+        match check_ref_status(conn, r, row.anchor()) {
             RefStatus::Broken => return RefStatus::Broken,
             RefStatus::Modified => has_modified = true,
             RefStatus::Valid => {}

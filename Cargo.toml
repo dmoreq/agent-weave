@@ -24,6 +24,8 @@ include = [
     "/tests/scripts/timing_assert.sh",
     "/tests/scripts/mem_recall.py",
     "/tests/scripts/mem_scale.py",
+    "/tests/scripts/reuse_oracle.py",
+    "/tests/scripts/reuse_perf.py",
     "/tests/scripts/old_binary_compat.sh",
     "/schema/**",
     "/build.rs",

@@ -181,7 +181,7 @@ fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) ->
             Ok(c) => c,
             Err(_) => return 0,
         };
-    let (candidates, total) =
+    let (candidates, total, _) =
         match crate::query::reuse::analyze_corpus(&conn, None, None, 25, false) {
             Ok(res) => res,
             Err(_) => return 0,
@@ -202,6 +202,13 @@ fn format_shared_evidence(c: &ReuseCandidate) -> String {
         DetectorId::D3 => "client bypass",
         DetectorId::D4 => "details",
     };
+    if c.detector == DetectorId::D3 {
+        return c
+            .raw_client
+            .as_deref()
+            .map(|raw| format!("client bypass: [{raw}]"))
+            .unwrap_or_default();
+    }
     if c.shared_items.is_empty() {
         String::new()
     } else {
@@ -253,24 +260,28 @@ fn format_candidate_json(
         resolve_candidate_snippets(r_root, conn, c);
 
     let loc_saving = cand_loc.loc;
+    let symbol = crate::query::reuse::sanitize(&c.symbol);
+    let canonical = crate::query::reuse::sanitize(&c.canonical);
     let narrative = format!(
         "Consolidating '{}' into authoritative '{}' ([callers={}]) deletes ~{} duplicate lines and eliminates drift between twin implementations.",
-        c.symbol, c.canonical, c.canonical_callers, loc_saving
+        symbol, canonical, c.canonical_callers, loc_saving
     );
 
     json!({
-        "id": format!("{}:{}->{}", r_name, c.symbol, c.canonical),
+        "id": format!("{}:{}->{}", r_name, symbol, canonical),
         "repo": r_name,
         "detector": c.detector.as_str(),
-        "symbol": c.symbol,
-        "canonical": c.canonical,
+        "symbol": symbol,
+        "canonical": canonical,
         "canonical_callers": c.canonical_callers,
-        "canonical_file": c.canonical_file,
+        "canonical_file": crate::query::reuse::sanitize(&c.canonical_file),
         "canonical_line": c.canonical_line,
         // D3/D4 emit no overlap metric: their match is an evidence class, not
         // a measured percentage. The UI renders a label from `detector`.
         "overlap_pct": c.overlap_pct,
         "overlap_applicable": c.overlap_pct.is_some(),
+        "confidence": c.confidence.as_str(),
+        "reasons": c.reasons.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
         "shared_evidence": shared_evidence,
         "candidate_info": json!({
             "file": cand_loc.file,

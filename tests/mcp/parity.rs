@@ -269,6 +269,50 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 }
 
 #[test]
+fn mcp_reuse_phase1_parity() {
+    let repo = fixture("mcp-reuse-phase1");
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let cli_ok = eg_cmd(&repo)
+        .args(["reuse", "utils.py", "--explain"])
+        .output()
+        .unwrap();
+    assert_eq!(cli_ok.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let ok = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "explain": true}}),
+    );
+    assert_eq!(ok["result"]["isError"], false, "{ok}");
+    assert_eq!(
+        strip_footer(&result_text(&ok)),
+        String::from_utf8_lossy(&cli_ok.stdout).into_owned()
+    );
+
+    let cli_err = eg_cmd(&repo)
+        .args(["reuse", "missing.py"])
+        .output()
+        .unwrap();
+    assert_eq!(cli_err.status.code(), Some(1));
+    let err = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["missing.py"]}}),
+    );
+    assert_eq!(err["result"]["isError"], true, "{err}");
+    assert_eq!(
+        strip_footer(&result_text(&err)),
+        String::from_utf8_lossy(&cli_err.stderr).into_owned()
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn reuse_arguments_via_mcp() {
     let repo = fixture("mcp-reuse");
     let build = eg_cmd(&repo).arg("build").output().unwrap();
@@ -298,6 +342,19 @@ fn reuse_arguments_via_mcp() {
         json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "deep_callee": true}}),
     );
     assert_eq!(deep["result"]["isError"], false, "{deep}");
+
+    let explain = rpc(
+        &mut srv,
+        4,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "explain": true}}),
+    );
+    assert_eq!(explain["result"]["isError"], false, "{explain}");
+    assert!(
+        result_text(&explain).contains("detector=D"),
+        "explain must carry detector details: {}",
+        result_text(&explain)
+    );
     let _ = fs::remove_dir_all(&repo);
 }
 

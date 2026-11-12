@@ -305,6 +305,7 @@ mod tests {
                 refs: String::new(),
                 source: "cli".into(),
                 created_at: created,
+                anchored_at: 0,
                 expires_at: 0,
                 superseded_by: None,
             },

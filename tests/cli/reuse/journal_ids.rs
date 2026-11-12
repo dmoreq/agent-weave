@@ -33,4 +33,16 @@ fn reuse_journals_surfaced_candidate_ids() {
         candidates.lines().count() >= 1,
         "at least one surfaced id: {last}"
     );
+    assert_eq!(val["mode"], "scan", "typed mode: {last}");
+    assert_eq!(val["truncated"], false, "typed truncation: {last}");
+    let reuse = &val["reuse"];
+    let provisional = reuse["provisional"].as_u64().unwrap_or(0);
+    let low = reuse["low"].as_u64().unwrap_or(0);
+    assert!(
+        provisional + low >= 1,
+        "typed confidence counts missing: {last}"
+    );
+    for key in ["guarded_out", "below_threshold", "omitted", "capped"] {
+        assert!(reuse[key].as_u64().is_some(), "missing {key}: {last}");
+    }
 }

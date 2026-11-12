@@ -56,7 +56,8 @@ pub enum CommandRequest {
         paths: Vec<String>,
         limit: usize,
         deep_callee: bool,
-        judge: bool,
+        min_confidence: String,
+        explain: bool,
     },
     Search {
         terms: String,

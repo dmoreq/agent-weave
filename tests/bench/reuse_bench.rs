@@ -15,11 +15,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const FILES: usize = 500;
+const FILES_5K: usize = 500;
+const FILES_10K: usize = 1_000;
 const WARMUP_RUNS: usize = 10;
 const MEASURED_RUNS: usize = 50;
+/// One benchmark at a time: parallel corpus generation and CPU contention make
+/// the p95 gates meaningless.
+static BENCH_LOCK: Mutex<()> = Mutex::new(());
 
 fn binary() -> PathBuf {
     let path = std::env::var("EG_BENCH_BIN")
@@ -33,20 +38,20 @@ fn binary() -> PathBuf {
     path
 }
 
-fn write_corpus(root: &Path) {
+fn write_corpus(root: &Path, files: usize, filler_count: usize) {
     let mut common = String::new();
-    for group in 0..FILES {
+    for group in 0..files {
         for helper in 0..3 {
             common.push_str(&format!("def h{group}_{helper}():\n    return {helper}\n"));
         }
     }
     let mut filler = String::new();
-    for i in 0..2_500 {
+    for i in 0..filler_count {
         filler.push_str(&format!("def filler_{i}():\n    return {i}\n"));
     }
     fs::write(root.join("common.py"), common).unwrap();
     fs::write(root.join("filler.py"), filler).unwrap();
-    for group in 0..FILES {
+    for group in 0..files {
         let source = format!(
             "from common import h{group}_0, h{group}_1, h{group}_2\n\
 def pipeline_{group}_a():\n    return h{group}_0() + h{group}_1() + h{group}_2()\n\
@@ -54,6 +59,28 @@ def pipeline_{group}_b():\n    return h{group}_0() + h{group}_1() + h{group}_2()
         );
         fs::write(root.join(format!("g{group}.py")), source).unwrap();
     }
+}
+
+fn build(eg: &Path, root: &Path) {
+    let build = Command::new(eg)
+        .arg("--root")
+        .arg(root)
+        .arg("--no-journal")
+        .args(["build"])
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+}
+
+fn bench_root(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("eg-reuse-bench-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    root
 }
 
 fn run(eg: &Path, root: &Path, extra: &[&str]) -> Duration {
@@ -91,31 +118,29 @@ fn measure(eg: &Path, root: &Path, extra: &[&str]) -> (Duration, Duration) {
 
 #[test]
 #[ignore = "gate benchmark: generates a 5,000-symbol repo and needs the release binary"]
-fn reuse_c1_p95_on_5000_symbols() {
-    let root = std::env::temp_dir().join(format!("eg-reuse-bench-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).unwrap();
-    // The benchmark is `#[ignore]`, so a panic aborts before any Drop guard would run; the
-    // explicit removal below covers the normal path and the harness cleanup covers the rest.
-    write_corpus(&root);
+fn bench_scan_5k_p95() {
+    scan_gate("5k", FILES_5K, 2_500, Duration::from_millis(200));
+}
+
+#[test]
+#[ignore = "gate benchmark: generates a 10,000-symbol repo and needs the release binary"]
+fn bench_scan_10k_p95() {
+    scan_gate("10k", FILES_10K, 5_000, Duration::from_millis(500));
+}
+
+fn scan_gate(name: &str, files: usize, filler: usize, budget: Duration) {
+    let _guard = BENCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = bench_root(name);
+    // The benchmark is `#[ignore]`, so a panic aborts before any Drop guard
+    // would run; the explicit removal below covers the normal path.
+    write_corpus(&root, files, filler);
     let eg = binary();
-    let build = Command::new(&eg)
-        .arg("--root")
-        .arg(&root)
-        .arg("--no-journal")
-        .args(["build"])
-        .output()
-        .unwrap();
-    assert!(
-        build.status.success(),
-        "build failed: {}",
-        String::from_utf8_lossy(&build.stderr)
-    );
+    build(&eg, &root);
 
     let (baseline_median, baseline_p95) = measure(&eg, &root, &[]);
     let (deep_median, deep_p95) = measure(&eg, &root, &["--deep-callee"]);
     println!(
-        "reuse p50: baseline={:.2}ms deep-callee={:.2}ms (+{:.1}%); p95: baseline={:.2}ms deep-callee={:.2}ms",
+        "{name} reuse p50: baseline={:.2}ms deep-callee={:.2}ms (+{:.1}%); p95: baseline={:.2}ms deep-callee={:.2}ms",
         baseline_median.as_secs_f64() * 1e3,
         deep_median.as_secs_f64() * 1e3,
         (deep_median.as_secs_f64() / baseline_median.as_secs_f64() - 1.0) * 100.0,
@@ -123,18 +148,55 @@ fn reuse_c1_p95_on_5000_symbols() {
         deep_p95.as_secs_f64() * 1e3,
     );
 
-    // The C1 keep gate is the detector-phase budget
-    // (`query::reuse::detectors::tests::detector_scan_gate_on_5000_symbols`,
-    // measured at ~3ms). This end-to-end number includes SQLite load and
-    // process startup; guard it against gross regression instead.
     assert!(
-        baseline_p95 < Duration::from_millis(100),
-        "end-to-end regression: p95 {:.2}ms >= 100ms",
-        baseline_p95.as_secs_f64() * 1e3
+        baseline_p95 < budget,
+        "{name} end-to-end regression: p95 {:.2}ms >= {:?}",
+        baseline_p95.as_secs_f64() * 1e3,
+        budget
     );
     assert!(
         deep_median <= baseline_median.mul_f64(1.10),
-        "C2 gate: --deep-callee median regression exceeds 10%"
+        "{name} --deep-callee median regression exceeds 10%"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+#[ignore = "gate benchmark: hashes 16 MiB and needs the release binary"]
+fn bench_hash_16mib() {
+    let _guard = BENCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = bench_root("hash");
+    let eg = binary();
+    let payload = 1024 * 1024;
+    for i in 0..16 {
+        let head = format!("def hash_target_{i}():\n    return {i}\n");
+        let mut source = String::with_capacity(payload);
+        source.push_str(&head);
+        source.push_str(&"#".repeat(payload - head.len()));
+        fs::write(root.join(format!("h{i}.py")), source).unwrap();
+    }
+    build(&eg, &root);
+    let fresh = (0..20).map(|_| run(&eg, &root, &[])).collect();
+    let (_, fresh_p95) = percentile(fresh, 0.95);
+    // Same bytes, fresh mtime: every file reaches the hash phase.
+    for i in 0..16 {
+        let path = root.join(format!("h{i}.py"));
+        let bytes = fs::read(&path).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    let samples = (0..20).map(|_| run(&eg, &root, &[])).collect();
+    let (_, hash_p95) = percentile(samples, 0.95);
+    let added = hash_p95.saturating_sub(fresh_p95);
+    println!(
+        "hash 16MiB: fresh p95={:.2}ms, hashing p95={:.2}ms, added={:.2}ms",
+        fresh_p95.as_secs_f64() * 1e3,
+        hash_p95.as_secs_f64() * 1e3,
+        added.as_secs_f64() * 1e3
+    );
+    assert!(
+        added <= Duration::from_millis(25),
+        "hash wall: added {:.2}ms > 25ms",
+        added.as_secs_f64() * 1e3
     );
     let _ = fs::remove_dir_all(&root);
 }

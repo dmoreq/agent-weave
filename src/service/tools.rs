@@ -175,7 +175,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
     },
     ToolSpec {
         name: "reuse",
-        description: "Calibrated anti-reinvention candidates: detect duplicate helpers and suggest canonical reuse",
+        description: "Anti-reinvention candidates: detect duplicate helpers and suggest canonical reuse",
         params: &[
             ParamSpec {
                 name: "paths",
@@ -196,10 +196,16 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 description: "Extend the callee footprint to second-hop callees (weight 0.5)",
             },
             ParamSpec {
-                name: "judge",
+                name: "min_confidence",
+                kind: ParamKind::Str,
+                required: false,
+                description: "Minimum confidence to show: low or provisional (default low)",
+            },
+            ParamSpec {
+                name: "explain",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Ask the local eg-judge model to arbitrate 45-75% overlap candidates",
+                description: "Append detector and reason codes to each candidate",
             },
         ],
         core: true,

@@ -56,11 +56,7 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
     } else {
         cap
     };
-    Ok(LineQuery {
-        lines: out,
-        stderr: cap,
-        shown,
-    })
+    Ok(LineQuery::new(out, cap, shown))
 }
 
 /// Total, distinct files, and unlocated rows. `None` when the scoped set is
@@ -158,11 +154,7 @@ pub fn unresolved(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Resul
             .map(|(path, n)| format!("{path} unresolved={n}")),
     );
     let cap = finish_capped(&mut out, shown, n_files, false, "");
-    Ok(LineQuery {
-        lines: out,
-        stderr: cap,
-        shown,
-    })
+    Ok(LineQuery::new(out, cap, shown))
 }
 
 /// Files with unresolved callees, descending by count.

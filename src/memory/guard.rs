@@ -283,6 +283,7 @@ mod tests {
             refs: refs.into(),
             source: "cli".into(),
             created_at: 1,
+            anchored_at: 0,
             expires_at: 0,
             superseded_by: None,
         }

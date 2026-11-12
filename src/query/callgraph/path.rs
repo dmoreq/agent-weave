@@ -85,11 +85,7 @@ fn render_path(ctx: &QueryCtx<'_>, chain_ids: &[i64], hop_sites: &[i64]) -> Resu
         "eg: chain {} ({hops} hops)",
         chain_names.join(" -> ")
     ));
-    Ok(LineQuery {
-        lines: out,
-        stderr: String::new(),
-        shown: hops,
-    })
+    Ok(LineQuery::new(out, String::new(), hops))
 }
 
 fn chain_lookup(

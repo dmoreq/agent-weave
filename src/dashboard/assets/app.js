@@ -1027,9 +1027,7 @@ function createRecentRow(q) {
     '<td class="num-col text-muted">' + ts + '</td>' +
     '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
     '<td>' + agentTagHtml(aName) + '</td>' +
-    '<td><code>' + escapeHtml(q.tool || '—') + '</code>' +
-      (q.judged ? ' <span class="badge badge-judge" title="eg-judge dispatched">judge</span>' : '') +
-      '</td>' +
+    '<td><code>' + escapeHtml(q.tool || '—') + '</code></td>' +
     '<td class="text-right num-col">' + (q.shown || q.result_count || 0) + '</td>' +
     '<td class="text-right num-col">' + latStr + '</td>' +
     '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +

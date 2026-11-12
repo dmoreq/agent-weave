@@ -176,17 +176,20 @@ eg symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 Real-time anti-reinvention engine. Detects cross-file and intra-file duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
 ```bash
-eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--judge]
+eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--min-confidence <low|provisional>] [--explain]
 ```
 
 | Option / Argument | Default | Description |
 |---|---|---|
-| `[PATHS]...` | Empty (repo) | Optional file or directory paths to inspect. |
+| `[PATHS]...` | Empty (repo) | File, directory, `file:line`, or unique symbol name to inspect. Multiple paths form a union. |
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
 | `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). |
-| `--judge` | `false` | Send candidates with 45-75% overlap to a local `eg-judge` binary and append its verdict. Reads `EG_JUDGE_BIN` and `EG_JUDGE_MODEL`; any failure keeps the static output and prints one stderr note. |
+| `--min-confidence <low\|provisional>` | `low` | Minimum confidence shown; `medium`/`high` are reserved for Phase 2 and rejected. |
+| `--explain` | `false` | Append `detector=...; reasons=[...]` to each candidate line. |
 
-#### Calibrated Detectors
+Path targets are validated before the scan: absolute paths, `..`, backslashes, and symlinks exit `2`; missing or unindexed targets exit `1`. A `file:line` target selects the innermost production function or method containing that line. Directory targets match at a path-component boundary. When a target or canonical file changed since the build, the candidate is downgraded to `low` and the output carries a reuse-specific freshness header.
+
+#### Detectors
 - **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard). With `--deep-callee`, the footprint includes second-hop callees, catching wrappers that forward through an intermediate helper.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Flags functions with heavily overlapping signatures and parameter types.
 - **D3: Raw Client Bypass**: Warns when callers invoke raw primitives rather than existing canonical wrappers.

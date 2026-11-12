@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod reuse;
+pub use reuse::{set_candidate_ids, set_reuse_counts, ReuseJournalCounts};
+
 /// Rotate `usage.log` to `usage.log.1` past this size (one prior generation).
 pub(crate) const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -36,10 +39,10 @@ pub fn session_tag() -> String {
 
 /// Journal opt-out contract: env `ENGRAM_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
-struct Pending {
+pub(super) struct Pending {
     surface: &'static str,
     tool: String,
-    args: serde_json::Map<String, serde_json::Value>,
+    pub(super) args: serde_json::Map<String, serde_json::Value>,
     result_count: usize,
     shown: usize,
     total: usize,
@@ -48,36 +51,14 @@ struct Pending {
     session: String,
     arm: String,
     agent: String,
-    judged: bool,
-}
-
-/// Stamp this invocation as having dispatched `eg-judge` successfully.
-///
-/// Called at most once per process from the reuse arbitration path; a no-op when no
-/// journal entry is pending.
-pub fn set_judged() {
-    PENDING.with(|pending| {
-        if let Some(entry) = pending.borrow_mut().as_mut() {
-            entry.judged = true;
-        }
-    });
-}
-
-/// Record which candidates this invocation surfaced, so the dashboard can
-/// count per-candidate usage from the retained journal. Overwrites any prior
-/// value in this process (one invocation = one list).
-pub fn set_candidate_ids(list: &str) {
-    PENDING.with(|pending| {
-        if let Some(entry) = pending.borrow_mut().as_mut() {
-            entry
-                .args
-                .insert("candidates".to_string(), Value::String(list.to_string()));
-        }
-    });
+    pub(super) judged: bool,
+    pub(super) mode: &'static str,
+    pub(super) truncated: bool,
+    pub(super) reuse_counts: Option<ReuseJournalCounts>,
 }
 
 thread_local! {
-    static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
+    pub(super) static PENDING: RefCell<Option<Pending>> = const { RefCell::new(None) };
     static DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -123,6 +104,9 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
             arm: env_tag(&["ENGRAM_ARM"]),
             agent: detect_agent(),
             judged: false,
+            mode: "scan",
+            truncated: false,
+            reuse_counts: None,
         });
     });
 }
@@ -144,12 +128,29 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     };
     let repo_name = repo.as_ref().map(|r| r.name().to_string());
     let is_worktree = repo.as_ref().is_some_and(crate::repo::RepoRef::is_worktree);
+    let reuse = pending
+        .reuse_counts
+        .map(|c| {
+            serde_json::json!({
+                "provisional": c.provisional,
+                "low": c.low,
+                "guarded_out": c.guarded_out,
+                "below_threshold": c.below_threshold,
+                "omitted": c.omitted,
+                "capped": c.capped,
+                "truncated": c.truncated,
+            })
+        })
+        .unwrap_or(Value::Null);
 
     let line = serde_json::json!({
         "ts": crate::db::unix_now(),
         "surface": pending.surface,
         "tool": pending.tool,
         "args": Value::Object(pending.args),
+        "mode": pending.mode,
+        "truncated": pending.truncated,
+        "reuse": reuse,
         "result_count": pending.result_count,
         "shown": pending.shown,
         "total": pending.total,

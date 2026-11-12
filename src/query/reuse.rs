@@ -1,26 +1,48 @@
 //! Anti-reinvention detection engine (D1-D4).
 //! Referencing RepoReuse (arXiv:2609.35357) and codebase-minimalism.
-//! Sub-20ms calibrated static duplicate detectors.
+//! Deterministic structural duplicate detectors.
 
+mod candidate;
+mod confidence;
 mod corpus;
 mod detectors;
+mod finalize;
+mod freshness;
+mod guards;
 mod index;
+mod opts;
+mod status;
+mod target;
 mod tokens;
+mod types;
 
+use std::cell::Cell;
 use std::collections::HashSet;
 
 use rusqlite::Connection;
 
-use crate::error::Result;
-use crate::query::{clamp_limit, QueryCtx};
+use crate::error::{EgError, Result};
+use crate::query::QueryCtx;
 
-use corpus::{load_callees, load_deep_weights, load_symbols, select_targets};
+use corpus::{load_callees, load_deep_weights, load_df_all, load_symbols, select_targets};
 use detectors::{Corpus, DETECTORS};
 use index::{CorpusIndex, INVERTED_INDEX_MIN_SYMBOLS};
+use opts::ReuseOpts;
 
 pub(crate) use detectors::is_raw_client;
 pub use detectors::DetectorId;
 use tokens::build_stoplist;
+pub use types::{
+    Freshness, FreshnessMode, ReasonCode, ReuseConfidence, ReuseCounts, ReuseMode, UnknownReason,
+};
+
+/// Analysis output before confidence filtering and display truncation.
+pub(super) struct ReuseReport {
+    pub(super) pool: Vec<ReuseCandidate>,
+    pub(super) counts: ReuseCounts,
+    pub(super) freshness: freshness::FreshnessReport,
+    pub(super) path_matches: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct ReuseCandidate {
@@ -34,8 +56,29 @@ pub struct ReuseCandidate {
     pub canonical_callers: i64,
     pub overlap_pct: Option<u64>,
     pub shared_items: Vec<String>,
-    /// Semantic verdict from `eg-judge`, present only with `--judge`.
-    pub verdict: Option<crate::query::judge::Verdict>,
+    pub raw_client: Option<String>,
+    pub confidence: ReuseConfidence,
+    pub reasons: Vec<ReasonCode>,
+    pub freshness: Freshness,
+}
+
+/// Escape untrusted index/user text for one-line CLI, MCP, and journal output.
+/// Backslash first, then the named escapes, then every remaining control char
+/// as `\xNN`.
+pub(crate) fn sanitize(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{1b}' => out.push_str("\\x1b"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 impl ReuseCandidate {
@@ -43,39 +86,53 @@ impl ReuseCandidate {
         // The caller tail every detector renders the same way.
         let tail = format!(
             "([callers={}] in {}:{})",
-            self.canonical_callers, self.canonical_file, self.canonical_line
+            self.canonical_callers,
+            sanitize(&self.canonical_file),
+            self.canonical_line
         );
+        let symbol = sanitize(&self.symbol);
+        let canonical = sanitize(&self.canonical);
         match self.detector {
             // D1/D2 share the overlap template and differ only in the noun.
             DetectorId::D1 | DetectorId::D2 => format!(
                 "symbol '{}' shares {}% {} with existing '{}' {}",
-                self.symbol,
+                symbol,
                 self.overlap_pct.unwrap_or(0),
                 if self.detector == DetectorId::D1 {
                     "callee footprint"
                 } else {
                     "interface token overlap"
                 },
-                self.canonical,
+                canonical,
                 tail
             ),
             DetectorId::D3 => format!(
-                "symbol '{}' bypasses canonical client '{}' to call raw external client {}",
-                self.symbol, self.canonical, tail
+                "symbol '{}' bypasses canonical client '{}' to call raw external client {} {}",
+                symbol,
+                canonical,
+                sanitize(self.raw_client.as_deref().unwrap_or("unknown")),
+                tail
             ),
             DetectorId::D4 => format!(
                 "symbol '{}' is a pass-through wrapper around existing '{}' {}",
-                self.symbol, self.canonical, tail
+                symbol, canonical, tail
             ),
         }
     }
 
-    pub fn format_text(&self) -> String {
-        let mut line = self.hint_line();
-        if let Some(verdict) = &self.verdict {
+    pub fn format_text(&self, explain: bool) -> String {
+        let mut line = format!(
+            "{} [confidence={}]",
+            self.hint_line(),
+            self.confidence.as_str()
+        );
+        if explain {
+            let mut reasons: Vec<&str> = self.reasons.iter().map(|r| r.as_str()).collect();
+            reasons.sort_unstable();
             line.push_str(&format!(
-                "\n  judge ({}): {} p={:.2}",
-                verdict.mode, verdict.decision, verdict.probability
+                " detector={}; reasons=[{}]",
+                self.detector.as_str(),
+                reasons.join(",")
             ));
         }
         if !self.shared_items.is_empty() {
@@ -85,11 +142,12 @@ impl ReuseCandidate {
                 DetectorId::D3 => "client bypass",
                 DetectorId::D4 => "details",
             };
-            line.push_str(&format!(
-                "\n  {}: [{}]",
-                label,
-                self.shared_items.join(", ")
-            ));
+            let items: Vec<String> = self
+                .shared_items
+                .iter()
+                .map(|item| sanitize(item))
+                .collect();
+            line.push_str(&format!("\n  {}: [{}]", label, items.join(", ")));
         }
         line
     }
@@ -111,7 +169,7 @@ pub fn detect_hints(conn: &Connection, new_names: &HashSet<String>) -> Result<Ve
     if new_names.is_empty() {
         return Ok(Vec::new());
     }
-    let (candidates, _) = analyze_corpus(conn, None, Some(new_names), 3, false)?;
+    let (candidates, _, _) = analyze_corpus(conn, None, Some(new_names), 3, false)?;
     let mut hints = Vec::new();
     for c in candidates.iter().take(3) {
         hints.push(format!("eg: reuse-hint: {}", c.hint_line()));
@@ -125,102 +183,45 @@ pub fn run_reuse(
     paths: &[String],
     limit: usize,
     deep_callee: bool,
-    judge: bool,
+    min_confidence: ReuseConfidence,
+    explain: bool,
 ) -> Result<crate::query::LineQuery> {
-    let QueryCtx { conn, .. } = *ctx;
-    let limit = clamp_limit(limit)?;
-    let path_filter = if paths.is_empty() { None } else { Some(paths) };
-    let (mut candidates, total) = analyze_corpus(conn, path_filter, None, limit, deep_callee)?;
-    let mut stderr = String::new();
-
-    // Arbitrate before the empty-result early return so `--judge` reports why it could not run
-    // even when the static detectors found nothing.
-    if judge {
-        stderr = arbitrate(ctx, &mut candidates);
-    }
-
-    if candidates.is_empty() {
-        crate::journal::record_result(crate::journal::OutcomeCounts::of(0, 0), false, 0);
-        return Ok(crate::query::LineQuery {
-            lines: vec!["0 reuse candidates found".to_string()],
-            stderr,
-            shown: 0,
-        });
-    }
-
-    let mut out = vec![format!(
-        "eg: reuse — {} duplication candidate(s) found",
-        candidates.len()
-    )];
-    for c in &candidates {
-        for l in c.format_text().lines() {
-            out.push(l.to_string());
-        }
-    }
-    let shown = candidates.len();
-    // The dashboard counts per-candidate usage from the retained journal; the
-    // identity must ride the invocation line. Cap at the emitted list size.
-    let surfaced: Vec<String> = candidates
-        .iter()
-        .take(25)
-        .map(|c| format!("{}->{}", c.symbol, c.canonical))
-        .collect();
-    crate::journal::set_candidate_ids(&surfaced.join("\n"));
-    crate::journal::record_result(crate::journal::OutcomeCounts::of(shown, total), false, 0);
-    Ok(crate::query::LineQuery {
-        lines: out,
-        stderr,
-        shown,
-    })
+    let opts = ReuseOpts::new(paths.to_vec(), limit, deep_callee, min_confidence, explain)?;
+    let scope = target::resolve_scope(ctx, &opts.paths)?;
+    let report = analyze_corpus_with(ctx, &opts, &scope)?;
+    finalize::finalize(ctx, report, &opts)
 }
 
-/// Fill `verdict` for gray-zone candidates and return the one stderr note (if any).
-fn arbitrate(ctx: &QueryCtx<'_>, candidates: &mut [ReuseCandidate]) -> String {
-    use crate::query::judge;
-    let setup = match judge::detect_setup() {
-        Ok(setup) => setup,
-        Err(note) => return format!("eg: judge: {note}\n"),
+/// Phase 1 analysis entry point: load the corpus, run guards/detectors, and
+/// attach per-pair freshness. Display truncation belongs to `finalize`.
+pub(super) fn analyze_corpus_with(
+    ctx: &QueryCtx<'_>,
+    opts: &ReuseOpts,
+    scope: &status::ResolvedScope,
+) -> Result<ReuseReport> {
+    let (mut pool, total, guarded_out) = analyze_corpus(
+        ctx.conn,
+        scope.path_filter(),
+        scope.target_names(),
+        crate::query::MAX_LIMIT,
+        opts.deep_callee,
+    )?;
+    let freshness = if opts.freshness_mode == FreshnessMode::Full {
+        freshness::evaluate(ctx, scope, &mut pool)?
+    } else {
+        freshness::FreshnessReport::default()
     };
-    let mut judged = 0usize;
-    let mut gray = 0usize;
-    for candidate in candidates.iter_mut() {
-        let Some(pct) = candidate.overlap_pct else {
-            continue;
-        };
-        if !judge::is_gray(pct) {
-            continue;
-        }
-        gray += 1;
-        if judged >= judge::MAX_JUDGED {
-            continue;
-        }
-        if let Some(verdict) = judge::arbitrate(&setup, ctx.conn, ctx.root, candidate) {
-            candidate.verdict = Some(verdict);
-            judged += 1;
-            if judged == 1 {
-                // Stamp the usage log once so the dashboard can count judged invocations.
-                crate::journal::set_judged();
-            }
-        }
-    }
-    if gray == 0 {
-        return format!(
-            "eg: judge: no candidate in the {}-{}% band — overlaps sit outside it\n",
-            judge::GRAY_LOW,
-            judge::GRAY_HIGH
-        );
-    }
-    if judged == 0 {
-        return "eg: judge: eg-judge returned no verdict (timeout or model error)\n".to_string();
-    }
-    if gray > judged {
-        return format!(
-            "eg: judge: {} gray-zone candidate(s) left unjudged (cap {})\n",
-            gray - judged,
-            judge::MAX_JUDGED
-        );
-    }
-    String::new()
+    let counts = ReuseCounts {
+        guarded_out,
+        total,
+        ..ReuseCounts::default()
+    };
+    Ok(ReuseReport {
+        pool,
+        counts,
+        freshness,
+        path_matches: scope.path_matches,
+    })
 }
 
 pub(crate) fn analyze_corpus(
@@ -229,10 +230,10 @@ pub(crate) fn analyze_corpus(
     target_names: Option<&HashSet<String>>,
     limit: usize,
     deep_callee: bool,
-) -> Result<(Vec<ReuseCandidate>, usize)> {
+) -> Result<(Vec<ReuseCandidate>, usize, usize)> {
     let mut symbols = load_symbols(conn)?;
     if symbols.len() < 2 {
-        return Ok((Vec::new(), 0));
+        return Ok((Vec::new(), 0, 0));
     }
 
     load_callees(conn, &mut symbols)?;
@@ -249,10 +250,13 @@ pub(crate) fn analyze_corpus(
 
     let targets = select_targets(&symbols, path_filter, target_names);
     let index = (symbols.len() > INVERTED_INDEX_MIN_SYMBOLS).then(|| CorpusIndex::build(&symbols));
+    let df_all_excl = load_df_all(conn)?;
     let corpus = Corpus {
         symbols: &symbols,
         index: index.as_ref(),
+        df_all_excl: Some(&df_all_excl),
         deep_callee,
+        guarded_out: Cell::new(0),
     };
     let mut candidates = Vec::new();
     let mut seen_pairs = HashSet::new();
@@ -273,8 +277,9 @@ pub(crate) fn analyze_corpus(
             .then_with(|| a.symbol.cmp(&b.symbol))
     });
     let total = candidates.len();
+    let guarded_out = corpus.guarded_out.get();
     candidates.truncate(limit);
-    Ok((candidates, total))
+    Ok((candidates, total, guarded_out))
 }
 
 /// Dedup the (symbol, canonical) pair and push. A repeated pair is dropped,
@@ -286,5 +291,17 @@ fn accept_candidate(
 ) {
     if seen_pairs.insert((candidate.symbol.clone(), candidate.canonical.clone())) {
         out.push(candidate);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize;
+
+    #[test]
+    fn sanitize_escapes_backslash_before_named_controls() {
+        assert_eq!(sanitize(r"a\b"), r"a\\b");
+        assert_eq!(sanitize("a\nb\tc"), r"a\nb\tc");
+        assert_eq!(sanitize("a\u{1b}b\u{7f}"), r"a\x1bb\x7f");
     }
 }

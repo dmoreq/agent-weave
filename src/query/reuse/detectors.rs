@@ -1,9 +1,13 @@
 //! Detectors D1-D4: callee-footprint containment, interface token overlap,
 //! raw-client abstraction bypass, and guarded pass-through wrappers.
 
+use super::candidate::{make_candidate, MatchMeta};
+use super::confidence::distinctive_ratio;
 use super::corpus::SymbolData;
+use super::guards::*;
 use super::index::{CorpusIndex, PostingKind};
 use super::*;
+use std::cell::Cell;
 use std::collections::HashMap;
 
 /// One immutable view of the corpus shared by every detector: the symbol map,
@@ -11,7 +15,19 @@ use std::collections::HashMap;
 pub(super) struct Corpus<'a> {
     pub(super) symbols: &'a HashMap<i64, SymbolData>,
     pub(super) index: Option<&'a CorpusIndex>,
+    /// Distinct callers per resolved destination. `None` in detector unit
+    /// tests, where every resolved shared callee counts as distinctive.
+    pub(super) df_all_excl: Option<&'a HashMap<i64, i64>>,
     pub(super) deep_callee: bool,
+    /// Explicit guard rejections seen while matching pairs. The scan reports
+    /// this as `guarded_out`; it is not part of the candidate pool.
+    pub(super) guarded_out: Cell<usize>,
+}
+
+impl Corpus<'_> {
+    fn guard(&self) {
+        self.guarded_out.set(self.guarded_out.get() + 1);
+    }
 }
 
 /// Raw external clients targeted by D3 abstraction bypass.
@@ -92,57 +108,6 @@ impl DetectorId {
 
 pub(super) const DETECTORS: &[Detector] = &[find_best_d1, find_best_d2, check_d3, check_d4];
 
-/// Deterministic ordering: candidate is more canonical if it has more callers,
-/// or alphabetically earlier file/line/qualname as tie-breaker.
-fn is_more_canonical(candidate: &SymbolData, target: &SymbolData) -> bool {
-    if candidate.inbound_callers != target.inbound_callers {
-        candidate.inbound_callers > target.inbound_callers
-    } else {
-        (
-            candidate.file_path.as_str(),
-            candidate.line_start,
-            candidate.qualname.as_str(),
-        ) < (
-            target.file_path.as_str(),
-            target.line_start,
-            target.qualname.as_str(),
-        )
-    }
-}
-
-/// `find_best_d1` -> `find_best_d`. Numbered siblings share a stem: they are a
-/// deliberate family, so a matching name must not read as duplication.
-fn strip_trailing_digits(name: &str) -> &str {
-    name.trim_end_matches(|c: char| c.is_ascii_digit() || c == '_')
-}
-
-/// The identity block every detector builds from a matched (target,
-/// candidate) pair; detectors only differ in the overlap signal above it.
-/// `shared` is sorted into the candidate's display items.
-fn make_candidate(
-    detector: DetectorId,
-    target: &SymbolData,
-    candidate: &SymbolData,
-    overlap_pct: Option<u64>,
-    shared: &[String],
-) -> ReuseCandidate {
-    let mut shared_items: Vec<String> = shared.to_vec();
-    shared_items.sort();
-    ReuseCandidate {
-        verdict: None,
-        detector,
-        symbol: target.qualname.clone(),
-        file: target.file_path.clone(),
-        line: target.line_start,
-        canonical: candidate.qualname.clone(),
-        canonical_file: candidate.file_path.clone(),
-        canonical_line: candidate.line_start,
-        canonical_callers: candidate.inbound_callers,
-        overlap_pct,
-        shared_items,
-    }
-}
-
 /// Shared D1/D2 scan frame: walk the corpus, drop the target's own id/file
 /// and non-canonical candidates, let `signal` produce the `(pct, shared)`
 /// overlap, and keep the best by overlap percentage. An equal percentage
@@ -154,37 +119,62 @@ fn best_by_overlap(
     corpus: &Corpus<'_>,
     kind: PostingKind,
     min_shared: usize,
-    signal: impl Fn(&SymbolData) -> Option<(u64, Vec<String>)>,
+    signal: impl Fn(&SymbolData) -> Option<(u64, Vec<String>, ReuseConfidence, Vec<ReasonCode>)>,
 ) -> Option<ReuseCandidate> {
-    let mut best: Option<(u64, &SymbolData, Vec<String>)> = None;
+    type BestMatch<'a> = (
+        u64,
+        &'a SymbolData,
+        Vec<String>,
+        ReuseConfidence,
+        Vec<ReasonCode>,
+    );
+    let mut best: Option<BestMatch<'_>> = None;
     for candidate in candidate_symbols(corpus, target, kind, min_shared) {
         if candidate.id == target.id {
+            corpus.guard();
             continue;
         }
         // If in the same file, drop enclosing/overlapping spans (e.g. methods in class or nested fns)
         if candidate.file_id == target.file_id
             && !(candidate.line_end < target.line_start || candidate.line_start > target.line_end)
         {
+            corpus.guard();
+            continue;
+        }
+        if cross_language(target, candidate) {
+            corpus.guard();
             continue;
         }
         if !is_more_canonical(candidate, target) {
+            corpus.guard();
             continue;
         }
-        let Some((pct, shared)) = signal(candidate) else {
+        let Some((pct, shared, confidence, reasons)) = signal(candidate) else {
             continue;
         };
         let better = match &best {
             None => true,
-            Some((best_pct, best_sym, _)) => {
+            Some((best_pct, best_sym, _, _, _)) => {
                 pct > *best_pct || (pct == *best_pct && is_more_canonical(candidate, best_sym))
             }
         };
         if better {
-            best = Some((pct, candidate, shared));
+            best = Some((pct, candidate, shared, confidence, reasons));
         }
     }
-    best.map(|(pct, candidate, shared)| {
-        make_candidate(detector, target, candidate, Some(pct), &shared)
+    best.map(|(pct, candidate, shared, confidence, reasons)| {
+        make_candidate(
+            detector,
+            target,
+            candidate,
+            Some(pct),
+            &shared,
+            MatchMeta {
+                raw_client: None,
+                confidence,
+                reasons,
+            },
+        )
     })
 }
 
@@ -213,13 +203,21 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
         2,
         |candidate| {
             let c_callees = &candidate.all_callees;
+            // GUARD-COMP: a resolved call edge in either direction is a
+            // caller/callee composition, not duplication.
             if target.callee_ids.contains(&candidate.id)
                 || candidate.callee_ids.contains(&target.id)
-                || target.all_callees.contains(&candidate.name)
-                || candidate.all_callees.contains(&target.name)
             {
+                corpus.guard();
                 return None;
             }
+            let unresolved_composition = target.all_callees.contains(&candidate.name)
+                || candidate.all_callees.contains(&target.name);
+            let zero_name = target
+                .name_tokens
+                .intersection(&candidate.name_tokens)
+                .next()
+                .is_none();
             if corpus.deep_callee {
                 if candidate.deep_weights.len() < 3 {
                     return None;
@@ -233,7 +231,22 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                     .intersection(c_callees)
                     .cloned()
                     .collect();
-                return Some(((ratio * 100.0).round() as u64, shared));
+                let pct = (ratio * 100.0).round() as u64;
+                let mut reasons = Vec::new();
+                if unresolved_composition {
+                    reasons.push(ReasonCode::CallerCallee);
+                }
+                if zero_name {
+                    reasons.push(ReasonCode::ZeroName);
+                }
+                let confidence = if reasons.is_empty()
+                    && distinctive_ratio(target, candidate, corpus, &shared) <= 0.75
+                {
+                    ReuseConfidence::Provisional
+                } else {
+                    ReuseConfidence::Low
+                };
+                return Some((pct, shared, confidence, reasons));
             }
             if c_callees.len() < 3 || candidate.resolved_callees.len() < 2 {
                 return None;
@@ -251,10 +264,12 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                 .intersection(c_callees)
                 .cloned()
                 .collect();
-            // Guard size balance: min callees must be at least 50% of max callees
+            // GUARD-BAL: reject < 0.30, low in [0.30, 0.50), provisional >= 0.50.
             let min_len = target.all_callees.len().min(c_callees.len());
             let max_len = target.all_callees.len().max(c_callees.len());
-            if min_len * 2 < max_len {
+            let bal = min_len as f64 / max_len as f64;
+            if bal < 0.30 {
+                corpus.guard();
                 return None;
             }
             let ratio_candidate = shared.len() as f64 / c_callees.len() as f64;
@@ -263,33 +278,27 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             if ratio < 0.80 {
                 return None;
             }
-            Some(((ratio * 100.0).round() as u64, shared))
+            let pct = (ratio * 100.0).round() as u64;
+            let mut reasons = Vec::new();
+            if unresolved_composition {
+                reasons.push(ReasonCode::CallerCallee);
+            }
+            if zero_name {
+                reasons.push(ReasonCode::ZeroName);
+            }
+            if bal < 0.50 {
+                reasons.push(ReasonCode::SizeImbalance);
+            }
+            let confidence = if reasons.is_empty()
+                && distinctive_ratio(target, candidate, corpus, &shared) <= 0.75
+            {
+                ReuseConfidence::Provisional
+            } else {
+                ReuseConfidence::Low
+            };
+            Some((pct, shared, confidence, reasons))
         },
     )
-}
-
-/// Weighted containment of the smaller deep footprint in the larger one:
-/// shared weight divided by the smaller footprint's total weight. 1.0 means
-/// the smaller call graph is fully covered by the larger.
-fn weighted_containment(target: &SymbolData, candidate: &SymbolData) -> f64 {
-    let target_total: f64 = target.deep_weights.values().sum();
-    let candidate_total: f64 = candidate.deep_weights.values().sum();
-    if target_total <= 0.0 || candidate_total <= 0.0 {
-        return 0.0;
-    }
-    let target_shared: f64 = target
-        .deep_weights
-        .iter()
-        .filter(|(name, _)| candidate.deep_weights.contains_key(*name))
-        .map(|(_, weight)| weight)
-        .sum();
-    let candidate_shared: f64 = candidate
-        .deep_weights
-        .iter()
-        .filter(|(name, _)| target.deep_weights.contains_key(*name))
-        .map(|(_, weight)| weight)
-        .sum();
-    (target_shared / target_total).max(candidate_shared / candidate_total)
 }
 
 /// Detector D2: Interface & Signature Token Overlap.
@@ -304,34 +313,40 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
         PostingKind::TokenPair,
         1,
         |candidate| {
-            if candidate.tokens.len() < 2 {
+            if candidate.tokens.len() < 2
+                || target.name_tokens.is_empty()
+                || candidate.name_tokens.is_empty()
+            {
                 return None;
             }
-            // Similarity is measured on the symbol names when both sides have
-            // name tokens. Signature tokens dominate the union otherwise, which
-            // pushed every D2 candidate to ~100% and left the 45-75% judge band
-            // permanently empty.
-            let comparable = !target.name_tokens.is_empty() || !candidate.name_tokens.is_empty();
-            let (shared, union_len): (Vec<String>, usize) = if comparable {
-                (
-                    target
-                        .name_tokens
-                        .intersection(&candidate.name_tokens)
-                        .cloned()
-                        .collect(),
-                    target.name_tokens.union(&candidate.name_tokens).count(),
-                )
-            } else {
-                (
-                    target
-                        .tokens
-                        .intersection(&candidate.tokens)
-                        .cloned()
-                        .collect(),
-                    target.tokens.union(&candidate.tokens).count(),
-                )
-            };
+            // GUARD-COMP: resolved caller/callee edges reject. A bare-name-only
+            // overlap is still a composition hint, so keep it at Low.
+            if target.callee_ids.contains(&candidate.id)
+                || candidate.callee_ids.contains(&target.id)
+            {
+                corpus.guard();
+                return None;
+            }
+            let unresolved_composition = target.all_callees.contains(&candidate.name)
+                || candidate.all_callees.contains(&target.name);
+            let shared: Vec<String> = target
+                .name_tokens
+                .intersection(&candidate.name_tokens)
+                .cloned()
+                .collect();
+            let union_len = target.name_tokens.union(&candidate.name_tokens).count();
             if shared.len() < 2 {
+                return None;
+            }
+            let strict_subset = target.name_tokens.len() != candidate.name_tokens.len()
+                && (target.name_tokens.is_subset(&candidate.name_tokens)
+                    || candidate.name_tokens.is_subset(&target.name_tokens));
+            let shared_callees = target
+                .resolved_callees
+                .intersection(&candidate.resolved_callees)
+                .count();
+            if strict_subset && shared_callees == 0 {
+                corpus.guard();
                 return None;
             }
             // Numbered siblings in one file (`find_best_d1` / `find_best_d2`,
@@ -339,6 +354,7 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             if candidate.file_id == target.file_id
                 && strip_trailing_digits(&target.name) == strip_trailing_digits(&candidate.name)
             {
+                corpus.guard();
                 return None;
             }
             let jaccard = shared.len() as f64 / union_len as f64;
@@ -356,7 +372,24 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             if jaccard < 0.60 && !(jaccard >= 0.40 && type_jaccard >= 0.50) {
                 return None;
             }
-            Some(((jaccard * 100.0).round() as u64, shared))
+            let mut reasons = Vec::new();
+            if unresolved_composition {
+                reasons.push(ReasonCode::CallerCallee);
+            }
+            if strict_subset {
+                reasons.push(ReasonCode::SameNameSubset);
+            }
+            let confidence = if reasons.is_empty() && shared.len() >= 3 {
+                ReuseConfidence::Provisional
+            } else {
+                ReuseConfidence::Low
+            };
+            Some((
+                (jaccard * 100.0).round() as u64,
+                shared,
+                confidence,
+                reasons,
+            ))
         },
     )
 }
@@ -367,7 +400,16 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
     for s in candidate_symbols(corpus, target, PostingKind::RawClient, 1) {
         let same_file_overlap = s.file_id == target.file_id
             && !(s.line_end < target.line_start || s.line_start > target.line_end);
-        if s.id == target.id || same_file_overlap || !is_more_canonical(s, target) {
+        if s.id == target.id || same_file_overlap {
+            corpus.guard();
+            continue;
+        }
+        if cross_language(target, s) {
+            corpus.guard();
+            continue;
+        }
+        if !is_more_canonical(s, target) {
+            corpus.guard();
             continue;
         }
         let Some(shared_raw) = target
@@ -395,7 +437,12 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         target,
         canonical,
         None,
-        &[format!("raw_client={raw_client}")],
+        &[],
+        MatchMeta {
+            raw_client: Some(raw_client.to_string()),
+            confidence: ReuseConfidence::Provisional,
+            reasons: Vec::new(),
+        },
     ))
 }
 
@@ -413,6 +460,11 @@ fn check_d4(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
     let callee_id = *target.callee_ids.iter().next()?;
     let callee = corpus.symbols.get(&callee_id)?;
     if callee.id == target.id || callee.file_id == target.file_id {
+        corpus.guard();
+        return None;
+    }
+    if cross_language(target, callee) {
+        corpus.guard();
         return None;
     }
 
@@ -422,6 +474,11 @@ fn check_d4(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         callee,
         None,
         std::slice::from_ref(&callee.name),
+        MatchMeta {
+            raw_client: None,
+            confidence: ReuseConfidence::Provisional,
+            reasons: Vec::new(),
+        },
     ))
 }
 

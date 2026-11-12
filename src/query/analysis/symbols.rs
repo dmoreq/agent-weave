@@ -73,11 +73,7 @@ fn symbols_file(
     }
     out.extend(data_lines);
     let cap = finish_capped(&mut out, shown, n_symbols, stale, "");
-    Ok(LineQuery {
-        lines: out,
-        stderr: cap,
-        shown,
-    })
+    Ok(LineQuery::new(out, cap, shown))
 }
 
 fn file_symbol_rows(conn: &Connection, rel: &str, outline: bool) -> Result<Vec<SymbolRow>> {
@@ -130,11 +126,7 @@ fn dir_line_query(
     }
     let shown = rows.len();
     let cap = finish_capped(&mut out, shown, total, stale, "");
-    LineQuery {
-        lines: out,
-        stderr: cap,
-        shown,
-    }
+    LineQuery::new(out, cap, shown)
 }
 
 /// Directory mode for `eg symbols <dir>` (Amendment 19): indexed prefix only,

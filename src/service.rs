@@ -234,7 +234,8 @@ mod tests {
                 paths: vec!["f".into()],
                 limit: 10,
                 deep_callee: false,
-                judge: false,
+                min_confidence: "low".into(),
+                explain: false,
             },
             CommandRequest::Search {
                 terms: "x".into(),
