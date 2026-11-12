@@ -13,6 +13,7 @@ pub struct MemFilter {
     pub scope: Option<crate::memory::MemScope>,
     pub now: i64,
     pub include_superseded: bool,
+    pub window: crate::memory::TimeWindow,
 }
 
 /// The one "current row" rule set, stated in Rust: not superseded (unless the
@@ -35,6 +36,16 @@ pub(crate) fn memory_row_is_current(row: &MemRow, filter: &MemFilter) -> bool {
     }
     if let Some(s) = filter.scope {
         if row.scope != s.as_str() {
+            return false;
+        }
+    }
+    if let Some(since) = filter.window.since {
+        if row.created_at < since {
+            return false;
+        }
+    }
+    if let Some(until) = filter.window.until {
+        if row.created_at >= until {
             return false;
         }
     }
@@ -65,6 +76,8 @@ pub fn memory_current_rows(
                {superseded_clause}
                AND (?2 = '' OR kind = ?2)
                AND (?3 = '' OR scope = ?3)
+               AND (?6 = -1 OR created_at >= ?6)
+               AND (?7 = -1 OR created_at < ?7)
              ORDER BY created_at DESC, key ASC, rev DESC
              LIMIT ?5"
         ))
@@ -83,6 +96,8 @@ pub fn memory_current_rows(
                     .unwrap_or(""),
                 i64::from(filter.include_superseded),
                 limit.map_or(-1, |n| n as i64),
+                filter.window.since.unwrap_or(-1),
+                filter.window.until.unwrap_or(-1),
             ],
             mem_row,
         )
@@ -91,26 +106,47 @@ pub fn memory_current_rows(
         .map_err(map_memory_err)
 }
 
-/// FTS candidates: (rowid, bm25 rank) best-first, capped. Smaller rank is the
-/// better match; the presentation layer inverts via min-max normalization.
+/// FTS candidates from one index: (rowid, bm25 rank) best-first, capped.
+/// Current-row, expiry, and time predicates run before `LIMIT`, so stale rows
+/// cannot consume the candidate cap. Smaller rank is the better match.
 pub fn memory_fts_candidates(
     conn: &Connection,
     match_query: &str,
+    window: &crate::memory::TimeWindow,
+    now: i64,
+    v2: bool,
     cap: usize,
 ) -> Result<Vec<(i64, f64)>> {
     if match_query.is_empty() {
         return Ok(Vec::new());
     }
-    let mut stmt = conn
-        .prepare(
-            "SELECT rowid, bm25(memories_fts) FROM memories_fts
-             WHERE memories_fts MATCH ?1 ORDER BY rank, rowid LIMIT ?2",
-        )
-        .map_err(map_memory_err)?;
+    let table = if v2 {
+        "memories_fts_v2"
+    } else {
+        "memories_fts"
+    };
+    let sql = format!(
+        "SELECT {table}.rowid, bm25({table}) FROM {table}
+         JOIN memories m ON m.id = {table}.rowid
+         WHERE {table} MATCH ?1
+           AND m.superseded_by IS NULL
+           AND (m.expires_at = 0 OR m.expires_at > ?2)
+           AND (?3 = -1 OR m.created_at >= ?3)
+           AND (?4 = -1 OR m.created_at < ?4)
+         ORDER BY rank, {table}.rowid LIMIT ?5"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(map_memory_err)?;
     let rows = stmt
-        .query_map(rusqlite::params![match_query, cap as i64], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))
-        })
+        .query_map(
+            rusqlite::params![
+                match_query,
+                now,
+                window.since.unwrap_or(-1),
+                window.until.unwrap_or(-1),
+                cap as i64,
+            ],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)),
+        )
         .map_err(map_memory_err)?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(map_memory_err)
@@ -134,30 +170,43 @@ pub fn memory_rows_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<MemRow>>
         .map_err(map_memory_err)
 }
 
-/// Candidates from code-anchored `refs`: returns current unexpired rows whose
-/// `refs` field matches any of the query `tokens` via substring matching.
+/// Candidates from code-anchored `refs`: current unexpired rows whose `refs`
+/// field matches any query token, window-filtered before the cap.
 pub fn memory_ref_candidate_rows(
     conn: &Connection,
     tokens: &[String],
+    window: &crate::memory::TimeWindow,
+    now: i64,
     cap: usize,
 ) -> Result<Vec<MemRow>> {
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
-    let clauses: Vec<String> = (1..=tokens.len())
-        .map(|i| format!("refs LIKE ?{i}"))
-        .collect();
+    let n = tokens.len();
+    let clauses: Vec<String> = (1..=n).map(|i| format!("refs LIKE ?{i}")).collect();
     let sql = format!(
         "SELECT {MEM_ROW_SQL} FROM memories
-         WHERE superseded_by IS NULL AND refs != '' AND ({})
+         WHERE superseded_by IS NULL AND refs != ''
+           AND (expires_at = 0 OR expires_at > ?{})
+           AND (?{} = -1 OR created_at >= ?{})
+           AND (?{} = -1 OR created_at < ?{})
+           AND ({})
          ORDER BY id DESC LIMIT ?{}",
+        n + 1,
+        n + 2,
+        n + 2,
+        n + 3,
+        n + 3,
         clauses.join(" OR "),
-        tokens.len() + 1
+        n + 4
     );
     let mut params: Vec<rusqlite::types::Value> = tokens
         .iter()
         .map(|t| rusqlite::types::Value::Text(format!("%{t}%")))
         .collect();
+    params.push(rusqlite::types::Value::Integer(now));
+    params.push(rusqlite::types::Value::Integer(window.since.unwrap_or(-1)));
+    params.push(rusqlite::types::Value::Integer(window.until.unwrap_or(-1)));
     params.push(rusqlite::types::Value::Integer(cap as i64));
     let mut stmt = conn.prepare(&sql).map_err(map_memory_err)?;
     let rows = stmt
@@ -171,7 +220,12 @@ pub fn memory_ref_candidate_rows(
 /// probe behind the merged-store shadowing check (one IN query replaces a
 /// per-key `memory_get`, at most CANDIDATE_CAP keys). Matches `memory_get`'s
 /// row visibility: current revision only, zero `expires_at` never expires.
-pub fn memory_current_keys(conn: &Connection, keys: &[String]) -> Result<Vec<String>> {
+pub fn memory_current_keys(
+    conn: &Connection,
+    keys: &[String],
+    window: &crate::memory::TimeWindow,
+    now: i64,
+) -> Result<Vec<String>> {
     if keys.is_empty() {
         return Ok(Vec::new());
     }
@@ -180,14 +234,20 @@ pub fn memory_current_keys(conn: &Connection, keys: &[String]) -> Result<Vec<Str
         .iter()
         .map(|k| rusqlite::types::Value::Text(k.clone()))
         .collect();
-    values.push(rusqlite::types::Value::Integer(unix_now()));
+    values.push(rusqlite::types::Value::Integer(now));
     let now_param = values.len();
+    values.push(rusqlite::types::Value::Integer(window.since.unwrap_or(-1)));
+    let since_param = values.len();
+    values.push(rusqlite::types::Value::Integer(window.until.unwrap_or(-1)));
+    let until_param = values.len();
     let mut stmt = conn
         .prepare(&format!(
             "SELECT DISTINCT key FROM memories
              WHERE key IN ({placeholders})
                AND superseded_by IS NULL
-               AND (expires_at = 0 OR expires_at > ?{now_param})"
+               AND (expires_at = 0 OR expires_at > ?{now_param})
+               AND (?{since_param} = -1 OR created_at >= ?{since_param})
+               AND (?{until_param} = -1 OR created_at < ?{until_param})"
         ))
         .map_err(map_memory_err)?;
     let rows = stmt
@@ -288,6 +348,19 @@ pub fn memory_gc(conn: &mut Connection, now: i64) -> Result<(i64, i64, i64)> {
     };
     delete_memory_ids(&tx, &expired_ids)?;
     let retention_horizon = now - crate::memory::RETENTION_DAYS * 86_400;
+    for table in ["memories_fts", "memories_fts_v2"] {
+        tx.execute(
+            &format!(
+                "DELETE FROM {table} WHERE rowid IN (
+                    SELECT id FROM memories
+                    WHERE superseded_by IS NOT NULL
+                      AND superseded_at > 0
+                      AND superseded_at <= ?1)"
+            ),
+            rusqlite::params![retention_horizon],
+        )
+        .map_err(map_memory_err)?;
+    }
     let superseded = tx
         .execute(
             "DELETE FROM memories
@@ -312,6 +385,11 @@ fn delete_memory_ids(tx: &rusqlite::Transaction<'_>, ids: &[i64]) -> Result<()> 
         .map_err(map_memory_err)?;
         conn.execute(
             &format!("DELETE FROM memories_fts WHERE rowid IN ({placeholders})"),
+            rusqlite::params_from_iter(chunk.iter()),
+        )
+        .map_err(map_memory_err)?;
+        conn.execute(
+            &format!("DELETE FROM memories_fts_v2 WHERE rowid IN ({placeholders})"),
             rusqlite::params_from_iter(chunk.iter()),
         )
         .map_err(map_memory_err)?;

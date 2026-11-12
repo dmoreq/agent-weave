@@ -32,22 +32,33 @@ LLM summarization while maintaining Pareto-optimal query latency (< 2ms).
 
 ## Schema
 
-[`schema/memory.sql`](../../schema/memory.sql) defines one `memories` table and
-one FTS5 table:
+[`schema/memory.sql`](../../schema/memory.sql) defines one `memories` table, two
+FTS5 tables, and one internal state table:
 
 - `key` — caller-chosen stable identity; a rewrite appends a revision.
 - `rev` — 1-based revision, unique per key; the current row is the highest
   non-superseded revision.
 - `kind` — closed set: `decision`, `gotcha`, `fact`, `task`, `procedure`.
 - `scope` — `durable`, or `session` with a TTL deadline in `expires_at`.
-- `body` — prose, capped at 8192 bytes; secrets and credentials are rejected at
-  the trust boundary.
+- `body` — prose, capped at 8192 bytes; secrets are rejected at the trust
+  boundary.
 - `tags`, `refs` — bounded token lists (16 items each) used by retrieval.
 - `content_hash` — FNV-1a 64 over kind, body, tags, refs, and scope, so an
   identical replay is idempotent instead of a new revision.
 - `superseded_by`, `superseded_at` — cross-key and same-key replacement chain.
-- `memories_fts` — `unicode61` FTS5 over pre-tokenized key, tags, and body.
-  `refs` stay out of the FTS text; the reference signal covers them separately.
+- `fts_version` — `0` when an older binary wrote the row, `2` when this binary
+  indexed it in both FTS tables.
+- `memories_fts` — legacy `unicode61` FTS5 over the frozen ASCII tokenizer.
+- `memories_fts_v2` — `unicode61 remove_diacritics 2` FTS5 over Unicode tokens,
+  so Vietnamese tones fold and `đ` maps to `d`.
+- `memory_meta` — `fts_epoch` (tokenizer contract) and `fts_v2_complete`
+  (safe-to-read marker). Both are internal; missing rows mean "use legacy".
+
+`refs` stay out of both FTS texts; the reference signal covers them separately.
+A v2 read happens only when the table exists, the epoch matches, and the
+completeness marker is `1`. A write open reconciles missing or old-binary rows
+in 5,000-row chunks; a crash leaves the marker at `0`, so reads stay on the
+legacy table instead of silently omitting notes.
 
 `PRAGMA user_version` carries `MEMORY_SCHEMA_VERSION` and a compiled
 required-structure manifest is checked at open. An older store that still has
@@ -102,12 +113,22 @@ areas.
   Jaccard similarity without English glue words. At $\ge 80\%$ similarity under another key,
   it appends an advisory hint suggesting `--supersedes <old>` ($659\text{ \mu s}$ overhead).
   The write always succeeds (exit 0).
-- **Write** — append a revision, update the FTS row, and commit in one
-  transaction. `--touch` refreshes `created_at` when the content hash matches.
+- **Write** — append a revision, update both FTS rows, and commit in one
+  transaction. `--touch` refreshes `created_at` (the last assertion date) when
+  the content hash matches.
+- **Touch** — `eg mem touch <key>` refreshes `anchored_at` (the last
+  verification date) after the reader re-audits the anchor, without a revision.
 - **Supersede** — `--supersedes <key>` marks the older key's current row and
   records the replacement without deleting history.
 - **GC** — `eg mem gc` purges expired session notes and superseded revisions
-  older than the 30-day retention window.
+  older than the 30-day retention window, including both FTS rows.
+- **Reindex** — `eg mem reindex` rebuilds the derived Unicode index and
+  `fts_version` markers. Notes are primary data and are never touched; a
+  read-only store can be upgraded with this command without a write.
+- **Rollback** — an older binary ignores `memories_fts_v2` and `memory_meta`
+  and keeps using the legacy table. A repair runs on the next write open or
+  through `eg mem reindex` after re-upgrading. `--legacy` forces legacy terms
+  for diagnosis without changing the binary.
 - **Export** — `eg mem export` writes JSONL (default) or fenced Markdown
   (`--format markdown`) for the current notes. Both formats read the same
   expiry-filtered current-row query.

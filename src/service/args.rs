@@ -34,6 +34,39 @@ impl ArgReader<'_> {
         self.0.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
     }
 
+    /// Strict String reader for new params: absent/null is `None`, a string is
+    /// accepted, and any other JSON type is a usage error instead of a silent
+    /// filter drop.
+    fn s_opt_spec(&self, tool: &str, name: &str) -> Result<Option<String>> {
+        if !matches!(param_spec(tool, name)?.kind, ParamKind::Str) {
+            return Err(EgError::Internal(format!(
+                "argument '{name}' of tool '{tool}' is not declared as Str"
+            )));
+        }
+        match self.0.get(name) {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(serde_json::Value::String(s)) => Ok(Some(s.clone())),
+            Some(_) => Err(EgError::Usage(format!("{tool}: '{name}' must be a string"))),
+        }
+    }
+
+    /// Strict Bool reader for new params: absent/null is `false`, a bool is
+    /// accepted, and any other JSON type is a usage error.
+    fn b_spec(&self, tool: &str, name: &str) -> Result<bool> {
+        if !matches!(param_spec(tool, name)?.kind, ParamKind::Bool) {
+            return Err(EgError::Internal(format!(
+                "argument '{name}' of tool '{tool}' is not declared as Bool"
+            )));
+        }
+        match self.0.get(name) {
+            None | Some(serde_json::Value::Null) => Ok(false),
+            Some(serde_json::Value::Bool(b)) => Ok(*b),
+            Some(_) => Err(EgError::Usage(format!(
+                "{tool}: '{name}' must be a boolean"
+            ))),
+        }
+    }
+
     fn req(&self, key: &str) -> Result<String> {
         self.s(key)
             .ok_or_else(|| EgError::Usage(format!("missing required argument '{key}'")))
@@ -139,7 +172,7 @@ pub fn from_tool_args(tool: &str, args: &serde_json::Value) -> Result<CommandReq
         }
         "symbols" | "reuse" | "search" => from_tool_args_analysis(&a, tool),
         "mem_write" | "mem_touch" | "mem_query" | "mem_get" | "mem_delete" | "mem_gc"
-        | "mem_export" | "mem_import" => from_tool_args_memory(&a, tool),
+        | "mem_export" | "mem_import" | "mem_reindex" => from_tool_args_memory(&a, tool),
         _ => Err(unknown_tool(tool)),
     }
 }
@@ -237,19 +270,42 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
             key: a.req("key")?,
             global: a.b("global"),
         },
-        "mem_query" => CommandRequest::MemQuery {
-            terms: a
-                .s("terms")
-                .map(|t| t.split_whitespace().map(str::to_string).collect())
-                .unwrap_or_default(),
-            all: a.b("all"),
-            kind: crate::memory::parse_kind_filter(tool, a.s("kind").as_deref())?,
-            scope: crate::memory::parse_scope_filter(tool, a.s("scope").as_deref())?,
-            limit: a.n_spec(tool, "limit", crate::memory::DEFAULT_MEM_LIMIT)?,
-            include_superseded: a.b("include_superseded"),
-            global: a.b("global"),
-            reference: a.s("ref").or_else(|| a.s("reference")),
-        },
+        "mem_query" => {
+            let local = a.b_spec(tool, "local")?;
+            let global = a.b("global");
+            super::scope::StoreScope::from_flags(local, global)?;
+            let window = crate::memory::TimeWindow {
+                since: a
+                    .s_opt_spec(tool, "since")?
+                    .as_deref()
+                    .map(|r| crate::memory::parse_time_bound(r, "mem query", "--since"))
+                    .transpose()?,
+                until: a
+                    .s_opt_spec(tool, "until")?
+                    .as_deref()
+                    .map(|r| crate::memory::parse_time_bound(r, "mem query", "--until"))
+                    .transpose()?,
+            };
+            crate::memory::validate_window(&window, "mem query")?;
+            CommandRequest::MemQuery {
+                terms: a
+                    .s("terms")
+                    .map(|t| t.split_whitespace().map(str::to_string).collect())
+                    .unwrap_or_default(),
+                all: a.b("all"),
+                kind: crate::memory::parse_kind_filter(tool, a.s("kind").as_deref())?,
+                scope: crate::memory::parse_scope_filter(tool, a.s("scope").as_deref())?,
+                limit: a.n_spec(tool, "limit", crate::memory::DEFAULT_MEM_LIMIT)?,
+                include_superseded: a.b("include_superseded"),
+                global,
+                reference: a.s("ref").or_else(|| a.s("reference")),
+                since: window.since,
+                until: window.until,
+                local,
+                explain: a.b_spec(tool, "explain")?,
+                legacy: a.b_spec(tool, "legacy")?,
+            }
+        }
         "mem_get" => CommandRequest::MemGet {
             key: a.req("key")?,
             global: a.b("global"),
@@ -261,11 +317,29 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
         "mem_gc" => CommandRequest::MemGc {
             global: a.b("global"),
         },
-        "mem_export" => CommandRequest::MemExport {
-            format: a.s("format"),
-            limit: a.n_opt_spec(tool, "limit")?,
-            global: a.b("global"),
-        },
+        "mem_export" => {
+            let window = crate::memory::TimeWindow {
+                since: a
+                    .s_opt_spec(tool, "since")?
+                    .as_deref()
+                    .map(|r| crate::memory::parse_time_bound(r, "mem export", "--since"))
+                    .transpose()?,
+                until: a
+                    .s_opt_spec(tool, "until")?
+                    .as_deref()
+                    .map(|r| crate::memory::parse_time_bound(r, "mem export", "--until"))
+                    .transpose()?,
+            };
+            crate::memory::validate_window(&window, "mem export")?;
+            CommandRequest::MemExport {
+                format: a.s("format"),
+                limit: a.n_opt_spec(tool, "limit")?,
+                global: a.b("global"),
+                since: window.since,
+                until: window.until,
+                scan: false,
+            }
+        }
         "mem_import" => CommandRequest::MemImport {
             path: a.req("path")?,
             format: a.s("format"),
@@ -273,6 +347,9 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
             // MCP writes are confined to the project store: untrusted repos
             // cannot pollute the user-global memory over the tool boundary.
             global: false,
+        },
+        "mem_reindex" => CommandRequest::MemReindex {
+            global: a.b("global"),
         },
         _ => return Err(unknown_tool(tool)),
     })

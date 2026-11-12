@@ -121,6 +121,30 @@ Before writing, `eg mem write` verifies note novelty via Jaccard token similarit
 
 Operationalizing [Zero-Mem](https://arxiv.org/abs/2607.29377), `eg mem query` consumes 0 LLM tokens. When `.engram/index.db` exists, it follows resolved `calls` edges outward from the query's symbols (depth up to 3, decay `0.5^depth`). Notes anchored to downstream callees surface automatically without requiring exact lexical overlap. If the index is missing, the query safely falls back to plain FTS5 ranking.
 
+#### 2c. Time-Bounded Recall, Explanations, and Scope
+Bound a handoff or regression window with half-open UTC bounds. Dates accept `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SSZ`; `@<unix-seconds>` is available for scripts:
+
+```bash
+eg mem query --all --since 2026-11-11 --until 2026-11-12
+eg mem export --since @1794441600 > handoff.jsonl
+```
+
+Add `--explain` to a ranked query to see why each note matched. Labels are causal and bounded: `lexical match`, `ref src/memory/rank.rs`, `graph depth 2`, and `age 3d`; scores and note bodies are never printed:
+
+```bash
+eg mem query resolver --explain
+```
+
+Use `--local` when only repository notes matter; it never falls back to the global store. Unicode retrieval matches `bo nho` to `Bộ nhớ` through the derived Unicode index, while `--legacy` forces the old ASCII index for diagnosis:
+
+```bash
+eg mem query deploy --local
+eg mem query "bo nho"
+eg mem query "bo nho" --legacy
+```
+
+`eg mem reindex` rebuilds the derived Unicode index without touching notes. `eg mem export --scan` reports suspected secrets on stderr and still exits 0; stdout stays valid JSONL for restore.
+
 #### 3. Record Multi-Agent Task Handoffs
 When wrapping up a session or passing tasks between agents, write a scoped task note:
 

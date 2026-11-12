@@ -2,6 +2,7 @@
 //! and local/global store resolution.
 
 use super::*;
+use crate::journal::JournalArgs;
 
 /// Persist one note (validation, normalization, and the write outcome line).
 pub(super) fn run_mem_write(
@@ -130,6 +131,8 @@ pub(super) struct MemQueryArgs<'a> {
     pub(super) filter: crate::db::MemFilter,
     pub(super) index_conn: Option<&'a rusqlite::Connection>,
     pub(super) reference: Option<&'a str>,
+    pub(super) explain: bool,
+    pub(super) legacy: bool,
 }
 
 /// Journal fields for `mem write` (key/kind/scope/ttl/supersedes/body_len —
@@ -165,13 +168,18 @@ pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
 pub(super) fn mem_query_args(req: &CommandRequest) -> JournalArgs {
     let CommandRequest::MemQuery {
         terms,
+        all: _,
         kind,
         scope,
         limit,
         include_superseded,
         global,
         reference,
-        ..
+        since,
+        until,
+        local,
+        explain,
+        legacy,
     } = req
     else {
         unreachable!("mem_query_args called with a non-query request")
@@ -190,6 +198,11 @@ pub(super) fn mem_query_args(req: &CommandRequest) -> JournalArgs {
         ("limit", limit.to_string()),
         ("include_superseded", include_superseded.to_string()),
         ("global", global.to_string()),
+        ("since", since.map_or_else(String::new, |n| n.to_string())),
+        ("until", until.map_or_else(String::new, |n| n.to_string())),
+        ("local", local.to_string()),
+        ("explain", explain.to_string()),
+        ("legacy", legacy.to_string()),
     ]
 }
 

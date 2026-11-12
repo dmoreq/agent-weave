@@ -315,8 +315,23 @@ pub enum MemAction {
         /// Restrict search exclusively to the global store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
+        /// Lower bound on created_at (last asserted): YYYY-MM-DD, RFC 3339, or @unix-seconds
+        #[arg(long)]
+        since: Option<String>,
+        /// Exclusive upper bound on created_at: YYYY-MM-DD, RFC 3339, or @unix-seconds
+        #[arg(long)]
+        until: Option<String>,
+        /// Restrict to the project store only (default searches local and global)
+        #[arg(long)]
+        local: bool,
+        /// Add one causal why: line per shown ranked note
+        #[arg(long)]
+        explain: bool,
+        /// Use legacy ASCII tokens (diagnostic; bypasses the Unicode index)
+        #[arg(long)]
+        legacy: bool,
     },
-    /// Refresh created_at timestamp on the active revision without revision churn
+    /// Refresh anchored_at (last verified) on the active revision without revision churn
     Touch {
         /// The note's stable identity
         key: String,
@@ -352,6 +367,15 @@ pub enum MemAction {
         /// Export from the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
+        /// Lower bound on created_at: YYYY-MM-DD, RFC 3339, or @unix-seconds
+        #[arg(long)]
+        since: Option<String>,
+        /// Exclusive upper bound on created_at: YYYY-MM-DD, RFC 3339, or @unix-seconds
+        #[arg(long)]
+        until: Option<String>,
+        /// Report suspected secrets in exported notes on stderr (advisory; exit stays 0)
+        #[arg(long)]
+        scan: bool,
     },
     /// Restore notes from a JSONL or fenced-Markdown export (use '-' for stdin).
     /// Conflicting keys are skipped unless --force overwrites them.
@@ -372,6 +396,12 @@ pub enum MemAction {
     /// older than the 30-day retention clock, then report counts
     Gc {
         /// Run GC on the cross-project global memory store (~/.engram/memory.db)
+        #[arg(long)]
+        global: bool,
+    },
+    /// Rebuild the derived Unicode memory index (derived data only; notes are untouched)
+    Reindex {
+        /// Rebuild the cross-project global memory store (~/.engram/memory.db)
         #[arg(long)]
         global: bool,
     },

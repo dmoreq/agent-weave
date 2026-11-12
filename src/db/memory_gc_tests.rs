@@ -28,6 +28,9 @@ fn mem_commands_work_without_an_index() {
     let candidates = memory_fts_candidates(
         &conn,
         &crate::memory::mem_query_terms("works alone"),
+        &crate::memory::TimeWindow::default(),
+        now,
+        false,
         crate::memory::CANDIDATE_CAP,
     )
     .unwrap();
@@ -71,6 +74,7 @@ fn gc_purges_expired_rows_and_their_fts_entries() {
             scope: None,
             now: now + 10,
             include_superseded: false,
+            window: crate::memory::TimeWindow::default(),
         },
         None,
     )

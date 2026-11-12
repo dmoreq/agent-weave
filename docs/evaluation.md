@@ -288,6 +288,17 @@ The project-memory resolver (design: [memory store architecture](architecture/me
 
 **What this does not establish:** one 30-note synthetic fixture, one repository, one binary build; recall over the oracle is not agent utility (no task-completion A/B), not precision under adversarial duplicates, and not transferable to other note distributions. The negative control rules out a pass-everything store, not every trivial-ranking failure mode.
 
+### 6b. Bilingual retrieval (frozen 2026-11-12)
+
+`tests/fixtures/memory/oracle-v3-vietnamese.json` freezes 10 Vietnamese/English notes and 10 queries, including accented and unaccented forms of the same term and a bare-consonant negative case. The fixture carries a SHA-256 over its canonical body; `mem_recall.py` exits 2 if it is edited.
+
+- **Command:** `python3 -I tests/scripts/mem_recall.py --eg target/release/eg --fixture tests/fixtures/memory/oracle-v3-vietnamese.json --threshold 1.0 --json docs/baselines/memory-parity-oracle-v3.json`
+- **Pre-change baseline (1.0.4, 2026-11-12):** 5/10 = 0.500; negative control 1/10 = 0.100; gate FAIL. Only accented queries match through the legacy consonant skeleton; unaccented and `đ` queries miss. Evidence: `docs/baselines/memory-parity-oracle-v3-pre.json`.
+- **Post-change result (2026-11-12):** 10/10 = **1.000**, Wilson 95% [0.722, 1.000]; negative control 2/10 = **0.200**; gate PASS. Evidence: `docs/baselines/memory-parity-oracle-v3.json`.
+- **Scale (5,000 notes):** import 0.163 s, v2 repair 0.137 s, `mem write` p95 21.4 ms versus the 1.0.4 baseline 20.5 ms (+0.9 ms); store 3.74 MB with 0.99 MB legacy FTS and 0.98 MB v2 FTS. Evidence: `docs/baselines/memory-parity-scale.json` and `docs/baselines/memory-parity-write-baseline.json` (workstation measurement, not a CI gate).
+- **Query latency (5,000 notes, 60 runs, process spawn included):** `mem query "resolver ranking"` p95 20.48 ms on the dual index versus 20.04 ms on 1.0.4 (+0.44 ms); p50 19.22 vs 18.90 ms. Evidence: `docs/baselines/memory-parity-query-latency.json`. This measures process-level latency, not a warm in-process resolver.
+- **Scope limit:** the fixture proves the tokenizer contract and the unaccented/accented equivalence, not agent utility or ranking quality on arbitrary Vietnamese prose. `--explain`, `--local`, `--scan`, and `--reindex` have functional acceptance tests but no agent task-completion A/B or token-savings measurement.
+
 ## 7. Practical limits
 
 - Static edges are navigation candidates, not proof of runtime behavior. Dynamic dispatch and untyped attributes can hide callers and paths.

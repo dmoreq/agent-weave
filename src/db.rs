@@ -425,12 +425,15 @@ pub(crate) mod test_support {
 pub(crate) use test_support::temp_root;
 
 mod inserts;
+mod memory_fts;
 #[cfg(test)]
 mod memory_gc_tests;
 mod memory_query;
 mod memory_store;
 #[cfg(test)]
 mod memory_tests;
+#[cfg(test)]
+mod memory_v2_tests;
 mod memory_write;
 mod meta;
 mod paths;
@@ -441,6 +444,7 @@ mod sql;
 mod tests;
 
 pub(crate) use inserts::*;
+pub(crate) use memory_fts::*;
 pub(crate) use memory_query::*;
 pub(crate) use memory_store::*;
 pub(crate) use memory_write::*;

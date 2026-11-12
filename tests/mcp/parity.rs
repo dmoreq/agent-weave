@@ -55,7 +55,8 @@ fn g10_initialize_tools_list_and_parity() {
             "mem_delete",
             "mem_gc",
             "mem_export",
-            "mem_import"
+            "mem_import",
+            "mem_reindex"
         ]
         .map(str::to_string)
     );
@@ -300,7 +301,7 @@ fn reuse_arguments_via_mcp() {
     let _ = fs::remove_dir_all(&repo);
 }
 
-/// Default MCP profile: the eight core navigation tools plus the memory
+/// Default MCP profile: the 13 core navigation tools plus the memory
 /// write/query loop (OQ1). The full inventory/analysis surface stays
 /// available behind `--all-tools`.
 #[test]

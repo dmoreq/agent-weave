@@ -2,8 +2,10 @@
 //! `CommandRequest::from_cli` mapping for every subcommand.
 
 use super::*;
+use crate::journal::JournalArgs;
 
 mod audit;
+mod memory;
 
 /// Coarse routing family shared by the CLI, journaling, and execution
 /// dispatch. `family()` is exhaustive, so a new variant cannot be added
@@ -179,113 +181,6 @@ impl CommandRequest {
             _ => unreachable!("from_cli_analysis called with a non-matching command"),
         })
     }
-    /// Memory subcommands. `write`/`query` destructure through their own
-    /// request helpers (the same surface-boundary split `impact_request` uses).
-    fn from_cli_memory(cmd: crate::cli::Cmd) -> Result<CommandRequest> {
-        let crate::cli::Cmd::Mem { action } = cmd else {
-            unreachable!("from_cli_memory called with a non-matching command")
-        };
-        match action {
-            crate::cli::MemAction::Write { .. } => Self::mem_write_request(action),
-            crate::cli::MemAction::Touch { key, global } => {
-                Ok(CommandRequest::MemTouch { key, global })
-            }
-            crate::cli::MemAction::Query { .. } => Self::mem_query_request(action),
-            crate::cli::MemAction::Get { key, global } => {
-                Ok(CommandRequest::MemGet { key, global })
-            }
-            crate::cli::MemAction::Delete { key, global } => {
-                Ok(CommandRequest::MemDelete { key, global })
-            }
-            crate::cli::MemAction::Export {
-                format,
-                limit,
-                global,
-            } => Ok(CommandRequest::MemExport {
-                format,
-                limit,
-                global,
-            }),
-            crate::cli::MemAction::Import {
-                path,
-                format,
-                force,
-                global,
-            } => Ok(CommandRequest::MemImport {
-                path,
-                format,
-                force,
-                global,
-            }),
-            crate::cli::MemAction::Gc { global } => Ok(CommandRequest::MemGc { global }),
-        }
-    }
-
-    /// The `mem write` request shape, destructured from the CLI variant.
-    fn mem_write_request(action: crate::cli::MemAction) -> Result<CommandRequest> {
-        let crate::cli::MemAction::Write {
-            key,
-            body,
-            kind,
-            tags,
-            refs,
-            scope,
-            ttl,
-            supersedes,
-            global,
-            touch,
-        } = action
-        else {
-            unreachable!("mem_write_request called with a non-write action")
-        };
-        Ok(CommandRequest::MemWrite {
-            key,
-            body,
-            kind,
-            tags: Self::join_list(tags),
-            refs: Self::join_list(refs),
-            scope,
-            ttl,
-            supersedes,
-            global,
-            touch,
-        })
-    }
-
-    /// Collapse `--tags a b` and `--tags a --tags b` into the one
-    /// space-separated string the request carries.
-    fn join_list(values: Vec<String>) -> Option<String> {
-        let joined = values.join(" ");
-        (!joined.is_empty()).then_some(joined)
-    }
-
-    /// The `mem query` request shape, destructured from the CLI variant.
-    fn mem_query_request(action: crate::cli::MemAction) -> Result<CommandRequest> {
-        let crate::cli::MemAction::Query {
-            terms,
-            all,
-            reference,
-            kind,
-            scope,
-            limit,
-            include_superseded,
-            global,
-        } = action
-        else {
-            unreachable!("mem_query_request called with a non-query action")
-        };
-        Ok(CommandRequest::MemQuery {
-            terms,
-            all,
-            kind: crate::memory::parse_kind_filter("mem query", kind.as_deref())?,
-            scope: crate::memory::parse_scope_filter("mem query", scope.as_deref())?,
-            limit,
-            include_superseded,
-            global,
-            reference,
-        })
-    }
-
     /// Routing family for dispatch. Exhaustive: a new variant must be
     /// classified here before the family dispatchers can route it.
     pub(super) fn family(&self) -> Family {
@@ -312,7 +207,8 @@ impl CommandRequest {
             | CommandRequest::MemDelete { .. }
             | CommandRequest::MemGc { .. }
             | CommandRequest::MemExport { .. }
-            | CommandRequest::MemImport { .. } => Family::Memory,
+            | CommandRequest::MemImport { .. }
+            | CommandRequest::MemReindex { .. } => Family::Memory,
         }
     }
 
@@ -342,6 +238,7 @@ impl CommandRequest {
             CommandRequest::MemGc { .. } => "mem_gc",
             CommandRequest::MemExport { .. } => "mem_export",
             CommandRequest::MemImport { .. } => "mem_import",
+            CommandRequest::MemReindex { .. } => "mem_reindex",
         }
     }
 
@@ -466,14 +363,21 @@ impl CommandRequest {
                 vec![("key", key.clone()), ("global", global.to_string())]
             }
             CommandRequest::MemGc { global } => vec![("global", global.to_string())],
+            CommandRequest::MemReindex { global } => vec![("global", global.to_string())],
             CommandRequest::MemExport {
                 format,
                 limit,
                 global,
+                since,
+                until,
+                scan,
             } => vec![
                 ("format", format.clone().unwrap_or_default()),
                 ("limit", limit.map_or_else(String::new, |n| n.to_string())),
                 ("global", global.to_string()),
+                ("since", since.map_or_else(String::new, |n| n.to_string())),
+                ("until", until.map_or_else(String::new, |n| n.to_string())),
+                ("scan", scan.to_string()),
             ],
             CommandRequest::MemImport {
                 format,

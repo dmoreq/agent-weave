@@ -215,7 +215,7 @@ eg mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 | `--scope <SCOPE>` | `durable` | `durable` (never expires) or `session` (expires after TTL). |
 | `--ttl <SECS>` | `604800` (7 days)| Expiration lifetime in seconds (only valid with `--scope session`). |
 | `--supersedes <KEY>`| None | Mark the specified key as superseded by this note in one atomic transaction. |
-| `--touch` | `false` | Refresh timestamp on active revision when content hash matches without revision churn. |
+| `--touch` | `false` | Refresh `created_at` (last asserted) on the active revision when the content hash matches; no new revision. |
 | `--global` | `false` | Persist to global store (`~/.engram/memory.db`) instead of repository (`.engram/memory.db`). |
 
 When the new note is at least 80% Jaccard-similar to an existing current note under another key, `mem write` appends an advisory `eg: mem hint:` line suggesting `--supersedes`. The write still succeeds; the hint is never a hard failure.
@@ -226,7 +226,7 @@ When the new note is at least 80% Jaccard-similar to an existing current note un
 Retrieve and rank memory notes using SQLite FTS5 BM25, reference token overlap, and recency decay.
 
 ```bash
-eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global] [--ref <REFERENCE>]
+eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global|--local] [--ref <REFERENCE>] [--since <TIME>] [--until <TIME>] [--explain] [--legacy]
 ```
 
 | Option | Default | Description |
@@ -238,9 +238,18 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 | `--limit <N>` | `10` | Maximum results displayed (1 to 100). |
 | `--include-superseded`| `false` | When combined with `--all`, includes superseded note revisions. |
 | `--global` | `false` | Restrict search exclusively to global store (`~/.engram/memory.db`). |
+| `--local` | `false` | Restrict search exclusively to the project store; mutually exclusive with `--global`. |
 | `--ref <REFERENCE>` | None | Filter notes referencing target path or symbol. |
+| `--since <TIME>` | None | Inclusive lower bound on `created_at` (last assertion). |
+| `--until <TIME>` | None | Exclusive upper bound on `created_at`. |
+| `--explain` | `false` | Add one causal `why:` line per shown ranked note; requires terms. |
+| `--legacy` | `false` | Force the legacy ASCII index and tokens (diagnostic). |
 
-- **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
+Time bounds accept `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SSZ`, or `@<unix-seconds>`. Bounds are UTC and half-open: `[since, until)`. Invalid dates, timezone offsets, fractional seconds, bare integers, and `since > until` are usage errors (exit 2).
+
+- **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`. `--local` restricts to the project store and never falls back to global.
+- **Unicode Retrieval**: Notes are indexed in both a legacy ASCII FTS table and a Unicode FTS table using `remove_diacritics 2`. `bo nho` finds `Bộ nhớ`; a bare consonant query such as `nh` does not. Reads use the Unicode table only after a clean reconcile; otherwise they fall back to the legacy table.
+- **Explain**: `--explain` emits labels such as `lexical match`, `ref src/memory/rank.rs`, `graph depth 2`, and `age 3d`; it never prints bm25 values, normalized scores, weights, or note bodies.
 - **Graph Expansion**: When `.engram/index.db` is readable, query terms seed a bounded traversal of resolved `calls` edges (depth $\le 3$, decay $0.5^{depth}$), so notes attached to downstream callees still surface. A missing or unreadable index silently falls back to plain FTS5 ranking.
 - **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.engram/index.db`. Broken targets missing from the index are badged with `[stale-ref] [broken-ref]`, while targets modified after note creation are badged with `[stale-ref] [modified-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
 
@@ -250,12 +259,13 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 
 | Subcommand | Syntax | Description |
 |---|---|---|
-| `touch` | `eg mem touch <KEY> [--global]` | Refresh `created_at` timestamp on active revision without creating a new revision. |
+| `touch` | `eg mem touch <KEY> [--global]` | Refresh `anchored_at` (last verified) on the active revision without creating a new revision. |
 | `get` | `eg mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
 | `delete` | `eg mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
-| `export` | `eg mem export [--format jsonl\|markdown] [--limit <N>] [--global]` | Export active notes as JSONL (default) or fenced Markdown to stdout. |
+| `export` | `eg mem export [--format jsonl\|markdown] [--limit <N>] [--global] [--since <TIME>] [--until <TIME>] [--scan]` | Export active notes as JSONL (default) or fenced Markdown to stdout. `--scan` reports suspected secrets on stderr without changing stdout or the exit code. |
 | `import` | `eg mem import <PATH> [--format jsonl\|markdown] [--force] [--global]` | Restore a JSONL/Markdown export (use `-` for stdin). Conflicting keys are skipped unless `--force` overwrites; imported rows carry `[imported]`. MCP import is confined to the project store. |
 | `gc` | `eg mem gc [--global]` | Purge expired session notes and superseded revisions older than 30 days. |
+| `reindex` | `eg mem reindex [--global]` | Rebuild the derived Unicode FTS index; notes are primary data and are untouched. |
 
 ---
 

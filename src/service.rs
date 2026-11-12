@@ -8,7 +8,6 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::error::{EgError, Result};
-use crate::journal::JournalArgs;
 
 /// Which surface is dispatching; journaled as `surface` in `.engram/usage.log`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,134 +23,6 @@ impl Surface {
             Surface::Mcp => "mcp",
         }
     }
-}
-
-/// One dispatchable command with its resolved arguments.
-#[derive(Debug)]
-pub enum CommandRequest {
-    Build {
-        force: bool,
-        max_parse_error_rate: f64,
-    },
-    Callers {
-        name: String,
-        limit: usize,
-        depth: usize,
-    },
-    Callees {
-        name: String,
-        limit: usize,
-        depth: usize,
-    },
-    Context {
-        name: String,
-        limit: usize,
-    },
-    Imports {
-        file: String,
-        limit: usize,
-    },
-    Path {
-        from: String,
-        to: String,
-        depth: usize,
-    },
-    Impact {
-        file: String,
-        sites: bool,
-        depth: usize,
-        /// Validated `--edges` kinds (parsed at the surface boundary, so a bad
-        /// spec is a usage error before dispatch).
-        edges: Vec<crate::extract::EdgeKind>,
-        limit: usize,
-    },
-    Unresolved {
-        names: bool,
-        path: Option<String>,
-        limit: usize,
-    },
-    Symbols {
-        file: String,
-        outline: bool,
-        limit: usize,
-    },
-    Reuse {
-        paths: Vec<String>,
-        limit: usize,
-        deep_callee: bool,
-        judge: bool,
-    },
-    Search {
-        terms: String,
-        limit: usize,
-    },
-    Stats {
-        path: Option<String>,
-    },
-    Doctor {
-        invalidate: bool,
-    },
-    Usage {
-        quality: bool,
-        global: bool,
-    },
-    Audit {
-        json: bool,
-        global: bool,
-        days: u32,
-        baseline_days: u32,
-        all_checks: bool,
-        reveal_paths: bool,
-        fail_on: Option<String>,
-    },
-    MemWrite {
-        key: String,
-        body: String,
-        kind: String,
-        tags: Option<String>,
-        refs: Option<String>,
-        scope: String,
-        ttl: Option<u64>,
-        supersedes: Option<String>,
-        global: bool,
-        touch: bool,
-    },
-    MemQuery {
-        terms: Vec<String>,
-        all: bool,
-        kind: Option<crate::memory::MemKind>,
-        scope: Option<crate::memory::MemScope>,
-        limit: usize,
-        include_superseded: bool,
-        global: bool,
-        reference: Option<String>,
-    },
-    MemTouch {
-        key: String,
-        global: bool,
-    },
-    MemGet {
-        key: String,
-        global: bool,
-    },
-    MemDelete {
-        key: String,
-        global: bool,
-    },
-    MemGc {
-        global: bool,
-    },
-    MemExport {
-        format: Option<String>,
-        limit: Option<usize>,
-        global: bool,
-    },
-    MemImport {
-        path: String,
-        format: Option<String>,
-        force: bool,
-        global: bool,
-    },
 }
 
 /// Rendered command outcome: everything the caller prints, plus the exit code
@@ -283,22 +154,30 @@ impl ArmOut {
 }
 
 mod args;
+mod explain;
 mod from_cli;
+mod mem_export;
 mod mem_import;
 mod mem_ops;
 mod mem_query;
+mod mem_reindex;
 mod mem_write;
+mod request;
 mod run;
+mod scope;
 mod tools;
 
 use from_cli::*;
+use mem_export::*;
 use mem_import::*;
 use mem_ops::*;
 use mem_query::*;
+use mem_reindex::*;
 use mem_write::*;
 use run::*;
 
 pub(crate) use args::from_tool_args;
+pub use request::CommandRequest;
 pub use tools::{ParamKind, ParamSpec, ToolSpec, MAX_STR_ARRAY_ITEMS, TOOL_SPECS};
 #[cfg(test)]
 mod tests {
@@ -396,6 +275,11 @@ mod tests {
                 include_superseded: false,
                 global: false,
                 reference: None,
+                since: None,
+                until: None,
+                local: false,
+                explain: false,
+                legacy: false,
             },
             CommandRequest::MemTouch {
                 key: "k".into(),
@@ -414,6 +298,9 @@ mod tests {
                 format: None,
                 limit: None,
                 global: false,
+                since: None,
+                until: None,
+                scan: false,
             },
             CommandRequest::MemImport {
                 path: "memory.md".into(),
@@ -421,6 +308,7 @@ mod tests {
                 force: false,
                 global: false,
             },
+            CommandRequest::MemReindex { global: false },
         ]
     }
 

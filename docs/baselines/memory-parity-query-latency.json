@@ -1,0 +1,28 @@
+{
+  "notes": 5000,
+  "queries": 60,
+  "legacy_104": {
+    "resolver ranking": {
+      "p50_ms": 18.896,
+      "p95_ms": 20.041,
+      "exit0_rate": 1.0
+    },
+    "bo nho": {
+      "p50_ms": 15.979,
+      "p95_ms": 17.278,
+      "exit0_rate": 0.0
+    }
+  },
+  "unicode_new": {
+    "resolver ranking": {
+      "p50_ms": 19.22,
+      "p95_ms": 20.48,
+      "exit0_rate": 1.0
+    },
+    "bo nho": {
+      "p50_ms": 16.422,
+      "p95_ms": 17.38,
+      "exit0_rate": 0.0
+    }
+  }
+}

@@ -42,6 +42,7 @@ pub const UNPRICED_TOOLS: &[&str] = &[
     "mem_gc",
     "mem_export",
     "mem_import",
+    "mem_reindex",
 ];
 
 /// Estimated tokens one tool call saves the agent versus reading the same

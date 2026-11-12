@@ -141,11 +141,14 @@ pub const MAX_SESSION_TTL_SECS: u64 = 10 * 365 * 86_400;
 pub const RETENTION_DAYS: i64 = 30;
 
 // ---------------------------------------------------------------------------
-// One tokenizer, two consumers (Storage design note): the FTS text stored at
-// insert time and the query side (MATCH terms + ref-overlap) both pass
-// through `mem_tokens`, so query and stored text can never disagree.
+// Two tokenizer contracts coexist during the dual-index migration: the frozen
+// legacy ASCII contract for `memories_fts` and the Unicode contract for
+// `memories_fts_v2`. The secret detector and time grammar are standalone.
 // ---------------------------------------------------------------------------
 
+pub mod secret;
+pub mod time;
+pub use time::{parse_time_bound, validate_window, TimeWindow};
 mod graph;
 mod guard;
 mod note;
@@ -311,6 +314,7 @@ mod tests {
             age_days: age,
             score: 0.0,
             is_global: false,
+            from_fts: false,
         };
         // All-equal lex and ref -> both 1.0; recency alone separates.
         let fused = fuse(vec![mk(1, 2.0, 0.5, 0.0, 100), mk(2, 2.0, 0.5, 10.0, 100)]);
@@ -358,30 +362,59 @@ mod tests {
 
     #[test]
     fn secret_rejection_covers_key_body_tags_refs() {
+        let openai = format!("sk-{}", "a".repeat(24));
+        let github = format!("ghp_{}", "a".repeat(36));
+        let aws = format!("AKIA{}", "A".repeat(16));
+        let jwt = format!(
+            "eyJ{}.eyJ{}.{}",
+            "a".repeat(10),
+            "b".repeat(10),
+            "c".repeat(10)
+        );
+        let pem = format!("-----BEGIN {} PRIVATE KEY-----", "RSA");
+
         assert!(normalize_note(NoteInput {
-            key: "sk-12345",
+            key: &openai,
             ..note("k", "fact", "b", "durable")
         })
         .is_err());
         assert!(normalize_note(NoteInput {
-            body: "contains ghp_abcdef token",
+            body: &github,
             ..note("k", "fact", "b", "durable")
         })
         .is_err());
         assert!(normalize_note(NoteInput {
-            tags: Some("tag AKIAIOSFODNN7EXAMPLE"),
+            tags: Some(&aws),
             ..note("k", "fact", "b", "durable")
         })
         .is_err());
         assert!(normalize_note(NoteInput {
-            refs: Some("src/main.rs eyJhbGciOi"),
+            refs: Some(&jwt),
             ..note("k", "fact", "b", "durable")
         })
         .is_err());
         assert!(normalize_note(NoteInput {
-            body: "-----BEGIN RSA PRIVATE KEY-----",
+            body: &pem,
             ..note("k", "fact", "b", "durable")
         })
         .is_err());
+
+        // Short prefixes and ordinary words that contain `sk-` are allowed.
+        for text in [
+            "sk-12345",
+            "ghp_abcdef",
+            "eyJhbGciOi",
+            "task-1 pending",
+            "risk-averse",
+        ] {
+            assert!(
+                normalize_note(NoteInput {
+                    body: text,
+                    ..note("k", "fact", "b", "durable")
+                })
+                .is_ok(),
+                "{text}"
+            );
+        }
     }
 }

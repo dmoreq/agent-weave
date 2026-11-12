@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use super::checks::{CheckResult, Status};
 use super::collect::AuditData;
 use super::index::{IndexState, RepoFacts};
+use crate::time::civil_from_days;
 
 pub fn human(
     data: &AuditData,
@@ -266,17 +267,4 @@ fn fmt_utc(ts: i64) -> String {
         (secs % 3600) / 60,
         secs % 60
     )
-}
-
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    (y + if m <= 2 { 1 } else { 0 }, m as u32, d as u32)
 }

@@ -60,15 +60,23 @@ fn schema_compatible(old: &Connection) -> bool {
     true
 }
 
-/// True when `sqlite_master` holds an object of `kind` named `name`.
-fn object_exists(conn: &Connection, kind: &str, name: &str) -> bool {
-    conn.query_row(
+/// Fallible `sqlite_master` probe: distinguishes "absent" from "probe failed".
+pub(super) fn object_exists_result(
+    conn: &Connection,
+    kind: &str,
+    name: &str,
+) -> rusqlite::Result<bool> {
+    let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",
         rusqlite::params![kind, name],
-        |r| r.get::<_, i64>(0),
-    )
-    .unwrap_or(0)
-        > 0
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// True when `sqlite_master` holds an object of `kind` named `name`.
+fn object_exists(conn: &Connection, kind: &str, name: &str) -> bool {
+    object_exists_result(conn, kind, name).unwrap_or(false)
 }
 
 /// True when `table` has a column named `column`.

@@ -1,5 +1,5 @@
 //! Project memory over MCP (companion design, Phase 1): OQ1 puts mem_write +
-//! mem_query in the default `eg mcp` tool set (ToolSpec::core); the other four
+//! mem_query in the default `eg mcp` tool set (ToolSpec::core); the other seven
 //! stay behind --all-tools. Every call dispatches through service::execute, so
 //! the result text is the CLI's stdout byte for byte.
 

@@ -1,5 +1,5 @@
--- eg memory schema v1 — the project-memory store `.engram/memory.db` (companion
--- design: docs/architecture/memory-store.md). Separate
+-- eg memory schema (user_version 2) — the project-memory store `.engram/memory.db`
+-- (companion design: docs/architecture/memory-store.md). Separate
 -- file from index.db on purpose: memory is primary data, the index is derived.
 -- The binary gates this store on its own compiled MEMORY_SCHEMA_VERSION
 -- (src/db.rs stamps PRAGMA user_version; this file declares no PRAGMA, the
@@ -26,19 +26,33 @@ CREATE TABLE memories(
     anchored_at INTEGER NOT NULL DEFAULT 0, -- unix secs of the last verify; 0 = never (readers fall back to created_at)
     expires_at INTEGER NOT NULL DEFAULT 0,   -- 0 = never; session rows carry the TTL deadline
     superseded_by INTEGER,          -- id of the replacing rev; NULL = current row
-    superseded_at INTEGER NOT NULL DEFAULT 0 -- unix secs when superseded; 0 = current; the gc retention clock
+    superseded_at INTEGER NOT NULL DEFAULT 0, -- unix secs when superseded; 0 = current; the gc retention clock
+    fts_version INTEGER NOT NULL DEFAULT 0    -- 0 = legacy writer (v2 index may lag); 2 = indexed in both FTS tables
 );
 
 CREATE UNIQUE INDEX memories_key_rev ON memories(key, rev);
 CREATE INDEX memories_current ON memories(key, rev DESC) WHERE superseded_by IS NULL;
 CREATE INDEX memories_expiry ON memories(expires_at) WHERE expires_at > 0;
+CREATE INDEX memories_created ON memories(created_at);
+CREATE INDEX memories_pending ON memories(id) WHERE fts_version < 2;
+
+-- Internal key/value state for the derived FTS indexes: fts_epoch (tokenizer
+-- contract) and fts_v2_complete ("1" only after a clean reconcile). Missing
+-- rows mean "not usable"; this table is not part of MEMORY_REQUIRED.
+CREATE TABLE memory_meta(
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 CREATE VIRTUAL TABLE memories_fts USING fts5(text, tokenize='unicode61');
--- rowid = memories.id; text = mem_tokens(key) + mem_tokens(tags) +
--- mem_tokens(body) joined with spaces — the SAME tokenizer function the
--- query side uses, pre-applied at insert so unicode61's whitespace splitting
--- suffices; camelCase in prose (calleeEmptyReason) is already split here.
--- refs are NOT in the FTS text — the ref-overlap signal covers them
--- separately (no double count). Delta-maintained in the same transaction as
+-- Legacy index: rowid = memories.id; text = mem_fts_text_legacy(key, tags,
+-- body). It is the 1.0.4 contract and must keep the frozen ASCII tokenizer.
+-- refs are NOT in the FTS text. Delta-maintained in the same transaction as
 -- every insert/supersede/delete. Purity invariant: memories_fts is a pure
--- function of memories (rebuild-and-compare test).
+-- function of the current memories rows (rebuild-and-compare test).
+
+CREATE VIRTUAL TABLE memories_fts_v2 USING fts5(text, tokenize='unicode61 remove_diacritics 2');
+-- Unicode index: rowid = memories.id; text = mem_fts_text(key, tags, body).
+-- The SQLite tokenizer folds Vietnamese tones; mem_tokens_unicode maps đ -> d.
+-- Reads use this table only when memory_meta says fts_epoch = 2 and
+-- fts_v2_complete = 1. Maintained in lockstep with memories_fts.

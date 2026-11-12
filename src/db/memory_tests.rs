@@ -40,11 +40,12 @@ fn memories_fts_is_pure_function_of_memories() {
             scope: None,
             now,
             include_superseded: false,
+            window: crate::memory::TimeWindow::default(),
         },
         None,
     )
     .unwrap();
-    let mut fts: Vec<(i64, String)> = {
+    let mut legacy: Vec<(i64, String)> = {
         let mut stmt = conn
             .prepare("SELECT rowid, text FROM memories_fts ORDER BY rowid")
             .unwrap();
@@ -53,8 +54,28 @@ fn memories_fts_is_pure_function_of_memories() {
             .collect::<std::result::Result<Vec<_>, _>>()
             .unwrap()
     };
-    fts.sort();
-    let mut expected: Vec<(i64, String)> = current
+    legacy.sort();
+    let mut v2: Vec<(i64, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT rowid, text FROM memories_fts_v2 ORDER BY rowid")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    v2.sort();
+    let mut expected_legacy: Vec<(i64, String)> = current
+        .iter()
+        .map(|row| {
+            (
+                row.id,
+                crate::memory::mem_fts_text_legacy(&row.key, &row.tags, &row.body),
+            )
+        })
+        .collect();
+    expected_legacy.sort();
+    let mut expected_v2: Vec<(i64, String)> = current
         .iter()
         .map(|row| {
             (
@@ -63,10 +84,19 @@ fn memories_fts_is_pure_function_of_memories() {
             )
         })
         .collect();
-    expected.sort();
+    expected_v2.sort();
     assert_eq!(
-        fts, expected,
+        legacy, expected_legacy,
         "memories_fts must be a pure function of memories"
+    );
+    assert_eq!(
+        v2, expected_v2,
+        "memories_fts_v2 must be a pure function of memories"
+    );
+    assert_eq!(
+        legacy.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        v2.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        "both FTS tables mirror the same current rows"
     );
     drop(conn);
     remove_tree(&root);
@@ -130,6 +160,7 @@ fn memory_current_rows_matches_is_current_predicate() {
                     scope,
                     now,
                     include_superseded,
+                    window: crate::memory::TimeWindow::default(),
                 };
                 let mut expected: Vec<i64> = all_rows
                     .iter()
@@ -298,6 +329,9 @@ fn cross_key_supersede_removes_target_fts() {
     let hits = memory_fts_candidates(
         &conn,
         &crate::memory::mem_query_terms("alpha"),
+        &crate::memory::TimeWindow::default(),
+        crate::db::unix_now(),
+        false,
         crate::memory::CANDIDATE_CAP,
     )
     .unwrap();

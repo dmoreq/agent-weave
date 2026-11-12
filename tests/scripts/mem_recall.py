@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import shutil
@@ -38,6 +39,13 @@ from precision_recall import run_eg, wilson
 
 CAVEAT_PREFIX = "eg: memory"
 SHOWING_PREFIX = "showing "
+
+
+def fixture_digest(fixture: dict) -> str:
+    """SHA-256 over the canonical fixture body, excluding its own digest."""
+    body = {k: v for k, v in fixture.items() if k != "sha256"}
+    canon = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(canon).hexdigest()
 
 
 def parse_query_keys(stdout: str) -> list[str]:
@@ -92,6 +100,14 @@ def main() -> int:
     args = ap.parse_args()
 
     fixture = json.loads(Path(args.fixture).read_text(encoding="utf-8"))
+    expected_digest = fixture.get("sha256")
+    actual_digest = fixture_digest(fixture)
+    if expected_digest and expected_digest != actual_digest:
+        print(
+            f"fixture sha256 mismatch: expected {expected_digest}, got {actual_digest}",
+            file=sys.stderr,
+        )
+        return 2
     limit = args.limit if args.limit is not None else int(fixture.get("limit", 5))
     threshold = args.threshold if args.threshold is not None else float(fixture.get("threshold", 0.8))
     seed = int(fixture["seed"])
@@ -102,6 +118,11 @@ def main() -> int:
         retrievals: list[list[str]] = []
         for query in fixture["queries"]:
             proc = run_eg(args.eg, root, ["mem", "query", query["terms"], "--limit", str(limit)])
+            if proc.returncode == 1:
+                # No-results is a miss, not a harness failure: the frozen
+                # oracle must be able to score a regression instead of aborting.
+                retrievals.append([])
+                continue
             if proc.returncode != 0:
                 raise RuntimeError(
                     f"query '{query['terms']}' failed ({proc.returncode}): {proc.stderr.strip()}"
@@ -125,6 +146,7 @@ def main() -> int:
     gate_pass = recall >= threshold and recall_neg < threshold
     report = {
         "fixture": str(args.fixture),
+        "fixture_sha256": actual_digest,
         "limit": limit,
         "threshold": threshold,
         "seed": seed,
@@ -154,7 +176,9 @@ def main() -> int:
     )
     print(f"gate: {report['gate']}")
     if args.json:
-        Path(args.json).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        out = Path(args.json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(f"evidence written: {args.json}")
     return 0 if gate_pass else 1
 

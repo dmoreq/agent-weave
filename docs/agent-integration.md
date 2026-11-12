@@ -112,12 +112,12 @@ By default, `eg mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 | `symbols` | `file`, `outline?`, `limit?` | File/directory definitions and signatures |
 | `search` | `terms`, `limit?` | Discover symbols with interface cards & `[callers=N]` |
 | `reuse` | `paths?`, `limit?`, `deep_callee?` | Anti-reinvention duplicate detector; `deep_callee` adds second-hop callee footprints |
-| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?` | Zero-token layered memory search; uses the code index for call-graph expansion when available |
+| `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?`, `since?`, `until?`, `local?`, `explain?`, `legacy?` | Zero-token layered memory search; uses the code index for call-graph expansion when available; Unicode-aware with a legacy fallback |
 | `usage` | `quality?` | Session telemetry, latency percentiles, and token savings |
 | `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `touch?`, `global?` | Persist architectural decisions and gotchas |
 
 ### Extended Surface (`--all-tools`)
-Passing `--all-tools` exposes 6 additional memory maintenance tools (19 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, `mem_export` (JSONL or Markdown), and `mem_import` (reject-on-conflict restore; confined to the project store).
+Passing `--all-tools` exposes 7 additional memory maintenance tools (20 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, `mem_export` (JSONL or Markdown, optional `since`/`until`), `mem_import` (reject-on-conflict restore; confined to the project store), and `mem_reindex` (rebuild the derived Unicode index). `mem_export` over MCP does not expose `--scan`; agents that need a scanned backup run the CLI, which reports suspected secrets on stderr without blocking the export.
 
 *Note*: `doctor`, `audit`, `stats`, and `unresolved` are intentionally reserved for human CLI inspection and omitted from MCP stdio dispatch. `eg audit --json` is the machine-readable health surface; it is read-only and redacted by default.
 

@@ -63,7 +63,13 @@ pub(crate) fn graph_expand(
         return GraphExpansion::default();
     }
     let tokens: Vec<String> = names.keys().cloned().collect();
-    let rows = match crate::db::memory_ref_candidate_rows(memory, &tokens, cap) {
+    let rows = match crate::db::memory_ref_candidate_rows(
+        memory,
+        &tokens,
+        &filter.window,
+        filter.now,
+        cap,
+    ) {
         Ok(rows) => rows,
         Err(_) => return GraphExpansion::default(),
     };
@@ -282,6 +288,7 @@ mod tests {
             scope: None,
             now: 10,
             include_superseded: false,
+            window: crate::memory::TimeWindow::default(),
         };
         let tokens: BTreeSet<String> = ["s0".to_string()].into_iter().collect();
         let start = Instant::now();

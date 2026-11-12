@@ -1,0 +1,90 @@
+{
+  "seed": 20261112,
+  "limit": 5,
+  "threshold": 1.0,
+  "sha256": "6dad4c0e3283a25480f23b4ba352cfc03476c14bb29993eb19730fadaf419fd0",
+  "notes": [
+    {
+      "key": "vn-memory",
+      "kind": "fact",
+      "tags": "memory handoff",
+      "refs": "src/memory.rs",
+      "body": "Bộ nhớ dự án lưu ghi chú bàn giao giữa các phiên làm việc."
+    },
+    {
+      "key": "vn-arch",
+      "kind": "decision",
+      "tags": "architecture storage",
+      "refs": "schema/memory.sql",
+      "body": "Quyết định kiến trúc dùng SQLite FTS5 thay vì vector database."
+    },
+    {
+      "key": "vn-street",
+      "kind": "fact",
+      "tags": "place",
+      "refs": "",
+      "body": "Đường phố Hà Nội có nhiều quán cà phê mở cửa sớm."
+    },
+    {
+      "key": "vn-map",
+      "kind": "procedure",
+      "tags": "map",
+      "refs": "src/service/mem_ops.rs",
+      "body": "Bản đồ hệ thống mô tả luồng dữ liệu từ parser đến resolver."
+    },
+    {
+      "key": "en-resolver",
+      "kind": "fact",
+      "tags": "resolver ranking",
+      "refs": "src/memory/rank.rs",
+      "body": "The resolver tiers select lexical candidates before graph expansion."
+    },
+    {
+      "key": "en-tokenizer",
+      "kind": "fact",
+      "tags": "tokenizer unicode",
+      "refs": "src/memory/tokens.rs",
+      "body": "The unicode tokenizer folds diacritics for Vietnamese notes."
+    },
+    {
+      "key": "vi-handoff",
+      "kind": "task",
+      "tags": "handoff",
+      "refs": "",
+      "body": "Bàn giao phiên làm việc ghi lại các bước kiểm chứng."
+    },
+    {
+      "key": "vi-test",
+      "kind": "procedure",
+      "tags": "test",
+      "refs": "tests/cli/main.rs",
+      "body": "Kiểm thử hồi quy chạy trên kho lưu trữ tạm."
+    },
+    {
+      "key": "en-audit",
+      "kind": "fact",
+      "tags": "audit",
+      "refs": "src/audit/memory.rs",
+      "body": "Audit checks report stale references and memory health."
+    },
+    {
+      "key": "vi-secret",
+      "kind": "gotcha",
+      "tags": "security",
+      "refs": "src/memory/note.rs",
+      "body": "Mẫu kiểm thử che giấu khóa bí mật trong nội dung."
+    }
+  ],
+  "queries": [
+    { "terms": "bo nho", "expect": "vn-memory" },
+    { "terms": "bộ nhớ", "expect": "vn-memory" },
+    { "terms": "quyet dinh kien truc", "expect": "vn-arch" },
+    { "terms": "quyết định kiến trúc", "expect": "vn-arch" },
+    { "terms": "duong pho", "expect": "vn-street" },
+    { "terms": "đường phố", "expect": "vn-street" },
+    { "terms": "resolver tiers", "expect": "en-resolver" },
+    { "terms": "unicode tokenizer", "expect": "en-tokenizer" },
+    { "terms": "ban do he thong", "expect": "vn-map" },
+    { "terms": "kiem thu hoi quy", "expect": "vi-test" }
+  ]
+}

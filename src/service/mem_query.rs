@@ -1,6 +1,7 @@
 //! Memory queries: ranked FTS search, `--all` listings, multi-store merge,
 //! stale-ref checks, and row rendering.
 
+use super::scope::StoreScope;
 use super::*;
 
 /// Ranked search or the explicit `--all` listing.
@@ -14,13 +15,29 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
         include_superseded,
         global,
         reference,
+        since,
+        until,
+        local,
+        explain,
+        legacy,
     } = req
     else {
         unreachable!("run_mem_query called with a non-query request")
     };
+    let store_scope = StoreScope::from_flags(*local, *global)?;
+    let window = crate::memory::TimeWindow {
+        since: *since,
+        until: *until,
+    };
+    crate::memory::validate_window(&window, "mem query")?;
     let clean_terms: Vec<String> = terms.iter().filter(|t| !t.is_empty()).cloned().collect();
     let effective_all = *all || clean_terms.is_empty();
     validate_mem_query(terms, *all, effective_all, *include_superseded)?;
+    if *explain && effective_all {
+        return Err(EgError::Usage(
+            "mem query: --explain requires terms".to_string(),
+        ));
+    }
     let index_conn = stale_ref_conn(root_arg);
     let args = MemQueryArgs {
         terms: &clean_terms,
@@ -31,22 +48,33 @@ pub(super) fn run_mem_query(req: &CommandRequest, root_arg: Option<&Path>) -> Re
             scope: *scope,
             now: crate::db::unix_now(),
             include_superseded: *include_superseded,
+            window,
         },
         index_conn: index_conn.as_ref(),
         reference: reference.as_deref(),
+        explain: *explain,
+        legacy: *legacy,
     };
 
-    if *global {
-        let conn = crate::db::open_global_memory_query()?;
-        return query_single_store(&conn, &args, true);
-    }
-
-    let stores = resolve_memory_stores(root_arg)?;
-    match (stores.local, stores.global) {
-        (None, None) => Err(no_memory_store_error(root_arg)),
-        (Some(local), None) => query_single_store(&local, &args, false),
-        (None, Some(global)) => query_single_store(&global, &args, true),
-        (Some(local), Some(global)) => query_merged_stores(&local, &global, &args),
+    match store_scope {
+        StoreScope::Local => {
+            let root = crate::walk::discover_root(root_arg)?;
+            let conn = crate::db::open_memory_query(&root)?;
+            query_single_store(&conn, &args, false)
+        }
+        StoreScope::Global => {
+            let conn = crate::db::open_global_memory_query()?;
+            query_single_store(&conn, &args, true)
+        }
+        StoreScope::Merged => {
+            let stores = resolve_memory_stores(root_arg)?;
+            match (stores.local, stores.global) {
+                (None, None) => Err(no_memory_store_error(root_arg)),
+                (Some(local), None) => query_single_store(&local, &args, false),
+                (None, Some(global)) => query_single_store(&global, &args, true),
+                (Some(local), Some(global)) => query_merged_stores(&local, &global, &args),
+            }
+        }
     }
 }
 
@@ -162,6 +190,7 @@ fn mem_all_empty(include_superseded: bool) -> EgError {
 fn render_mem_rows(
     rows: Vec<(crate::db::MemRow, bool)>,
     args: &MemQueryArgs<'_>,
+    explain: Option<&std::collections::HashMap<(bool, i64), String>>,
     empty_error: impl FnOnce() -> EgError,
 ) -> Result<ArmOut> {
     let rows: Vec<_> = if let Some(target_ref) = args.reference {
@@ -181,7 +210,15 @@ fn render_mem_rows(
         .take(shown)
         .map(|(row, is_global)| {
             let status = check_note_ref_status(args.index_conn, row);
-            crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global, status))
+            let mut line =
+                crate::memory::render_row_tagged(row, &mem_row_tag(row, *is_global, status));
+            if let Some(map) = explain {
+                if let Some(why) = map.get(&(*is_global, row.id)) {
+                    line.push_str("\n  why: ");
+                    line.push_str(why);
+                }
+            }
+            line
         })
         .collect();
     Ok(render_mem_list(&rendered, total, shown))
@@ -193,6 +230,15 @@ fn render_ranked(
     candidates: Vec<crate::memory::Candidate>,
     args: &MemQueryArgs<'_>,
 ) -> Result<ArmOut> {
+    let explain = args.explain.then(|| {
+        super::explain::build(
+            &candidates,
+            &args.terms.join(" "),
+            args.filter.now,
+            args.index_conn.is_some(),
+            args.legacy,
+        )
+    });
     let fused = crate::memory::fuse(candidates);
     render_mem_rows(
         fused
@@ -200,6 +246,7 @@ fn render_ranked(
             .map(|cand| (cand.row, cand.is_global))
             .collect(),
         args,
+        explain.as_ref(),
         || mem_empty(&format!("no memory matches '{}'", args.terms.join(" "))),
     )
 }
@@ -210,7 +257,9 @@ fn render_all_rows(
     rows: Vec<(crate::db::MemRow, bool)>,
     args: &MemQueryArgs<'_>,
 ) -> Result<ArmOut> {
-    render_mem_rows(rows, args, || mem_all_empty(args.filter.include_superseded))
+    render_mem_rows(rows, args, None, || {
+        mem_all_empty(args.filter.include_superseded)
+    })
 }
 
 fn query_single_store(
@@ -223,7 +272,14 @@ fn query_single_store(
         return render_all_rows(rows.into_iter().map(|row| (row, is_global)).collect(), args);
     }
     let joined = args.terms.join(" ");
-    let candidates = mem_ranked(conn, &joined, &args.filter, is_global, args.index_conn)?;
+    let candidates = mem_ranked(
+        conn,
+        &joined,
+        &args.filter,
+        is_global,
+        args.index_conn,
+        args.legacy,
+    )?;
     render_ranked(candidates, args)
 }
 
@@ -266,10 +322,24 @@ fn query_merged_stores(
         return render_all_rows(combined, args);
     }
     let joined = args.terms.join(" ");
-    let mut combined = mem_ranked(local_conn, &joined, &args.filter, false, args.index_conn)?;
+    let mut combined = mem_ranked(
+        local_conn,
+        &joined,
+        &args.filter,
+        false,
+        args.index_conn,
+        args.legacy,
+    )?;
     let seen_keys: std::collections::HashSet<String> =
         combined.iter().map(|c| c.row.key.clone()).collect();
-    let global = mem_ranked(global_conn, &joined, &args.filter, true, args.index_conn)?;
+    let global = mem_ranked(
+        global_conn,
+        &joined,
+        &args.filter,
+        true,
+        args.index_conn,
+        args.legacy,
+    )?;
     // One batched existence probe replaces the per-candidate `memory_get`
     // (N+1 with a revision COUNT per key): only keys the local ranking has
     // not already surfaced need the shadowing check.
@@ -279,7 +349,7 @@ fn query_merged_stores(
         .filter(|key| !seen_keys.contains(key))
         .collect();
     let local_keys: std::collections::HashSet<String> =
-        crate::db::memory_current_keys(local_conn, &probe)?
+        crate::db::memory_current_keys(local_conn, &probe, &args.filter.window, args.filter.now)?
             .into_iter()
             .collect();
     for c in global {

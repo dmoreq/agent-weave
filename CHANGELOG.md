@@ -16,6 +16,28 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-11-12
+
+### Added
+- Unicode-aware project memory: `memories_fts_v2` folds Vietnamese diacritics
+  (`remove_diacritics 2`), maps `đ` to `d`, and keeps the legacy ASCII index so
+  1.0.4 continues to read and write. Reads use the new index only after a clean
+  reconcile and fall back to legacy otherwise.
+- `mem query --since/--until` half-open UTC windows (`YYYY-MM-DD`,
+  `YYYY-MM-DDTHH:MM:SSZ`, or `@unix-seconds`), also on `mem export`.
+- `mem query --explain` causal `why:` labels without scores or note bodies;
+  `--local` project scope; `--legacy` diagnostic override.
+- `eg mem reindex` rebuilds the derived Unicode index; the write open repairs
+  rows written by older binaries in 5,000-row chunks.
+- `mem export --scan` advisory suspected-secret report on stderr.
+- Suspected-secret detection now uses provider prefixes, length bounds, and
+  token boundaries, so ordinary words such as `task-1` are accepted.
+
+### Changed
+- `mem touch` help now states that it refreshes `anchored_at`; `mem write
+  --touch` refreshes `created_at` (last assertion). The architecture page
+  defines both timestamps.
+
 ## [1.0.4] - 2026-11-11
 
 ### Added

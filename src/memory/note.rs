@@ -1,6 +1,7 @@
 //! Note normalization and validation: key/body/tags/refs/ttl bounds,
 //! secret screening, and the content hash.
 
+use super::secret::contains_suspected_secret;
 use super::*;
 
 /// Normalized note input after validation: tags lowercased, whitespace-collapsed;
@@ -75,13 +76,6 @@ pub fn normalize_note(input: NoteInput<'_>) -> Result<NormalizedNote> {
         body: body.to_string(),
         ttl_secs,
     })
-}
-
-fn contains_suspected_secret(text: &str) -> bool {
-    const SUSPECTED_SECRETS: [&str; 5] = ["sk-", "ghp_", "AKIA", "eyJ", "-----BEGIN "];
-    SUSPECTED_SECRETS
-        .iter()
-        .any(|&prefix| text.contains(prefix))
 }
 
 fn validate_key(key: &str) -> Result<&str> {

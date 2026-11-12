@@ -51,6 +51,8 @@ External memory MCP servers introduce an expensive "Memory Tax" through prompt-i
 - **Provenance-Aware Triples & Citation Locks**: Notes anchor directly to AST symbols via `--refs`. Enforces Agent Zero Memory's citation-lock principle by checking references against the active code graph, badging invalid anchors with `[stale-ref]`, `[broken-ref]`, or `[modified-ref]`.
 - **Memory Consolidation Guard**: An advisory Jaccard token similarity guard ($\ge 80\%$) alerts agents to existing knowledge before writing, suggesting `--supersedes` to prevent memory bloat without blocking execution.
 - **Layered storage**: Local `.engram/memory.db` for repository decisions, gotchas, and task handoffs; global `~/.engram/memory.db` (`--global`) for developer preferences and cross-project conventions.
+- **Unicode-aware retrieval**: Two FTS indexes (legacy ASCII + Unicode with `remove_diacritics 2`) keep 1.0.4 compatibility while making `bo nho` find `Bộ nhớ`; a completeness marker falls back to the legacy index until the new one is repaired.
+- **Time, scope, and explanations**: `--since`/`--until` bound `created_at`; `--local` isolates the project store; `--explain` adds causal labels; `--legacy` is the diagnostic override; `eg mem reindex` rebuilds the derived Unicode index.
 - **Unified binary**: Replaces separate memory servers (`ai-memory`) with a single toolchain.
 
 ---

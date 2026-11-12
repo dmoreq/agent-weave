@@ -1,0 +1,14 @@
+{
+  "notes": 5000,
+  "seed": 20261112,
+  "writes": 100,
+  "writes_only": true,
+  "import_seconds": 0.103,
+  "repair_seconds": null,
+  "write_p50_ms": 18.131,
+  "write_p95_ms": 20.496,
+  "store_bytes": 2428928,
+  "fts_legacy_bytes": 983040,
+  "fts_v2_bytes": 0,
+  "sqlite_version": "3.54.1"
+}
