@@ -434,4 +434,35 @@ mod cache_tests {
         assert_eq!(read_usage_entries(&log).len(), 2);
         remove_tree(&dir);
     }
+
+    #[test]
+    fn retain_untracked_reports_security_errors() {
+        let dir = temp_root("dashboard-retain-tracked");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        write_file(repo.join(".engram/index.db"), b"x").unwrap();
+        let init = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-q"])
+            .status();
+        if !matches!(init, Ok(status) if status.success()) {
+            remove_tree(&dir);
+            return;
+        }
+        let added = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "-f", ".engram/index.db"])
+            .status()
+            .unwrap();
+        assert!(added.success());
+        let mut repos = HashMap::new();
+        repos.insert("repo".to_string(), repo);
+        let (errors, blocked) = retain_untracked(&mut repos);
+        assert!(repos.is_empty());
+        assert_eq!(blocked, 1);
+        assert_eq!(errors[0]["stage"], "security");
+        remove_tree(&dir);
+    }
 }

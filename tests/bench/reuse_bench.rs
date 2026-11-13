@@ -212,3 +212,40 @@ fn bench_hash_16mib() {
     );
     let _ = fs::remove_dir_all(&root);
 }
+
+/// 1,250 workers call two ubiquitous helpers plus three unique callees. The
+/// helpers are stoplisted, so D1's index must not post them; otherwise each
+/// target scans every other caller before the detector rejects it.
+fn write_hub_corpus(root: &Path) {
+    let mut source = String::new();
+    source.push_str("def hub_a():\n    return 0\n\ndef hub_b():\n    return 1\n");
+    for worker in 0..1_250 {
+        for slot in 0..3 {
+            source.push_str(&format!("def h{worker}_{slot}():\n    return {slot}\n"));
+        }
+    }
+    for worker in 0..1_250 {
+        source.push_str(&format!(
+            "def worker_{worker}():\n    return hub_a() + hub_b() + h{worker}_0() + h{worker}_1() + h{worker}_2()\n"
+        ));
+    }
+    fs::write(root.join("hub.py"), source).unwrap();
+}
+
+#[test]
+#[ignore = "gate benchmark: generates a 5,000-symbol hub corpus and needs the release binary"]
+fn bench_scan_hub_5k_p95() {
+    let _guard = BENCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = bench_root("hub5k");
+    write_hub_corpus(&root);
+    let eg = binary();
+    build(&eg, &root);
+    let (_, p95) = measure(&eg, &root, &[]);
+    println!("hub 5k reuse p95={:.2}ms", p95.as_secs_f64() * 1e3);
+    assert!(
+        p95 < Duration::from_millis(200),
+        "hub 5k regression: p95 {:.2}ms >= 200ms",
+        p95.as_secs_f64() * 1e3
+    );
+    let _ = fs::remove_dir_all(&root);
+}

@@ -115,7 +115,11 @@ fn symlinked_journal_file_is_rejected() {
 fn index_derived_control_bytes_are_escaped_in_output() {
     let repo = temp_repo("control-bytes");
     let evil = "evil\u{1b}[31mred\u{7}.py";
-    write(&repo, evil, "def unique_control_marker():\n    return 1\n");
+    write(
+        &repo,
+        evil,
+        "def unique_control_marker():\n    return 1\n\ndef unique_control_other():\n    return 2\n",
+    );
     build(&repo);
     for args in [
         vec!["search", "unique_control_marker"],
@@ -128,4 +132,16 @@ fn index_derived_control_bytes_are_escaped_in_output() {
         assert!(!stdout.contains('\u{7}'), "{args:?}: raw BEL: {stdout}");
         assert!(stdout.contains("\\x1b[31m"), "{args:?}: {stdout}");
     }
+    let out = eg(&repo)
+        .args(["path", "unique_control_marker", "unique_control_other"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains('\u{1b}'),
+        "raw ESC in path error: {stderr}"
+    );
+    assert!(!stderr.contains('\u{7}'), "raw BEL in path error: {stderr}");
+    assert!(stderr.contains("\\x1b[31m"), "{stderr}");
 }

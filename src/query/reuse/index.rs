@@ -47,7 +47,16 @@ impl CorpusIndex {
         let mut index = CorpusIndex::default();
         for sym in symbols.values() {
             for callee in &sym.callee_ids {
-                index.by_callee.entry(*callee).or_default().push(sym.id);
+                // Post only IDs that can satisfy D1's C_in predicate. A
+                // stoplisted ubiquitous callee would otherwise create an
+                // N-length posting shared by every caller, making each target
+                // scan the whole corpus before the detector filters it out.
+                if symbols.get(callee).is_some_and(|callee_sym| {
+                    !super::guards::cross_language(sym, callee_sym)
+                        && sym.resolved_callees.contains(&callee_sym.name)
+                }) {
+                    index.by_callee.entry(*callee).or_default().push(sym.id);
+                }
             }
             for callee in sym.deep_weights.keys() {
                 index
@@ -67,13 +76,17 @@ impl CorpusIndex {
                         .push(sym.id);
                 }
             }
-            for callee in &sym.all_callees {
-                if is_raw_client(callee) {
-                    index
-                        .by_raw_client
-                        .entry(normalize_client(callee))
-                        .or_default()
-                        .push(sym.id);
+            // D3 only accepts a wrapper with at least two callers; indexing
+            // low-caller symbols would make every raw-client user a candidate.
+            if sym.inbound_callers >= 2 {
+                for callee in &sym.all_callees {
+                    if is_raw_client(callee) {
+                        index
+                            .by_raw_client
+                            .entry(normalize_client(callee))
+                            .or_default()
+                            .push(sym.id);
+                    }
                 }
             }
         }
@@ -177,6 +190,13 @@ mod tests {
         }
     }
 
+    fn callee_symbol(name: &str) -> SymbolData {
+        let mut symbol = symbol_with(callee_key(name), &[], &[]);
+        symbol.name = name.to_string();
+        symbol.qualname = format!("m.{name}");
+        symbol
+    }
+
     #[test]
     fn callee_posting_requires_two_shared_keys() {
         let mut symbols = HashMap::new();
@@ -184,6 +204,9 @@ mod tests {
         symbols.insert(2, symbol_with(2, &["a", "b", "x"], &[]));
         symbols.insert(3, symbol_with(3, &["a", "c"], &[]));
         symbols.insert(4, symbol_with(4, &["a", "d"], &[]));
+        for name in ["a", "b", "c", "d", "x"] {
+            symbols.insert(callee_key(name), callee_symbol(name));
+        }
         let index = CorpusIndex::build(&symbols);
         let target = &symbols[&1];
         let mut ids = index.candidates(target, PostingKind::Callee, 2);
@@ -207,9 +230,16 @@ mod tests {
     #[test]
     fn raw_client_posting_normalizes_path_separators() {
         let mut symbols = HashMap::new();
-        symbols.insert(1, symbol_with(1, &["reqwest::get"], &[]));
-        symbols.insert(2, symbol_with(2, &["reqwest.get"], &[]));
-        symbols.insert(3, symbol_with(3, &["requests.get"], &[]));
+        for id in 1..=3 {
+            let callee = match id {
+                1 => "reqwest::get",
+                2 => "reqwest.get",
+                _ => "requests.get",
+            };
+            let mut symbol = symbol_with(id, &[callee], &[]);
+            symbol.inbound_callers = 2;
+            symbols.insert(id, symbol);
+        }
         let index = CorpusIndex::build(&symbols);
         let mut ids = index.candidates(&symbols[&1], PostingKind::RawClient, 1);
         ids.retain(|id| *id != 1);

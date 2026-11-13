@@ -65,6 +65,10 @@ pub(super) fn analyze(conn: &Connection, kinds: &[CoverageKind]) -> Result<Vec<R
     Ok(pool)
 }
 
+/// D5 is pairwise; cap the materialized pool so thousands of same-named
+/// classes cannot exhaust memory before finalize truncates the output.
+const MAX_CLASS_CANDIDATES: usize = 10_000;
+
 fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, qualname, file_id, file_path, line_start, line_end
@@ -102,7 +106,7 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
         );
     }
     let mut pool = Vec::new();
-    for (i, left) in classes.iter().enumerate() {
+    'classes: for (i, left) in classes.iter().enumerate() {
         for right in classes.iter().skip(i + 1) {
             if left.1 != right.1
                 || left.4 == right.4
@@ -145,6 +149,9 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
                 reasons: vec![ReasonCode::CoverageClass],
                 freshness: Freshness::Fresh,
             });
+            if pool.len() >= MAX_CLASS_CANDIDATES {
+                break 'classes;
+            }
         }
     }
     Ok(pool)

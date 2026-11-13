@@ -19,18 +19,24 @@ pub fn path(ctx: &QueryCtx<'_>, from: &str, to: &str, depth: usize) -> Result<Li
     let (to_id, to_qn) = resolve_endpoint(conn, to, "to")?;
     if from_id == to_id {
         return Err(EgError::NoResults(format!(
-            "'{from_qn}' and '{to_qn}' resolve to the same symbol"
+            "'{}' and '{}' resolve to the same symbol",
+            sanitize(&from_qn),
+            sanitize(&to_qn)
         )));
     }
     let (chain_ids, hop_sites) = match path_bfs(conn, from_id, to_id, depth)? {
         PathSearch::Exhausted => {
             return Err(EgError::NoResults(format!(
-                "no call path from '{from_qn}' to '{to_qn}' at any depth <= {depth} (resolved edges only)"
+                "no call path from '{}' to '{}' at any depth <= {depth} (resolved edges only)",
+                sanitize(&from_qn),
+                sanitize(&to_qn)
             )));
         }
         PathSearch::CapTruncated => {
             return Err(EgError::NoResults(format!(
-                "no call path from '{from_qn}' to '{to_qn}' within depth {depth}; a longer path may exist (resolved edges only)"
+                "no call path from '{}' to '{}' within depth {depth}; a longer path may exist (resolved edges only)",
+                sanitize(&from_qn),
+                sanitize(&to_qn)
             )));
         }
         PathSearch::Found {

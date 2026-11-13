@@ -366,3 +366,47 @@ fn resolve_monitor_log_path(
         None,
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_gate_rejects_tracked_and_symlinked_journals() {
+        let dir = crate::db::test_support::temp_root("monitor-gate");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        crate::db::test_support::write_file(repo.join(".engram/usage.log"), b"{}\n").unwrap();
+        assert!(monitor_gate(Some(&repo), false).is_ok());
+        assert!(monitor_gate(Some(&repo), true).is_ok());
+        let init = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-q"])
+            .status();
+        if matches!(init, Ok(status) if status.success()) {
+            let added = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["add", "-f", ".engram/usage.log"])
+                .status()
+                .unwrap();
+            assert!(added.success());
+            assert!(monitor_gate(Some(&repo), true).is_err());
+        }
+        crate::db::test_support::remove_tree(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn monitor_gate_rejects_symlinked_journal_file() {
+        let dir = crate::db::test_support::temp_root("monitor-gate-link");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        crate::db::test_support::write_file(dir.join("outside.log"), b"{}\n").unwrap();
+        std::os::unix::fs::symlink(dir.join("outside.log"), repo.join(".engram/usage.log"))
+            .unwrap();
+        assert!(monitor_gate(Some(&repo), true).is_err());
+        crate::db::test_support::remove_tree(&dir);
+    }
+}

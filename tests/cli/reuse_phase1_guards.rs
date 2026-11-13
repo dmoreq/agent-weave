@@ -262,6 +262,16 @@ fn duplicate_qualname_scan_is_deterministic_after_freshness_change() {
     for output in &outputs[1..] {
         assert_eq!(&outputs[0], output);
     }
+    assert!(
+        !outputs[0].contains("changed since build"),
+        "fresh a.b.py must win the duplicate-qualname tie: {}",
+        outputs[0]
+    );
+    assert!(
+        outputs[0].contains("a.b.wrap") && outputs[0].contains("confidence=medium"),
+        "{}",
+        outputs[0]
+    );
 }
 
 #[test]

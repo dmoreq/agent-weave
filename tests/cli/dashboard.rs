@@ -7,6 +7,8 @@ use std::time::Instant;
 
 use engram::dashboard::server::{handle_client, poll_sse_file};
 
+use super::common::*;
+
 #[test]
 fn dashboard_query_string_stripped_and_head_method_suppresses_body() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
