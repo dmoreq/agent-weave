@@ -113,7 +113,7 @@ By default, `eg mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 | `search` | `terms`, `limit?` | Discover symbols with interface cards & `[callers=N]` |
 | `reuse` | `paths?`, `limit?`, `deep_callee?`, `min_confidence?`, `propose?`, `callees?`, `explain?`, `show_suppressed?`, `coverage?`, `judge?` | Anti-reinvention scan, pre-write proposal, allowlist visibility, opt-in coverage, and optional judge |
 | `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?`, `since?`, `until?`, `local?`, `explain?`, `legacy?` | Zero-token layered memory search; uses the code index for call-graph expansion when available; Unicode-aware with a legacy fallback |
-| `usage` | `quality?` | Session telemetry, latency percentiles, and token savings |
+| `usage` | `quality?` (default `false`), `global?` | Session telemetry, latency percentiles, and token savings |
 | `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `touch?`, `global?`, `confirm?` | Persist architectural decisions and gotchas; `confirm=true` is required for `reuse-allow/` over MCP |
 
 ### Extended Surface (`--all-tools`)

@@ -188,7 +188,11 @@ fn from_tool_args_diag(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> 
             )?,
         },
         "usage" => CommandRequest::Usage {
-            quality: a.0.get("quality").and_then(|v| v.as_bool()).unwrap_or(true),
+            quality: a
+                .0
+                .get("quality")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             global: a.0.get("global").and_then(|v| v.as_bool()).unwrap_or(false),
         },
         _ => return Err(unknown_tool(tool)),

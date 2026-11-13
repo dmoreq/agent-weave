@@ -321,6 +321,40 @@ fn reuse_arguments_via_mcp() {
     let _ = fs::remove_dir_all(&repo);
 }
 
+/// `usage` must default to the CLI's non-quality summary on both surfaces.
+#[test]
+fn usage_default_matches_cli() {
+    let repo = fixture("mcp-usage");
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let mut srv = spawn(&repo);
+    let mcp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "usage", "arguments": {}}),
+    );
+    let cli = eg_cmd(&repo).args(["usage"]).output().unwrap();
+    assert_eq!(cli.status.code(), Some(0));
+    assert_eq!(
+        strip_footer(&result_text(&mcp)),
+        String::from_utf8_lossy(&cli.stdout).into_owned()
+    );
+    let mcp_quality = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "usage", "arguments": {"quality": true}}),
+    );
+    let cli_quality = eg_cmd(&repo).args(["usage", "--quality"]).output().unwrap();
+    assert_eq!(cli_quality.status.code(), Some(0));
+    assert_eq!(
+        strip_footer(&result_text(&mcp_quality)),
+        String::from_utf8_lossy(&cli_quality.stdout).into_owned()
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
 /// Default MCP profile: the 13 core navigation tools plus the memory
 /// write/query loop (OQ1). The full inventory/analysis surface stays
 /// available behind `--all-tools`.

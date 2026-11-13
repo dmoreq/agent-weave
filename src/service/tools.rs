@@ -257,7 +257,7 @@ pub const TOOL_SPECS: &[ToolSpec] = &[
                 name: "quality",
                 kind: ParamKind::Bool,
                 required: false,
-                description: "Include latency and error breakdown (default true)",
+                description: "Include latency and error breakdown (default false)",
             },
             ParamSpec {
                 name: "global",
