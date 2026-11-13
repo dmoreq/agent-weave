@@ -93,17 +93,34 @@ reuse_bench --ignored (6 gates)                           PASS
   d3 raw ≈108 ms (300), deep shared ≈245 ms (500),
   16 MiB hash ≈+6 ms (25); deep median delta +2.3%/+4.4% (10%)
 oracle tests + protocol fixture                           PASS (precision/recall 1.0 fixture-only)
+field sample scorer --check                               PASS (37 labeled pairs, metrics frozen)
 ```
+
+## Field calibration (first run)
+
+The remaining calibration follow-up was executed on real code: the engram repository itself, frozen at commit `38a2542` (eg 1.0.5). Frozen artifact: `docs/baselines/reuse-field-scan-20261114.json`; scorer: `tests/scripts/reuse_field_run.py` (CI pins a drift check).
+
+Method: `eg reuse --explain --limit 100` on the frozen corpus (116 total candidates; the 16 low candidates beyond the cap are unsampled). The labeled subset covers every medium and provisional candidate plus every 4th low candidate — 37 pairs. Each pair was labeled `duplicate` (consolidation onto the canonical is the correct action) or `distinct` by reading both function bodies. Provenance: single-labeler static inspection by the implementing agent; not owner-verified ground truth.
+
+| Tier | Candidates | Labeled | Duplicate | Field precision |
+|---|---:|---:|---:|---:|
+| high | 0 | 0 | 0 | — |
+| medium | 12 | 12 | 3 | 0.25 |
+| provisional | 5 | 5 | 0 | 0.00 |
+| low | 83 | 20 | 2 | 0.10 |
+| overall | 100 | 37 | 5 | 0.1351 |
+
+Reading: the three medium true positives are all D4 pass-through wrappers (thin delegates that should call the canonical directly). Every D1/D2 medium on this corpus fires on same-family siblings (graph vs memory panels, legacy vs unicode tokenizers, batch vs single write) that are deliberately parallel, not duplicated; the four D3 bypass advisories target different endpoints and are not duplicates. `low`/`provisional` are dominated by the same family-by-design pattern. This matches the calibration warning: the tiers rank signal strength, they do not certify duplication — on real code, `medium` must still be read before acting, and `high` (absent here) remains the only conservative tier.
 
 ## Residual risks (updated)
 
-- Confidence tiers are ordinal heuristics, not field-calibrated probabilities. `high` is intentionally conservative (D1/D2 only; D3 capped).
-- The tracked 160-label oracle file is a protocol fixture. Field calibration requires a frozen repository sample and predictions from real corpora.
+- Confidence tiers are ordinal heuristics, not field-calibrated probabilities. `high` is intentionally conservative (D1/D2 only; D3 capped). The first field run (above) measured `medium` at 0.25 and `low` at 0.10 precision on this repository's own scan; treat every tier below `high` as a review pointer, not consolidation advice.
+- The 160-label oracle file is a protocol fixture; the field sample is a 37-pair single-labeler subset of one repository. Broader calibration needs more frozen repos and owner-verified labels.
 - `--deep-callee` is bounded by design: closures wider than 512 weighted callees are skipped and deep scanning stops after 30,000 candidate pairs per invocation; exhaustion is visible in `guarded_out`, not as a silent zero.
 - D3 indexes raw-client wrappers with `inbound_callers >= 2` per language family; the canonical-first scan stops early, so evidence ordering follows the deterministic canonical rank.
 - Coverage remains opt-in and low-precision by design; D5 pairs are capped at 10,000; D1L/DT are advisory, not proof.
 - Dashboard renders confidence but does not run coverage detectors; CLI coverage remains the authoritative surface.
 - Allowlist suppression is an explicit local act with `--show-suppressed` visibility; it is not a security boundary against a malicious same-user agent.
 - A judge binary is trusted input; model integrity and installation provenance remain operator responsibilities.
-- MCP `usage` defaults `quality=true` while the CLI defaults to `false`; byte parity holds for identical explicit arguments. Aligning the defaults is a follow-up, not a contract break.
-- The final confidence tier claims should be revisited after a real oracle run; until then `high` is a review aid, not a probability.
+- MCP `usage` `quality` now defaults to `false` on both surfaces (aligned follow-up); byte parity holds for identical explicit arguments.
+- The final confidence tier claims should be revisited as more field samples land; until then `high` is a review aid, not a probability.

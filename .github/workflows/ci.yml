@@ -36,6 +36,7 @@ jobs:
       - run: python3 -I tests/scripts/test_recall_scorers.py
       - run: python3 -I tests/scripts/test_reuse_oracle.py
       - run: python3 -I tests/scripts/reuse_oracle.py --labels tests/fixtures/reuse/oracle-labels.csv --predictions tests/fixtures/reuse/oracle-predictions.csv --baseline tests/fixtures/reuse/oracle-baseline.csv --json
+      - run: python3 -I tests/scripts/reuse_field_run.py docs/baselines/reuse-field-scan-20261114.json --check
       - run: python3 -I -B bench/test_run.py
       - run: python3 -I bench/run.py target/release/eg
       - run: bash tests/scripts/allowlist_check.sh Cargo.lock
