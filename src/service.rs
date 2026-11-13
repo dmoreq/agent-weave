@@ -98,7 +98,11 @@ pub fn execute(
             }
             if let EgError::Ambiguous { candidates, .. } = &e {
                 for (path, line, qualname) in candidates {
-                    stdout.push_str(&format!("{path}:{line} {qualname}\n"));
+                    stdout.push_str(&format!(
+                        "{}:{line} {}\n",
+                        crate::query::sanitize(path),
+                        crate::query::sanitize(qualname)
+                    ));
                 }
             }
             let stderr = format!("{e}\n");

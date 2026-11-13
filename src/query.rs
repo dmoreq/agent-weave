@@ -33,6 +33,37 @@ pub const DEFAULT_IMPACT_EDGES: &str = "calls";
 pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
 
+/// Escape untrusted index/user text for one-line CLI, MCP, and journal output.
+/// Backslash first, then the named escapes, then every remaining control char
+/// as `\xNN`. Every rendered index-derived field goes through this function:
+/// a cloned repository controls its file names, qualnames, and signatures.
+pub(crate) fn sanitize(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{1b}' => out.push_str("\\x1b"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c if matches!(
+                c,
+                '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{feff}'
+            ) =>
+            {
+                out.push_str(&format!("\\u{{{:04x}}}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Permanent honesty caveat for `eg path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
 const PATH_CAVEAT: &str = "eg: path — resolved static edges only; dynamic dispatch may hide paths";
@@ -128,10 +159,12 @@ pub struct Pointer {
 
 impl Pointer {
     pub fn render(&self) -> String {
-        if self.detail.is_empty() {
-            format!("{}:{}{}", self.file, self.line, self.tag)
+        let file = sanitize(&self.file);
+        let detail = sanitize(&self.detail);
+        if detail.is_empty() {
+            format!("{file}:{}{}", self.line, self.tag)
         } else {
-            format!("{}:{}{} {}", self.file, self.line, self.tag, self.detail)
+            format!("{file}:{}{} {detail}", self.line, self.tag)
         }
     }
 }

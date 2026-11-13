@@ -67,6 +67,9 @@ pub fn serve_dashboard(
         let r = root_path
             .as_deref()
             .ok_or_else(|| EgError::Usage("--local needs a repository root".to_string()))?;
+        // Local mode reads and displays this repo's journal; refuse a tracked
+        // confinement directory before opening any panel.
+        crate::db::reject_tracked_eg_dir(r)?;
         crate::journal::usage_log_path(r)
     } else {
         db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log"))

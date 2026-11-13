@@ -48,7 +48,12 @@ pub fn unresolved_names(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) ->
             kind,
             name,
         } = row;
-        format!("{path}:{line} {kind} {name}")
+        format!(
+            "{}:{line} {} {}",
+            sanitize(&path),
+            sanitize(&kind),
+            sanitize(&name)
+        )
     }));
     let cap = finish_capped(&mut out, shown, total as usize, stale, "rows");
     let cap = if unlocated > 0 {
@@ -142,16 +147,16 @@ pub fn unresolved(ctx: &QueryCtx<'_>, path: Option<&str>, limit: usize) -> Resul
         out.push("top unresolved names:".to_string());
         out.extend(names.into_iter().map(|(name, n, internal)| {
             if internal {
-                format!("  {name} n={n} [internal]")
+                format!("  {} n={n} [internal]", sanitize(&name))
             } else {
-                format!("  {name} n={n}")
+                format!("  {} n={n}", sanitize(&name))
             }
         }));
     }
     out.extend(
         rows.into_iter()
             .take(shown)
-            .map(|(path, n)| format!("{path} unresolved={n}")),
+            .map(|(path, n)| format!("{} unresolved={n}", sanitize(&path))),
     );
     let cap = finish_capped(&mut out, shown, n_files, false, "");
     Ok(LineQuery::new(out, cap, shown))

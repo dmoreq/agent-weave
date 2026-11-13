@@ -34,7 +34,7 @@ pub fn stream_monitor(
     errors_only: bool,
     local: bool,
 ) -> Result<()> {
-    let log_path = resolve_monitor_log_path(root, local);
+    let log_path = resolve_monitor_log_path(root, local)?;
 
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return stream_linear(&log_path, repo_filter, errors_only);
@@ -307,17 +307,19 @@ fn is_event_matched(val: &Value, repo_filter: Option<&str>, errors_only: bool) -
     true
 }
 
-fn resolve_monitor_log_path(root: Option<&Path>, local: bool) -> PathBuf {
+fn resolve_monitor_log_path(root: Option<&Path>, local: bool) -> Result<PathBuf> {
     if local {
         if let Some(r) = root {
-            return crate::journal::usage_log_path(r);
+            crate::db::reject_tracked_eg_dir(r)?;
+            return Ok(crate::journal::usage_log_path(r));
         }
         if let Ok(cwd) = std::env::current_dir() {
             let local_p = crate::journal::usage_log_path(&cwd);
             if local_p.is_file() {
-                return local_p;
+                crate::db::reject_tracked_eg_dir(&cwd)?;
+                return Ok(local_p);
             }
         }
     }
-    db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log"))
+    Ok(db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log")))
 }

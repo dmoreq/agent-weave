@@ -379,11 +379,65 @@ fn tracked_index_is_rejected_before_query() {
     build(&repo);
     git(&repo, &["init", "-q"]);
     git(&repo, &["add", "-f", ".engram/index.db"]);
-    for args in [vec!["search", "unique_one"], vec!["reuse"]] {
+    for args in [
+        vec!["search", "unique_one"],
+        vec!["reuse"],
+        vec!["usage"],
+        vec!["build"],
+    ] {
         let out = eg(&repo).args(&args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.contains("git-tracked"), "{args:?}: {stderr}");
+    }
+    // A rejected invocation must not mutate the tracked confinement state.
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["status", "--porcelain", "--", ".engram"])
+        .output()
+        .unwrap();
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        !status.lines().any(|line| line.starts_with(" M")),
+        "{status}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn tracked_case_variant_engram_is_rejected() {
+    let repo = temp_repo("tracked-case-variant");
+    write(&repo, "a.py", "def unique_case_marker():\n    return 1\n");
+    build(&repo);
+    std::fs::rename(repo.join(".engram"), repo.join(".ENGRAM")).unwrap();
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-f", ".ENGRAM/index.db"]);
+    let out = eg(&repo)
+        .args(["search", "unique_case_marker"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "case-variant bypass");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("git-tracked"), "{stderr}");
+}
+
+#[test]
+fn index_derived_control_bytes_are_escaped_in_output() {
+    let repo = temp_repo("control-bytes");
+    let evil = "evil\u{1b}[31mred\u{7}.py";
+    write(&repo, evil, "def unique_control_marker():\n    return 1\n");
+    build(&repo);
+    for args in [
+        vec!["search", "unique_control_marker"],
+        vec!["symbols", evil],
+        vec!["context", "unique_control_marker"],
+    ] {
+        let out = eg(&repo).args(&args).output().unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(!stdout.contains('\u{1b}'), "{args:?}: raw ESC: {stdout}");
+        assert!(!stdout.contains('\u{7}'), "{args:?}: raw BEL: {stdout}");
+        assert!(stdout.contains("\\x1b[31m"), "{args:?}: {stdout}");
     }
 }
 

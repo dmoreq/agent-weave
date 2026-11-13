@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use rusqlite::Connection;
 
 use crate::error::{EgError, Result};
+pub(crate) use crate::query::sanitize;
 use crate::query::QueryCtx;
 
 use corpus::{load_callees, load_deep_weights, load_df_all, load_symbols, select_targets};
@@ -66,36 +67,6 @@ pub struct ReuseCandidate {
     pub confidence: ReuseConfidence,
     pub reasons: Vec<ReasonCode>,
     pub freshness: Freshness,
-}
-
-/// Escape untrusted index/user text for one-line CLI, MCP, and journal output.
-/// Backslash first, then the named escapes, then every remaining control char
-/// as `\xNN`.
-pub(crate) fn sanitize(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{1b}' => out.push_str("\\x1b"),
-            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c if matches!(
-                c,
-                '\u{200b}'..='\u{200f}'
-                    | '\u{2028}'..='\u{202e}'
-                    | '\u{2060}'..='\u{2064}'
-                    | '\u{2066}'..='\u{2069}'
-                    | '\u{feff}'
-            ) =>
-            {
-                out.push_str(&format!("\\u{{{:04x}}}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 impl ReuseCandidate {
@@ -366,8 +337,9 @@ pub(crate) fn analyze_corpus(
     let stopset = build_stoplist(&symbols);
     let name_stopset = build_name_stoplist(&symbols);
     for sym in symbols.values_mut() {
-        sym.all_callees
-            .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
+        // `all_callees` stays unfiltered: D4 needs the true distinct-callee
+        // count, and a stoplisted constructor must still disqualify a
+        // pass-through wrapper.
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
         sym.name_tokens

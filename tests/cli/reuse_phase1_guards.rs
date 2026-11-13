@@ -153,6 +153,35 @@ fn class_constructors_are_not_callee_footprints() {
 }
 
 #[test]
+fn stoplisted_constructor_disqualifies_pass_through_wrapper() {
+    let repo = temp_repo("reuse-d4-stoplisted-constructor");
+    write(
+        &repo,
+        "models.py",
+        "class W:\n    pass\n\ndef normalize(value):\n    return value\n",
+    );
+    write(
+        &repo,
+        "x.py",
+        "from models import W, normalize\n\ndef wrap(value):\n    W()\n    return normalize(value)\n",
+    );
+    // Four constructor call sites push W past the dynamic callee stoplist.
+    write(
+        &repo,
+        "y.py",
+        "from models import W\n\ndef a():\n    W()\n\ndef b():\n    W()\n\ndef c():\n    W()\n",
+    );
+    build(&repo);
+    let out = eg(&repo).args(["reuse", "--explain"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("pass-through wrapper"),
+        "two resolved callees must not read as a wrapper: {stdout}"
+    );
+    assert!(!stdout.contains("x.wrap"), "{stdout}");
+}
+
+#[test]
 fn scan_output_cap_30k() {
     let repo = temp_repo("reuse-output-cap");
     let mut a = String::new();

@@ -22,6 +22,8 @@ struct Store {
     repo_root: PathBuf,
     db_path: PathBuf,
     store_id: String,
+    /// Repo root whose `.engram/` owns this store; `None` for the global store.
+    guard_root: Option<PathBuf>,
 }
 
 pub fn collect_memories(root: Option<&Path>, entries: &[Value]) -> Result<Value> {
@@ -85,22 +87,24 @@ fn discover_memory_stores(root: Option<&Path>, entries: &[Value]) -> Vec<Store> 
 
     // `db_path` is explicit: the global root already IS the `.engram`
     // directory, so re-joining `.engram` here doubled the home path.
-    let mut push = |name: String, repo_root: PathBuf, db_path: PathBuf| {
-        let store_id = store_id_for(&db_path);
-        if seen.insert(store_id.clone(), ()).is_none() {
-            stores.push(Store {
-                name,
-                repo_root,
-                db_path,
-                store_id,
-            });
-        }
-    };
+    let mut push =
+        |name: String, repo_root: PathBuf, db_path: PathBuf, guard_root: Option<PathBuf>| {
+            let store_id = store_id_for(&db_path);
+            if seen.insert(store_id.clone(), ()).is_none() {
+                stores.push(Store {
+                    name,
+                    repo_root,
+                    db_path,
+                    store_id,
+                    guard_root,
+                });
+            }
+        };
 
     if let Ok(g_dir) = db::global_eg_dir() {
         let g_db = global_store_db(&g_dir);
         if g_db.is_file() {
-            push("global".to_string(), g_dir, g_db);
+            push("global".to_string(), g_dir, g_db, None);
         }
     }
 
@@ -111,7 +115,7 @@ fn discover_memory_stores(root: Option<&Path>, entries: &[Value]) -> Vec<Store> 
     for name in names {
         if let Some(repo) = locals.remove(&name) {
             let db_path = repo.join(".engram").join("memory.db");
-            push(name, repo, db_path);
+            push(name, repo.clone(), db_path, Some(repo));
         }
     }
 
@@ -316,18 +320,21 @@ fn collect_store_notes(
     out: &mut Vec<Value>,
 ) -> std::result::Result<(), Value> {
     let err = |stage: &str, message: String| json!({ "store": store.name, "store_id": store.store_id, "stage": stage, "message": message });
+    if let Some(root) = &store.guard_root {
+        crate::db::reject_symlink(&root.join(".engram"), ".engram directory")
+            .map_err(|e| err("security", e.to_string()))?;
+        crate::db::reject_tracked_eg_dir(root).map_err(|e| err("security", e.to_string()))?;
+    }
+    crate::db::reject_symlink(&store.db_path, "memory store")
+        .map_err(|e| err("security", e.to_string()))?;
     let conn =
         Connection::open_with_flags(&store.db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| err("open", e.to_string()))?;
-    let index_conn = if crate::db::reject_tracked_eg_dir(&store.repo_root).is_ok() {
-        Connection::open_with_flags(
-            store.repo_root.join(".engram").join("index.db"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .ok()
-    } else {
-        None
-    };
+    let index_conn = Connection::open_with_flags(
+        store.repo_root.join(".engram").join("index.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok();
 
     // v1 stores predate anchored_at; fall back to created_at at read time
     // instead of migrating a read-only connection.
@@ -400,12 +407,50 @@ mod tests {
     }
 
     #[test]
+    fn tracked_store_is_reported_not_read() {
+        let dir = crate::db::test_support::temp_root("tracked-dashboard-memory");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        crate::db::test_support::write_file(repo.join(".engram/memory.db"), b"attacker").unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-q"])
+            .status();
+        if !matches!(status, Ok(s) if s.success()) {
+            crate::db::test_support::remove_tree(&dir);
+            return;
+        }
+        let added = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "-f", ".engram/memory.db"])
+            .status()
+            .unwrap();
+        assert!(added.success());
+        let store = Store {
+            name: "repo".to_string(),
+            repo_root: repo.clone(),
+            db_path: repo.join(".engram/memory.db"),
+            store_id: "tracked".to_string(),
+            guard_root: Some(repo),
+        };
+        let mut notes = Vec::new();
+        let err = collect_store_notes(&store, &HashMap::new(), &mut notes).unwrap_err();
+        assert_eq!(err["stage"], "security", "{err}");
+        assert!(err["message"].as_str().unwrap().contains("git-tracked"));
+        assert!(notes.is_empty());
+        crate::db::test_support::remove_tree(&dir);
+    }
+
+    #[test]
     fn refs_without_an_index_are_unverified_not_broken() {
         let store = Store {
             name: "global".to_string(),
             repo_root: PathBuf::from("/nonexistent-eg-global"),
             db_path: PathBuf::from("/nonexistent-eg-global/memory.db"),
             store_id: "global".to_string(),
+            guard_root: None,
         };
         let row = MemoryRow {
             id: 1,

@@ -100,17 +100,14 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
     });
 }
 
-/// Serialize and append the usage line. Called exactly once per process,
-/// after the outcome is known. All I/O failures are swallowed by contract.
-/// An invocation that resolved no repository (a `None` root, or any root
-/// without an identity) skips the write entirely: there is no `.engram/`
-/// location, and an unattributable line would only surface as a ghost row.
+/// Serialize and append the usage line. Called once per process after the
+/// outcome is known; I/O failures are swallowed. A `None` root or an
+/// identityless root skips the write (no `.engram/` location exists).
 pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
     let Some(pending) = PENDING.with(|p| p.borrow_mut().take()) else {
         return;
     };
-    // One identity for every surface. The `file_name` and `.git` probes that
-    // used to live here belong to `repo::RepoRef`.
+    // One identity for every surface (see `repo::RepoRef`).
     let repo = root.map(crate::repo::RepoRef::from_root);
     let Some(repo_path) = repo.as_ref().and_then(crate::repo::RepoRef::journal_repo) else {
         return;
@@ -161,7 +158,10 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "judged": pending.judged,
     });
     let line_str = format!("{line}\n");
-
+    // Never append to tracked, attacker-authored state.
+    if root.is_some_and(|r| crate::db::reject_tracked_eg_dir(r).is_err()) {
+        return;
+    }
     if let Some(root) = root {
         append_line(&usage_log_path(root), &line_str);
     }

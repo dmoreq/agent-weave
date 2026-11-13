@@ -63,7 +63,7 @@ fn render_path(ctx: &QueryCtx<'_>, chain_ids: &[i64], hop_sites: &[i64]) -> Resu
         let Some(f) = file.get(&caller) else {
             return Err(EgError::Internal("path hop file missing".to_string()));
         };
-        pointers.push(format!("{f}:{site}"));
+        pointers.push(format!("{}:{site}", sanitize(f)));
         hop_files.insert(f.clone());
     }
     let (header, stale) = staleness_header(ctx, &hop_files);
@@ -83,7 +83,11 @@ fn render_path(ctx: &QueryCtx<'_>, chain_ids: &[i64], hop_sites: &[i64]) -> Resu
     }
     out.push(format!(
         "eg: chain {} ({hops} hops)",
-        chain_names.join(" -> ")
+        chain_names
+            .iter()
+            .map(|name| sanitize(name))
+            .collect::<Vec<_>>()
+            .join(" -> ")
     ));
     Ok(LineQuery::new(out, String::new(), hops))
 }

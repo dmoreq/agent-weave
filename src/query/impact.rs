@@ -139,7 +139,11 @@ pub fn impact(
     for g in guards.iter().filter(|g| g.kind == "decision").take(1) {
         prepend_header(
             &mut out,
-            &format!("warning: guarded by decision '{}': {}", g.key, g.summary),
+            &format!(
+                "warning: guarded by decision '{}': {}",
+                sanitize(&g.key),
+                sanitize(&g.summary)
+            ),
         );
     }
     Ok(out)

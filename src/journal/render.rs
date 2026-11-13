@@ -94,6 +94,7 @@ fn load_usage_lines_from_path(base_log: &Path) -> crate::error::Result<String> {
 
 /// Read both journal generations, newest last (`""` is current, `.1` rotated).
 fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
+    crate::db::reject_tracked_eg_dir(root)?;
     load_usage_lines_from_path(&usage_log_path(root))
 }
 

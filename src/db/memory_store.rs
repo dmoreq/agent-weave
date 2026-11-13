@@ -202,10 +202,19 @@ pub fn open_memory_store(root: &Path) -> Result<Connection> {
 pub fn open_memory_mutation_at(db_path: &Path) -> Result<Connection> {
     // Same write-path guards the CLI enforces: a symlinked store or a
     // git-tracked .engram is refused, so the dashboard cannot write outside
-    // the directory it resolved.
+    // the directory it resolved. `db_path` is `<root>/.engram/memory.db`;
+    // derive the repository root before probing (the old parent() call probed
+    // `<root>/.engram/.engram` and always passed).
     reject_symlink(db_path, "memory store")?;
-    if let Some(dir) = db_path.parent() {
-        reject_tracked_eg_dir(dir)?;
+    if let Some(eg) = db_path.parent() {
+        if eg
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(".engram"))
+        {
+            if let Some(root) = eg.parent() {
+                reject_tracked_eg_dir(root)?;
+            }
+        }
     }
     open_memory_conn_path(db_path, false, || {
         EgError::NoResults(format!("no memory store at {}", db_path.display()))

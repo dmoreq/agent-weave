@@ -82,11 +82,15 @@ fn render_context(ctx: &QueryCtx<'_>, data: &ContextData) -> Result<LineQuery> {
     let sig = if data.signature.is_empty() {
         String::new()
     } else {
-        format!(" {}", data.signature)
+        format!(" {}", sanitize(&data.signature))
     };
     out.push(format!(
         "{}:{}-{} {} {}{sig}",
-        data.def_path, data.def_line, data.def_end, data.kind, data.qualname
+        sanitize(&data.def_path),
+        data.def_line,
+        data.def_end,
+        sanitize(&data.kind),
+        sanitize(&data.qualname),
     ));
     let last_segment = data.qualname.split("::").last().unwrap_or("");
     let guards = crate::memory::find_guarding_notes(
@@ -95,7 +99,12 @@ fn render_context(ctx: &QueryCtx<'_>, data: &ContextData) -> Result<LineQuery> {
         &[&data.qualname, last_segment],
     );
     for g in guards.iter().take(2) {
-        out.push(format!("memory: [{}] {}: {}", g.kind, g.key, g.summary));
+        out.push(format!(
+            "memory: [{}] {}: {}",
+            sanitize(&g.kind),
+            sanitize(&g.key),
+            sanitize(&g.summary)
+        ));
     }
     out.push(format!(
         "callers (showing {} of {}):",
@@ -124,7 +133,14 @@ fn context_rows(data: &ContextData) -> (Vec<String>, Vec<String>) {
     let caller_lines = data
         .callers
         .iter()
-        .map(|row| format!("{}:{} {}", row.path, row.site_line, row.qualname))
+        .map(|row| {
+            format!(
+                "{}:{} {}",
+                sanitize(&row.path),
+                row.site_line,
+                sanitize(&row.qualname)
+            )
+        })
         .collect();
     let callee_lines = data
         .callees

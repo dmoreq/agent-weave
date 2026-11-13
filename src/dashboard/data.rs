@@ -62,6 +62,26 @@ fn discover_repos(
     }
 }
 
+/// Drop repos whose `.engram/` is git-tracked and return the security errors
+/// for the panel payload. A tracked repo must not scan as a clean zero-result.
+fn retain_untracked(repos: &mut HashMap<String, PathBuf>) -> (Vec<Value>, usize) {
+    let mut errors = Vec::new();
+    let mut blocked = 0usize;
+    repos.retain(|name, path| match crate::db::reject_tracked_eg_dir(path) {
+        Ok(()) => true,
+        Err(err) => {
+            blocked += 1;
+            errors.push(serde_json::json!({
+                "repo": name,
+                "stage": "security",
+                "message": err.to_string(),
+            }));
+            false
+        }
+    });
+    (errors, blocked)
+}
+
 pub struct AggregatedData {
     pub summary: Value,
     pub reuse: Value,

@@ -106,6 +106,9 @@ pub(super) fn prepare_build(
     max_parse_error_rate: f64,
     started: Instant,
 ) -> Result<BuildPrep> {
+    // Refuse tracked state before walking, parsing, or reading old rows: the
+    // provenance gate must not depend on reaching create_fresh later.
+    crate::db::reject_tracked_eg_dir(root)?;
     let t0 = Instant::now();
     let stats = crate::walk::walk(root, &crate::walk::source_exts())?;
     let opts = BuildOpts {

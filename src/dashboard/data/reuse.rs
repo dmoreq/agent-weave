@@ -147,6 +147,7 @@ pub fn collect_reuse_candidates(
 ) -> Result<(Vec<Value>, Value, Vec<Value>)> {
     let mut repos: HashMap<String, PathBuf> = HashMap::new();
     discover_repos(root, entries, "index.db", &mut repos);
+    let (errors, blocked) = super::retain_untracked(&mut repos);
 
     let usage = aggregate_candidate_usage(entries);
     let ((mut candidates_json, total_corpus_candidates), cache_hit, cache_age_ms) =
@@ -168,6 +169,8 @@ pub fn collect_reuse_candidates(
         summarize_reuse_metrics(&candidates_json, total_corpus_candidates, prewrite_count);
     summary["cache_hit"] = json!(cache_hit);
     summary["cache_age_ms"] = json!(cache_age_ms);
+    summary["degraded"] = json!(blocked > 0);
+    summary["errors"] = json!(errors);
     Ok((candidates_json, summary, prewrite_searches))
 }
 
