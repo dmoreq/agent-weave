@@ -181,7 +181,10 @@ fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) ->
         return 0;
     }
     let db_path = r_root.join(".engram").join("index.db");
-    if !db_path.is_file() {
+    if crate::db::reject_symlink(&r_root.join(".engram"), ".engram directory").is_err()
+        || crate::db::reject_symlink(&db_path, "index.db").is_err()
+        || !db_path.is_file()
+    {
         return 0;
     }
     let conn =

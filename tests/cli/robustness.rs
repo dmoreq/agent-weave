@@ -377,12 +377,23 @@ fn tracked_index_is_rejected_before_query() {
     let repo = temp_repo("tracked-index");
     write(&repo, "a.py", "def unique_one():\n    return 1\n");
     build(&repo);
+    write(&repo, ".engram/index.db.new", "tracked new\n");
     git(&repo, &["init", "-q"]);
-    git(&repo, &["add", "-f", ".engram/index.db"]);
+    git(
+        &repo,
+        &[
+            "add",
+            "-f",
+            ".engram/index.db",
+            ".engram/build.lock",
+            ".engram/index.db.new",
+        ],
+    );
     for args in [
         vec!["search", "unique_one"],
         vec!["reuse"],
         vec!["usage"],
+        vec!["audit"],
         vec!["build"],
     ] {
         let out = eg(&repo).args(&args).output().unwrap();
@@ -399,7 +410,9 @@ fn tracked_index_is_rejected_before_query() {
         .unwrap();
     let status = String::from_utf8_lossy(&status.stdout);
     assert!(
-        !status.lines().any(|line| line.starts_with(" M")),
+        !status
+            .lines()
+            .any(|line| line.starts_with(" M") || line.starts_with(" D")),
         "{status}"
     );
 }
@@ -420,6 +433,25 @@ fn tracked_case_variant_engram_is_rejected() {
     assert_eq!(out.status.code(), Some(2), "case-variant bypass");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("git-tracked"), "{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_engram_journal_is_rejected() {
+    let repo = temp_repo("symlink-journal");
+    let outside = temp_repo("symlink-journal-outside");
+    write(
+        &outside,
+        "usage.log",
+        "{\"tool\":\"build\",\"exit_code\":0,\"result_count\":1,\"shown\":1,\"repo\":\"/x\",\"ts\":1}\n",
+    );
+    std::os::unix::fs::symlink(&*outside, repo.join(".engram")).unwrap();
+    for args in [vec!["usage"], vec!["audit"]] {
+        let out = eg(&repo).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(6), "{args:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("refusing symlinked"), "{args:?}: {stderr}");
+    }
 }
 
 #[test]

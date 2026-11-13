@@ -207,6 +207,7 @@ pub fn open_memory_mutation_at(db_path: &Path) -> Result<Connection> {
     // `<root>/.engram/.engram` and always passed).
     reject_symlink(db_path, "memory store")?;
     if let Some(eg) = db_path.parent() {
+        crate::db::reject_symlink(eg, ".engram directory")?;
         if eg
             .file_name()
             .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(".engram"))

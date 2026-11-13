@@ -313,12 +313,14 @@ fn reuse_multiple_paths_abort_on_invalid() {
 #[test]
 fn reuse_truncation_reports_showing_and_omitted() {
     let repo = temp_repo("reuse-truncation");
+    let mut helpers = String::new();
     let mut a = String::new();
     let mut b = String::new();
+    let mut imports = Vec::new();
     for i in 0..20 {
         for suffix in ["one", "two", "three"] {
-            a.push_str(&format!("def h{i}_{suffix}():\n    return 1\n"));
-            b.push_str(&format!("def h{i}_{suffix}():\n    return 1\n"));
+            helpers.push_str(&format!("def h{i}_{suffix}():\n    return 1\n"));
+            imports.push(format!("h{i}_{suffix}"));
         }
         a.push_str(&format!(
             "def alpha_{i}():\n    return h{i}_one() + h{i}_two() + h{i}_three()\n"
@@ -327,8 +329,10 @@ fn reuse_truncation_reports_showing_and_omitted() {
             "def beta_{i}():\n    return h{i}_one() + h{i}_two() + h{i}_three()\n"
         ));
     }
-    write(&repo, "a.py", &a);
-    write(&repo, "b.py", &b);
+    let import_line = format!("from helpers import {}\n", imports.join(", "));
+    write(&repo, "helpers.py", &helpers);
+    write(&repo, "a.py", &format!("{import_line}{a}"));
+    write(&repo, "b.py", &format!("{import_line}{b}"));
     build(&repo);
     let out = eg(&repo)
         .args(["reuse", "b.py", "--limit", "10"])

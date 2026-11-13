@@ -330,11 +330,12 @@ fn collect_store_notes(
     let conn =
         Connection::open_with_flags(&store.db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|e| err("open", e.to_string()))?;
-    let index_conn = Connection::open_with_flags(
-        store.repo_root.join(".engram").join("index.db"),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .ok();
+    let index_path = store.repo_root.join(".engram").join("index.db");
+    let index_conn = if crate::db::reject_symlink(&index_path, "index.db").is_ok() {
+        Connection::open_with_flags(&index_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
+    } else {
+        None
+    };
 
     // v1 stores predate anchored_at; fall back to created_at at read time
     // instead of migrating a read-only connection.

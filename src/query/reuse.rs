@@ -349,7 +349,15 @@ pub(crate) fn analyze_corpus(
         load_deep_weights(&mut symbols);
     }
 
-    let targets = select_targets(&symbols, path_filter, target_names);
+    let mut targets = select_targets(&symbols, path_filter, target_names);
+    // Duplicate qualnames across files race for the same deduped pair; sort by
+    // the full identity so the surviving target (and its freshness) is stable.
+    targets.sort_by(|a, b| {
+        a.qualname
+            .cmp(&b.qualname)
+            .then_with(|| a.file_path.cmp(&b.file_path))
+            .then_with(|| a.line_start.cmp(&b.line_start))
+    });
     let index = (symbols.len() > INVERTED_INDEX_MIN_SYMBOLS).then(|| CorpusIndex::build(&symbols));
     let df_all_excl = load_df_all(conn)?;
     let corpus = Corpus {

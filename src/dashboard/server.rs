@@ -68,7 +68,8 @@ pub fn serve_dashboard(
             .as_deref()
             .ok_or_else(|| EgError::Usage("--local needs a repository root".to_string()))?;
         // Local mode reads and displays this repo's journal; refuse a tracked
-        // confinement directory before opening any panel.
+        // or symlinked confinement directory before opening any panel.
+        crate::db::reject_symlink(&crate::db::eg_dir(r), ".engram directory")?;
         crate::db::reject_tracked_eg_dir(r)?;
         crate::journal::usage_log_path(r)
     } else {
@@ -229,7 +230,12 @@ fn serve_api_route(
     }
 }
 
-fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result<()> {
+fn stream_sse_events(
+    stream: &mut TcpStream,
+    log_path: &Path,
+    root: Option<&Path>,
+    global: bool,
+) -> std::io::Result<()> {
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
     // Same-origin only: the stream carries repository paths and search terms.
@@ -239,8 +245,15 @@ fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result
 
     let mut tail = data::Tail::new(log_path);
     let mut last_keepalive = Instant::now();
+    let mut last_gate = Instant::now();
 
     loop {
+        if last_gate.elapsed() >= Duration::from_secs(5) {
+            if local_gate(root, global).is_err() {
+                return Ok(());
+            }
+            last_gate = Instant::now();
+        }
         let now = Instant::now();
         poll_sse_file(stream, &mut tail, log_path, &mut last_keepalive, now)?;
 
@@ -288,6 +301,19 @@ pub fn poll_sse_file(
     stream.flush()
 }
 
+/// Gate the captured local log path. Global mode reads `~/.engram/usage.log`
+/// and is not repository provenance.
+fn local_gate(root: Option<&Path>, global: bool) -> Result<()> {
+    if global {
+        return Ok(());
+    }
+    if let Some(root) = root {
+        crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+        crate::db::reject_tracked_eg_dir(root)?;
+    }
+    Ok(())
+}
+
 pub fn handle_client(
     mut stream: TcpStream,
     log_path: &Path,
@@ -310,6 +336,19 @@ pub fn handle_client(
     if !host_allowed(req.host.as_deref()) {
         let resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         stream.write_all(resp.as_bytes())?;
+        return Ok(());
+    }
+    // Local mode is revalidated per request: a session can become tracked
+    // after startup, and the captured log path must not keep serving it.
+    if let Err(err) = local_gate(root, global) {
+        let body = format!("eg: {err}\n");
+        send_response(
+            &mut stream,
+            503,
+            "text/plain; charset=utf-8",
+            body.as_bytes(),
+            method == "HEAD",
+        )?;
         return Ok(());
     }
 
@@ -346,7 +385,7 @@ pub fn handle_client(
             stream.write_all(header.as_bytes())?;
             return stream.flush();
         }
-        return stream_sse_events(&mut stream, log_path);
+        return stream_sse_events(&mut stream, log_path, root, global);
     }
 
     let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";

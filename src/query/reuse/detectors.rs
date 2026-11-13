@@ -1,13 +1,15 @@
 //! Detectors D1-D5, D1L, DT: duplicate, bypass, wrapper, and coverage signals.
 
 use super::candidate::{make_candidate, MatchMeta};
-use super::confidence::distinctive_ratio;
 use super::corpus::SymbolData;
 use super::guards::*;
 use super::index::{CorpusIndex, PostingKind};
 use super::*;
 use std::cell::Cell;
 use std::collections::HashMap;
+
+mod d1;
+pub(super) use d1::find_best_d1;
 
 /// Immutable corpus view: symbols, optional index, and deep-callee switch.
 pub(super) struct Corpus<'a> {
@@ -175,138 +177,6 @@ fn best_by_overlap(
     })
 }
 
-/// D1: callee-footprint containment over resolved project callees.
-fn d1_footprint(symbol: &SymbolData) -> &std::collections::HashSet<String> {
-    if symbol.resolved_callees.is_empty() {
-        &symbol.all_callees
-    } else {
-        &symbol.resolved_callees
-    }
-}
-
-fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
-    if corpus.deep_callee {
-        if target.deep_weights.len() < 3 {
-            return None;
-        }
-    } else if d1_footprint(target).len() < 3 || target.resolved_callees.len() < 2 {
-        return None;
-    }
-    best_by_overlap(
-        DetectorId::D1,
-        target,
-        corpus,
-        if corpus.deep_callee {
-            PostingKind::DeepCallee
-        } else {
-            PostingKind::Callee
-        },
-        2,
-        |candidate| {
-            let c_callees = d1_footprint(candidate);
-            // GUARD-COMP: a resolved call edge in either direction is a
-            // caller/callee composition, not duplication.
-            if target.callee_ids.contains(&candidate.id)
-                || candidate.callee_ids.contains(&target.id)
-            {
-                corpus.guard();
-                return None;
-            }
-            let unresolved_composition = target.all_callees.contains(&candidate.name)
-                || candidate.all_callees.contains(&target.name);
-            let zero_name = target
-                .name_tokens
-                .intersection(&candidate.name_tokens)
-                .next()
-                .is_none();
-            if corpus.deep_callee {
-                if candidate.deep_weights.len() < 3 {
-                    return None;
-                }
-                let ratio = weighted_containment(target, candidate);
-                if ratio < 0.85 {
-                    return None;
-                }
-                let shared: Vec<String> = d1_footprint(target)
-                    .intersection(c_callees)
-                    .cloned()
-                    .collect();
-                let pct = (ratio * 100.0).round() as u64;
-                let mut reasons = Vec::new();
-                if unresolved_composition {
-                    reasons.push(ReasonCode::CallerCallee);
-                }
-                if zero_name {
-                    reasons.push(ReasonCode::ZeroName);
-                }
-                let weak = distinctive_ratio(target, candidate, corpus, &shared);
-                let confidence = if !reasons.is_empty() || weak > 0.75 {
-                    ReuseConfidence::Low
-                } else if ratio >= 0.95 && weak <= 0.25 {
-                    ReuseConfidence::High
-                } else if ratio >= 0.90 {
-                    ReuseConfidence::Medium
-                } else {
-                    ReuseConfidence::Provisional
-                };
-                return Some((pct, shared, confidence, reasons));
-            }
-            if c_callees.len() < 3 || candidate.resolved_callees.len() < 2 {
-                return None;
-            }
-            if target
-                .resolved_callees
-                .intersection(&candidate.resolved_callees)
-                .count()
-                < 2
-            {
-                return None;
-            }
-            let shared: Vec<String> = d1_footprint(target)
-                .intersection(c_callees)
-                .cloned()
-                .collect();
-            // GUARD-BAL: reject < 0.30, low in [0.30, 0.50), provisional >= 0.50.
-            let target_fp = d1_footprint(target);
-            let min_len = target_fp.len().min(c_callees.len());
-            let max_len = target_fp.len().max(c_callees.len());
-            let bal = min_len as f64 / max_len as f64;
-            if bal < 0.30 {
-                corpus.guard();
-                return None;
-            }
-            let ratio_candidate = shared.len() as f64 / c_callees.len() as f64;
-            let ratio_target = shared.len() as f64 / target_fp.len() as f64;
-            let ratio = ratio_candidate.max(ratio_target);
-            if ratio < 0.80 {
-                return None;
-            }
-            let pct = (ratio * 100.0).round() as u64;
-            let mut reasons = Vec::new();
-            if unresolved_composition {
-                reasons.push(ReasonCode::CallerCallee);
-            }
-            if zero_name {
-                reasons.push(ReasonCode::ZeroName);
-            }
-            if bal < 0.50 {
-                reasons.push(ReasonCode::SizeImbalance);
-            }
-            let weak = distinctive_ratio(target, candidate, corpus, &shared);
-            let confidence = if !reasons.is_empty() || weak > 0.75 {
-                ReuseConfidence::Low
-            } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {
-                ReuseConfidence::High
-            } else if ratio >= 0.90 {
-                ReuseConfidence::Medium
-            } else {
-                ReuseConfidence::Provisional
-            };
-            Some((pct, shared, confidence, reasons))
-        },
-    )
-}
-
 /// Detector D2: Interface & Signature Token Overlap.
 fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
     if target.name_tokens.len() < 2 {
@@ -333,8 +203,8 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                 corpus.guard();
                 return None;
             }
-            let unresolved_composition = target.all_callees.contains(&candidate.name)
-                || candidate.all_callees.contains(&target.name);
+            let unresolved_composition = target.unresolved_callees.contains(&candidate.name)
+                || candidate.unresolved_callees.contains(&target.name);
             let shared: Vec<String> = target
                 .name_tokens
                 .intersection(&candidate.name_tokens)

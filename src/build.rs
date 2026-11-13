@@ -136,6 +136,10 @@ pub fn run_build(
     }
     let started = Instant::now();
     let root = crate::walk::discover_root(root_arg)?;
+    // Refuse tracked state before the lock is acquired: lock setup deletes
+    // index.db.new and rewrites build.lock, so a denied build must not mutate
+    // committed files.
+    crate::db::reject_tracked_eg_dir(&root)?;
     let _lock = crate::db::BuildLock::acquire(&root)?;
     let mut prep = prepare_build(&root, force, max_parse_error_rate, started)?;
     if let Some(line) = no_op_line(&prep)? {

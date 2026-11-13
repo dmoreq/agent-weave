@@ -182,10 +182,95 @@ fn stoplisted_constructor_disqualifies_pass_through_wrapper() {
 }
 
 #[test]
+fn resolved_callee_name_collisions_do_not_create_d1_overlap() {
+    let repo = temp_repo("reuse-d1-name-collision");
+    write(
+        &repo,
+        "common.py",
+        "def normalize(value):\n    return value\n",
+    );
+    write(
+        &repo,
+        "mod_a.py",
+        "from common import normalize\n\ndef load():\n    return 1\n\ndef save():\n    return 2\n\ndef render():\n    return 3\n\ndef run_alpha():\n    return load() + save() + render() + normalize(1)\n",
+    );
+    write(
+        &repo,
+        "mod_b.py",
+        "from common import normalize\n\ndef load():\n    return 1\n\ndef save():\n    return 2\n\ndef render():\n    return 3\n\ndef run_beta():\n    return load() + save() + render() + normalize(1)\n",
+    );
+    build(&repo);
+    let out = eg(&repo).args(["reuse", "--explain"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("detector=D1"),
+        "same bare callee names in different modules are not a shared project footprint: {stdout}"
+    );
+}
+
+#[test]
+fn resolved_different_symbol_is_not_caller_callee_reason() {
+    let repo = temp_repo("reuse-d1-resolved-reason");
+    write(
+        &repo,
+        "common.py",
+        "def a():\n    return 1\n\ndef b():\n    return 2\n\ndef c():\n    return 3\n\ndef parse():\n    return 4\n",
+    );
+    write(
+        &repo,
+        "cand.py",
+        "from common import a, b, c\n\ndef parse():\n    return a() + b() + c()\n",
+    );
+    write(
+        &repo,
+        "target.py",
+        "from common import a, b, c, parse\n\ndef parse_all():\n    return parse() + a() + b() + c()\n",
+    );
+    build(&repo);
+    let out = eg(&repo).args(["reuse", "--explain"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("target.parse_all"), "{stdout}");
+    assert!(
+        !stdout.contains("reasons=[caller-callee]"),
+        "a resolved call to a different symbol is not a composition hint: {stdout}"
+    );
+    assert!(!stdout.contains("confidence=low"), "{stdout}");
+}
+
+#[test]
+fn duplicate_qualname_scan_is_deterministic_after_freshness_change() {
+    let repo = temp_repo("reuse-dupq-scan-order");
+    write(&repo, "h.py", "def normalize(value):\n    return value\n");
+    for path in ["a/b.py", "a.b.py"] {
+        write(
+            &repo,
+            path,
+            "from h import normalize\n\ndef wrap(value):\n    return normalize(value)\n",
+        );
+    }
+    build(&repo);
+    write(
+        &repo,
+        "a/b.py",
+        "from h import normalize\n\ndef wrap(value):\n    return normalize(value)\n# stale\n",
+    );
+    let mut outputs = Vec::new();
+    for _ in 0..8 {
+        let out = eg(&repo).args(["reuse", "--limit", "5"]).output().unwrap();
+        outputs.push(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    for output in &outputs[1..] {
+        assert_eq!(&outputs[0], output);
+    }
+}
+
+#[test]
 fn scan_output_cap_30k() {
     let repo = temp_repo("reuse-output-cap");
+    let mut helpers = String::new();
     let mut a = String::new();
     let mut b = String::new();
+    let mut imports = Vec::new();
     // Ten independent pairs. Each pair shares 20 very long-named helpers, so
     // its block exceeds 4 KiB while helper frequencies stay below the stoplist.
     let long_suffix = "x".repeat(380);
@@ -193,17 +278,18 @@ fn scan_output_cap_30k() {
         let mut calls = Vec::new();
         for i in 0..20 {
             let name = format!("helper_{pair}_{i}_{long_suffix}");
-            let line = format!("def {name}():\n    return {i}\n");
-            a.push_str(&line);
-            b.push_str(&line);
+            helpers.push_str(&format!("def {name}():\n    return {i}\n"));
+            imports.push(name.clone());
             calls.push(format!("{name}()"));
         }
         let call = calls.join(" + ");
         a.push_str(&format!("def dup_{pair}():\n    return {call}\n"));
         b.push_str(&format!("def dup_{pair}():\n    return {call}\n"));
     }
-    write(&repo, "a.py", &a);
-    write(&repo, "b.py", &b);
+    let import_line = format!("from helpers import {}\n", imports.join(", "));
+    write(&repo, "helpers.py", &helpers);
+    write(&repo, "a.py", &format!("{import_line}{a}"));
+    write(&repo, "b.py", &format!("{import_line}{b}"));
     build(&repo);
     let out = eg(&repo)
         .args(["reuse", "b.py", "--limit", "100"])
