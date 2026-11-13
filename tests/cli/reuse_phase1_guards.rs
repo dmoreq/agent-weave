@@ -32,6 +32,49 @@ fn empty_below_threshold_run_journals_counts() {
 }
 
 #[test]
+fn fresh_higher_confidence_sorts_before_stale_low() {
+    let repo = temp_repo("reuse-order-freshness");
+    write(
+        &repo,
+        "helpers.py",
+        "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef normalize(value):\n    return value\n",
+    );
+    write(
+        &repo,
+        "a1.py",
+        "from helpers import h1, h2, h3\n\ndef alpha_case():\n    return h1() + h2() + h3()\n",
+    );
+    write(
+        &repo,
+        "b1.py",
+        "from helpers import h1, h2, h3\n\ndef beta_case():\n    return h1() + h2() + h3()\n",
+    );
+    write(
+        &repo,
+        "c.py",
+        "from helpers import normalize\n\ndef parse_token_value_data_extra(value):\n    return normalize(value)\n",
+    );
+    write(
+        &repo,
+        "d.py",
+        "from helpers import normalize\n\ndef parse_token_value(value):\n    return normalize(value)\n",
+    );
+    build(&repo);
+    write(
+        &repo,
+        "b1.py",
+        "from helpers import h1, h2, h3\n\ndef beta_case():\n    return h1() + h2() + h3() + 1\n",
+    );
+    let out = eg(&repo).args(["reuse", "--limit", "1"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("parse_token_value") && !stdout.contains("confidence=low"),
+        "fresh higher-confidence candidate must sort first: {stdout}"
+    );
+    assert!(!stdout.contains("beta_case"), "{stdout}");
+}
+
+#[test]
 fn scan_output_cap_30k() {
     let repo = temp_repo("reuse-output-cap");
     let mut a = String::new();

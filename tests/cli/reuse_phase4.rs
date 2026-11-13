@@ -115,6 +115,25 @@ fn coverage_unresolved_selects_same_language_canonical() {
 }
 
 #[test]
+fn coverage_duplicate_qualname_is_deterministic() {
+    let repo = temp_repo("reuse-coverage-duplicate-qualname");
+    write(&repo, "a/b.py", "def helper(value):\n    return value\n");
+    write(&repo, "a.b.py", "def helper(value):\n    return value\n");
+    write(&repo, "rogue.py", "def rogue():\n    return helper(1)\n");
+    build(&repo);
+    let mut outputs = Vec::new();
+    for _ in 0..3 {
+        let out = eg(&repo)
+            .args(["reuse", "--coverage", "unresolved"])
+            .output()
+            .unwrap();
+        outputs.push(String::from_utf8_lossy(&out.stdout).into_owned());
+    }
+    assert_eq!(outputs[0], outputs[1]);
+    assert_eq!(outputs[1], outputs[2]);
+}
+
+#[test]
 fn coverage_tests_reports_test_production_overlap() {
     let repo = temp_repo("reuse-coverage-tests");
     write(
