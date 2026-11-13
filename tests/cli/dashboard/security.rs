@@ -29,6 +29,8 @@ fn local_dashboard_rejects_tracked_journal_at_request_time() {
         ".engram/usage.log",
         "{\"tool\":\"build\",\"exit_code\":0,\"result_count\":1,\"shown\":1,\"repo\":\"/x\",\"ts\":1}\n",
     );
+    let clean = local_request(&repo, &repo.join(".engram/usage.log"));
+    assert!(clean.starts_with("HTTP/1.1 200"), "{clean}");
     git(&repo, &["init", "-q"]);
     git(&repo, &["add", "-f", ".engram/usage.log"]);
     let resp = local_request(&repo, &repo.join(".engram/usage.log"));
