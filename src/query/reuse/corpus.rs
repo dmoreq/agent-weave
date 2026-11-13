@@ -17,6 +17,10 @@ pub(super) struct SymbolData {
     pub(super) line_end: i64,
     pub(super) resolved_callees: HashSet<String>,
     pub(super) all_callees: HashSet<String>,
+    /// Names whose call site has no resolved destination. A call resolved to a
+    /// class or test symbol is not unresolved, so D1L must not suggest a
+    /// same-named function as its canonical.
+    pub(super) unresolved_callees: HashSet<String>,
     pub(super) callee_ids: HashSet<i64>,
     /// Weighted 1-hop (1.0) and 2-hop (0.5) callee footprint, populated only
     /// when `reuse --deep-callee` asks for the transitive signal.
@@ -55,6 +59,7 @@ pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>
             line_end: r.get(6)?,
             resolved_callees: HashSet::new(),
             all_callees: HashSet::new(),
+            unresolved_callees: HashSet::new(),
             callee_ids: HashSet::new(),
             deep_weights: HashMap::new(),
             inbound_callers: 0,
@@ -155,12 +160,21 @@ fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDat
                 caller_sets.entry(did).or_default().insert(src_id);
             }
         }
+        let resolved = dst_id.filter(|id| symbols.contains_key(id));
         if let Some(sym) = symbols.get_mut(&src_id) {
             let callee = callee_name(&dst_name);
             sym.all_callees.insert(callee.clone());
-            if let Some(did) = dst_id {
-                sym.callee_ids.insert(did);
-                sym.resolved_callees.insert(callee);
+            match resolved {
+                Some(did) => {
+                    sym.callee_ids.insert(did);
+                    sym.resolved_callees.insert(callee);
+                }
+                // A resolved destination outside the production corpus (class,
+                // test, or other symbol kind) is still a real call site.
+                None if dst_id.is_none() => {
+                    sym.unresolved_callees.insert(callee);
+                }
+                None => {}
             }
         }
     }
@@ -210,7 +224,8 @@ fn map_unresolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDa
             .map(|&(_, _, id)| id);
 
         if let Some(sym) = innermost.and_then(|id| symbols.get_mut(&id)) {
-            sym.all_callees.insert(callee);
+            sym.all_callees.insert(callee.clone());
+            sym.unresolved_callees.insert(callee);
         }
     }
     Ok(())

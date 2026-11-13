@@ -172,6 +172,11 @@ pub fn collect_reuse_candidates(
 }
 
 fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
+    // The dashboard opens index.db directly; apply the same provenance gate as
+    // every CLI/MCP query so a tracked, attacker-authored index is not read.
+    if crate::db::reject_tracked_eg_dir(r_root).is_err() {
+        return 0;
+    }
     let db_path = r_root.join(".engram").join("index.db");
     if !db_path.is_file() {
         return 0;

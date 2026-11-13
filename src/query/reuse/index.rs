@@ -166,6 +166,7 @@ mod tests {
             line_end: 2,
             resolved_callees: callees.iter().map(|s| s.to_string()).collect(),
             all_callees: callees.iter().map(|s| s.to_string()).collect(),
+            unresolved_callees: HashSet::new(),
             callee_ids: HashSet::new(),
             deep_weights: HashMap::new(),
             inbound_callers: 0,

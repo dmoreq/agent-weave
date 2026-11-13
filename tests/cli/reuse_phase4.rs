@@ -26,6 +26,31 @@ fn coverage_class_finds_duplicate_shapes() {
 }
 
 #[test]
+fn coverage_class_does_not_merge_duplicate_qualname_methods() {
+    let repo = temp_repo("reuse-coverage-duplicate-class-qualname");
+    // `a/b.py` and `a.b.py` both map to module `a.b`, so the two `Parser`
+    // classes share a qualname. Their method sets are disjoint and must not
+    // be merged into a false class-shape match.
+    write(
+        &repo,
+        "a/b.py",
+        "class Parser:\n    def read(self):\n        return 1\n",
+    );
+    write(
+        &repo,
+        "a.b.py",
+        "class Parser:\n    def write(self):\n        return 2\n",
+    );
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--coverage", "class", "--explain"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("detector=D5"), "{stdout}");
+}
+
+#[test]
 fn coverage_class_requires_shared_method() {
     let repo = temp_repo("reuse-coverage-class-negative");
     write(
@@ -61,6 +86,28 @@ fn coverage_rejects_paths_instead_of_ignoring_scope() {
     assert!(
         stderr.contains("coverage cannot be combined with paths"),
         "{stderr}"
+    );
+}
+
+#[test]
+fn coverage_unresolved_ignores_resolved_constructor_calls() {
+    let repo = temp_repo("reuse-coverage-resolved-constructor");
+    write(&repo, "models.py", "class Widget:\n    pass\n");
+    write(&repo, "factory.py", "def Widget():\n    return 1\n");
+    write(
+        &repo,
+        "a.py",
+        "from models import Widget\n\ndef build_widget():\n    return Widget()\n",
+    );
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--coverage", "unresolved", "--explain"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("detector=D1L"),
+        "resolved constructor must not be reported as unresolved: {stdout}"
     );
 }
 

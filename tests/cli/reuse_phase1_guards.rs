@@ -4,6 +4,56 @@
 use super::common::*;
 
 #[test]
+fn reuse_repo_root_and_inner_dot_targets_scan() {
+    let repo = temp_repo("reuse-repo-root-dot");
+    write(
+        &repo,
+        "src/a.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    write(
+        &repo,
+        "src/b.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    build(&repo);
+    for target in [".", "./"] {
+        let out = eg(&repo)
+            .args(["reuse", target, "--explain"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{target}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("path_matches=0"), "{target}: {stdout}");
+        assert!(stdout.contains("parse_token"), "{target}: {stdout}");
+    }
+    for target in ["src/.", "src/./", "./src/"] {
+        let out = eg(&repo)
+            .args(["reuse", target, "--explain"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{target}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("path_matches=2"), "{target}: {stdout}");
+        assert!(stdout.contains("parse_token"), "{target}: {stdout}");
+    }
+}
+
+#[test]
+fn reuse_repo_root_cannot_mix_with_paths() {
+    let repo = temp_repo("reuse-repo-root-mixed");
+    write(&repo, "a.py", "def unique_one():\n    return 1\n");
+    build(&repo);
+    let out = eg(&repo).args(["reuse", ".", "a.py"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cannot be combined with other targets"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn empty_below_threshold_run_journals_counts() {
     let repo = temp_repo("reuse-below-journal");
     write(
@@ -72,6 +122,34 @@ fn fresh_higher_confidence_sorts_before_stale_low() {
         "fresh higher-confidence candidate must sort first: {stdout}"
     );
     assert!(!stdout.contains("beta_case"), "{stdout}");
+}
+
+#[test]
+fn class_constructors_are_not_callee_footprints() {
+    let repo = temp_repo("reuse-class-constructor-footprint");
+    write(
+        &repo,
+        "models.py",
+        "class Widget:\n    pass\n\nclass Parser:\n    pass\n\ndef normalize(value):\n    return value\n",
+    );
+    write(
+        &repo,
+        "a.py",
+        "from models import Widget, Parser, normalize\n\ndef alpha_case(value):\n    Widget()\n    Parser()\n    return normalize(value)\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "from models import Widget, Parser, normalize\n\ndef beta_case(value):\n    Widget()\n    Parser()\n    return normalize(value)\n",
+    );
+    build(&repo);
+    let out = eg(&repo).args(["reuse", "--explain"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("detector=D1"),
+        "constructors must not satisfy D1's footprint gates: {stdout}"
+    );
+    assert!(!stdout.contains("alpha_case"), "{stdout}");
 }
 
 #[test]

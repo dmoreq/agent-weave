@@ -14,8 +14,28 @@ pub(super) fn resolve_scope(ctx: &QueryCtx<'_>, inputs: &[String]) -> Result<Res
     let mut matched_files = HashSet::new();
 
     for input in inputs {
+        if input.is_empty() {
+            return Err(EgError::Usage("path must be non-empty".to_string()));
+        }
+        // Validate the raw input before lexical normalization: dropping empty
+        // components would otherwise turn `/etc` into a relative path.
+        validate_input(input)?;
         let normalized = normalize_target(input);
         validate_input(&normalized)?;
+        if normalized == "." {
+            if inputs.len() > 1 {
+                return Err(EgError::Usage(
+                    "repository root cannot be combined with other targets".to_string(),
+                ));
+            }
+            return Ok(ResolvedScope {
+                kind: ScopeKind::Repo,
+                paths: Vec::new(),
+                symbols: HashSet::new(),
+                files: Vec::new(),
+                path_matches: 0,
+            });
+        }
         if let Some((file, line)) = split_file_line(ctx, &normalized) {
             let meta = std::fs::symlink_metadata(ctx.root.join(&file))
                 .map_err(|err| EgError::Internal(format!("stat {file}: {err}")))?;
@@ -97,15 +117,22 @@ pub(super) fn resolve_scope(ctx: &QueryCtx<'_>, inputs: &[String]) -> Result<Res
     })
 }
 
+/// Collapse dot and empty components so `.`, `./`, `src/.`, and `./src/`
+/// all resolve to a stable repo-relative path. `..` is preserved for
+/// `validate_input` to reject.
 fn normalize_target(input: &str) -> String {
-    let mut out = input;
-    while let Some(rest) = out.strip_prefix("./") {
-        out = rest;
+    let mut parts = Vec::new();
+    for part in input.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        parts.push(part);
     }
-    if out.len() > 1 {
-        out = out.trim_end_matches('/');
+    if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
     }
-    out.to_string()
 }
 
 fn validate_input(input: &str) -> Result<()> {

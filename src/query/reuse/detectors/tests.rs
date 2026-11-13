@@ -20,6 +20,7 @@ fn make_test_symbol(
         line_end: 20,
         resolved_callees: HashSet::new(),
         all_callees: callees.iter().map(|&s| s.to_string()).collect(),
+        unresolved_callees: HashSet::new(),
         callee_ids: HashSet::new(),
         deep_weights: HashMap::new(),
         inbound_callers: callers,

@@ -38,6 +38,8 @@ pub(super) fn analyze(conn: &Connection, kinds: &[CoverageKind]) -> Result<Vec<R
     for sym in symbols.values_mut() {
         sym.all_callees
             .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
+        sym.unresolved_callees
+            .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
         sym.name_tokens
@@ -81,15 +83,21 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
         ))
     })?;
     let classes: Vec<_> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut methods: HashMap<String, HashSet<String>> = HashMap::new();
-    for (_, _, qualname, _, _, _, _) in &classes {
+    let mut methods: HashMap<(i64, String), HashSet<String>> = HashMap::new();
+    for (_, _, qualname, file_id, _, _, _) in &classes {
+        // Scope methods to the defining file: two files can produce the same
+        // qualname (`a/b.py` and `a.b.py` both map to `a.b`), and a
+        // qualname-only query would merge their unrelated method sets.
         let mut stmt = conn.prepare(
-            "SELECT name FROM symbols WHERE kind = 'method' AND qualname LIKE ?1 ESCAPE '\\'",
+            "SELECT name FROM symbols
+             WHERE kind = 'method' AND file_id = ?1 AND qualname LIKE ?2 ESCAPE '\\'",
         )?;
         let prefix = format!("{}.%", escape_like(qualname));
-        let names = stmt.query_map([prefix], |r| r.get::<_, String>(0))?;
+        let names = stmt.query_map(rusqlite::params![file_id, prefix], |r| {
+            r.get::<_, String>(0)
+        })?;
         methods.insert(
-            qualname.clone(),
+            (*file_id, qualname.clone()),
             names.collect::<rusqlite::Result<HashSet<_>>>()?,
         );
     }
@@ -102,8 +110,14 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
             {
                 continue;
             }
-            let left_methods = methods.get(&left.2).cloned().unwrap_or_default();
-            let right_methods = methods.get(&right.2).cloned().unwrap_or_default();
+            let left_methods = methods
+                .get(&(left.3, left.2.clone()))
+                .cloned()
+                .unwrap_or_default();
+            let right_methods = methods
+                .get(&(right.3, right.2.clone()))
+                .cloned()
+                .unwrap_or_default();
             let mut shared: Vec<String> =
                 left_methods.intersection(&right_methods).cloned().collect();
             if shared.is_empty() {
@@ -180,7 +194,7 @@ fn unresolved_candidates(symbols: &HashMap<i64, SymbolData>) -> Result<Vec<Reuse
     let mut pool = Vec::new();
     for target in symbols.values() {
         let family = language_family(&target.file_path);
-        for callee in target.all_callees.difference(&target.resolved_callees) {
+        for callee in &target.unresolved_callees {
             if is_generic_coverage_name(callee) {
                 continue;
             }

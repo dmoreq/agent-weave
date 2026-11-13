@@ -373,6 +373,21 @@ fn serial_and_parallel_builds_are_identical() {
 }
 
 #[test]
+fn tracked_index_is_rejected_before_query() {
+    let repo = temp_repo("tracked-index");
+    write(&repo, "a.py", "def unique_one():\n    return 1\n");
+    build(&repo);
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-f", ".engram/index.db"]);
+    for args in [vec!["search", "unique_one"], vec!["reuse"]] {
+        let out = eg(&repo).args(&args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("git-tracked"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
 fn unresolved_names_flag_internal_misses() {
     // R7 L4: an unresolved bare name that exists in the index is a resolver
     // gap (actionable), distinct from external/builtin calls.
