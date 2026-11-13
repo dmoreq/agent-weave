@@ -40,6 +40,7 @@ pub(super) fn apply(
     ctx: &QueryCtx<'_>,
     pool: &mut Vec<ReuseCandidate>,
     enabled: bool,
+    mode: ReuseMode,
 ) -> Option<String> {
     if !enabled {
         return None;
@@ -50,7 +51,7 @@ pub(super) fn apply(
     };
     let mut judged = 0usize;
     pool.retain(|candidate| {
-        if judged >= MAX_JUDGED || !is_gray(candidate) {
+        if judged >= MAX_JUDGED || !is_judgeable(candidate, mode) {
             return true;
         }
         judged += 1;
@@ -63,7 +64,10 @@ pub(super) fn apply(
     None
 }
 
-fn is_gray(candidate: &ReuseCandidate) -> bool {
+fn is_judgeable(candidate: &ReuseCandidate, mode: ReuseMode) -> bool {
+    if mode == ReuseMode::Propose {
+        return candidate.overlap_pct.is_some();
+    }
     candidate
         .overlap_pct
         .is_some_and(|pct| (GRAY_LOW..=GRAY_HIGH).contains(&pct))
@@ -262,10 +266,11 @@ mod tests {
             reasons: Vec::new(),
             freshness: Freshness::Fresh,
         };
-        assert!(!is_gray(&candidate(44)));
-        assert!(is_gray(&candidate(45)));
-        assert!(is_gray(&candidate(75)));
-        assert!(!is_gray(&candidate(76)));
+        assert!(!is_judgeable(&candidate(44), ReuseMode::Scan));
+        assert!(is_judgeable(&candidate(45), ReuseMode::Scan));
+        assert!(is_judgeable(&candidate(75), ReuseMode::Scan));
+        assert!(!is_judgeable(&candidate(76), ReuseMode::Scan));
+        assert!(is_judgeable(&candidate(100), ReuseMode::Propose));
     }
 
     #[test]

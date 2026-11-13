@@ -301,7 +301,7 @@ pub(super) fn analyze_corpus_with(
             });
         }
     }
-    let judge_note = judge::apply(ctx, &mut pool, opts.judge);
+    let judge_note = judge::apply(ctx, &mut pool, opts.judge, opts.mode);
     let total = pool.len();
     let freshness = if opts.freshness_mode == FreshnessMode::Full {
         freshness::evaluate(ctx, scope, &mut pool)?
