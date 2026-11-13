@@ -55,6 +55,26 @@ fn reuse_deep_high_requires_weighted_balance() {
 }
 
 #[test]
+fn deep_cycle_does_not_use_the_pair_as_shared_evidence() {
+    let repo = temp_repo("reuse-deep-cycle");
+    write(
+        &repo,
+        "a.py",
+        "def call_x():\n    return hub_x()\n\ndef member_x():\n    return hub_x()\n\ndef hub_x():\n    return call_x() + member_x()\n",
+    );
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--deep-callee", "--explain"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("detector=D1"),
+        "a call cycle must not make the pair its own shared footprint: {stdout}"
+    );
+}
+
+#[test]
 fn reuse_deep_callee_catches_two_hop_wrapper() {
     let repo = temp_repo("reuse-deep-callee");
     write(

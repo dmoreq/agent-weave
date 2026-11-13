@@ -112,10 +112,14 @@ pub(super) fn load_deep_weights(symbols: &mut HashMap<i64, SymbolData>) {
                 .iter()
                 .copied()
                 .filter(|callee_id| {
-                    symbols.get(callee_id).is_some_and(|callee| {
-                        !super::guards::cross_language(sym, callee)
-                            && sym.resolved_callees.contains(&callee.name)
-                    })
+                    // A self-call must not enter the symbol's own closure; a
+                    // call cycle would otherwise list the pair as evidence of
+                    // its own duplication.
+                    *callee_id != id
+                        && symbols.get(callee_id).is_some_and(|callee| {
+                            !super::guards::cross_language(sym, callee)
+                                && sym.resolved_callees.contains(&callee.name)
+                        })
                 })
                 .collect();
             let mut weights: HashMap<i64, f64> =
@@ -125,10 +129,12 @@ pub(super) fn load_deep_weights(symbols: &mut HashMap<i64, SymbolData>) {
                     continue;
                 };
                 for second in &callee.callee_ids {
-                    if symbols.get(second).is_some_and(|second_sym| {
-                        !super::guards::cross_language(sym, second_sym)
-                            && callee.resolved_callees.contains(&second_sym.name)
-                    }) {
+                    if *second != id
+                        && symbols.get(second).is_some_and(|second_sym| {
+                            !super::guards::cross_language(sym, second_sym)
+                                && callee.resolved_callees.contains(&second_sym.name)
+                        })
+                    {
                         weights.entry(*second).or_insert(0.5);
                     }
                 }

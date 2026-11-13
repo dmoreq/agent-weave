@@ -78,6 +78,11 @@ fn find_best_d1_deep(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCa
         let shared_ids: Vec<i64> = target
             .deep_weights
             .keys()
+            .filter(|id| {
+                // A cycle can place each pair member in the other's closure;
+                // the pair itself is never evidence of its own duplication.
+                **id != target.id && **id != candidate.id
+            })
             .filter(|id| candidate.deep_weights.contains_key(*id))
             .copied()
             .collect();
