@@ -4,7 +4,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::corpus::{load_callees, load_symbols, SymbolData};
-use super::tokens::{build_stoplist, tokenize_name_sig};
+use super::guards::is_more_canonical;
+use super::tokens::{build_name_stoplist, build_stoplist, tokenize_name_sig};
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,11 +34,14 @@ pub(super) fn analyze(conn: &Connection, kinds: &[CoverageKind]) -> Result<Vec<R
     let mut symbols = load_symbols(conn)?;
     load_callees(conn, &mut symbols)?;
     let stopset = build_stoplist(&symbols);
+    let name_stopset = build_name_stoplist(&symbols);
     for sym in symbols.values_mut() {
         sym.all_callees
             .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
+        sym.name_tokens
+            .retain(|token| !name_stopset.contains(token));
     }
     if kinds.contains(&CoverageKind::Unresolved) {
         pool.extend(unresolved_candidates(&symbols)?);
@@ -78,7 +82,7 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
         let mut stmt = conn.prepare(
             "SELECT name FROM symbols WHERE kind = 'method' AND qualname LIKE ?1 ESCAPE '\\'",
         )?;
-        let prefix = format!("{qualname}.%");
+        let prefix = format!("{}.%", escape_like(qualname));
         let names = stmt.query_map([prefix], |r| r.get::<_, String>(0))?;
         methods.insert(
             qualname.clone(),
@@ -88,15 +92,20 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
     let mut pool = Vec::new();
     for (i, left) in classes.iter().enumerate() {
         for right in classes.iter().skip(i + 1) {
-            if left.1 != right.1 || left.4 == right.4 {
+            if left.1 != right.1
+                || left.4 == right.4
+                || language_family(&left.4) != language_family(&right.4)
+            {
                 continue;
             }
             let left_methods = methods.get(&left.2).cloned().unwrap_or_default();
             let right_methods = methods.get(&right.2).cloned().unwrap_or_default();
-            let shared: Vec<String> = left_methods.intersection(&right_methods).cloned().collect();
-            if shared.is_empty() && left.1 != right.1 {
+            let mut shared: Vec<String> =
+                left_methods.intersection(&right_methods).cloned().collect();
+            if shared.is_empty() {
                 continue;
             }
+            shared.sort();
             let confidence = if shared.len() >= 2 {
                 ReuseConfidence::Medium
             } else {
@@ -123,18 +132,59 @@ fn class_candidates(conn: &Connection) -> Result<Vec<ReuseCandidate>> {
     Ok(pool)
 }
 
+fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn is_generic_coverage_name(name: &str) -> bool {
+    matches!(
+        name,
+        "default" | "new" | "call" | "apply" | "then" | "map" | "get" | "set" | "run"
+    )
+}
+
+fn language_family(file: &str) -> String {
+    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    match ext {
+        "py" | "pyi" => "python".to_string(),
+        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => "tsjs".to_string(),
+        "rs" => "rust".to_string(),
+        other => other.to_ascii_lowercase(),
+    }
+}
+
 fn unresolved_candidates(symbols: &HashMap<i64, SymbolData>) -> Result<Vec<ReuseCandidate>> {
     let mut by_name: HashMap<&str, &SymbolData> = HashMap::new();
     for symbol in symbols.values() {
-        by_name.entry(symbol.name.as_str()).or_insert(symbol);
+        by_name
+            .entry(symbol.name.as_str())
+            .and_modify(|current| {
+                if is_more_canonical(symbol, current) {
+                    *current = symbol;
+                }
+            })
+            .or_insert(symbol);
     }
     let mut pool = Vec::new();
     for target in symbols.values() {
         for callee in target.all_callees.difference(&target.resolved_callees) {
+            if is_generic_coverage_name(callee) {
+                continue;
+            }
             let Some(canonical) = by_name.get(callee.as_str()).copied() else {
                 continue;
             };
-            if canonical.id == target.id || canonical.file_id == target.file_id {
+            if canonical.id == target.id
+                || canonical.file_id == target.file_id
+                || language_family(&target.file_path) != language_family(&canonical.file_path)
+            {
                 continue;
             }
             pool.push(ReuseCandidate {
@@ -149,7 +199,7 @@ fn unresolved_candidates(symbols: &HashMap<i64, SymbolData>) -> Result<Vec<Reuse
                 overlap_pct: None,
                 shared_items: vec![callee.clone()],
                 raw_client: None,
-                confidence: ReuseConfidence::Medium,
+                confidence: ReuseConfidence::Low,
                 reasons: vec![ReasonCode::CoverageUnresolved],
                 freshness: Freshness::Fresh,
             });
@@ -179,14 +229,26 @@ fn test_candidates(
     let tests: Vec<_> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut pool = Vec::new();
     for (name, qualname, file, line, signature) in tests {
-        let (name_tokens, _, _) = tokenize_name_sig(&name, &signature);
+        let (all_tokens, _, name_tokens) = tokenize_name_sig(&name, &signature);
+        let name_tokens = if name_tokens.is_empty() {
+            all_tokens
+        } else {
+            name_tokens
+        };
         if name_tokens.is_empty() {
             continue;
         }
         let mut best: Option<(&SymbolData, usize)> = None;
         for candidate in production.values() {
             let shared = name_tokens.intersection(&candidate.name_tokens).count();
-            if shared >= 2 && best.is_none_or(|(_, n)| shared > n) {
+            if shared < 3 {
+                continue;
+            }
+            let better = best.is_none_or(|(current, current_shared)| {
+                shared > current_shared
+                    || (shared == current_shared && is_more_canonical(candidate, current))
+            });
+            if better {
                 best = Some((candidate, shared));
             }
         }

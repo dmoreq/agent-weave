@@ -60,7 +60,7 @@ impl CorpusIndex {
                     .or_default()
                     .push(sym.id);
             }
-            let mut tokens: Vec<&String> = sym.tokens.iter().collect();
+            let mut tokens: Vec<&String> = sym.name_tokens.iter().collect();
             tokens.sort_unstable();
             for (i, left) in tokens.iter().enumerate() {
                 for right in &tokens[i + 1..] {
@@ -106,7 +106,7 @@ impl CorpusIndex {
                 }
             }
             PostingKind::TokenPair => {
-                let mut tokens: Vec<&String> = target.tokens.iter().collect();
+                let mut tokens: Vec<&String> = target.name_tokens.iter().collect();
                 tokens.sort_unstable();
                 for (i, left) in tokens.iter().enumerate() {
                     for right in &tokens[i + 1..] {
@@ -171,7 +171,7 @@ mod tests {
             inbound_callers: 0,
             tokens: tokens.iter().map(|s| s.to_string()).collect(),
             type_tokens: HashSet::new(),
-            name_tokens: HashSet::new(),
+            name_tokens: tokens.iter().map(|s| s.to_string()).collect(),
         }
     }
 

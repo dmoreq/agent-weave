@@ -416,6 +416,13 @@ fn reuse_arguments_via_mcp() {
         json!({"name": "reuse", "arguments": {"paths": "not_an_array"}}),
     );
     assert_eq!(bad_paths["result"]["isError"], true, "{bad_paths}");
+    let bad_limit = rpc(
+        &mut srv,
+        20,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "limit": 101}}),
+    );
+    assert_eq!(bad_limit["result"]["isError"], true, "{bad_limit}");
 
     let ok = rpc(
         &mut srv,

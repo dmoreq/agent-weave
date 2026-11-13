@@ -42,6 +42,7 @@ pub(super) fn apply(
     pool: &mut Vec<ReuseCandidate>,
     enabled: bool,
     mode: ReuseMode,
+    proposal_signature: Option<&str>,
 ) -> Option<String> {
     if !enabled {
         return None;
@@ -50,19 +51,32 @@ pub(super) fn apply(
         Ok(setup) => setup,
         Err(note) => return Some(format!("eg: judge unavailable: {note}")),
     };
+    let before = pool.len();
     let mut judged = 0usize;
+    let mut failed = false;
     pool.retain(|candidate| {
         if judged >= MAX_JUDGED || !is_judgeable(candidate, mode) {
             return true;
         }
         judged += 1;
-        match arbitrate(ctx, &setup, candidate) {
+        match arbitrate(ctx, &setup, candidate, proposal_signature) {
             Some(verdict) => verdict.decision != VerdictDecision::Distinct,
-            None => true,
+            None => {
+                failed = true;
+                true
+            }
         }
     });
     crate::journal::set_judged(judged > 0);
-    None
+    if failed {
+        return Some("eg: judge unavailable: arbitration failed; static result kept".to_string());
+    }
+    (judged > 0).then(|| {
+        format!(
+            "eg: judge: reviewed {judged}, rejected {}",
+            before.saturating_sub(pool.len())
+        )
+    })
 }
 
 fn is_judgeable(candidate: &ReuseCandidate, mode: ReuseMode) -> bool {
@@ -119,8 +133,17 @@ fn which(name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-fn arbitrate(ctx: &QueryCtx<'_>, setup: &Setup, candidate: &ReuseCandidate) -> Option<Verdict> {
-    let left = source(ctx, &candidate.file, &candidate.symbol)?;
+fn arbitrate(
+    ctx: &QueryCtx<'_>,
+    setup: &Setup,
+    candidate: &ReuseCandidate,
+    proposal_signature: Option<&str>,
+) -> Option<Verdict> {
+    let left = if candidate.file == "<proposal>" {
+        proposal_signature?.to_string()
+    } else {
+        source(ctx, &candidate.file, &candidate.symbol)?
+    };
     let right = source(ctx, &candidate.canonical_file, &candidate.canonical)?;
     run_child(setup, &left, &right).map(|decision| Verdict { decision })
 }
@@ -134,6 +157,9 @@ fn source(ctx: &QueryCtx<'_>, file: &str, name: &str) -> Option<String> {
     let abs = ctx.root.join(file);
     let meta = std::fs::symlink_metadata(&abs).ok()?;
     if !meta.is_file() || meta.file_type().is_symlink() {
+        return None;
+    }
+    if meta.len() > crate::walk::MAX_FILE_SIZE {
         return None;
     }
     let canon_root = std::fs::canonicalize(ctx.root).ok()?;
@@ -181,9 +207,6 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> 
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .env_clear();
-    if let Some(home) = std::env::var_os("HOME") {
-        command.env("HOME", home);
-    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -195,13 +218,9 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> 
         let _ = child.wait();
         return None;
     };
-    if stdin.write_all(&payload).is_err() {
-        kill_group(&child);
-        let _ = child.kill();
-        let _ = child.wait();
-        return None;
-    }
-    drop(stdin);
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(&payload);
+    });
     let deadline = Instant::now() + TIMEOUT;
     loop {
         match child.try_wait() {
@@ -211,10 +230,15 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> 
                 kill_group(&child);
                 let _ = child.kill();
                 let _ = child.wait();
+                let _ = writer.join();
                 return None;
             }
         }
     }
+    // The judge may have exited after forking a helper that inherited stdout.
+    // Tear down the process group before draining so the read is bounded.
+    kill_group(&child);
+    let _ = writer.join();
     let mut raw = String::new();
     child
         .stdout
@@ -230,12 +254,15 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> 
 
 #[cfg(unix)]
 fn kill_group(child: &std::process::Child) {
-    let _ = Command::new("kill")
-        .arg("-TERM")
-        .arg(format!("-{}", child.id()))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    let group = format!("-{}", child.id());
+    for signal in ["-TERM", "-KILL"] {
+        let _ = Command::new("kill")
+            .arg(signal)
+            .arg(&group)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 #[cfg(not(unix))]

@@ -462,7 +462,7 @@ fn call_tool(root: &Path, tool: &str, args: &Value) -> (String, bool, i32, Optio
     });
     match outcome {
         Ok((mut stdout, stderr, 0, shown)) => {
-            if tool == "build" && !stderr.is_empty() {
+            if matches!(tool, "build" | "reuse") && !stderr.is_empty() {
                 if !stdout.is_empty() && !stdout.ends_with('\n') {
                     stdout.push('\n');
                 }

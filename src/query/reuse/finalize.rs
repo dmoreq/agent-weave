@@ -10,6 +10,13 @@ pub(super) fn finalize(
     opts: &ReuseOpts,
 ) -> Result<crate::query::LineQuery> {
     let freshness_headers = report.freshness.headers();
+    crate::journal::set_freshness(crate::journal::ReuseFreshness {
+        state: report.freshness.state.as_str(),
+        changed_files: report.freshness.changed_files,
+        checked_files: report.freshness.checked_files,
+        unknown_count: report.freshness.unknown_count,
+        unknown_reason: report.freshness.unknown_reason.map(|r| r.as_str()),
+    });
     let below_threshold = report
         .pool
         .iter()
@@ -23,9 +30,29 @@ pub(super) fn finalize(
     report.pool.truncate(opts.limit);
 
     if report.pool.is_empty() {
+        report.counts = ReuseCounts {
+            suppressed: report.counts.suppressed,
+            guarded_out: report.counts.guarded_out,
+            below_threshold,
+            total: report.counts.total,
+            ..ReuseCounts::default()
+        };
+        crate::journal::set_mode(report.mode);
+        crate::journal::set_reuse_counts(crate::journal::ReuseJournalCounts {
+            provisional: 0,
+            low: 0,
+            medium: 0,
+            high: 0,
+            suppressed: report.counts.suppressed,
+            guarded_out: report.counts.guarded_out,
+            below_threshold,
+            omitted: 0,
+            capped: 0,
+            truncated: false,
+        });
         crate::journal::record_result(
             crate::journal::OutcomeCounts::of(0, report.counts.total),
-            false,
+            report.freshness.state == Freshness::Stale,
             0,
         );
         let mut lines = vec!["eg: reuse — 0 duplication candidate(s) found".to_string()];
@@ -48,20 +75,21 @@ pub(super) fn finalize(
         return Ok(query);
     }
 
-    let mut blocks: Vec<(&ReuseCandidate, String)> = report
+    let blocks: Vec<(&ReuseCandidate, String)> = report
         .pool
         .iter()
         .map(|c| (c, c.format_text(opts.explain)))
         .collect();
     const OUTPUT_CAP: usize = 30 * 1024;
+    let total_blocks = blocks.len();
     let mut emitted: Vec<(&ReuseCandidate, String)> = Vec::new();
     let mut bytes = 0usize;
     let mut capped = 0usize;
-    for (candidate, block) in blocks.drain(..) {
+    for (index, (candidate, block)) in blocks.into_iter().enumerate() {
         let cost = block.len() + 1;
         if bytes + cost > OUTPUT_CAP {
-            capped += 1;
-            continue;
+            capped = total_blocks - index;
+            break;
         }
         bytes += cost;
         emitted.push((candidate, block));
@@ -156,7 +184,7 @@ pub(super) fn finalize(
     crate::journal::set_candidate_ids(&surfaced.join("\n"));
     crate::journal::record_result(
         crate::journal::OutcomeCounts::of(report.counts.shown, report.counts.total),
-        false,
+        report.freshness.state == Freshness::Stale,
         0,
     );
     let mut query = crate::query::LineQuery::new(out, report.stderr, report.counts.shown);

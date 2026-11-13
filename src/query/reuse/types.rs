@@ -80,6 +80,16 @@ pub enum Freshness {
     Unknown,
 }
 
+impl Freshness {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 /// Why a pair's freshness could not be established.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnknownReason {

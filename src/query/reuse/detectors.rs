@@ -1,5 +1,4 @@
-//! Detectors D1-D4: callee-footprint containment, interface token overlap,
-//! raw-client abstraction bypass, and guarded pass-through wrappers.
+//! Detectors D1-D5, D1L, DT: duplicate, bypass, wrapper, and coverage signals.
 
 use super::candidate::{make_candidate, MatchMeta};
 use super::confidence::distinctive_ratio;
@@ -10,8 +9,7 @@ use super::*;
 use std::cell::Cell;
 use std::collections::HashMap;
 
-/// One immutable view of the corpus shared by every detector: the symbol map,
-/// the optional inverted index, and the deep-callee experiment switch.
+/// Immutable corpus view: symbols, optional index, and deep-callee switch.
 pub(super) struct Corpus<'a> {
     pub(super) symbols: &'a HashMap<i64, SymbolData>,
     pub(super) index: Option<&'a CorpusIndex>,
@@ -58,9 +56,7 @@ fn raw_client_eq(a: &str, b: &str) -> bool {
 /// One reuse detector: resolve a target against the corpus to a candidate.
 pub(super) type Detector = fn(&SymbolData, &Corpus<'_>) -> Option<ReuseCandidate>;
 
-/// Detector candidates for one signal. With an index this is the posting-list
-/// union filtered to `min_shared`; without one it is the flat corpus scan.
-/// Either way the list is a superset of the detector's exact matches.
+/// Superset of candidates sharing the signal; the detector rechecks exactly.
 fn candidate_symbols<'a>(
     corpus: &'a Corpus<'_>,
     target: &SymbolData,
@@ -77,11 +73,7 @@ fn candidate_symbols<'a>(
     }
 }
 
-/// The detector cascade in priority order; a target stops at the first
-/// detector that produces a candidate.
-/// The closed D1-D4 detector set. `as_str` keeps the journal and dashboard
-/// spelling ("D1"...) byte-identical; exhaustive matches replace the old
-/// string comparisons and their silent `_` fallbacks.
+/// Closed detector set; `as_str` is the stable journal/dashboard spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetectorId {
     /// Callee Footprint Overlap.
@@ -184,17 +176,21 @@ fn best_by_overlap(
     })
 }
 
-/// Detector D1: Callee Footprint Containment.
-/// Flag when (g, f) not in calls, |C(f)| >= 3, |resolved(g) ∩ resolved(f)| >= 2,
-/// and max(|C(g) ∩ C(f)| / |C(f)|, |C(g) ∩ C(f)| / |C(g)|) >= 0.80.
-/// With `--deep-callee`, the footprint extends to second-hop callees (weight
-/// 0.5) and the containment ratio is computed over the weighted closure.
+/// D1: callee-footprint containment over resolved project callees.
+fn d1_footprint(symbol: &SymbolData) -> &std::collections::HashSet<String> {
+    if symbol.resolved_callees.is_empty() {
+        &symbol.all_callees
+    } else {
+        &symbol.resolved_callees
+    }
+}
+
 fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
     if corpus.deep_callee {
         if target.deep_weights.len() < 3 {
             return None;
         }
-    } else if target.all_callees.len() < 3 || target.resolved_callees.len() < 2 {
+    } else if d1_footprint(target).len() < 3 || target.resolved_callees.len() < 2 {
         return None;
     }
     best_by_overlap(
@@ -208,7 +204,7 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
         },
         2,
         |candidate| {
-            let c_callees = &candidate.all_callees;
+            let c_callees = d1_footprint(candidate);
             // GUARD-COMP: a resolved call edge in either direction is a
             // caller/callee composition, not duplication.
             if target.callee_ids.contains(&candidate.id)
@@ -232,8 +228,7 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                 if ratio < 0.85 {
                     return None;
                 }
-                let shared: Vec<String> = target
-                    .all_callees
+                let shared: Vec<String> = d1_footprint(target)
                     .intersection(c_callees)
                     .cloned()
                     .collect();
@@ -250,8 +245,10 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                     ReuseConfidence::Low
                 } else if ratio >= 0.95 && weak <= 0.25 {
                     ReuseConfidence::High
-                } else {
+                } else if ratio >= 0.90 {
                     ReuseConfidence::Medium
+                } else {
+                    ReuseConfidence::Provisional
                 };
                 return Some((pct, shared, confidence, reasons));
             }
@@ -266,21 +263,21 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             {
                 return None;
             }
-            let shared: Vec<String> = target
-                .all_callees
+            let shared: Vec<String> = d1_footprint(target)
                 .intersection(c_callees)
                 .cloned()
                 .collect();
             // GUARD-BAL: reject < 0.30, low in [0.30, 0.50), provisional >= 0.50.
-            let min_len = target.all_callees.len().min(c_callees.len());
-            let max_len = target.all_callees.len().max(c_callees.len());
+            let target_fp = d1_footprint(target);
+            let min_len = target_fp.len().min(c_callees.len());
+            let max_len = target_fp.len().max(c_callees.len());
             let bal = min_len as f64 / max_len as f64;
             if bal < 0.30 {
                 corpus.guard();
                 return None;
             }
             let ratio_candidate = shared.len() as f64 / c_callees.len() as f64;
-            let ratio_target = shared.len() as f64 / target.all_callees.len() as f64;
+            let ratio_target = shared.len() as f64 / target_fp.len() as f64;
             let ratio = ratio_candidate.max(ratio_target);
             if ratio < 0.80 {
                 return None;
@@ -301,8 +298,10 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                 ReuseConfidence::Low
             } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {
                 ReuseConfidence::High
-            } else {
+            } else if ratio >= 0.90 {
                 ReuseConfidence::Medium
+            } else {
+                ReuseConfidence::Provisional
             };
             Some((pct, shared, confidence, reasons))
         },
@@ -311,7 +310,7 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
 
 /// Detector D2: Interface & Signature Token Overlap.
 fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
-    if target.tokens.len() < 2 {
+    if target.name_tokens.len() < 2 {
         return None;
     }
     best_by_overlap(
@@ -391,8 +390,10 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                 ReuseConfidence::Low
             } else if shared.len() >= 4 && jaccard >= 0.80 && type_jaccard >= 0.50 {
                 ReuseConfidence::High
-            } else {
+            } else if jaccard >= 0.75 {
                 ReuseConfidence::Medium
+            } else {
+                ReuseConfidence::Provisional
             };
             Some((
                 (jaccard * 100.0).round() as u64,
@@ -450,11 +451,9 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         &[],
         MatchMeta {
             raw_client: Some(raw_client.to_string()),
-            confidence: if canonical.inbound_callers >= 5 {
-                ReuseConfidence::High
-            } else {
-                ReuseConfidence::Medium
-            },
+            // D3 canonical semantics are not precise enough for High until a
+            // labeled gate proves otherwise (self-scan produced 0/4 precision).
+            confidence: ReuseConfidence::Medium,
             reasons: Vec::new(),
         },
     ))
@@ -487,7 +486,7 @@ fn check_d4(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         target,
         callee,
         None,
-        std::slice::from_ref(&callee.name),
+        &[],
         MatchMeta {
             raw_client: None,
             confidence: ReuseConfidence::Medium,

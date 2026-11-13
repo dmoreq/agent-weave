@@ -48,6 +48,10 @@ fn allowlist_suppresses_and_show_exposes_count() {
         "{hidden_stdout}"
     );
     assert!(hidden_stdout.contains("1 suppressed"), "{hidden_stdout}");
+    let log = std::fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
+    let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(last["mode"], "scan");
+    assert_eq!(last["reuse"]["suppressed"], 1);
 
     let shown = eg(&repo)
         .args(["reuse", "--show-suppressed"])

@@ -11,6 +11,41 @@ use super::common::{
 };
 
 #[test]
+fn mem_import_rejects_traversal_and_allowlist_keys() {
+    let repo = mem_fixture("import-guard");
+    let outside = repo.parent().unwrap().join("outside-import.jsonl");
+    fs::write(
+        &outside,
+        r#"{"key":"outside","kind":"fact","body":"outside"}"#,
+    )
+    .unwrap();
+    fs::write(
+        repo.join("allow.jsonl"),
+        r#"{"key":"reuse-allow/a->b","kind":"decision","body":"intentional"}"#,
+    )
+    .unwrap();
+
+    let mut srv = spawn_with(&repo, true);
+    notification(&mut srv, "notifications/initialized");
+    let traversal = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "../outside-import.jsonl"}}),
+    );
+    assert_eq!(traversal["result"]["isError"], true, "{traversal}");
+    let allowlist = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "allow.jsonl"}}),
+    );
+    assert_eq!(allowlist["result"]["isError"], true, "{allowlist}");
+    let _ = fs::remove_file(outside);
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn mem_import_and_markdown_export_parity() {
     let repo = mem_fixture("import");
     let (code, _stdout, stderr) = cli_mem(

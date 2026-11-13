@@ -126,6 +126,23 @@ fn keep_token(lower: &str) -> bool {
     lower.len() >= 3 && !STOPLIST.contains(&lower)
 }
 
+/// Name tokens carried by more than 5% of the corpus are generic vocabulary,
+/// not a distinctive interface signature. Pruning them keeps D2's posting
+/// lists bounded on corpora with a shared parameter/name vocabulary.
+pub(super) fn build_name_stoplist(symbols: &HashMap<i64, SymbolData>) -> HashSet<String> {
+    let mut freq: HashMap<&str, usize> = HashMap::new();
+    for symbol in symbols.values() {
+        for token in &symbol.name_tokens {
+            *freq.entry(token.as_str()).or_default() += 1;
+        }
+    }
+    let threshold = (symbols.len() as f64 * 0.05).max(10.0) as usize;
+    freq.into_iter()
+        .filter(|(_, count)| *count > threshold)
+        .map(|(token, _)| token.to_string())
+        .collect()
+}
+
 pub(super) fn build_stoplist(symbols: &HashMap<i64, SymbolData>) -> HashSet<String> {
     let mut stopset: HashSet<String> = STOPLIST.iter().map(|&s| s.to_string()).collect();
     let mut freq: HashMap<String, usize> = HashMap::new();

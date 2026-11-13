@@ -198,7 +198,7 @@ Path targets are validated before the scan: absolute paths, `..`, backslashes, a
 
 Proposal mode never creates a file. It matches the proposed name tokens and callees against resolved index data and returns only existing canonical symbols.
 
-Allowlist notes use the key `reuse-allow/<target>-><canonical>` in the local memory store. High-confidence pairs are never suppressed. A note with `--refs` is ignored after any referenced file changes. `--show-suppressed` keeps the candidate visible and adds `N suppressed` to the summary.
+Allowlist notes use the key `reuse-allow/<target>-><canonical>` in the local memory store; `--global` is rejected and imported notes cannot create allowlist keys. High-confidence pairs are never suppressed. A note with `--refs` is ignored after any referenced file changes or disappears from the index. `--show-suppressed` keeps the candidate visible and adds `N suppressed` to the summary. `--coverage` scans the whole repository and rejects paths.
 
 Judge mode is best-effort. It reviews gray-zone scan candidates and proposal candidates. A missing binary, model, timeout, malformed output, or unknown verdict leaves the static result unchanged and prints one `eg: judge unavailable:` stderr note. Set `EG_JUDGE_BIN` and `EG_JUDGE_MODEL` to pin the executable and checkpoint directory; the child runs with a cleared environment and a 15 s deadline. The v2 protocol passes source through stdin as `{"code_a","code_b"}` (or `{"text_a","text_b"}` for the similarity subcommand), never through argv.
 

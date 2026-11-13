@@ -26,7 +26,11 @@ jobs:
       - run: cargo build --locked --release
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
+      - run: cargo test --locked --test reuse_bench -- --list | grep -q 'bench_scan_5k_p95'
+      - run: EG_BENCH_BIN=target/release/eg cargo test --locked --test reuse_bench -- --ignored --nocapture
       - run: python3 -I tests/scripts/test_recall_scorers.py
+      - run: python3 -I tests/scripts/test_reuse_oracle.py
+      - run: python3 -I tests/scripts/reuse_oracle.py --labels tests/fixtures/reuse/oracle-labels.csv --predictions tests/fixtures/reuse/oracle-predictions.csv --baseline tests/fixtures/reuse/oracle-baseline.csv --json
       - run: python3 -I -B bench/test_run.py
       - run: python3 -I bench/run.py target/release/eg
       - run: bash tests/scripts/allowlist_check.sh Cargo.lock

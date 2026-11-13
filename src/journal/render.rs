@@ -3,68 +3,12 @@
 use super::*;
 use crate::repo::UNATTRIBUTED;
 
+mod parse;
 mod read;
 mod reuse;
+pub(crate) use parse::{parse_usage_line, UsageFields};
 pub(crate) use read::*;
 use reuse::ReuseUsage;
-
-/// Parsed usage line; serde_json handles quotes, backslashes, and controls.
-pub(crate) struct UsageFields {
-    pub(crate) tool: String,
-    pub(crate) exit_code: i64,
-    pub(crate) result_count: i64,
-    /// `None` distinguishes a legacy line with no `shown` key from a real 0.
-    pub(crate) shown: Option<i64>,
-    pub(crate) total: i64,
-    pub(crate) stale: bool,
-    pub(crate) ambiguous: i64,
-    pub(crate) latency_us: Option<i64>,
-    pub(crate) ts: Option<i64>,
-    pub(crate) repo: Option<String>,
-    pub(crate) repo_name: Option<String>,
-    pub(crate) worktree: bool,
-    pub(crate) agent: Option<String>,
-    pub(crate) mode: Option<String>,
-    pub(crate) truncated: bool,
-    pub(crate) reuse: Option<ReuseUsage>,
-}
-
-pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    Some(UsageFields {
-        tool: v.get("tool")?.as_str()?.to_string(),
-        exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
-        result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
-        shown: v.get("shown").and_then(|x| x.as_i64()),
-        total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
-        stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
-        ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
-        latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
-        ts: v.get("ts").and_then(|x| x.as_i64()),
-        repo: v
-            .get("repo")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        repo_name: v
-            .get("repo_name")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        worktree: v.get("worktree").and_then(|x| x.as_bool()).unwrap_or(false),
-        agent: v
-            .get("agent")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        mode: v
-            .get("mode")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        truncated: v
-            .get("truncated")
-            .and_then(|x| x.as_bool())
-            .unwrap_or(false),
-        reuse: v.get("reuse").and_then(reuse::parse),
-    })
-}
 
 #[derive(Default)]
 struct RepoAgg {
@@ -99,6 +43,10 @@ struct ToolAgg {
     reuse_usage: ReuseUsage,
     reuse_truncated: usize,
     reuse_modes: usize,
+    reuse_scan_shown: usize,
+    reuse_scan_results: usize,
+    reuse_stale: usize,
+    reuse_unknown: usize,
 }
 
 /// Summarize `usage.log` (+ `.1`); `quality` adds the empty split and cap count.
@@ -172,7 +120,12 @@ fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
         }
     }
     let shown = fields.shown.unwrap_or(fields.result_count).max(0) as usize;
-    if fields.total > shown as i64 {
+    let capped = if fields.tool == "reuse" {
+        fields.reuse.is_some_and(|reuse| reuse.capped > 0)
+    } else {
+        fields.total > shown as i64
+    };
+    if capped {
         agg.capped += 1;
     }
     if fields.stale {
@@ -184,7 +137,17 @@ fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
     if let Some(us) = fields.latency_us {
         agg.latencies.push(us.max(0) as u64);
     }
-    reuse::fold(fields.reuse, fields.truncated, fields.mode.is_some(), agg);
+    reuse::fold(fields.reuse, fields.truncated, fields.tool == "reuse", agg);
+    if fields.tool == "reuse" && fields.mode.as_deref().is_none_or(|mode| mode == "scan") {
+        agg.reuse_scan_shown += shown;
+        agg.reuse_scan_results += fields.result_count.max(0) as usize;
+        if fields.freshness_state.as_deref() == Some("stale") {
+            agg.reuse_stale += 1;
+        }
+        if fields.freshness_state.as_deref() == Some("unknown") {
+            agg.reuse_unknown += fields.freshness_unknown.max(1);
+        }
+    }
 }
 
 /// Fold every parsed line into one `ToolAgg` per tool. Only calls against a
@@ -447,7 +410,7 @@ fn calculate_telemetry_totals(
         saved_tokens +=
             estimated_tokens_saved(tool, agg.total_shown, agg.total_results, successful_calls);
         if tool == "reuse" {
-            reuse_hits += agg.total_results.max(agg.total_shown);
+            reuse_hits += agg.reuse_scan_results.max(agg.reuse_scan_shown);
         }
     }
 
@@ -485,6 +448,12 @@ fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
                 agg.reuse_usage.below_threshold,
                 agg.reuse_usage.omitted,
             ));
+            if agg.reuse_stale > 0 || agg.reuse_unknown > 0 {
+                row.push_str(&format!(
+                    " stale={} unknown={}",
+                    agg.reuse_stale, agg.reuse_unknown
+                ));
+            }
         }
         row
     } else {

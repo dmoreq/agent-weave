@@ -138,6 +138,11 @@ fn run_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
             None if !callees.is_empty() => {
                 return Err(EgError::Usage("--callees requires --propose".to_string()));
             }
+            None if !coverage.is_empty() && !paths.is_empty() => {
+                return Err(EgError::Usage(
+                    "--coverage cannot be combined with paths".to_string(),
+                ));
+            }
             None => {}
         }
     }

@@ -233,6 +233,13 @@ fn from_tool_args_graph(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest>
     })
 }
 fn from_tool_args_analysis(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest> {
+    if tool == "reuse" {
+        if let Some(limit) = a.0.get("limit").and_then(serde_json::Value::as_i64) {
+            if !(1..=100).contains(&limit) {
+                return Err(EgError::Usage("limit must be 1..=100".to_string()));
+            }
+        }
+    }
     Ok(match tool {
         "symbols" => CommandRequest::Symbols {
             file: a.req("file")?,
@@ -242,14 +249,14 @@ fn from_tool_args_analysis(a: &ArgReader<'_>, tool: &str) -> Result<CommandReque
         "reuse" => CommandRequest::Reuse {
             paths: a.str_array("paths")?,
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_REUSE_LIMIT)?,
-            deep_callee: a.b("deep_callee"),
-            min_confidence: a.s("min_confidence").unwrap_or_default(),
-            propose: a.s("propose"),
+            deep_callee: a.b_spec(tool, "deep_callee")?,
+            min_confidence: a.s_opt_spec(tool, "min_confidence")?.unwrap_or_default(),
+            propose: a.s_opt_spec(tool, "propose")?,
             callees: a.str_array("callees")?,
-            explain: a.b("explain"),
-            show_suppressed: a.b("show_suppressed"),
+            explain: a.b_spec(tool, "explain")?,
+            show_suppressed: a.b_spec(tool, "show_suppressed")?,
             coverage: a.str_array("coverage")?,
-            judge: a.b("judge"),
+            judge: a.b_spec(tool, "judge")?,
         },
         "search" => CommandRequest::Search {
             terms: a.req("terms")?,

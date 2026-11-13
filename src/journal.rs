@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 mod reuse;
-pub use reuse::{set_candidate_ids, set_judged, set_mode, set_reuse_counts, ReuseJournalCounts};
+pub use reuse::{
+    set_candidate_ids, set_freshness, set_judged, set_mode, set_reuse_counts, ReuseFreshness,
+    ReuseJournalCounts,
+};
 
 /// Rotate `usage.log` to `usage.log.1` past this size (one prior generation).
 pub(crate) const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
@@ -55,6 +58,7 @@ pub(super) struct Pending {
     pub(super) mode: &'static str,
     pub(super) truncated: bool,
     pub(super) reuse_counts: Option<ReuseJournalCounts>,
+    pub(super) freshness: Option<Value>,
 }
 
 thread_local! {
@@ -107,6 +111,7 @@ pub fn begin(surface: &'static str, tool: &str, args: &JournalArgs) {
             mode: "scan",
             truncated: false,
             reuse_counts: None,
+            freshness: None,
         });
     });
 }
@@ -154,6 +159,7 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
         "mode": pending.mode,
         "truncated": pending.truncated,
         "reuse": reuse,
+        "freshness": pending.freshness.unwrap_or(Value::Null),
         "result_count": pending.result_count,
         "shown": pending.shown,
         "total": pending.total,
@@ -187,6 +193,36 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
             }
         }
     }
+}
+
+/// Replace a pruned log through a same-directory temp file. Kept here because
+/// this file owns the journal write allowlist.
+pub(super) fn rewrite_pruned_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "log has no parent")
+    })?;
+    let temp = parent.join(format!(
+        ".usage-prune-{}-{}",
+        std::process::id(),
+        crate::db::unix_now()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temp)?;
+    if let Err(err) = file
+        .write_all(text.as_bytes())
+        .and_then(|_| file.sync_all())
+    {
+        let _ = fs::remove_file(&temp);
+        return Err(err);
+    }
+    drop(file);
+    if let Err(err) = fs::rename(&temp, path) {
+        let _ = fs::remove_file(&temp);
+        return Err(err);
+    }
+    Ok(())
 }
 
 fn append_line(path: &Path, line: &str) {
@@ -260,65 +296,14 @@ fn rotate_if_needed(path: &Path, max: u64) {
     let _ = fs::rename(path, PathBuf::from(rotated));
 }
 
-/// Prune usage.log entries that carry no live repository: dead absolute roots
-/// (deleted worktrees, temp scratch repos, ordinary repositories — the purge
-/// policy) and unjudgeable lines without a usable `repo` identity (legacy
-/// binaries, test artifacts). Rewrites the log file in place. Returns the
-/// count of pruned lines.
-pub fn prune_stale_entries(log_path: &Path) -> std::io::Result<usize> {
-    if !log_path.is_file() {
-        return Ok(0);
-    }
-    let content = match fs::read_to_string(log_path) {
-        Ok(c) => c,
-        Err(_) => return Ok(0),
-    };
-
-    let mut kept = Vec::new();
-    let mut pruned = 0;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if liveness::entry_is_stale(&val) || liveness::entry_is_unattributed(&val) {
-                pruned += 1;
-                continue;
-            }
-        }
-        kept.push(trimmed);
-    }
-
-    if pruned > 0 {
-        let mut new_text = kept.join("\n");
-        if !new_text.is_empty() {
-            new_text.push('\n');
-        }
-        fs::write(log_path, new_text)?;
-    }
-
-    Ok(pruned)
-}
-
-/// Prune stale entries from both current and rotated (.1) generations.
-pub fn prune_stale_entries_all(base_path: &Path) -> std::io::Result<usize> {
-    let mut total = prune_stale_entries(base_path)?;
-    if let Some(parent) = base_path.parent() {
-        let rotated = parent.join("usage.log.1");
-        if rotated.is_file() {
-            total += prune_stale_entries(&rotated)?;
-        }
-    }
-    Ok(total)
-}
-
 mod agent;
 pub(crate) mod liveness;
 mod outcome;
+mod prune;
 mod render;
 mod tokens;
+
+pub use prune::{prune_stale_entries, prune_stale_entries_all};
 
 pub use agent::{detect_agent, set_agent_context};
 pub(crate) use outcome::*;
@@ -417,6 +402,20 @@ mod tests {
         assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]).len(), 64);
         std::env::remove_var("ENGRAM_TEST_TAG");
         assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_refuses_symlinked_log() {
+        let dir = crate::db::temp_root("journal-prune-link");
+        let target = dir.join("user-config.json");
+        fs::write(&target, b"{\"theme\":\"dark\"}\n").unwrap();
+        let log = dir.join("usage.log");
+        std::os::unix::fs::symlink(&target, &log).unwrap();
+        let pruned = prune_stale_entries(&log).unwrap();
+        assert_eq!(pruned, 0);
+        assert_eq!(fs::read(&target).unwrap(), b"{\"theme\":\"dark\"}\n");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

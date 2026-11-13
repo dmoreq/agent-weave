@@ -1,22 +1,25 @@
 # Prevent-Reinvention Phases 2–5 — Implementation Contract
 
 - Status: Implemented (owner directive 2026-11-13)
-- Scope: proposal + numeric confidence, allowlist, coverage, judge
+- Scope: proposal + ordinal confidence tiers with an oracle protocol, allowlist, coverage, judge
 - Predecessor: `2026-11-12_reuse-prevention.md` (Phase 1 approved)
 
-## Phase 2 — Proposal + numeric confidence
+## Phase 2 — Proposal + ordinal confidence
 
 - CLI/MCP `--propose "<signature>"` with optional `--callees a,b`.
 - Proposal uses indexed production symbols only; it never writes a source file.
 - Paths combined with `--propose`, or `--callees` without `--propose`, exit `2`.
-- `low|provisional|medium|high` are public tiers; `--min-confidence` filters.
+- `low|provisional|medium|high` are public ordinal heuristics, not calibrated
+  probabilities; `--min-confidence` filters. Stale/unknown caps every tier at
+  `low`; D3 is capped at `medium` until a labeled gate proves High precision.
 - Proposal lines journal `mode=propose` and retain candidate IDs for uptake.
 - Oracle ledger arithmetic remains 160 labels: 50 tune, 60 confirmation
   positives (30 eligible + 15 D4 + 15 D3), 30 confirmation negatives, 20
   holdout. `tests/scripts/reuse_oracle.py` validates labels and can compute
   precision, recall, TP/FP/FN/TN, Wilson precision upper bound, and
   McNemar discordant counts, chi-square, p-value, power, and MDD against a
-  baseline prediction file.
+  baseline prediction file. `tests/fixtures/reuse/` is a protocol fixture, not
+  field calibration evidence.
 
 ## Phase 3 — Allowlist
 

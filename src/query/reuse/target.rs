@@ -14,27 +14,50 @@ pub(super) fn resolve_scope(ctx: &QueryCtx<'_>, inputs: &[String]) -> Result<Res
     let mut matched_files = HashSet::new();
 
     for input in inputs {
-        validate_input(input)?;
-        if let Some((file, line)) = split_file_line(ctx, input) {
-            resolve_file_line(ctx, input, &file, line, &mut symbols, &mut matched_files)?;
+        let normalized = normalize_target(input);
+        validate_input(&normalized)?;
+        if let Some((file, line)) = split_file_line(ctx, &normalized) {
+            let meta = std::fs::symlink_metadata(ctx.root.join(&file))
+                .map_err(|err| EgError::Internal(format!("stat {file}: {err}")))?;
+            if meta.file_type().is_symlink() {
+                return Err(unsafe_path(&normalized));
+            }
+            resolve_file_line(
+                ctx,
+                &normalized,
+                &file,
+                line,
+                &mut symbols,
+                &mut matched_files,
+            )?;
             continue;
         }
-        let abs = ctx.root.join(input);
+        let abs = ctx.root.join(&normalized);
         match std::fs::symlink_metadata(&abs) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(unsafe_path(input));
+                return Err(unsafe_path(&normalized));
             }
-            Ok(meta) if meta.is_file() => resolve_file(ctx, input, &mut paths, &mut matched_files)?,
-            Ok(meta) if meta.is_dir() => resolve_dir(ctx, input, &mut paths, &mut matched_files)?,
+            Ok(meta) if meta.is_file() => {
+                resolve_file(ctx, &normalized, &mut paths, &mut matched_files)?
+            }
+            Ok(meta) if meta.is_dir() => {
+                resolve_dir(ctx, &normalized, &mut paths, &mut matched_files)?
+            }
             Ok(_) => {
                 return Err(EgError::Usage(format!(
-                    "path must be a file or directory: {input}"
+                    "path must be a file or directory: {}",
+                    super::sanitize(&normalized)
                 )));
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                resolve_symbol(ctx, input, &mut symbols, &mut matched_files)?;
+                resolve_symbol(ctx, &normalized, &mut symbols, &mut matched_files)?;
             }
-            Err(err) => return Err(EgError::Internal(format!("stat {input}: {err}"))),
+            Err(err) => {
+                return Err(EgError::Internal(format!(
+                    "stat {}: {err}",
+                    super::sanitize(&normalized)
+                )));
+            }
         }
     }
 
@@ -72,6 +95,17 @@ pub(super) fn resolve_scope(ctx: &QueryCtx<'_>, inputs: &[String]) -> Result<Res
         files,
         path_matches,
     })
+}
+
+fn normalize_target(input: &str) -> String {
+    let mut out = input;
+    while let Some(rest) = out.strip_prefix("./") {
+        out = rest;
+    }
+    if out.len() > 1 {
+        out = out.trim_end_matches('/');
+    }
+    out.to_string()
 }
 
 fn validate_input(input: &str) -> Result<()> {

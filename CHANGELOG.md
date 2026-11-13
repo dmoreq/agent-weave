@@ -31,6 +31,13 @@ changes bump the minor while 0.x is unstable.
   `confirm=true`.
 - Phase 4 coverage: `--coverage class,unresolved,tests` adds D5 class-shape,
   D1L unresolved-call, and DT test/production detectors, off by default.
+- Security hardening: journal pruning rejects symlinks and rewrites atomically;
+  MCP `mem_import` rejects traversal paths and `reuse-allow/` keys; allowlist
+  writes reject `--global`; judge and reuse output escape bidi/format controls.
+- Reuse quality fixes: stale/unknown freshness caps every tier at Low; D3 is
+  capped at Medium; scan output sorts by confidence first; D2 indexes name
+  tokens with a generic-token stoplist; coverage requires shared class methods,
+  rejects paths, and uses deterministic canonical selection.
 - Phase 5 judge: `--judge` restores optional local `eg-judge` arbitration with
   a 15 s deadline, process-group termination, environment clearing, a 64 KiB
   stdin/stdout caps, path containment, and a closed verdict whitelist. Source

@@ -26,6 +26,11 @@ pub(super) fn run_mem_write(
     else {
         unreachable!("run_mem_write called with a non-write request")
     };
+    if key.trim_start().starts_with("reuse-allow/") && *global {
+        return Err(EgError::Usage(
+            "mem write: reuse-allow notes must be local, not --global".to_string(),
+        ));
+    }
     if key.trim_start().starts_with("reuse-allow/") && surface == Surface::Mcp && !confirm {
         return Err(EgError::Usage(
             "mem write: MCP allowlist writes require confirm=true".to_string(),

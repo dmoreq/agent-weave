@@ -315,7 +315,8 @@ pub(super) fn evaluate(
             candidate.freshness = Freshness::Stale;
             push_reason(candidate, ReasonCode::StaleIndex);
         }
-        if state != Freshness::Fresh && candidate.confidence == ReuseConfidence::Provisional {
+        if state != Freshness::Fresh {
+            // Stale or unknown evidence never carries Medium/High authority.
             candidate.confidence = ReuseConfidence::Low;
         }
     }

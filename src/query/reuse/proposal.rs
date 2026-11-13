@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use super::corpus::{load_callees, load_symbols};
-use super::tokens::{build_stoplist, tokenize_name_sig};
+use super::tokens::{build_name_stoplist, build_stoplist, tokenize_name_sig};
 use super::*;
 
 pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCandidate>> {
@@ -15,20 +15,20 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
         .ok_or_else(|| EgError::Usage("propose must be non-empty".to_string()))?;
     let name = proposal_name(signature)
         .ok_or_else(|| EgError::Usage("propose needs an identifier".to_string()))?;
-    let (name_tokens, _type_tokens, all_tokens) = tokenize_name_sig(&name, signature);
+    let (all_tokens, _type_tokens, name_tokens) = tokenize_name_sig(&name, signature);
     let proposed = callee_set(&opts.proposed_callees);
 
     let mut symbols = load_symbols(conn)?;
-    if symbols.len() < 2 {
-        return Ok(Vec::new());
-    }
     load_callees(conn, &mut symbols)?;
     let stopset = build_stoplist(&symbols);
+    let name_stopset = build_name_stoplist(&symbols);
     for sym in symbols.values_mut() {
         sym.all_callees
             .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
+        sym.name_tokens
+            .retain(|token| !name_stopset.contains(token));
     }
 
     let mut pool = Vec::new();
@@ -75,7 +75,9 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
             if coverage < 1.0 {
                 reasons.push(ReasonCode::ProposalPartial);
             }
-            let confidence = if coverage >= 0.95 && token_overlap >= 0.50 {
+            let confidence = if shared_callees.len() < 2 {
+                ReuseConfidence::Low
+            } else if coverage >= 0.95 && token_overlap >= 0.50 {
                 ReuseConfidence::High
             } else if coverage >= 0.75 {
                 ReuseConfidence::Medium
@@ -139,10 +141,17 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
 
 fn proposal_name(signature: &str) -> Option<String> {
     let trimmed = signature.trim();
-    let reduced = ["def ", "fn ", "function ", "class ", "method "]
-        .iter()
-        .find_map(|prefix| trimmed.strip_prefix(prefix))
-        .unwrap_or(trimmed);
+    let reduced = [
+        "async def ",
+        "def ",
+        "fn ",
+        "function ",
+        "class ",
+        "method ",
+    ]
+    .iter()
+    .find_map(|prefix| trimmed.strip_prefix(prefix))
+    .unwrap_or(trimmed);
     let name = reduced
         .split(['(', '<', ' ', ':'])
         .next()
@@ -159,10 +168,12 @@ fn callee_set(values: &[String]) -> HashSet<String> {
             if part.is_empty() {
                 continue;
             }
-            out.insert(part.to_string());
-            if let Some(last) = part.rsplit(['.', ':']).next() {
-                out.insert(last.to_string());
+            if is_raw_client(part) {
+                out.insert(part.to_string());
+                continue;
             }
+            let normalized = part.rsplit(['.', ':']).next().unwrap_or(part);
+            out.insert(normalized.to_string());
         }
     }
     out

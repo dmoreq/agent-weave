@@ -19,6 +19,9 @@ pub(crate) struct ReuseUsage {
 }
 
 pub(crate) fn parse(value: &Value) -> Option<ReuseUsage> {
+    if !value.is_object() {
+        return None;
+    }
     let number = |key: &str| value.get(key).and_then(Value::as_u64).unwrap_or(0) as usize;
     Some(ReuseUsage {
         provisional: number("provisional"),

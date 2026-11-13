@@ -30,8 +30,13 @@ from statistics import NormalDist
 from typing import Optional
 
 
+def read_rows(path: Path) -> list[dict]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
 def validate(path: Path) -> dict:
-    rows = list(csv.DictReader(path.open(newline="", encoding="utf-8")))
+    rows = read_rows(path)
     required = {"pair_id", "split", "label", "tier"}
     if not rows:
         raise ValueError("labels file is empty")
@@ -44,9 +49,20 @@ def validate(path: Path) -> dict:
         raise ValueError("pair_id values must be unique")
 
     split = Counter(row["split"] for row in rows)
-    tier = Counter(row["tier"] for row in rows)
     confirmation = [row for row in rows if row["split"] == "confirmation"]
     confirmation_labels = Counter(row["label"] for row in confirmation)
+    confirmation_tiers = Counter(row["tier"] for row in confirmation)
+    for row in rows:
+        split_name = row["split"]
+        if split_name == "confirmation":
+            if row["tier"] in {"eligible", "d4", "d3"} and row["label"] != "duplicate":
+                raise ValueError("confirmation tier rows must be duplicate")
+            if row["tier"] == "negative" and row["label"] != "distinct":
+                raise ValueError("confirmation negative rows must be distinct")
+        elif split_name == "tune" and row["tier"] != "tune":
+            raise ValueError("tune rows must use tier=tune")
+        elif split_name == "holdout" and row["tier"] != "holdout":
+            raise ValueError("holdout rows must use tier=holdout")
 
     expected = {
         "total": 160,
@@ -57,6 +73,7 @@ def validate(path: Path) -> dict:
         "eligible": 30,
         "d4": 15,
         "d3": 15,
+        "negative": 30,
         "holdout": 20,
     }
     actual = {
@@ -65,9 +82,10 @@ def validate(path: Path) -> dict:
         "confirmation": split["confirmation"],
         "confirmation_duplicate": confirmation_labels["duplicate"],
         "confirmation_distinct": confirmation_labels["distinct"],
-        "eligible": tier["eligible"],
-        "d4": tier["d4"],
-        "d3": tier["d3"],
+        "eligible": confirmation_tiers["eligible"],
+        "d4": confirmation_tiers["d4"],
+        "d3": confirmation_tiers["d3"],
+        "negative": confirmation_tiers["negative"],
         "holdout": split["holdout"],
     }
     mismatches = {k: {"expected": expected[k], "actual": actual[k]} for k in expected if expected[k] != actual[k]}
@@ -75,8 +93,11 @@ def validate(path: Path) -> dict:
         raise ValueError(f"oracle ledger mismatch: {json.dumps(mismatches, sort_keys=True)}")
     if set(split) - {"tune", "confirmation", "holdout"}:
         raise ValueError(f"unknown split values: {sorted(set(split) - {'tune', 'confirmation', 'holdout'})}")
-    if set(tier) - {"eligible", "d4", "d3", "negative", "holdout", "tune"}:
-        raise ValueError(f"unknown tier values: {sorted(set(tier) - {'eligible', 'd4', 'd3', 'negative', 'holdout', 'tune'})}")
+    tier_values = {row["tier"] for row in rows}
+    if tier_values - {"eligible", "d4", "d3", "negative", "holdout", "tune"}:
+        raise ValueError(
+            f"unknown tier values: {sorted(tier_values - {'eligible', 'd4', 'd3', 'negative', 'holdout', 'tune'})}"
+        )
     return {"labels": str(path), **actual}
 
 
@@ -155,13 +176,13 @@ def evaluate(
     baseline_path: Optional[Path] = None,
     alpha: float = 0.05,
     target_power: float = 0.8,
+    split_name: str = "confirmation",
 ) -> dict:
-    labels = list(csv.DictReader(labels_path.open(newline="", encoding="utf-8")))
+    labels = read_rows(labels_path)
     predictions = {
-        row["pair_id"]: float(row["confidence"])
-        for row in csv.DictReader(predictions_path.open(newline="", encoding="utf-8"))
+        row["pair_id"]: float(row["confidence"]) for row in read_rows(predictions_path)
     }
-    confirmation = [row for row in labels if row["split"] == "confirmation"]
+    confirmation = [row for row in labels if row["split"] == split_name]
     tp = fp = fn = tn = 0
     missing = 0
     for row in confirmation:
@@ -185,6 +206,7 @@ def evaluate(
         "labels": str(labels_path),
         "predictions": str(predictions_path),
         "threshold": threshold,
+        "split": split_name,
         "confirmation_pairs": len(confirmation),
         "missing_predictions": missing,
         "tp": tp,
@@ -195,10 +217,9 @@ def evaluate(
         "recall": round(recall, 4),
         "precision_wilson_upper": round(wilson_upper(tp, tp + fp), 4),
     }
-    if baseline_path is not None:
+    if baseline_path is not None and split_name == "confirmation":
         baseline = {
-            row["pair_id"]: float(row["confidence"])
-            for row in csv.DictReader(baseline_path.open(newline="", encoding="utf-8"))
+            row["pair_id"]: float(row["confidence"]) for row in read_rows(baseline_path)
         }
         result["mcnemar"] = mcnemar(
             confirmation, predictions, baseline, threshold, alpha, target_power
@@ -212,12 +233,15 @@ def main() -> int:
     parser.add_argument("--predictions", type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--threshold", default=0.5, type=float)
+    parser.add_argument("--split", default="confirmation", choices=["confirmation", "holdout"])
     parser.add_argument("--alpha", default=0.05, type=float)
     parser.add_argument("--power", dest="target_power", default=0.8, type=float)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     try:
         result = validate(args.labels)
+        if args.baseline is not None and args.predictions is None:
+            raise ValueError("--baseline requires --predictions")
         if args.predictions is not None:
             if not 0.0 <= args.threshold <= 1.0:
                 raise ValueError("threshold must be 0..1")
@@ -225,8 +249,6 @@ def main() -> int:
                 raise ValueError("alpha must be in (0, 1)")
             if not 0.0 < args.target_power < 1.0:
                 raise ValueError("power must be in (0, 1)")
-            if args.baseline is not None and args.predictions is None:
-                raise ValueError("--baseline requires --predictions")
             result = evaluate(
                 args.labels,
                 args.predictions,
@@ -234,6 +256,7 @@ def main() -> int:
                 args.baseline,
                 args.alpha,
                 args.target_power,
+                args.split,
             )
     except (OSError, ValueError) as exc:
         print(f"reuse_oracle: {exc}", file=sys.stderr)

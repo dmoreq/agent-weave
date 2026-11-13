@@ -8,7 +8,7 @@ fn proposal_repo(name: &str) -> TempRepo {
     write(
         &repo,
         "a.py",
-        "def normalize(value):\n    return value\n\ndef parse_token(value):\n    return normalize(value)\n",
+        "def normalize(value):\n    return value\n\ndef helper(value):\n    return value\n\ndef parse_token(value):\n    return normalize(value) + helper(value)\n",
     );
     build(&repo);
     repo
@@ -23,7 +23,7 @@ fn proposal_finds_canonical_by_callee() {
             "--propose",
             "def parse_token(value)",
             "--callees",
-            "normalize",
+            "normalize,helper",
             "--explain",
         ])
         .output()
@@ -59,7 +59,7 @@ fn proposal_journals_propose_mode_and_uptake_ids() {
             "--propose",
             "def parse_token(value)",
             "--callees",
-            "normalize",
+            "normalize,helper",
         ])
         .output()
         .unwrap();
@@ -99,7 +99,7 @@ fn proposal_min_confidence_filters_weaker_signal() {
             "--propose",
             "def parse_token(value)",
             "--callees",
-            "normalize",
+            "normalize,helper",
             "--min-confidence",
             "high",
         ])

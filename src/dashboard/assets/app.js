@@ -11,6 +11,9 @@ const UNATTRIBUTED = '(unattributed)';
 function detectorEvidenceLabel(detector) {
   if (detector === 'D3') return 'shared guard';
   if (detector === 'D4') return 'pass-through wrapper';
+  if (detector === 'D5') return 'class shape';
+  if (detector === 'D1L') return 'unresolved call';
+  if (detector === 'DT') return 'test overlap';
   return 'evidence';
 }
 
@@ -1156,13 +1159,14 @@ function renderReuseList() {
     const detBadgeClass = 'badge badge-' + c.detector.toLowerCase();
     const repoBadge = '<span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>';
     const locBadge = '<span class="badge status-warn" data-tip="card.loc_saving">-' + c.loc_saving + ' LOC</span>';
+    const confBadge = c.confidence ? '<span class="badge" data-tip="card.confidence">' + escapeHtml(c.confidence) + '</span>' : '';
 
     card.innerHTML =
       '<div class="item-card-head">' +
       '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
       '    <span class="' + detBadgeClass + '" data-tip="det.' + c.detector.toLowerCase() + '">' + c.detector + '</span>' +
           (c.overlap_applicable ? '<span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' : '<span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + escapeHtml(detectorEvidenceLabel(c.detector)) + '</span>') +
-      '    ' + locBadge +
+      '    ' + confBadge + locBadge +
       '  </div>' +
       '  ' + repoBadge +
       '</div>' +
@@ -1640,6 +1644,7 @@ const TIP = {
   'col.reads_writes': 'Memory reads versus notes written.',
   'card.overlap': 'Measured evidence overlap for D1/D2; D3/D4 show their evidence class instead of a percentage.',
   'card.callers': 'Call sites using the canonical helper.',
+  'card.confidence': 'Static confidence tier; stale or unknown freshness caps it at low.',
   'card.usage': 'How many eg reuse runs in the retained journal surfaced this candidate, and when the last one ran.',
   'card.recalled': 'Exact-key mem_get recalls in the retained journal.',
   'card.verified': 'Last Verify (anchor) timestamp; the creation date never changes.',

@@ -33,15 +33,25 @@ pub(super) fn load(ctx: &QueryCtx<'_>) -> HashSet<(String, String)> {
             continue;
         };
         let refs: Vec<&str> = row.refs.split_whitespace().collect();
-        if refs
-            .iter()
-            .any(|path| crate::query::staleness::file_changed(ctx, path))
-        {
+        if !refs.is_empty() && !refs.iter().all(|path| ref_is_fresh(ctx, path)) {
             continue;
         }
         pairs.insert((target.to_string(), canonical.to_string()));
     }
     pairs
+}
+
+fn ref_is_fresh(ctx: &QueryCtx<'_>, path: &str) -> bool {
+    if !crate::query::staleness::safe_index_path(path) {
+        return false;
+    }
+    let indexed: Option<i64> = ctx
+        .conn
+        .query_row("SELECT id FROM files WHERE path = ?1", [path], |row| {
+            row.get(0)
+        })
+        .ok();
+    indexed.is_some() && !crate::query::staleness::file_changed(ctx, path)
 }
 
 pub(super) fn is_allowed(pairs: &HashSet<(String, String)>, candidate: &ReuseCandidate) -> bool {

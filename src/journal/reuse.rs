@@ -30,6 +30,29 @@ pub fn set_candidate_ids(list: &str) {
     });
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ReuseFreshness {
+    pub state: &'static str,
+    pub changed_files: usize,
+    pub checked_files: usize,
+    pub unknown_count: usize,
+    pub unknown_reason: Option<&'static str>,
+}
+
+pub fn set_freshness(freshness: ReuseFreshness) {
+    super::PENDING.with(|pending| {
+        if let Some(entry) = pending.borrow_mut().as_mut() {
+            entry.freshness = Some(serde_json::json!({
+                "state": freshness.state,
+                "changed_files": freshness.changed_files,
+                "checked_files": freshness.checked_files,
+                "unknown_count": freshness.unknown_count,
+                "unknown_reason": freshness.unknown_reason,
+            }));
+        }
+    });
+}
+
 /// Record which reuse surface produced the line.
 pub fn set_mode(mode: crate::query::reuse::ReuseMode) {
     super::PENDING.with(|pending| {

@@ -255,6 +255,32 @@ fn reuse_symlink_path_exits_two() {
     assert!(stderr.contains("repo-relative and contained"), "{stderr}");
 }
 
+#[cfg(unix)]
+#[test]
+fn reuse_symlink_file_line_exits_two() {
+    let repo = temp_repo("reuse-symlink-line");
+    write(&repo, "a.py", "def unique_one():\n    return 1\n");
+    std::os::unix::fs::symlink(repo.join("a.py"), repo.join("link.py")).unwrap();
+    build(&repo);
+    let out = eg(&repo).args(["reuse", "link.py:1"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("repo-relative and contained"), "{stderr}");
+}
+
+#[test]
+fn reuse_directory_accepts_trailing_slash_and_dot_prefix() {
+    let repo = temp_repo("reuse-directory-normalize");
+    write(&repo, "sub/a.py", "def unique_one():\n    return 1\n");
+    build(&repo);
+    for target in ["sub/", "./sub"] {
+        let out = eg(&repo).args(["reuse", target]).output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{target}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("path_matches=1"), "{target}: {stdout}");
+    }
+}
+
 #[test]
 fn reuse_bare_name_zero_match_exits_one() {
     let repo = temp_repo("reuse-zero-match");
@@ -290,8 +316,16 @@ fn reuse_truncation_reports_showing_and_omitted() {
     let mut a = String::new();
     let mut b = String::new();
     for i in 0..20 {
-        a.push_str(&format!("def parse_item_{i}(value):\n    return value\n"));
-        b.push_str(&format!("def parse_item_{i}(value):\n    return value\n"));
+        for suffix in ["one", "two", "three"] {
+            a.push_str(&format!("def h{i}_{suffix}():\n    return 1\n"));
+            b.push_str(&format!("def h{i}_{suffix}():\n    return 1\n"));
+        }
+        a.push_str(&format!(
+            "def alpha_{i}():\n    return h{i}_one() + h{i}_two() + h{i}_three()\n"
+        ));
+        b.push_str(&format!(
+            "def beta_{i}():\n    return h{i}_one() + h{i}_two() + h{i}_three()\n"
+        ));
     }
     write(&repo, "a.py", &a);
     write(&repo, "b.py", &b);
@@ -303,6 +337,33 @@ fn reuse_truncation_reports_showing_and_omitted() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("10 omitted"), "{stdout}");
     assert!(stdout.contains("showing 10 of 20"), "{stdout}");
+}
+
+#[test]
+fn stale_candidate_downgrades_high_to_low() {
+    let repo = temp_repo("reuse-stale-high");
+    let source = "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef alpha_case():\n    return h1() + h2() + h3()\n";
+    write(&repo, "a.py", source);
+    write(
+        &repo,
+        "b.py",
+        "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef beta_case():\n    return h1() + h2() + h3()\n",
+    );
+    build(&repo);
+    write(
+        &repo,
+        "b.py",
+        "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef beta_case():\n    return h1() + h2() + h3() + 1\n",
+    );
+    let out = eg(&repo).args(["reuse", "b.py"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("result files changed since build"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("beta_case"), "{stdout}");
+    assert!(stdout.contains("confidence=low"), "{stdout}");
+    assert!(!stdout.contains("confidence=high"), "{stdout}");
 }
 
 #[test]
@@ -369,6 +430,34 @@ fn reuse_empty_scope_warns_about_new_unindexed_file() {
     assert!(
         stdout.contains("freshness unknown (new-file)"),
         "expected new-file warning: {stdout}"
+    );
+}
+
+#[test]
+fn empty_below_threshold_run_journals_counts() {
+    let repo = temp_repo("reuse-below-journal");
+    write(
+        &repo,
+        "a.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--min-confidence", "high"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let log = std::fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
+    let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(last["mode"], "scan");
+    assert!(
+        last["reuse"]["below_threshold"].as_u64().unwrap_or(0) >= 1,
+        "{last}"
     );
 }
 

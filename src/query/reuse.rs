@@ -35,7 +35,7 @@ use opts::ReuseOpts;
 
 pub(crate) use detectors::is_raw_client;
 pub use detectors::DetectorId;
-use tokens::build_stoplist;
+use tokens::{build_name_stoplist, build_stoplist};
 pub use types::{
     Freshness, FreshnessMode, ReasonCode, ReuseConfidence, ReuseCounts, ReuseMode, UnknownReason,
 };
@@ -81,6 +81,17 @@ pub(crate) fn sanitize(value: &str) -> String {
             '\t' => out.push_str("\\t"),
             '\u{1b}' => out.push_str("\\x1b"),
             c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c if matches!(
+                c,
+                '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{feff}'
+            ) =>
+            {
+                out.push_str(&format!("\\u{{{:04x}}}", c as u32));
+            }
             c => out.push(c),
         }
     }
@@ -310,7 +321,13 @@ pub(super) fn analyze_corpus_with(
             });
         }
     }
-    let judge_note = judge::apply(ctx, &mut pool, opts.judge, opts.mode);
+    let judge_note = judge::apply(
+        ctx,
+        &mut pool,
+        opts.judge,
+        opts.mode,
+        opts.proposal_signature.as_deref(),
+    );
     let total = pool.len();
     let freshness = if opts.freshness_mode == FreshnessMode::Full {
         freshness::evaluate(ctx, scope, &mut pool)?
@@ -347,11 +364,14 @@ pub(crate) fn analyze_corpus(
 
     load_callees(conn, &mut symbols)?;
     let stopset = build_stoplist(&symbols);
+    let name_stopset = build_name_stoplist(&symbols);
     for sym in symbols.values_mut() {
         sym.all_callees
             .retain(|c| !stopset.contains(c.as_str()) || is_raw_client(c.as_str()));
         sym.resolved_callees
             .retain(|c| !stopset.contains(c.as_str()));
+        sym.name_tokens
+            .retain(|token| !name_stopset.contains(token));
     }
     if deep_callee {
         load_deep_weights(&mut symbols);
@@ -380,10 +400,14 @@ pub(crate) fn analyze_corpus(
     }
 
     candidates.sort_by(|a, b| {
-        b.sort_rank()
-            .cmp(&a.sort_rank())
+        b.confidence
+            .rank()
+            .cmp(&a.confidence.rank())
+            .then_with(|| b.sort_rank().cmp(&a.sort_rank()))
             .then_with(|| b.canonical_callers.cmp(&a.canonical_callers))
             .then_with(|| a.symbol.cmp(&b.symbol))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
     });
     let total = candidates.len();
     let guarded_out = corpus.guarded_out.get();
@@ -412,5 +436,6 @@ mod tests {
         assert_eq!(sanitize(r"a\b"), r"a\\b");
         assert_eq!(sanitize("a\nb\tc"), r"a\nb\tc");
         assert_eq!(sanitize("a\u{1b}b\u{7f}"), r"a\x1bb\x7f");
+        assert_eq!(sanitize("a\u{202e}b"), r"a\u{202e}b");
     }
 }
