@@ -50,7 +50,7 @@
 cargo fmt --all -- --check                         PASS
 cargo clippy --all-targets -- -D warnings          PASS
 cargo test --locked                                 PASS
-  187 lib, 274 CLI, 37 fixtures, 34 MCP
+  187 lib, 274 CLI, 37 fixtures, 35 MCP
 allowlist_check / write_path_check / hygiene_check  PASS
 reuse_bench: 5k p95 26.48 ms, 10k p95 53.60 ms, hash +6.11 ms
 test_reuse_oracle.py                                4 tests PASS

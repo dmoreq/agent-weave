@@ -35,7 +35,12 @@ pub(crate) fn spawn(repo: &Path) -> Server {
 }
 
 pub(crate) fn spawn_with(repo: &Path, all_tools: bool) -> Server {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_eg"))
+    spawn_with_env(repo, all_tools, &[])
+}
+
+pub(crate) fn spawn_with_env(repo: &Path, all_tools: bool, envs: &[(&str, &Path)]) -> Server {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_eg"));
+    command
         .arg("--root")
         .arg(repo)
         .env("ENGRAM_GLOBAL_DIR", repo.join(".test_global"))
@@ -43,9 +48,11 @@ pub(crate) fn spawn_with(repo: &Path, all_tools: bool) -> Server {
         .args(all_tools.then_some("--all-tools"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::piped());
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().unwrap();
     let stdin = child.stdin.take().unwrap();
     let reader = BufReader::new(child.stdout.take().unwrap());
     Server {
