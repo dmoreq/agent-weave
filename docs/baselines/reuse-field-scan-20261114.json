@@ -1,0 +1,1340 @@
+{
+ "schema_version": 1,
+ "frozen_at": "2026-11-14",
+ "head": "38a2542",
+ "eg_version": "1.0.5",
+ "corpus": {
+  "files": 236,
+  "symbols": 2500,
+  "edges": 4990,
+  "parse_errors": 2,
+  "unresolved": 10805
+ },
+ "command": "eg reuse --explain --limit 100",
+ "provenance": "labels produced by static inspection of both function bodies by the implementing agent (single labeler); not owner-verified ground truth",
+ "selection": "all 12 medium + all 5 provisional candidates + every 4th low candidate in output order (20 of 83); the 16 omitted low candidates beyond the 100-pair cap are not sampled",
+ "candidates": [
+  {
+   "idx": 1,
+   "target": "src.memory.note.mem_content_hash",
+   "canonical": "src.hash.fnv1a64",
+   "callers": 6,
+   "file": "src/hash.rs",
+   "line": 7,
+   "tier": "medium",
+   "detector": "D4",
+   "pair_id": "f001"
+  },
+  {
+   "idx": 2,
+   "target": "src.dashboard.assets.app.renderAgentsTable",
+   "canonical": "src.dashboard.assets.app.renderMemoryAgentsTable",
+   "callers": 2,
+   "file": "src/dashboard/assets/app.js",
+   "line": 819,
+   "tier": "medium",
+   "detector": "D2",
+   "pair_id": "f002"
+  },
+  {
+   "idx": 3,
+   "target": "src.dashboard.assets.app.renderReposTable",
+   "canonical": "src.dashboard.assets.app.renderMemoryReposTable",
+   "callers": 2,
+   "file": "src/dashboard/assets/app.js",
+   "line": 769,
+   "tier": "medium",
+   "detector": "D2",
+   "pair_id": "f003"
+  },
+  {
+   "idx": 4,
+   "target": "src.db.memory_v2_tests.usable",
+   "canonical": "src.db.memory_fts.memory_fts_v2_usable",
+   "callers": 2,
+   "file": "src/db/memory_fts.rs",
+   "line": 45,
+   "tier": "medium",
+   "detector": "D4",
+   "pair_id": "f004"
+  },
+  {
+   "idx": 5,
+   "target": "bench.corpus.typescript.web.checkout.checkout",
+   "canonical": "bench.corpus.typescript.web.cart.Cart.add",
+   "callers": 1,
+   "file": "bench/corpus/typescript/web/cart.ts",
+   "line": 4,
+   "tier": "medium",
+   "detector": "D4",
+   "pair_id": "f005"
+  },
+  {
+   "idx": 6,
+   "target": "src.db.memory_write.memory_write_batch",
+   "canonical": "src.db.memory_write.try_write_revision",
+   "callers": 1,
+   "file": "src/db/memory_write.rs",
+   "line": 225,
+   "tier": "medium",
+   "detector": "D1",
+   "pair_id": "f006"
+  },
+  {
+   "idx": 7,
+   "target": "src.extract.resolve.imports.ImportEmitter.module_root",
+   "canonical": "src.extract.resolve.imports.ImportEmitter.module",
+   "callers": 1,
+   "file": "src/extract/resolve/imports.rs",
+   "line": 133,
+   "tier": "medium",
+   "detector": "D1",
+   "pair_id": "f007"
+  },
+  {
+   "idx": 8,
+   "target": "src.query.reuse.run_reuse",
+   "canonical": "src.query.reuse.run_reuse_proposal",
+   "callers": 1,
+   "file": "src/query/reuse.rs",
+   "line": 236,
+   "tier": "medium",
+   "detector": "D1",
+   "pair_id": "f008"
+  },
+  {
+   "idx": 9,
+   "target": "src.dashboard.assets.app.loadReuseData",
+   "canonical": "src.dashboard.assets.app.loadMemoriesData",
+   "callers": 6,
+   "file": "src/dashboard/assets/app.js",
+   "line": 310,
+   "tier": "medium",
+   "detector": "D3",
+   "pair_id": "f009"
+  },
+  {
+   "idx": 10,
+   "target": "src.dashboard.assets.app.loadSummaryData",
+   "canonical": "src.dashboard.assets.app.loadMemoriesData",
+   "callers": 6,
+   "file": "src/dashboard/assets/app.js",
+   "line": 310,
+   "tier": "medium",
+   "detector": "D3",
+   "pair_id": "f010"
+  },
+  {
+   "idx": 11,
+   "target": "src.dashboard.assets.app.touchMemory",
+   "canonical": "src.dashboard.assets.app.loadMemoriesData",
+   "callers": 6,
+   "file": "src/dashboard/assets/app.js",
+   "line": 310,
+   "tier": "medium",
+   "detector": "D3",
+   "pair_id": "f011"
+  },
+  {
+   "idx": 12,
+   "target": "src.dashboard.assets.app.verifyAllModified",
+   "canonical": "src.dashboard.assets.app.loadMemoriesData",
+   "callers": 6,
+   "file": "src/dashboard/assets/app.js",
+   "line": 310,
+   "tier": "medium",
+   "detector": "D3",
+   "pair_id": "f012"
+  },
+  {
+   "idx": 13,
+   "target": "src.memory.note.normalize_import_note",
+   "canonical": "src.memory.note.normalize_note",
+   "callers": 0,
+   "file": "src/memory/note.rs",
+   "line": 42,
+   "tier": "provisional",
+   "detector": "D1",
+   "pair_id": "f013"
+  },
+  {
+   "idx": 14,
+   "target": "src.dashboard.assets.app.renderReuseAgentsTable",
+   "canonical": "src.dashboard.assets.app.renderReuseReposTable",
+   "callers": 2,
+   "file": "src/dashboard/assets/app.js",
+   "line": 654,
+   "tier": "provisional",
+   "detector": "D2",
+   "pair_id": "f014"
+  },
+  {
+   "idx": 15,
+   "target": "src.memory.tokens.mem_fts_text_legacy",
+   "canonical": "src.memory.tokens.mem_fts_text_unicode",
+   "callers": 1,
+   "file": "src/memory/tokens.rs",
+   "line": 177,
+   "tier": "provisional",
+   "detector": "D2",
+   "pair_id": "f015"
+  },
+  {
+   "idx": 16,
+   "target": "src.memory.tokens.mem_query_terms_legacy",
+   "canonical": "src.memory.tokens.mem_query_terms_unicode",
+   "callers": 1,
+   "file": "src/memory/tokens.rs",
+   "line": 195,
+   "tier": "provisional",
+   "detector": "D2",
+   "pair_id": "f016"
+  },
+  {
+   "idx": 17,
+   "target": "src.db.query_state.gap_files_for_new_names",
+   "canonical": "src.db.query_state.gap_files_for_candidate_changes",
+   "callers": 0,
+   "file": "src/db/query_state.rs",
+   "line": 218,
+   "tier": "provisional",
+   "detector": "D2",
+   "pair_id": "f017"
+  },
+  {
+   "idx": 18,
+   "target": "src.dashboard.assets.app.refreshVisibleData",
+   "canonical": "src.dashboard.assets.app.showFetchError",
+   "callers": 3,
+   "file": "src/dashboard/assets/app.js",
+   "line": 1493,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f018"
+  },
+  {
+   "idx": 19,
+   "target": "src.query.reuse.coverage.language_family",
+   "canonical": "src.query.reuse.guards.language_family",
+   "callers": 3,
+   "file": "src/query/reuse/guards.rs",
+   "line": 6,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f019"
+  },
+  {
+   "idx": 20,
+   "target": "src.query.reuse.proposal.language_family",
+   "canonical": "src.query.reuse.guards.language_family",
+   "callers": 3,
+   "file": "src/query/reuse/guards.rs",
+   "line": 6,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f020"
+  },
+  {
+   "idx": 21,
+   "target": "src.dashboard.assets.app.renderMemoryAgentsTable",
+   "canonical": "src.dashboard.assets.app.renderReuseAgentsTable",
+   "callers": 2,
+   "file": "src/dashboard/assets/app.js",
+   "line": 702,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f021"
+  },
+  {
+   "idx": 22,
+   "target": "src.query.reuse.detectors.check_d4",
+   "canonical": "src.query.reuse.detectors.best_by_overlap",
+   "callers": 2,
+   "file": "src/query/reuse/detectors.rs",
+   "line": 122,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f022"
+  },
+  {
+   "idx": 23,
+   "target": "src.service.args.ArgReader.n_opt_spec",
+   "canonical": "src.service.args.ArgReader.s_opt_spec",
+   "callers": 2,
+   "file": "src/service/args.rs",
+   "line": 40,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f023"
+  },
+  {
+   "idx": 24,
+   "target": "src.time.civil_from_days",
+   "canonical": "src.time.days_from_civil",
+   "callers": 2,
+   "file": "src/time.rs",
+   "line": 22,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f024"
+  },
+  {
+   "idx": 25,
+   "target": "src.dashboard.assets.app.filterByRepo",
+   "canonical": "src.dashboard.assets.app.filterMemoryByRepo",
+   "callers": 1,
+   "file": "src/dashboard/assets/app.js",
+   "line": 867,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f025"
+  },
+  {
+   "idx": 26,
+   "target": "src.dashboard.data.memories.column_present",
+   "canonical": "src.audit.memory.column_present",
+   "callers": 1,
+   "file": "src/audit/memory.rs",
+   "line": 196,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f026"
+  },
+  {
+   "idx": 27,
+   "target": "src.dashboard.data.memories.like_escape",
+   "canonical": "src.query.reuse.target.escape_like",
+   "callers": 1,
+   "file": "src/query/reuse/target.rs",
+   "line": 325,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f027"
+  },
+  {
+   "idx": 28,
+   "target": "src.dashboard.data.summary.SummaryState.record_error",
+   "canonical": "src.dashboard.data.summary.SummaryState.record_calls",
+   "callers": 1,
+   "file": "src/dashboard/data/summary.rs",
+   "line": 204,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f028"
+  },
+  {
+   "idx": 29,
+   "target": "src.dashboard.data.summary.SummaryState.record_success",
+   "canonical": "src.dashboard.data.summary.SummaryState.record_calls",
+   "callers": 1,
+   "file": "src/dashboard/data/summary.rs",
+   "line": 204,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f029"
+  },
+  {
+   "idx": 30,
+   "target": "src.dashboard.data.summary.record_entry_into",
+   "canonical": "src.dashboard.data.summary.SummaryState.record_entry",
+   "callers": 1,
+   "file": "src/dashboard/data/summary.rs",
+   "line": 164,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f030"
+  },
+  {
+   "idx": 31,
+   "target": "src.db.memory_store.open_global_memory_store",
+   "canonical": "src.dashboard.data.memories.global_store_db",
+   "callers": 1,
+   "file": "src/dashboard/data/memories.rs",
+   "line": 73,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f031"
+  },
+  {
+   "idx": 32,
+   "target": "src.db.query_state.column_present",
+   "canonical": "src.audit.memory.column_present",
+   "callers": 1,
+   "file": "src/audit/memory.rs",
+   "line": 196,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f032"
+  },
+  {
+   "idx": 33,
+   "target": "src.db.security.ensure_global_dir",
+   "canonical": "src.db.memory_store.ensure_global_eg_dir",
+   "callers": 1,
+   "file": "src/db/memory_store.rs",
+   "line": 163,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f033"
+  },
+  {
+   "idx": 34,
+   "target": "src.error.EgError.exit_code",
+   "canonical": "src.exit_code_of",
+   "callers": 1,
+   "file": "src/main.rs",
+   "line": 67,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f034"
+  },
+  {
+   "idx": 35,
+   "target": "src.extract.ImportEdgeCandidate.module_root",
+   "canonical": "src.extract.resolve.imports.ImportEmitter.module_root",
+   "callers": 1,
+   "file": "src/extract/resolve/imports.rs",
+   "line": 170,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f035"
+  },
+  {
+   "idx": 36,
+   "target": "src.extract.walk.WalkCtx.for_file",
+   "canonical": "src.extract.FileExtraction.for_file",
+   "callers": 1,
+   "file": "src/extract.rs",
+   "line": 292,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f036"
+  },
+  {
+   "idx": 37,
+   "target": "src.extract.walk.typescript.record_import_ts",
+   "canonical": "src.extract.walk.python.record_import",
+   "callers": 1,
+   "file": "src/extract/walk/python.rs",
+   "line": 5,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f037"
+  },
+  {
+   "idx": 38,
+   "target": "src.extract.walk.typescript.resolve_ts_module",
+   "canonical": "src.extract.walk.python.resolve_from_module",
+   "callers": 1,
+   "file": "src/extract/walk/python.rs",
+   "line": 181,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f038"
+  },
+  {
+   "idx": 39,
+   "target": "src.query.analysis.unresolved.unresolved_names",
+   "canonical": "src.query.callgraph.frame.unresolved_names_in",
+   "callers": 1,
+   "file": "src/query/callgraph/frame.rs",
+   "line": 205,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f039"
+  },
+  {
+   "idx": 40,
+   "target": "src.query.reuse.coverage.escape_like",
+   "canonical": "src.query.reuse.target.escape_like",
+   "callers": 1,
+   "file": "src/query/reuse/target.rs",
+   "line": 325,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f040"
+  },
+  {
+   "idx": 41,
+   "target": "src.service.args.from_tool_args_memory",
+   "canonical": "src.service.args.from_tool_args_graph",
+   "callers": 1,
+   "file": "src/service/args.rs",
+   "line": 201,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f041"
+  },
+  {
+   "idx": 42,
+   "target": "src.service.from_cli.CommandRequest.journal_args",
+   "canonical": "src.service.from_cli.audit.journal_args",
+   "callers": 1,
+   "file": "src/service/from_cli/audit.rs",
+   "line": 29,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f042"
+  },
+  {
+   "idx": 43,
+   "target": "src.service.from_cli.audit.journal_args",
+   "canonical": "src.service.from_cli.CommandRequest.journal_args_memory",
+   "callers": 1,
+   "file": "src/service/from_cli.rs",
+   "line": 376,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f043"
+  },
+  {
+   "idx": 44,
+   "target": "src.service.mem_ops.run_mem_get",
+   "canonical": "src.service.run.run_mem_gc",
+   "callers": 1,
+   "file": "src/service/run.rs",
+   "line": 343,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f044"
+  },
+  {
+   "idx": 45,
+   "target": "src.audit.checks.effectiveness.memory_reads",
+   "canonical": "src.audit.checks.effectiveness.adoption_navigation",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 56,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f045"
+  },
+  {
+   "idx": 46,
+   "target": "src.audit.checks.effectiveness.reuse_activity",
+   "canonical": "src.audit.checks.effectiveness.adoption_navigation",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 56,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f046"
+  },
+  {
+   "idx": 47,
+   "target": "src.audit.checks.effectiveness.savings_per_call",
+   "canonical": "src.audit.checks.effectiveness.adoption_navigation",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 56,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f047"
+  },
+  {
+   "idx": 48,
+   "target": "src.audit.checks.index_checks.index_integrity",
+   "canonical": "src.audit.checks.effectiveness.empty_results",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 138,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f048"
+  },
+  {
+   "idx": 49,
+   "target": "src.audit.checks.index_checks.parse_errors",
+   "canonical": "src.audit.checks.effectiveness.empty_results",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 138,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f049"
+  },
+  {
+   "idx": 50,
+   "target": "src.audit.checks.index_checks.staleness",
+   "canonical": "src.audit.checks.effectiveness.empty_results",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 138,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f050"
+  },
+  {
+   "idx": 51,
+   "target": "src.audit.checks.runtime.performance",
+   "canonical": "src.audit.checks.effectiveness.empty_results",
+   "callers": 0,
+   "file": "src/audit/checks/effectiveness.rs",
+   "line": 138,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f051"
+  },
+  {
+   "idx": 52,
+   "target": "src.db.memory_store.open_global_memory_mutation",
+   "canonical": "src.db.memory_store.open_global_memory_store",
+   "callers": 0,
+   "file": "src/db/memory_store.rs",
+   "line": 230,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f052"
+  },
+  {
+   "idx": 53,
+   "target": "src.db.memory_store.open_memory_mutation",
+   "canonical": "src.db.memory_store.open_memory_store",
+   "callers": 0,
+   "file": "src/db/memory_store.rs",
+   "line": 191,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f053"
+  },
+  {
+   "idx": 54,
+   "target": "src.query.impact.impact",
+   "canonical": "src.query.callgraph.imports",
+   "callers": 0,
+   "file": "src/query/callgraph.rs",
+   "line": 15,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f054"
+  },
+  {
+   "idx": 55,
+   "target": "src.query.reuse.ReuseCandidate.hint_line",
+   "canonical": "src.memory.guard.ConsolidationMatch.hint_line",
+   "callers": 0,
+   "file": "src/memory/guard.rs",
+   "line": 21,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f055"
+  },
+  {
+   "idx": 56,
+   "target": "src.query.reuse.detectors.d1.find_best_d1",
+   "canonical": "src.query.reuse.detectors.find_best_d2",
+   "callers": 0,
+   "file": "src/query/reuse/detectors.rs",
+   "line": 188,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f056"
+  },
+  {
+   "idx": 57,
+   "target": "src.service.args.from_tool_args_analysis",
+   "canonical": "src.service.args.from_tool_args_graph",
+   "callers": 1,
+   "file": "src/service/args.rs",
+   "line": 201,
+   "tier": "low",
+   "detector": "D1",
+   "pair_id": "f057"
+  },
+  {
+   "idx": 58,
+   "target": "src.dashboard.assets.app.renderMemoryReposTable",
+   "canonical": "src.dashboard.assets.app.renderReuseReposTable",
+   "callers": 2,
+   "file": "src/dashboard/assets/app.js",
+   "line": 654,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f058"
+  },
+  {
+   "idx": 59,
+   "target": "src.journal.render.load_global_usage_lines",
+   "canonical": "src.journal.render.load_usage_lines",
+   "callers": 1,
+   "file": "src/journal/render.rs",
+   "line": 96,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f059"
+  },
+  {
+   "idx": 60,
+   "target": "src.db.memory_store.global_dir_overridden",
+   "canonical": "src.db.memory_store.global_eg_dir",
+   "callers": 3,
+   "file": "src/db/memory_store.rs",
+   "line": 122,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f060"
+  },
+  {
+   "idx": 61,
+   "target": "src.dashboard.assets.app.renderMemoryDossier",
+   "canonical": "src.dashboard.assets.app.renderReuseDossier",
+   "callers": 1,
+   "file": "src/dashboard/assets/app.js",
+   "line": 1188,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f061"
+  },
+  {
+   "idx": 62,
+   "target": "src.dashboard.monitor.poll_linear_events",
+   "canonical": "src.dashboard.monitor.poll_log_new_events",
+   "callers": 1,
+   "file": "src/dashboard/monitor/mod.rs",
+   "line": 223,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f062"
+  },
+  {
+   "idx": 63,
+   "target": "src.dashboard.monitor.render.render_tab_memory",
+   "canonical": "src.dashboard.monitor.render.render_tab_reuse",
+   "callers": 1,
+   "file": "src/dashboard/monitor/render.rs",
+   "line": 188,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f063"
+  },
+  {
+   "idx": 64,
+   "target": "src.db.memory_store.global_usage_log_path",
+   "canonical": "src.db.memory_store.global_memory_db_path",
+   "callers": 1,
+   "file": "src/db/memory_store.rs",
+   "line": 167,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f064"
+  },
+  {
+   "idx": 65,
+   "target": "src.extract.walk.python.record_from_import",
+   "canonical": "src.extract.walk.python.record_plain_import",
+   "callers": 1,
+   "file": "src/extract/walk/python.rs",
+   "line": 34,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f065"
+  },
+  {
+   "idx": 66,
+   "target": "src.journal.render.aggregate_global_usage",
+   "canonical": "src.journal.render.aggregate_usage",
+   "callers": 1,
+   "file": "src/journal/render.rs",
+   "line": 159,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f066"
+  },
+  {
+   "idx": 67,
+   "target": "src.journal.render.render_global_summary",
+   "canonical": "src.journal.render.render_summary",
+   "callers": 1,
+   "file": "src/journal/render.rs",
+   "line": 252,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f067"
+  },
+  {
+   "idx": 68,
+   "target": "src.service.mem_ops.run_mem_delete",
+   "canonical": "src.service.mem_ops.run_mem_get",
+   "callers": 0,
+   "file": "src/service/mem_ops.rs",
+   "line": 7,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f068"
+  },
+  {
+   "idx": 69,
+   "target": "src.service.mem_ops.run_mem_touch",
+   "canonical": "src.service.mem_ops.run_mem_get",
+   "callers": 0,
+   "file": "src/service/mem_ops.rs",
+   "line": 7,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f069"
+  },
+  {
+   "idx": 70,
+   "target": "src.memory.tokens.mem_ref_tag_tokens_legacy",
+   "canonical": "src.memory.tokens.mem_ref_tokens",
+   "callers": 1,
+   "file": "src/memory/tokens.rs",
+   "line": 164,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f070"
+  },
+  {
+   "idx": 71,
+   "target": "src.memory.tokens.mem_ref_tokens",
+   "canonical": "src.memory.tokens.mem_tokens_legacy",
+   "callers": 3,
+   "file": "src/memory/tokens.rs",
+   "line": 117,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f071"
+  },
+  {
+   "idx": 72,
+   "target": "src.memory.tokens.mem_tokens_unicode",
+   "canonical": "src.memory.tokens.mem_tokens_legacy",
+   "callers": 3,
+   "file": "src/memory/tokens.rs",
+   "line": 117,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f072"
+  },
+  {
+   "idx": 73,
+   "target": "src.db.memory_store.ensure_global_eg_dir",
+   "canonical": "src.db.ensure_dir_validated",
+   "callers": 2,
+   "file": "src/db.rs",
+   "line": 46,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f073"
+  },
+  {
+   "idx": 74,
+   "target": "src.memory.parse_scope_filter",
+   "canonical": "src.memory.parse_kind_filter",
+   "callers": 2,
+   "file": "src/memory.rs",
+   "line": 108,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f074"
+  },
+  {
+   "idx": 75,
+   "target": "src.build.write.write_meta_universe",
+   "canonical": "src.build.write.write_meta_identity",
+   "callers": 1,
+   "file": "src/build/write.rs",
+   "line": 216,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f075"
+  },
+  {
+   "idx": 76,
+   "target": "src.dashboard.monitor.render.render_tab_reuse",
+   "canonical": "src.dashboard.monitor.render.render_tab_graph",
+   "callers": 1,
+   "file": "src/dashboard/monitor/render.rs",
+   "line": 94,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f076"
+  },
+  {
+   "idx": 77,
+   "target": "src.dashboard.monitor.render.render_tab_stream",
+   "canonical": "src.dashboard.monitor.render.render_tab_graph",
+   "callers": 1,
+   "file": "src/dashboard/monitor/render.rs",
+   "line": 94,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f077"
+  },
+  {
+   "idx": 78,
+   "target": "src.db.inserts.load_carried_inherits",
+   "canonical": "src.db.inserts.load_carried_symbols",
+   "callers": 1,
+   "file": "src/db/inserts.rs",
+   "line": 57,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f078"
+  },
+  {
+   "idx": 79,
+   "target": "src.extract.resolve.attr.local_alias_outcome",
+   "canonical": "src.extract.resolve.calls.alias_target_outcome",
+   "callers": 1,
+   "file": "src/extract/resolve/calls.rs",
+   "line": 269,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f079"
+  },
+  {
+   "idx": 80,
+   "target": "src.extract.resolve.attr.resolve_attr_callee",
+   "canonical": "src.extract.resolve.calls.resolve_name_callee",
+   "callers": 1,
+   "file": "src/extract/resolve/calls.rs",
+   "line": 184,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f080"
+  },
+  {
+   "idx": 81,
+   "target": "src.extract.resolve.bindings.module_chain_outcome",
+   "canonical": "src.extract.resolve.attr.chain_is_module_start",
+   "callers": 1,
+   "file": "src/extract/resolve/attr.rs",
+   "line": 314,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f081"
+  },
+  {
+   "idx": 82,
+   "target": "src.extract.resolve.imports.python_type_ref",
+   "canonical": "src.extract.resolve.calls.type_ref_edge",
+   "callers": 1,
+   "file": "src/extract/resolve/calls.rs",
+   "line": 111,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f082"
+  },
+  {
+   "idx": 83,
+   "target": "src.extract.walk.python.visit_python_class",
+   "canonical": "src.extract.walk.python.visit_python_function",
+   "callers": 1,
+   "file": "src/extract/walk/python.rs",
+   "line": 254,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f083"
+  },
+  {
+   "idx": 84,
+   "target": "src.extract.walk.rust.visit_function_item",
+   "canonical": "src.extract.walk.python.visit_python_function",
+   "callers": 1,
+   "file": "src/extract/walk/python.rs",
+   "line": 254,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f084"
+  },
+  {
+   "idx": 85,
+   "target": "src.extract.walk.rust.visit_impl_item",
+   "canonical": "src.extract.walk.rust.visit_function_item",
+   "callers": 1,
+   "file": "src/extract/walk/rust.rs",
+   "line": 394,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f085"
+  },
+  {
+   "idx": 86,
+   "target": "src.extract.walk.rust_use.emit_use_leaf",
+   "canonical": "src.extract.walk.rust_use.emit_scoped_use_list",
+   "callers": 1,
+   "file": "src/extract/walk/rust_use.rs",
+   "line": 56,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f086"
+  },
+  {
+   "idx": 87,
+   "target": "src.extract.walk.rust_use.emit_use_wildcard",
+   "canonical": "src.extract.walk.rust_use.emit_scoped_use_list",
+   "callers": 1,
+   "file": "src/extract/walk/rust_use.rs",
+   "line": 56,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f087"
+  },
+  {
+   "idx": 88,
+   "target": "src.extract.walk.typescript.namespace_import_binding",
+   "canonical": "src.extract.walk.typescript.default_import_binding",
+   "callers": 1,
+   "file": "src/extract/walk/typescript.rs",
+   "line": 275,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f088"
+  },
+  {
+   "idx": 89,
+   "target": "src.extract.walk.typescript.record_leaf_base",
+   "canonical": "src.extract.walk.typescript.record_mixin_base",
+   "callers": 1,
+   "file": "src/extract/walk/typescript.rs",
+   "line": 54,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f089"
+  },
+  {
+   "idx": 90,
+   "target": "src.memory.rank.render_row_tagged",
+   "canonical": "src.service.mem_export.render_jsonl_row",
+   "callers": 1,
+   "file": "src/service/mem_export.rs",
+   "line": 125,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f090"
+  },
+  {
+   "idx": 91,
+   "target": "src.query.analysis.search.search_exact_page",
+   "canonical": "src.query.analysis.search.search_fts_page",
+   "callers": 1,
+   "file": "src/query/analysis/search.rs",
+   "line": 100,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f091"
+  },
+  {
+   "idx": 92,
+   "target": "src.query.analysis.symbols.dir_symbol_rows",
+   "canonical": "src.query.analysis.symbols.file_symbol_rows",
+   "callers": 1,
+   "file": "src/query/analysis/symbols.rs",
+   "line": 79,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f092"
+  },
+  {
+   "idx": 93,
+   "target": "src.query.impact.deep.direct_impact_frontier",
+   "canonical": "src.query.impact.deep.direct_impact_records",
+   "callers": 1,
+   "file": "src/query/impact/deep.rs",
+   "line": 130,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f093"
+  },
+  {
+   "idx": 94,
+   "target": "src.query.impact.deep.file_symbol_ids",
+   "canonical": "src.query.analysis.symbols.file_symbol_rows",
+   "callers": 1,
+   "file": "src/query/analysis/symbols.rs",
+   "line": 79,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f094"
+  },
+  {
+   "idx": 95,
+   "target": "src.query.impact.direct.impact_direct_grouped",
+   "canonical": "src.query.impact.deep.direct_impact_frontier",
+   "callers": 1,
+   "file": "src/query/impact/deep.rs",
+   "line": 161,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f095"
+  },
+  {
+   "idx": 96,
+   "target": "src.query.impact.direct.impact_direct_sites",
+   "canonical": "src.query.impact.deep.direct_impact_frontier",
+   "callers": 1,
+   "file": "src/query/impact/deep.rs",
+   "line": 161,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f096"
+  },
+  {
+   "idx": 97,
+   "target": "src.query.impact.direct.impact_grouped_rows",
+   "canonical": "src.query.impact.direct.impact_grouped_total",
+   "callers": 1,
+   "file": "src/query/impact/direct.rs",
+   "line": 30,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f097"
+  },
+  {
+   "idx": 98,
+   "target": "src.query.impact.direct.impact_site_rows",
+   "canonical": "src.query.impact.direct.impact_grouped_rows",
+   "callers": 1,
+   "file": "src/query/impact/direct.rs",
+   "line": 45,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f098"
+  },
+  {
+   "idx": 99,
+   "target": "src.query.impact.direct.impact_site_total",
+   "canonical": "src.query.impact.direct.impact_grouped_total",
+   "callers": 1,
+   "file": "src/query/impact/direct.rs",
+   "line": 30,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f099"
+  },
+  {
+   "idx": 100,
+   "target": "src.service.args.from_tool_args_graph",
+   "canonical": "src.service.args.from_tool_args_diag",
+   "callers": 1,
+   "file": "src/service/args.rs",
+   "line": 180,
+   "tier": "low",
+   "detector": "D2",
+   "pair_id": "f100"
+  }
+ ],
+ "labels": [
+  {
+   "pair_id": "f001",
+   "label": "duplicate",
+   "rationale": "thin D4 wrapper around fnv1a64; call sites can hash the formatted bytes directly"
+  },
+  {
+   "pair_id": "f002",
+   "label": "distinct",
+   "rationale": "graph and memory agent tables render different columns and data fields"
+  },
+  {
+   "pair_id": "f003",
+   "label": "distinct",
+   "rationale": "graph and memory repo tables render different columns and data fields"
+  },
+  {
+   "pair_id": "f004",
+   "label": "duplicate",
+   "rationale": "test-only delegate unwrapping memory_fts_v2_usable; callers can use it directly"
+  },
+  {
+   "pair_id": "f005",
+   "label": "duplicate",
+   "rationale": "bench wrapper adding one fixed item via Cart.add"
+  },
+  {
+   "pair_id": "f006",
+   "label": "distinct",
+   "rationale": "batch import (expired/conflict/force stats) vs single write attempt (touch/idempotent/supersedes/retry)"
+  },
+  {
+   "pair_id": "f007",
+   "label": "distinct",
+   "rationale": "star-import and plain-import emission are complementary branches of one resolver"
+  },
+  {
+   "pair_id": "f008",
+   "label": "distinct",
+   "rationale": "scan and proposal entry points build different option sets and argument types"
+  },
+  {
+   "pair_id": "f009",
+   "label": "distinct",
+   "rationale": "reuse and memories panels fetch different endpoints and render different KPIs"
+  },
+  {
+   "pair_id": "f010",
+   "label": "distinct",
+   "rationale": "summary loader renders telemetry KPIs; memories loader renders notes"
+  },
+  {
+   "pair_id": "f011",
+   "label": "distinct",
+   "rationale": "POST touch flow with per-button error handling vs GET loader"
+  },
+  {
+   "pair_id": "f012",
+   "label": "distinct",
+   "rationale": "bulk verify loop over modified notes vs GET loader"
+  },
+  {
+   "pair_id": "f013",
+   "label": "distinct",
+   "rationale": "import frontmatter normalization vs CLI note input normalization"
+  },
+  {
+   "pair_id": "f014",
+   "label": "distinct",
+   "rationale": "agents vs repos variants of the reuse telemetry table"
+  },
+  {
+   "pair_id": "f015",
+   "label": "distinct",
+   "rationale": "legacy and unicode tokenizers are a deliberate dual-FTS contract"
+  },
+  {
+   "pair_id": "f016",
+   "label": "distinct",
+   "rationale": "legacy and unicode query terms are a deliberate dual-FTS contract"
+  },
+  {
+   "pair_id": "f017",
+   "label": "distinct",
+   "rationale": "GLOB last-segment healing vs exact-name candidate-gap lookup"
+  },
+  {
+   "pair_id": "f021",
+   "label": "distinct",
+   "rationale": "memory vs reuse agent tables render different columns"
+  },
+  {
+   "pair_id": "f025",
+   "label": "distinct",
+   "rationale": "repo filter sets a value; memory filter also injects options and toggles"
+  },
+  {
+   "pair_id": "f029",
+   "label": "distinct",
+   "rationale": "success metrics update vs call counters update"
+  },
+  {
+   "pair_id": "f033",
+   "label": "duplicate",
+   "rationale": "delegate wrapper adding no behavior around ensure_global_dir"
+  },
+  {
+   "pair_id": "f037",
+   "label": "distinct",
+   "rationale": "TypeScript vs Python import walkers for different grammars"
+  },
+  {
+   "pair_id": "f041",
+   "label": "distinct",
+   "rationale": "memory tool argument parsing vs graph tool argument parsing"
+  },
+  {
+   "pair_id": "f045",
+   "label": "distinct",
+   "rationale": "memory-reads audit check vs adoption-navigation audit check"
+  },
+  {
+   "pair_id": "f049",
+   "label": "distinct",
+   "rationale": "parse-error audit check vs empty-results audit check"
+  },
+  {
+   "pair_id": "f053",
+   "label": "distinct",
+   "rationale": "mutation open (no create) vs store open (create + gitignore)"
+  },
+  {
+   "pair_id": "f057",
+   "label": "distinct",
+   "rationale": "analysis tool argument parsing vs graph tool argument parsing"
+  },
+  {
+   "pair_id": "f061",
+   "label": "distinct",
+   "rationale": "memory note dossier vs reuse candidate dossier render different sections"
+  },
+  {
+   "pair_id": "f065",
+   "label": "distinct",
+   "rationale": "from-import vs plain-import walkers for different grammar nodes"
+  },
+  {
+   "pair_id": "f069",
+   "label": "distinct",
+   "rationale": "mem touch vs mem get command handlers"
+  },
+  {
+   "pair_id": "f073",
+   "label": "duplicate",
+   "rationale": "delegate wrapper adding no behavior around ensure_dir_validated"
+  },
+  {
+   "pair_id": "f077",
+   "label": "distinct",
+   "rationale": "stream tab vs graph tab render different layouts"
+  },
+  {
+   "pair_id": "f081",
+   "label": "distinct",
+   "rationale": "module chain resolution outcome vs module-start predicate"
+  },
+  {
+   "pair_id": "f085",
+   "label": "distinct",
+   "rationale": "impl-item visitor vs function-item visitor"
+  },
+  {
+   "pair_id": "f089",
+   "label": "distinct",
+   "rationale": "leaf base vs mixin base class recording"
+  },
+  {
+   "pair_id": "f093",
+   "label": "distinct",
+   "rationale": "impact frontier traversal vs grouped impact records"
+  },
+  {
+   "pair_id": "f097",
+   "label": "distinct",
+   "rationale": "grouped impact rows vs grouped impact total"
+  }
+ ],
+ "metrics": {
+  "overall": {
+   "labeled": 37,
+   "duplicate": 5,
+   "precision": 0.1351
+  },
+  "per_tier": {
+   "high": {
+    "labeled": 0,
+    "duplicate": 0,
+    "precision": null
+   },
+   "medium": {
+    "labeled": 12,
+    "duplicate": 3,
+    "precision": 0.25
+   },
+   "provisional": {
+    "labeled": 5,
+    "duplicate": 0,
+    "precision": 0.0
+   },
+   "low": {
+    "labeled": 20,
+    "duplicate": 2,
+    "precision": 0.1
+   }
+  },
+  "candidates_by_tier": {
+   "high": 0,
+   "medium": 12,
+   "provisional": 5,
+   "low": 83
+  }
+ }
+}

@@ -147,6 +147,7 @@ pub fn collect_reuse_candidates(
 ) -> Result<(Vec<Value>, Value, Vec<Value>)> {
     let mut repos: HashMap<String, PathBuf> = HashMap::new();
     discover_repos(root, entries, "index.db", &mut repos);
+    let (errors, blocked) = super::retain_untracked(&mut repos);
 
     let usage = aggregate_candidate_usage(entries);
     let ((mut candidates_json, total_corpus_candidates), cache_hit, cache_age_ms) =
@@ -168,12 +169,22 @@ pub fn collect_reuse_candidates(
         summarize_reuse_metrics(&candidates_json, total_corpus_candidates, prewrite_count);
     summary["cache_hit"] = json!(cache_hit);
     summary["cache_age_ms"] = json!(cache_age_ms);
+    summary["degraded"] = json!(blocked > 0);
+    summary["errors"] = json!(errors);
     Ok((candidates_json, summary, prewrite_searches))
 }
 
 fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) -> usize {
+    // The dashboard opens index.db directly; apply the same provenance gate as
+    // every CLI/MCP query so a tracked, attacker-authored index is not read.
+    if crate::db::reject_tracked_eg_dir(r_root).is_err() {
+        return 0;
+    }
     let db_path = r_root.join(".engram").join("index.db");
-    if !db_path.is_file() {
+    if crate::db::reject_symlink(&r_root.join(".engram"), ".engram directory").is_err()
+        || crate::db::reject_symlink(&db_path, "index.db").is_err()
+        || !db_path.is_file()
+    {
         return 0;
     }
     let conn =
@@ -181,7 +192,7 @@ fn collect_repo_candidates(r_name: &str, r_root: &Path, out: &mut Vec<Value>) ->
             Ok(c) => c,
             Err(_) => return 0,
         };
-    let (candidates, total) =
+    let (candidates, total, _) =
         match crate::query::reuse::analyze_corpus(&conn, None, None, 25, false) {
             Ok(res) => res,
             Err(_) => return 0,
@@ -201,7 +212,17 @@ fn format_shared_evidence(c: &ReuseCandidate) -> String {
         DetectorId::D2 => "shared tokens",
         DetectorId::D3 => "client bypass",
         DetectorId::D4 => "details",
+        DetectorId::D5 => "class methods",
+        DetectorId::D1L => "unresolved callees",
+        DetectorId::DT => "shared test tokens",
     };
+    if c.detector == DetectorId::D3 {
+        return c
+            .raw_client
+            .as_deref()
+            .map(|raw| format!("client bypass: [{raw}]"))
+            .unwrap_or_default();
+    }
     if c.shared_items.is_empty() {
         String::new()
     } else {
@@ -251,26 +272,42 @@ fn format_candidate_json(
     let shared_evidence = format_shared_evidence(c);
     let (cand_loc, can_loc, cand_snippet, can_snippet) =
         resolve_candidate_snippets(r_root, conn, c);
+    let ctx = crate::query::QueryCtx { conn, root: r_root };
+    let stale = crate::query::file_changed(&ctx, &c.file)
+        || crate::query::file_changed(&ctx, &c.canonical_file);
+    let confidence = if stale {
+        crate::query::reuse::ReuseConfidence::Low
+    } else {
+        c.confidence
+    };
+    let mut reasons: Vec<&str> = c.reasons.iter().map(|r| r.as_str()).collect();
+    if stale {
+        reasons.push("stale-index");
+    }
 
     let loc_saving = cand_loc.loc;
+    let symbol = crate::query::reuse::sanitize(&c.symbol);
+    let canonical = crate::query::reuse::sanitize(&c.canonical);
     let narrative = format!(
         "Consolidating '{}' into authoritative '{}' ([callers={}]) deletes ~{} duplicate lines and eliminates drift between twin implementations.",
-        c.symbol, c.canonical, c.canonical_callers, loc_saving
+        symbol, canonical, c.canonical_callers, loc_saving
     );
 
     json!({
-        "id": format!("{}:{}->{}", r_name, c.symbol, c.canonical),
+        "id": format!("{}:{}->{}", r_name, symbol, canonical),
         "repo": r_name,
         "detector": c.detector.as_str(),
-        "symbol": c.symbol,
-        "canonical": c.canonical,
+        "symbol": symbol,
+        "canonical": canonical,
         "canonical_callers": c.canonical_callers,
-        "canonical_file": c.canonical_file,
+        "canonical_file": crate::query::reuse::sanitize(&c.canonical_file),
         "canonical_line": c.canonical_line,
         // D3/D4 emit no overlap metric: their match is an evidence class, not
         // a measured percentage. The UI renders a label from `detector`.
         "overlap_pct": c.overlap_pct,
         "overlap_applicable": c.overlap_pct.is_some(),
+        "confidence": confidence.as_str(),
+        "reasons": reasons,
         "shared_evidence": shared_evidence,
         "candidate_info": json!({
             "file": cand_loc.file,
@@ -318,6 +355,23 @@ fn collect_prewrite_searches(entries: &[Value]) -> Vec<Value> {
         }
     }
     out
+}
+
+fn candidate_reason_counts(candidates_json: &[Value]) -> Value {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for candidate in candidates_json {
+        if let Some(reasons) = candidate.get("reasons").and_then(Value::as_array) {
+            for reason in reasons.iter().filter_map(Value::as_str) {
+                *counts.entry(reason.to_string()).or_default() += 1;
+            }
+        }
+    }
+    Value::Object(
+        counts
+            .into_iter()
+            .map(|(key, count)| (key, json!(count)))
+            .collect(),
+    )
 }
 
 fn summarize_reuse_metrics(
@@ -369,6 +423,14 @@ fn summarize_reuse_metrics(
             "D4": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D4"))).count(),
         },
         "detector_counts_estimated": true,
+        "confidence_counts": {
+            "low": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("low"))).count(),
+            "provisional": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("provisional"))).count(),
+            "medium": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("medium"))).count(),
+            "high": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("high"))).count(),
+        },
+        "reason_counts": candidate_reason_counts(candidates_json),
+        "confidence_counts_estimated": true,
     })
 }
 

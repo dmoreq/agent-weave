@@ -1,6 +1,7 @@
 //! Durable memory store paths and open gates: structure manifest checks,
 //! version gating, corruption mapping, and local/global connection helpers.
 
+use super::memory_fts::ensure_memory_fts_v2;
 use super::*;
 
 /// Compiled memory schema version; gates `.engram/memory.db` like SCHEMA_VERSION
@@ -184,7 +185,7 @@ fn no_global_memory_error(path: &Path) -> EgError {
     ))
 }
 
-/// Open the memory store for writing, creating `.engram/memory.db` (schema v1)
+/// Open the memory store for writing, creating `.engram/memory.db` (schema v2)
 /// when absent. An existing store must pass the version gate (read-forward:
 /// older structurally complete stores open read-write).
 pub fn open_memory_store(root: &Path) -> Result<Connection> {
@@ -201,10 +202,20 @@ pub fn open_memory_store(root: &Path) -> Result<Connection> {
 pub fn open_memory_mutation_at(db_path: &Path) -> Result<Connection> {
     // Same write-path guards the CLI enforces: a symlinked store or a
     // git-tracked .engram is refused, so the dashboard cannot write outside
-    // the directory it resolved.
+    // the directory it resolved. `db_path` is `<root>/.engram/memory.db`;
+    // derive the repository root before probing (the old parent() call probed
+    // `<root>/.engram/.engram` and always passed).
     reject_symlink(db_path, "memory store")?;
-    if let Some(dir) = db_path.parent() {
-        reject_tracked_eg_dir(dir)?;
+    if let Some(eg) = db_path.parent() {
+        crate::db::reject_symlink(eg, ".engram directory")?;
+        if eg
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(".engram"))
+        {
+            if let Some(root) = eg.parent() {
+                reject_tracked_eg_dir(root)?;
+            }
+        }
     }
     open_memory_conn_path(db_path, false, || {
         EgError::NoResults(format!("no memory store at {}", db_path.display()))
@@ -270,6 +281,8 @@ fn open_memory_conn_path(
     // destroying the creation date. Only the write path migrates; readers
     // fall back to `created_at` when the column is absent.
     migrate_memory_schema(&conn)?;
+    // Derived v2 index: reconcile pending/missing rows on every write open.
+    ensure_memory_fts_v2(&conn, false)?;
     // Owner-only mode: notes are private primary data.
     let _ = crate::db::harden_file_mode(path);
     Ok(conn)
@@ -305,28 +318,66 @@ fn create_memory_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Additive schema migration: v1 memory stores gain `anchored_at`. Racing
-/// writers tolerate the duplicate-column error; the version stamp is set only
-/// after the column exists.
+/// Additive schema migration: v1 stores gain `anchored_at`, `fts_version`, the
+/// meta table, and the time/pending indexes. Each step is independent; a
+/// duplicate-column race is tolerated, every other error rolls back.
 fn migrate_memory_schema(conn: &Connection) -> Result<()> {
-    if column_present(conn, "memories", "anchored_at").map_err(map_memory_err)? {
+    // Read-only fast path: a fully migrated store must not pay a write
+    // transaction on every `mem write` open.
+    let ready = column_present(conn, "memories", "anchored_at").map_err(map_memory_err)?
+        && column_present(conn, "memories", "fts_version").map_err(map_memory_err)?
+        && super::query_state::object_exists_result(conn, "table", "memory_meta")
+            .map_err(map_memory_err)?
+        && super::query_state::object_exists_result(conn, "index", "memories_created")
+            .map_err(map_memory_err)?
+        && super::query_state::object_exists_result(conn, "index", "memories_pending")
+            .map_err(map_memory_err)?;
+    if ready {
         return Ok(());
     }
-    let _ = conn.execute_batch("BEGIN IMMEDIATE");
-    if !column_present(conn, "memories", "anchored_at").map_err(map_memory_err)? {
-        if let Err(e) = conn
-            .execute_batch("ALTER TABLE memories ADD COLUMN anchored_at INTEGER NOT NULL DEFAULT 0")
-        {
-            if !is_already_exists(&e) {
-                let _ = conn.execute_batch("ROLLBACK");
-                return Err(map_memory_err(e));
-            }
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(map_memory_err)?;
+    let step = (|| -> Result<()> {
+        add_column_if_missing(
+            conn,
+            "memories",
+            "anchored_at",
+            "ALTER TABLE memories ADD COLUMN anchored_at INTEGER NOT NULL DEFAULT 0",
+        )?;
+        add_column_if_missing(
+            conn,
+            "memories",
+            "fts_version",
+            "ALTER TABLE memories ADD COLUMN fts_version INTEGER NOT NULL DEFAULT 0",
+        )?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS memory_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS memories_created ON memories(created_at);
+             CREATE INDEX IF NOT EXISTS memories_pending ON memories(id) WHERE fts_version < 2;",
+        )
+        .map_err(map_memory_err)?;
+        conn.pragma_update(None, "user_version", MEMORY_SCHEMA_VERSION)
+            .map_err(map_memory_err)?;
+        Ok(())
+    })();
+    match step {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(map_memory_err),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
         }
     }
-    conn.pragma_update(None, "user_version", MEMORY_SCHEMA_VERSION)
-        .map_err(map_memory_err)?;
-    let _ = conn.execute_batch("COMMIT");
-    Ok(())
+}
+
+fn add_column_if_missing(conn: &Connection, table: &str, column: &str, ddl: &str) -> Result<()> {
+    if column_present(conn, table, column).map_err(map_memory_err)? {
+        return Ok(());
+    }
+    match conn.execute_batch(ddl) {
+        Ok(()) => Ok(()),
+        Err(e) if is_already_exists(&e) => Ok(()),
+        Err(e) => Err(map_memory_err(e)),
+    }
 }
 
 fn open_memory_query_path(

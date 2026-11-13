@@ -10,7 +10,10 @@ fn reuse_empty_reports_zero_candidates() {
     let out = eg(&repo).args(["reuse"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{stdout}");
-    assert!(stdout.contains("0 reuse candidates found"), "{stdout}");
+    assert!(
+        stdout.contains("eg: reuse — 0 duplication candidate(s) found"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -63,7 +66,7 @@ fn search_outputs_interface_cards_and_callers_ranking() {
     assert_eq!(out.status.code(), Some(0), "{stdout}");
     assert!(
         stdout.contains(
-            "util.py:1 function util.popular_helper def popular_helper(x: int) -> int [callers=2]"
+            "util.py:1 function util.popular_helper def popular_helper(x: int) -> int [callers=1]"
         ),
         "{stdout}"
     );
@@ -143,7 +146,7 @@ fn reuse_scoped_path_filters_targets_and_no_duplicate_pairs() {
     let stdout_a = String::from_utf8_lossy(&out_a.stdout);
     assert_eq!(out_a.status.code(), Some(0), "{stdout_a}");
     assert!(
-        stdout_a.contains("0 reuse candidates found"),
+        stdout_a.contains("eg: reuse — 0 duplication candidate(s) found"),
         "canonical a.py must not be reported as a duplicate: {stdout_a}"
     );
 }
@@ -462,8 +465,8 @@ fn reuse_d3_raw_client_bypass_detects_matching_canonical_wrapper() {
         "must detect D3 raw client bypass: {stdout}"
     );
     assert!(
-        stdout.contains("client bypass: [raw_client=requests.get]"),
-        "must display raw_client=requests.get: {stdout}"
+        stdout.contains("raw external client requests.get"),
+        "must display raw external client requests.get: {stdout}"
     );
     assert!(
         !stdout.contains("post_data"),

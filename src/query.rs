@@ -12,6 +12,8 @@ use crate::error::{EgError, Result};
 use crate::extract::{Confidence, EdgeKind, SymbolKind};
 use crate::hash::fnv1a64;
 
+use self::reuse::ReuseMode;
+
 pub const DEFAULT_LIMIT: usize = 50;
 /// Shared CLI/MCP surface defaults, so `cli.rs` and `service.rs::from_tool_args`
 /// cannot drift apart on the same flag's default.
@@ -30,6 +32,37 @@ pub const DEFAULT_IMPACT_EDGES: &str = "calls";
 /// print megabytes; the total count still travels in the error).
 pub const MAX_AMBIGUOUS_CANDIDATES: usize = 50;
 pub const MAX_LIMIT: usize = 10_000;
+
+/// Escape untrusted index/user text for one-line CLI, MCP, and journal output.
+/// Backslash first, then the named escapes, then every remaining control char
+/// as `\xNN`. Every rendered index-derived field goes through this function:
+/// a cloned repository controls its file names, qualnames, and signatures.
+pub(crate) fn sanitize(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{1b}' => out.push_str("\\x1b"),
+            c if c.is_control() => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c if matches!(
+                c,
+                '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{feff}'
+            ) =>
+            {
+                out.push_str(&format!("\\u{{{:04x}}}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
 
 /// Permanent honesty caveat for `eg path` (Amendment 13): resolved static
 /// edges only; dynamic dispatch may hide paths.
@@ -74,7 +107,6 @@ use staleness::*;
 mod analysis;
 mod callgraph;
 mod impact;
-pub mod judge;
 pub mod reuse;
 
 pub use analysis::{search, symbols, unresolved, unresolved_names, SymbolsOpts};
@@ -83,7 +115,7 @@ pub use callgraph::{callees, callers, context, imports, path, GraphQueryOpts};
 /// request is built, not at query time.
 pub(crate) use impact::parse_edge_kinds;
 pub use impact::{impact, ImpactOpts};
-pub use reuse::run_reuse;
+pub use reuse::{run_reuse, run_reuse_proposal};
 
 /// One resolved name candidate: (path, line, qualname). Defined in `error`
 /// beside the `Ambiguous` payload it fills; re-exported here so the query
@@ -127,10 +159,12 @@ pub struct Pointer {
 
 impl Pointer {
     pub fn render(&self) -> String {
-        if self.detail.is_empty() {
-            format!("{}:{}{}", self.file, self.line, self.tag)
+        let file = sanitize(&self.file);
+        let detail = sanitize(&self.detail);
+        if detail.is_empty() {
+            format!("{file}:{}{}", self.line, self.tag)
         } else {
-            format!("{}:{}{} {}", self.file, self.line, self.tag, self.detail)
+            format!("{file}:{}{} {detail}", self.line, self.tag)
         }
     }
 }
@@ -182,6 +216,24 @@ pub struct LineQuery {
     pub lines: Vec<String>,
     pub stderr: String,
     pub shown: usize,
+    /// Which reuse surface produced this result; every non-reuse query is
+    /// `Scan` for journal compatibility.
+    pub mode: ReuseMode,
+    /// True when a limit or output cap omitted candidates from the result.
+    pub truncated: bool,
+}
+
+impl LineQuery {
+    /// Default constructor for non-reuse surfaces and the current reuse scan.
+    pub fn new(lines: Vec<String>, stderr: String, shown: usize) -> Self {
+        Self {
+            lines,
+            stderr,
+            shown,
+            mode: ReuseMode::Scan,
+            truncated: false,
+        }
+    }
 }
 
 /// Prepend a caveat to any existing header without changing the default
@@ -231,11 +283,11 @@ pub(crate) fn journal_output(out: &QueryOutput, ambiguous: usize) -> String {
 /// notice rides the stderr channel, not `eprintln!`.
 fn search_lines(out: QueryOutput) -> Result<LineQuery> {
     let stderr = journal_output(&out, 0);
-    Ok(LineQuery {
-        lines: render_output(&out).lines().map(str::to_string).collect(),
+    Ok(LineQuery::new(
+        render_output(&out).lines().map(str::to_string).collect(),
         stderr,
-        shown: out.shown,
-    })
+        out.shown,
+    ))
 }
 
 /// Resolve a repo-relative file path and fail with the shared not-indexed

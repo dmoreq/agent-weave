@@ -55,7 +55,8 @@ fn g10_initialize_tools_list_and_parity() {
             "mem_delete",
             "mem_gc",
             "mem_export",
-            "mem_import"
+            "mem_import",
+            "mem_reindex"
         ]
         .map(str::to_string)
     );
@@ -281,6 +282,13 @@ fn reuse_arguments_via_mcp() {
         json!({"name": "reuse", "arguments": {"paths": "not_an_array"}}),
     );
     assert_eq!(bad_paths["result"]["isError"], true, "{bad_paths}");
+    let bad_limit = rpc(
+        &mut srv,
+        20,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "limit": 101}}),
+    );
+    assert_eq!(bad_limit["result"]["isError"], true, "{bad_limit}");
 
     let ok = rpc(
         &mut srv,
@@ -297,10 +305,57 @@ fn reuse_arguments_via_mcp() {
         json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "deep_callee": true}}),
     );
     assert_eq!(deep["result"]["isError"], false, "{deep}");
+
+    let explain = rpc(
+        &mut srv,
+        4,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"paths": ["utils.py"], "explain": true}}),
+    );
+    assert_eq!(explain["result"]["isError"], false, "{explain}");
+    assert!(
+        result_text(&explain).contains("detector=D"),
+        "explain must carry detector details: {}",
+        result_text(&explain)
+    );
     let _ = fs::remove_dir_all(&repo);
 }
 
-/// Default MCP profile: the eight core navigation tools plus the memory
+/// `usage` must default to the CLI's non-quality summary on both surfaces.
+#[test]
+fn usage_default_matches_cli() {
+    let repo = fixture("mcp-usage");
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+    let mut srv = spawn(&repo);
+    let mcp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "usage", "arguments": {}}),
+    );
+    let cli = eg_cmd(&repo).args(["usage"]).output().unwrap();
+    assert_eq!(cli.status.code(), Some(0));
+    assert_eq!(
+        strip_footer(&result_text(&mcp)),
+        String::from_utf8_lossy(&cli.stdout).into_owned()
+    );
+    let mcp_quality = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "usage", "arguments": {"quality": true}}),
+    );
+    let cli_quality = eg_cmd(&repo).args(["usage", "--quality"]).output().unwrap();
+    assert_eq!(cli_quality.status.code(), Some(0));
+    assert_eq!(
+        strip_footer(&result_text(&mcp_quality)),
+        String::from_utf8_lossy(&cli_quality.stdout).into_owned()
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
+/// Default MCP profile: the 13 core navigation tools plus the memory
 /// write/query loop (OQ1). The full inventory/analysis surface stays
 /// available behind `--all-tools`.
 #[test]

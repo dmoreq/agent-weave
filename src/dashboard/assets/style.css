@@ -223,6 +223,33 @@ th {
 tr.repo-row-item { cursor: pointer; }
 tr:hover td { background: var(--bg-subtle); }
 
+/* Linked-worktree sub-rows: collapsed until the main repository row toggles
+   them open; the chevron tracks the row's aria-expanded state. */
+tr.repo-worktree-row td {
+  background: var(--bg-subtle);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.82rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+tr.repo-worktree-row { display: none; cursor: default; }
+tr.repo-worktree-row.wt-open { display: table-row; }
+tr.repo-worktree-row .wt-sub-name { padding-left: 1.4rem; }
+.wt-chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.repo-row-item[aria-expanded="true"] .wt-chevron { transform: rotate(90deg); }
+.wt-count { font-size: 0.72rem; margin-left: 0.4rem; }
+.wt-from { font-size: 0.72rem; margin-left: 0.3rem; }
+
 .row-track {
   background: var(--border-subtle);
   height: 3px;

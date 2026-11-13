@@ -67,6 +67,11 @@ pub fn serve_dashboard(
         let r = root_path
             .as_deref()
             .ok_or_else(|| EgError::Usage("--local needs a repository root".to_string()))?;
+        // Local mode reads and displays this repo's journal; refuse a tracked
+        // or symlinked confinement directory before opening any panel.
+        crate::db::reject_symlink(&crate::db::eg_dir(r), ".engram directory")?;
+        crate::db::reject_unsafe_journal(r)?;
+        crate::db::reject_tracked_eg_dir(r)?;
         crate::journal::usage_log_path(r)
     } else {
         db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log"))
@@ -84,6 +89,11 @@ pub fn serve_dashboard(
     );
 
     let _ = crate::journal::prune_stale_entries_all(&log_path);
+    if !local {
+        // Global telemetry lists durable repositories: probe fixtures under
+        // the OS temp tree are scratch identities, not projects.
+        let _ = crate::journal::prune_ephemeral_entries_all(&log_path);
+    }
 
     let running = Arc::new(AtomicBool::new(true));
 
@@ -163,17 +173,28 @@ fn serve_static_asset(stream: &mut TcpStream, path: &str, is_head: bool) -> std:
     }
 }
 
+/// Journal entries for one panel request. Global mode hides scratch roots even
+/// when the startup prune could not rewrite the log (read-only store, a probe
+/// journaling while the server runs), so no table can list an ephemeral repo.
+fn read_entries(log_path: &Path, global: bool) -> Vec<serde_json::Value> {
+    let mut entries = data::read_usage_entries(log_path);
+    if global {
+        entries.retain(|entry| !crate::journal::liveness::entry_is_ephemeral(entry));
+    }
+    entries
+}
+
 fn serve_api_route(
     stream: &mut TcpStream,
     path: &str,
     log_path: &Path,
     root: Option<&Path>,
-    _global: bool,
+    global: bool,
     is_head: bool,
 ) -> std::io::Result<bool> {
     match path {
         "/api/summary" | "/api/metrics" => {
-            let entries = data::read_usage_entries(log_path);
+            let entries = read_entries(log_path, global);
             let summary = data::compute_summary(&entries);
             let encoded = serde_json::to_vec_pretty(&summary).unwrap_or_default();
             send_response(
@@ -186,7 +207,7 @@ fn serve_api_route(
             Ok(true)
         }
         "/api/reuse" => {
-            let entries = data::read_usage_entries(log_path);
+            let entries = read_entries(log_path, global);
             let (candidates, summary, prewrite) = data::collect_reuse_candidates(root, &entries)
                 .unwrap_or_else(|_| (Vec::new(), serde_json::json!({}), Vec::new()));
             let payload = serde_json::json!({
@@ -205,7 +226,7 @@ fn serve_api_route(
             Ok(true)
         }
         "/api/memories" => {
-            let entries = data::read_usage_entries(log_path);
+            let entries = read_entries(log_path, global);
             let payload = data::collect_memories(root, &entries).unwrap_or_else(|e| {
                 serde_json::json!({
                     "schema_version": 2, "notes": [], "degraded": true,
@@ -226,7 +247,12 @@ fn serve_api_route(
     }
 }
 
-fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result<()> {
+fn stream_sse_events(
+    stream: &mut TcpStream,
+    log_path: &Path,
+    root: Option<&Path>,
+    global: bool,
+) -> std::io::Result<()> {
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
     // Same-origin only: the stream carries repository paths and search terms.
@@ -236,10 +262,24 @@ fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result
 
     let mut tail = data::Tail::new(log_path);
     let mut last_keepalive = Instant::now();
+    let mut last_gate = Instant::now();
 
     loop {
+        if last_gate.elapsed() >= Duration::from_secs(5) {
+            if local_gate(root, global).is_err() {
+                return Ok(());
+            }
+            last_gate = Instant::now();
+        }
         let now = Instant::now();
-        poll_sse_file(stream, &mut tail, log_path, &mut last_keepalive, now)?;
+        poll_sse_file(
+            stream,
+            &mut tail,
+            log_path,
+            &mut last_keepalive,
+            now,
+            global,
+        )?;
 
         if now.duration_since(last_keepalive) >= Duration::from_secs(15) {
             stream.write_all(b": keepalive\n\n")?;
@@ -252,20 +292,26 @@ fn stream_sse_events(stream: &mut TcpStream, log_path: &Path) -> std::io::Result
 }
 
 /// Pump one tail poll to the SSE client. A shrink or rotation emits the named
-/// `reset` event and no replayed frames.
+/// `reset` event and no replayed frames. Global mode hides scratch roots; a
+/// linked-worktree frame is stamped with its main repository either way.
 pub fn poll_sse_file(
     stream: &mut TcpStream,
     tail: &mut data::Tail,
     log_path: &Path,
     last_keepalive: &mut Instant,
     now: Instant,
+    global: bool,
 ) -> std::io::Result<()> {
     let mut frames: Vec<String> = Vec::new();
     let mut reset = false;
     tail.poll(log_path, |event| match event {
         data::TailEvent::Reset => reset = true,
         data::TailEvent::Line(line) => {
-            if let Some(val) = data::live_event(line) {
+            if let Some(mut val) = data::live_event(line) {
+                if global && crate::journal::liveness::entry_is_ephemeral(&val) {
+                    return;
+                }
+                data::annotate_worktree_main(&mut val);
                 if let Ok(payload) = serde_json::to_string(&val) {
                     frames.push(format!("data: {payload}\n\n"));
                 }
@@ -283,6 +329,20 @@ pub fn poll_sse_file(
         *last_keepalive = now;
     }
     stream.flush()
+}
+
+/// Gate the captured local log path. Global mode reads `~/.engram/usage.log`
+/// and is not repository provenance.
+fn local_gate(root: Option<&Path>, global: bool) -> Result<()> {
+    if global {
+        return Ok(());
+    }
+    if let Some(root) = root {
+        crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+        crate::db::reject_unsafe_journal(root)?;
+        crate::db::reject_tracked_eg_dir(root)?;
+    }
+    Ok(())
 }
 
 pub fn handle_client(
@@ -307,6 +367,19 @@ pub fn handle_client(
     if !host_allowed(req.host.as_deref()) {
         let resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         stream.write_all(resp.as_bytes())?;
+        return Ok(());
+    }
+    // Local mode is revalidated per request: a session can become tracked
+    // after startup, and the captured log path must not keep serving it.
+    if let Err(err) = local_gate(root, global) {
+        let body = format!("{err}\n");
+        send_response(
+            &mut stream,
+            503,
+            "text/plain; charset=utf-8",
+            body.as_bytes(),
+            method == "HEAD",
+        )?;
         return Ok(());
     }
 
@@ -343,7 +416,7 @@ pub fn handle_client(
             stream.write_all(header.as_bytes())?;
             return stream.flush();
         }
-        return stream_sse_events(&mut stream, log_path);
+        return stream_sse_events(&mut stream, log_path, root, global);
     }
 
     let resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";

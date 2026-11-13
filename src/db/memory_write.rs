@@ -28,12 +28,21 @@ pub struct MemRow {
     pub refs: String,
     pub source: String,
     pub created_at: i64,
+    pub anchored_at: i64,
     pub expires_at: i64,
     pub superseded_by: Option<i64>,
 }
 
 pub(super) const MEM_ROW_SQL: &str =
-    "id, key, rev, kind, scope, session, body, tags, refs, source, created_at, expires_at, superseded_by";
+    "id, key, rev, kind, scope, session, body, tags, refs, source, created_at, expires_at, superseded_by, anchored_at";
+
+impl MemRow {
+    /// The freshness anchor: a verified note uses `anchored_at`, otherwise it
+    /// falls back to `created_at`.
+    pub fn anchor(&self) -> i64 {
+        self.anchored_at.max(self.created_at)
+    }
+}
 
 pub(super) fn mem_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemRow> {
     Ok(MemRow {
@@ -50,6 +59,7 @@ pub(super) fn mem_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemRow> {
         created_at: r.get(10)?,
         expires_at: r.get(11)?,
         superseded_by: r.get(12)?,
+        anchored_at: r.get(13)?,
     })
 }
 
@@ -163,7 +173,8 @@ pub fn memory_write_batch(
         let hash =
             crate::memory::mem_content_hash(note.kind, note.body, note.tags, note.refs, note.scope)
                 as i64;
-        let fts_text = crate::memory::mem_fts_text(note.key, note.tags, note.body);
+        let fts_legacy = crate::memory::mem_fts_text_legacy(note.key, note.tags, note.body);
+        let fts_unicode = crate::memory::mem_fts_text(note.key, note.tags, note.body);
         let current = current_revision(&tx, note.key)?;
         if let Some(row) = &current {
             if row.content_hash == hash {
@@ -183,7 +194,12 @@ pub fn memory_write_batch(
         }
         tx.execute(
             "INSERT INTO memories_fts(rowid, text) VALUES (?1, ?2)",
-            rusqlite::params![new_id, fts_text],
+            rusqlite::params![new_id, fts_legacy],
+        )
+        .map_err(map_memory_err)?;
+        tx.execute(
+            "INSERT INTO memories_fts_v2(rowid, text) VALUES (?1, ?2)",
+            rusqlite::params![new_id, fts_unicode],
         )
         .map_err(map_memory_err)?;
         stats.imported += 1;
@@ -214,7 +230,8 @@ fn try_write_revision(
     let hash =
         crate::memory::mem_content_hash(note.kind, note.body, note.tags, note.refs, note.scope)
             as i64;
-    let fts_text = crate::memory::mem_fts_text(note.key, note.tags, note.body);
+    let fts_legacy = crate::memory::mem_fts_text_legacy(note.key, note.tags, note.body);
+    let fts_unicode = crate::memory::mem_fts_text(note.key, note.tags, note.body);
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(map_memory_err)?;
@@ -223,7 +240,7 @@ fn try_write_revision(
         if row.content_hash == hash {
             if note.touch {
                 tx.execute(
-                    "UPDATE memories SET created_at = ?1 WHERE id = ?2",
+                    "UPDATE memories SET created_at = ?1, anchored_at = ?1 WHERE id = ?2",
                     rusqlite::params![now, row.id],
                 )
                 .map_err(map_memory_err)?;
@@ -255,7 +272,12 @@ fn try_write_revision(
     }
     tx.execute(
         "INSERT INTO memories_fts(rowid, text) VALUES (?1, ?2)",
-        rusqlite::params![new_id, fts_text],
+        rusqlite::params![new_id, fts_legacy],
+    )
+    .map_err(map_memory_err)?;
+    tx.execute(
+        "INSERT INTO memories_fts_v2(rowid, text) VALUES (?1, ?2)",
+        rusqlite::params![new_id, fts_unicode],
     )
     .map_err(map_memory_err)?;
     tx.commit().map_err(map_memory_err)?;
@@ -273,8 +295,8 @@ fn insert_revision(
     rev: i64,
 ) -> rusqlite::Result<usize> {
     tx.execute(
-        "INSERT INTO memories(key, rev, kind, scope, session, body, tags, refs, content_hash, source, created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO memories(key, rev, kind, scope, session, body, tags, refs, content_hash, source, created_at, expires_at, fts_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 2)",
         rusqlite::params![
             note.key,
             rev,
@@ -324,6 +346,11 @@ fn supersede_current(
     .map_err(map_memory_err)?;
     tx.execute(
         "DELETE FROM memories_fts WHERE rowid = ?1",
+        rusqlite::params![old_id],
+    )
+    .map_err(map_memory_err)?;
+    tx.execute(
+        "DELETE FROM memories_fts_v2 WHERE rowid = ?1",
         rusqlite::params![old_id],
     )
     .map_err(map_memory_err)?;

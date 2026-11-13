@@ -1,58 +1,14 @@
-//! Usage-log parsing, aggregation, and rendering: per-tool and per-repo
-//! folds, summary rendering, telemetry totals, and bounded log loading.
+//! Usage-log parsing, aggregation, rendering, telemetry, and bounded reads.
 
 use super::*;
 use crate::repo::UNATTRIBUTED;
 
+mod parse;
 mod read;
+mod reuse;
+pub(crate) use parse::{parse_usage_line, UsageFields};
 pub(crate) use read::*;
-
-/// Parsed usage line. Queries and signatures can contain quotes, backslashes,
-/// and control characters, so this must go through serde_json rather than
-/// slicing the raw text between quote characters.
-pub(crate) struct UsageFields {
-    pub(crate) tool: String,
-    pub(crate) exit_code: i64,
-    pub(crate) result_count: i64,
-    pub(crate) shown: i64,
-    pub(crate) total: i64,
-    pub(crate) stale: bool,
-    pub(crate) ambiguous: i64,
-    pub(crate) latency_us: Option<i64>,
-    pub(crate) ts: Option<i64>,
-    pub(crate) repo: Option<String>,
-    pub(crate) repo_name: Option<String>,
-    pub(crate) worktree: bool,
-    pub(crate) agent: Option<String>,
-}
-
-pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    Some(UsageFields {
-        tool: v.get("tool")?.as_str()?.to_string(),
-        exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
-        result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
-        shown: v.get("shown").and_then(|x| x.as_i64()).unwrap_or(0),
-        total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
-        stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
-        ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
-        latency_us: v.get("latency_us").and_then(|x| x.as_i64()),
-        ts: v.get("ts").and_then(|x| x.as_i64()),
-        repo: v
-            .get("repo")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        repo_name: v
-            .get("repo_name")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-        worktree: v.get("worktree").and_then(|x| x.as_bool()).unwrap_or(false),
-        agent: v
-            .get("agent")
-            .and_then(|x| x.as_str())
-            .map(|s| s.to_string()),
-    })
-}
+use reuse::ReuseUsage;
 
 #[derive(Default)]
 struct RepoAgg {
@@ -84,11 +40,16 @@ struct ToolAgg {
     latencies: Vec<u64>,
     total_shown: usize,
     total_results: usize,
+    reuse_usage: ReuseUsage,
+    reuse_truncated: usize,
+    reuse_modes: usize,
+    reuse_scan_shown: usize,
+    reuse_scan_results: usize,
+    reuse_stale: usize,
+    reuse_unknown: usize,
 }
 
-/// Summarize `usage.log` (+ `.1`): per-tool calls, errors, p50/p95, rates.
-/// `quality` adds the empty-result split and the cap count without changing
-/// the journal schema or the default text.
+/// Summarize `usage.log` (+ `.1`); `quality` adds the empty split and cap count.
 pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> {
     let lines = load_usage_lines(root)?;
     let aggs = aggregate_usage(&lines);
@@ -133,6 +94,9 @@ fn load_usage_lines_from_path(base_log: &Path) -> crate::error::Result<String> {
 
 /// Read both journal generations, newest last (`""` is current, `.1` rotated).
 fn load_usage_lines(root: &Path) -> crate::error::Result<String> {
+    crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+    crate::db::reject_unsafe_journal(root)?;
+    crate::db::reject_tracked_eg_dir(root)?;
     load_usage_lines_from_path(&usage_log_path(root))
 }
 
@@ -142,9 +106,7 @@ fn load_global_usage_lines() -> crate::error::Result<String> {
     load_usage_lines_from_path(&path)
 }
 
-/// Fold one parsed journal line into its per-tool aggregate. The single copy
-/// of the counter rules shared by the per-repo and global summaries, so their
-/// error/empty/capped/stale semantics cannot drift apart.
+/// Fold one parsed line into its per-tool aggregate; one counter rule set.
 fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
     agg.calls += 1;
     // One exit-code classification for the CLI and the dashboard: empty and
@@ -160,17 +122,34 @@ fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
             agg.empty_error += 1;
         }
     }
-    if fields.total > fields.shown {
+    let shown = fields.shown.unwrap_or(fields.result_count).max(0) as usize;
+    let capped = if fields.tool == "reuse" {
+        fields.reuse.is_some_and(|reuse| reuse.capped > 0)
+    } else {
+        fields.total > shown as i64
+    };
+    if capped {
         agg.capped += 1;
     }
     if fields.stale {
         agg.stale += 1;
     }
     agg.ambiguous += fields.ambiguous.max(0) as usize;
-    agg.total_shown += fields.shown.max(0) as usize;
+    agg.total_shown += shown;
     agg.total_results += fields.result_count.max(0) as usize;
     if let Some(us) = fields.latency_us {
         agg.latencies.push(us.max(0) as u64);
+    }
+    reuse::fold(fields.reuse, fields.truncated, fields.tool == "reuse", agg);
+    if fields.tool == "reuse" && fields.mode.as_deref().is_none_or(|mode| mode == "scan") {
+        agg.reuse_scan_shown += shown;
+        agg.reuse_scan_results += fields.result_count.max(0) as usize;
+        if fields.freshness_state.as_deref() == Some("stale") {
+            agg.reuse_stale += 1;
+        }
+        if fields.freshness_state.as_deref() == Some("unknown") {
+            agg.reuse_unknown += fields.freshness_unknown.max(1);
+        }
     }
 }
 
@@ -434,7 +413,7 @@ fn calculate_telemetry_totals(
         saved_tokens +=
             estimated_tokens_saved(tool, agg.total_shown, agg.total_results, successful_calls);
         if tool == "reuse" {
-            reuse_hits += agg.total_results.max(agg.total_shown);
+            reuse_hits += agg.reuse_scan_results.max(agg.reuse_scan_shown);
         }
     }
 
@@ -447,7 +426,7 @@ fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
     let p50 = percentile(&lat, 0.5);
     let p95 = percentile(&lat, 0.95);
     if quality {
-        format!(
+        let mut row = format!(
             "  {tool}: {} calls, errors={} empty_ok={} ({}) empty_error={} stale={} ambiguous={} capped={} p50={p50} p95={p95}",
             agg.calls,
             agg.errors,
@@ -457,7 +436,29 @@ fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
             agg.stale,
             agg.ambiguous,
             agg.capped,
-        )
+        );
+        if agg.reuse_modes > 0 {
+            row.push_str(&format!(
+                " reuse_modes={} truncated={} provisional={} low={} medium={} high={} suppressed={} guarded={} below={} omitted={}",
+                agg.reuse_modes,
+                agg.reuse_truncated,
+                agg.reuse_usage.provisional,
+                agg.reuse_usage.low,
+                agg.reuse_usage.medium,
+                agg.reuse_usage.high,
+                agg.reuse_usage.suppressed,
+                agg.reuse_usage.guarded_out,
+                agg.reuse_usage.below_threshold,
+                agg.reuse_usage.omitted,
+            ));
+            if agg.reuse_stale > 0 || agg.reuse_unknown > 0 {
+                row.push_str(&format!(
+                    " stale={} unknown={}",
+                    agg.reuse_stale, agg.reuse_unknown
+                ));
+            }
+        }
+        row
     } else {
         format!(
             "  {tool}: {} calls, errors={} empty={} stale={} ambiguous={} p50={p50} p95={p95}",

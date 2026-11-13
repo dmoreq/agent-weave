@@ -85,7 +85,11 @@ fn incremental_reuse_hints(
     let Ok(conn) = crate::db::open_for_query(&prep.root) else {
         return String::new();
     };
-    let Ok(hints) = crate::query::reuse::detect_hints(&conn, &new_names) else {
+    let ctx = crate::query::QueryCtx {
+        conn: &conn,
+        root: &prep.root,
+    };
+    let Ok(hints) = crate::query::reuse::detect_hints(&ctx, &new_names) else {
         return String::new();
     };
     if hints.is_empty() {
@@ -102,6 +106,9 @@ pub(super) fn prepare_build(
     max_parse_error_rate: f64,
     started: Instant,
 ) -> Result<BuildPrep> {
+    // Refuse tracked state before walking, parsing, or reading old rows: the
+    // provenance gate must not depend on reaching create_fresh later.
+    crate::db::reject_tracked_eg_dir(root)?;
     let t0 = Instant::now();
     let stats = crate::walk::walk(root, &crate::walk::source_exts())?;
     let opts = BuildOpts {

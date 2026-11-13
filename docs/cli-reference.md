@@ -176,21 +176,40 @@ eg symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 Real-time anti-reinvention engine. Detects cross-file and intra-file duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
 ```bash
-eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--judge]
+eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--min-confidence <low|provisional|medium|high>] [--explain]
+eg reuse --propose "<signature>" [--callees <a,b>] [--explain]
+eg reuse --coverage <class|unresolved|tests> [--explain]
 ```
 
 | Option / Argument | Default | Description |
 |---|---|---|
-| `[PATHS]...` | Empty (repo) | Optional file or directory paths to inspect. |
+| `[PATHS]...` | Empty (repo) | File, directory, `file:line`, or unique symbol name to inspect. Multiple paths form a union. |
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
-| `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). |
-| `--judge` | `false` | Send candidates with 45-75% overlap to a local `eg-judge` binary and append its verdict. Reads `EG_JUDGE_BIN` and `EG_JUDGE_MODEL`; any failure keeps the static output and prints one stderr note. |
+| `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). Closures wider than 512 weighted callees are skipped as hubs; deep mode evaluates at most 30,000 candidate pairs per invocation. |
+| `--min-confidence <tier>` | `low` | Minimum confidence shown: `low`, `provisional`, `medium`, or `high`. |
+| `--propose <signature>` | — | Pre-finalize proposal matched against indexed symbols; paths are rejected. |
+| `--callees <a,b>` | — | Proposed callee names used with `--propose`. |
+| `--coverage <kinds>` | — | Opt-in coverage detectors: `class`, `unresolved`, `tests`. |
+| `--show-suppressed` | `false` | Include allowlisted candidates and report the suppressed count. |
+| `--judge` | `false` | Ask a local `eg-judge` binary to arbitrate gray-zone candidates. |
+| `--explain` | `false` | Append `detector=...; reasons=[...]` to each candidate line. |
 
-#### Calibrated Detectors
+Path targets are validated before the scan: absolute paths, `..`, backslashes, and symlinks exit `2`; missing or unindexed targets exit `1`. A `file:line` target selects the innermost production function or method containing that line. Directory targets match at a path-component boundary. When a target or canonical file changed since the build, the candidate is downgraded and the output carries a reuse-specific freshness header.
+
+Proposal mode never creates a file. It matches the proposed name tokens and callees against resolved index data and returns only existing canonical symbols.
+
+Allowlist notes use the key `reuse-allow/<target>-><canonical>` in the local memory store; `--global` is rejected and imported notes cannot create allowlist keys. High-confidence pairs are never suppressed. A note with `--refs` is ignored after any referenced file changes or disappears from the index. `--show-suppressed` keeps the candidate visible and adds `N suppressed` to the summary. `--coverage` scans the whole repository and rejects paths.
+
+Judge mode is best-effort. It reviews gray-zone scan candidates and proposal candidates. A missing binary, model, timeout, malformed output, or unknown verdict leaves the static result unchanged and prints one `eg: judge unavailable:` stderr note. Set `EG_JUDGE_BIN` and `EG_JUDGE_MODEL` to pin the executable and checkpoint directory; the child runs with a cleared environment and a 15 s deadline. The v2 protocol passes source through stdin as `{"code_a","code_b"}` (or `{"text_a","text_b"}` for the similarity subcommand), never through argv.
+
+#### Detectors
 - **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard). With `--deep-callee`, the footprint includes second-hop callees, catching wrappers that forward through an intermediate helper.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Flags functions with heavily overlapping signatures and parameter types.
 - **D3: Raw Client Bypass**: Warns when callers invoke raw primitives rather than existing canonical wrappers.
 - **D4: 1-Caller Wrappers**: Surfaces redundant single-use forwarding functions.
+- **D5: Class Shape Overlap**: Opt-in `--coverage class`; same class name and method overlap across files.
+- **D1L: Unresolved Call Coverage**: Opt-in `--coverage unresolved`; an unresolved bare-name call matches an indexed production symbol.
+- **DT: Test Helper Overlap**: Opt-in `--coverage tests`; a test helper shares name tokens with a production symbol.
 
 ---
 
@@ -215,7 +234,8 @@ eg mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 | `--scope <SCOPE>` | `durable` | `durable` (never expires) or `session` (expires after TTL). |
 | `--ttl <SECS>` | `604800` (7 days)| Expiration lifetime in seconds (only valid with `--scope session`). |
 | `--supersedes <KEY>`| None | Mark the specified key as superseded by this note in one atomic transaction. |
-| `--touch` | `false` | Refresh timestamp on active revision when content hash matches without revision churn. |
+| `--touch` | `false` | Refresh `created_at` (last asserted) on the active revision when the content hash matches; no new revision. |
+| `--confirm` | `false` | Required for `reuse-allow/...` writes over MCP; keeps allowlist creation an explicit act. |
 | `--global` | `false` | Persist to global store (`~/.engram/memory.db`) instead of repository (`.engram/memory.db`). |
 
 When the new note is at least 80% Jaccard-similar to an existing current note under another key, `mem write` appends an advisory `eg: mem hint:` line suggesting `--supersedes`. The write still succeeds; the hint is never a hard failure.
@@ -226,7 +246,7 @@ When the new note is at least 80% Jaccard-similar to an existing current note un
 Retrieve and rank memory notes using SQLite FTS5 BM25, reference token overlap, and recency decay.
 
 ```bash
-eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global] [--ref <REFERENCE>]
+eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--include-superseded] [--global|--local] [--ref <REFERENCE>] [--since <TIME>] [--until <TIME>] [--explain] [--legacy]
 ```
 
 | Option | Default | Description |
@@ -238,9 +258,18 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 | `--limit <N>` | `10` | Maximum results displayed (1 to 100). |
 | `--include-superseded`| `false` | When combined with `--all`, includes superseded note revisions. |
 | `--global` | `false` | Restrict search exclusively to global store (`~/.engram/memory.db`). |
+| `--local` | `false` | Restrict search exclusively to the project store; mutually exclusive with `--global`. |
 | `--ref <REFERENCE>` | None | Filter notes referencing target path or symbol. |
+| `--since <TIME>` | None | Inclusive lower bound on `created_at` (last assertion). |
+| `--until <TIME>` | None | Exclusive upper bound on `created_at`. |
+| `--explain` | `false` | Add one causal `why:` line per shown ranked note; requires terms. |
+| `--legacy` | `false` | Force the legacy ASCII index and tokens (diagnostic). |
 
-- **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`.
+Time bounds accept `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SSZ`, or `@<unix-seconds>`. Bounds are UTC and half-open: `[since, until)`. Invalid dates, timezone offsets, fractional seconds, bare integers, and `since > until` are usage errors (exit 2).
+
+- **Layered Precedence**: Default queries seamlessly search **both** local repository notes and global preferences. Local notes shadow colliding global keys. Global notes are marked with `[global]`. `--local` restricts to the project store and never falls back to global.
+- **Unicode Retrieval**: Notes are indexed in both a legacy ASCII FTS table and a Unicode FTS table using `remove_diacritics 2`. `bo nho` finds `Bộ nhớ`; a bare consonant query such as `nh` does not. Reads use the Unicode table only after a clean reconcile; otherwise they fall back to the legacy table.
+- **Explain**: `--explain` emits labels such as `lexical match`, `ref src/memory/rank.rs`, `graph depth 2`, and `age 3d`; it never prints bm25 values, normalized scores, weights, or note bodies.
 - **Graph Expansion**: When `.engram/index.db` is readable, query terms seed a bounded traversal of resolved `calls` edges (depth $\le 3$, decay $0.5^{depth}$), so notes attached to downstream callees still surface. A missing or unreadable index silently falls back to plain FTS5 ranking.
 - **Citation-Lock Verification**: Automatically verifies `--refs` anchors against `.engram/index.db`. Broken targets missing from the index are badged with `[stale-ref] [broken-ref]`, while targets modified after note creation are badged with `[stale-ref] [modified-ref]`. Candidates are also retrieved directly by matching code-anchored reference tokens.
 
@@ -250,12 +279,13 @@ eg mem query [TERMS] [--all] [--kind <KIND>] [--scope <SCOPE>] [--limit <N>] [--
 
 | Subcommand | Syntax | Description |
 |---|---|---|
-| `touch` | `eg mem touch <KEY> [--global]` | Refresh `created_at` timestamp on active revision without creating a new revision. |
+| `touch` | `eg mem touch <KEY> [--global]` | Refresh `anchored_at` (last verified) on the active revision without creating a new revision. |
 | `get` | `eg mem get <KEY> [--global]` | Fetch current revision and total revision count for an exact key. |
 | `delete` | `eg mem delete <KEY> [--global]` | Hard-delete all revisions and FTS rows for a key. |
-| `export` | `eg mem export [--format jsonl\|markdown] [--limit <N>] [--global]` | Export active notes as JSONL (default) or fenced Markdown to stdout. |
+| `export` | `eg mem export [--format jsonl\|markdown] [--limit <N>] [--global] [--since <TIME>] [--until <TIME>] [--scan]` | Export active notes as JSONL (default) or fenced Markdown to stdout. `--scan` reports suspected secrets on stderr without changing stdout or the exit code. |
 | `import` | `eg mem import <PATH> [--format jsonl\|markdown] [--force] [--global]` | Restore a JSONL/Markdown export (use `-` for stdin). Conflicting keys are skipped unless `--force` overwrites; imported rows carry `[imported]`. MCP import is confined to the project store. |
 | `gc` | `eg mem gc [--global]` | Purge expired session notes and superseded revisions older than 30 days. |
+| `reindex` | `eg mem reindex [--global]` | Rebuild the derived Unicode FTS index; notes are primary data and are untouched. |
 
 ---
 
@@ -338,6 +368,8 @@ eg dashboard [--port 7890] [--host 127.0.0.1] [--open] [--local]
 - `--local`: Scope telemetry exclusively to the current repository (`.engram/usage.log`) instead of global.
 
 Entries without a live repository identity — deleted repositories, legacy lines, calls that resolved no repository — disappear from the repository tables, the active-repo count, the Recent Queries feed, and the live SSE stream, and are purged from the log at startup, matching `eg usage --global`.
+
+Calls recorded in a linked git worktree fold into the main repository's row instead of adding a second row: the main root is resolved from the worktree's `.git` pointer file, the repository table shows a per-worktree breakdown behind an expandable row, and Recent Queries feed rows keep the worktree name with a `from <main-repo>` note. In global mode the dashboard also treats repository roots under the OS temp directory (`/tmp`, `/private/tmp`, `/var/tmp`, `$TMPDIR`) as scratch identities — probe fixtures and throwaway checkouts never reach the tables, and dashboard start drops their lines from the global journal.
 
 ### Live Query Monitor (`eg monitor`)
 Stream real-time query events directly in your terminal with colored ANSI output, agent attribution tags, and zero dependencies. Defaults to global telemetry across all repositories with an initial backlog of recent events.

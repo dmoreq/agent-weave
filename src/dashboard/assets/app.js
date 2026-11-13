@@ -11,6 +11,9 @@ const UNATTRIBUTED = '(unattributed)';
 function detectorEvidenceLabel(detector) {
   if (detector === 'D3') return 'shared guard';
   if (detector === 'D4') return 'pass-through wrapper';
+  if (detector === 'D5') return 'class shape';
+  if (detector === 'D1L') return 'unresolved call';
+  if (detector === 'DT') return 'test overlap';
   return 'evidence';
 }
 
@@ -529,13 +532,19 @@ function renderReposTable(repoAggs) {
       select.appendChild(opt);
     }
 
+    const worktrees = Object.entries(rData.worktrees || {});
+    const expandable = worktrees.length > 0;
+
     const tr = document.createElement('tr');
     tr.className = 'repo-row-item';
     tr.tabIndex = 0;
     tr.setAttribute('role', 'row');
-    tr.setAttribute('aria-label', 'Filter by repository ' + label);
-    tr.onclick = () => filterByRepo(label);
-    tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); filterByRepo(label); } };
+    if (expandable) {
+      tr.setAttribute('aria-label', 'Toggle worktrees for repository ' + label);
+      tr.setAttribute('aria-expanded', 'false');
+    } else {
+      tr.setAttribute('aria-label', 'Filter by repository ' + label);
+    }
 
     const calls = rData.calls;
     const errs = rData.errors || 0;
@@ -545,10 +554,16 @@ function renderReposTable(repoAggs) {
     const pct = (calls / maxCalls) * 100.0;
     const wtBadge = wt ? '<span class="badge badge-wt">worktree</span>' : '<span class="badge badge-repo">repo</span>';
     const relClass = errs === 0 ? 'status-ok' : 'status-err';
+    const chevron = expandable
+      ? '<span class="wt-chevron" aria-hidden="true"></span>'
+      : '';
+    const wtCount = expandable
+      ? '<span class="text-muted wt-count">' + worktrees.length + (worktrees.length === 1 ? ' worktree' : ' worktrees') + '</span>'
+      : '';
 
     tr.innerHTML =
       '<td>' +
-      '  <div class="repo-name-wrap"><strong>' + escapeHtml(rData.display || rName) + '</strong> ' + wtBadge + '</div>' +
+      '  <div class="repo-name-wrap">' + chevron + '<strong>' + escapeHtml(label) + '</strong> ' + wtBadge + wtCount + '</div>' +
       '  <div class="row-track"><div class="row-track-fill" style="width: ' + pct.toFixed(1) + '%;"></div></div>' +
       '</td>' +
       '<td class="text-right num-col">' + calls.toLocaleString() + '</td>' +
@@ -556,6 +571,39 @@ function renderReposTable(repoAggs) {
       '<td class="text-muted num-col">' + lastStr + '</td>';
 
     tbody.appendChild(tr);
+
+    // Linked-worktree sub-rows stay collapsed until the main row is clicked;
+    // the repository filter dropdown still scopes the feed to the main repo.
+    const subRows = worktrees.map(([wtName, wtData]) => {
+      const wtCalls = wtData.calls || 0;
+      const wtErrs = wtData.errors || 0;
+      const wtRel = wtCalls ? 100.0 * (wtCalls - wtErrs) / wtCalls : 100.0;
+      const wtLast = wtData.last_ts ? new Date(wtData.last_ts * 1000).toLocaleString() : '—';
+      const sub = document.createElement('tr');
+      sub.className = 'repo-worktree-row';
+      sub.setAttribute('data-parent', label);
+      sub.innerHTML =
+        '<td><div class="repo-name-wrap wt-sub-name"><span class="badge badge-wt">worktree</span> ' + escapeHtml(wtName) + '</div></td>' +
+        '<td class="text-right num-col">' + wtCalls.toLocaleString() + '</td>' +
+        '<td><span class="badge ' + (wtErrs === 0 ? 'status-ok' : 'status-err') + '">' + wtRel.toFixed(1) + '% (' + wtErrs + ' err)</span></td>' +
+        '<td class="text-muted num-col">' + wtLast + '</td>';
+      tbody.appendChild(sub);
+      return sub;
+    });
+
+    if (expandable) {
+      const toggle = () => {
+        const open = tr.getAttribute('aria-expanded') !== 'true';
+        tr.setAttribute('aria-expanded', String(open));
+        subRows.forEach(sub => sub.classList.toggle('wt-open', open));
+        announce((open ? 'Expanded ' : 'Collapsed ') + worktrees.length + ' worktrees of ' + label);
+      };
+      tr.onclick = toggle;
+      tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } };
+    } else {
+      tr.onclick = () => filterByRepo(label);
+      tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); filterByRepo(label); } };
+    }
   });
   if (select) {
     if (curRepoVal && Array.from(select.options).some(o => o.value === curRepoVal)) {
@@ -997,9 +1045,12 @@ function createRecentRow(q) {
   const tr = document.createElement('tr');
   tr.className = 'query-row';
   const rName = q.repo_name || UNATTRIBUTED;
+  // A linked worktree keeps its own name in the feed, but scoping filters and
+  // the row's provenance follow the main repository it belongs to.
+  const mainName = q.repo_main_name || '';
   const aName = q.agent || 'user';
   const exitCode = parseInt(q.exit_code || 0, 10);
-  tr.setAttribute('data-repo', rName);
+  tr.setAttribute('data-repo', mainName || rName);
   tr.setAttribute('data-agent', aName);
   tr.setAttribute('data-code', exitCode);
 
@@ -1023,13 +1074,15 @@ function createRecentRow(q) {
   const argsShort = argsRaw.length > 85 ? argsRaw.substring(0, 82) + '...' : argsRaw;
   const argsHuman = explainToolArgs(q.tool, q.args) || argsShort;
 
+  const fromMain = mainName
+    ? ' <span class="text-muted wt-from">from ' + escapeHtml(mainName) + '</span>'
+    : '';
+
   tr.innerHTML =
     '<td class="num-col text-muted">' + ts + '</td>' +
-    '<td><span class="repo-tag">' + escapeHtml(rName) + '</span></td>' +
+    '<td><span class="repo-tag">' + escapeHtml(rName) + '</span>' + fromMain + '</td>' +
     '<td>' + agentTagHtml(aName) + '</td>' +
-    '<td><code>' + escapeHtml(q.tool || '—') + '</code>' +
-      (q.judged ? ' <span class="badge badge-judge" title="eg-judge dispatched">judge</span>' : '') +
-      '</td>' +
+    '<td><code>' + escapeHtml(q.tool || '—') + '</code></td>' +
     '<td class="text-right num-col">' + (q.shown || q.result_count || 0) + '</td>' +
     '<td class="text-right num-col">' + latStr + '</td>' +
     '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
@@ -1158,13 +1211,14 @@ function renderReuseList() {
     const detBadgeClass = 'badge badge-' + c.detector.toLowerCase();
     const repoBadge = '<span class="badge badge-repo">' + escapeHtml(c.repo) + '</span>';
     const locBadge = '<span class="badge status-warn" data-tip="card.loc_saving">-' + c.loc_saving + ' LOC</span>';
+    const confBadge = c.confidence ? '<span class="badge" data-tip="card.confidence">' + escapeHtml(c.confidence) + '</span>' : '';
 
     card.innerHTML =
       '<div class="item-card-head">' +
       '  <div style="display:flex; align-items:center; gap:0.4rem;">' +
       '    <span class="' + detBadgeClass + '" data-tip="det.' + c.detector.toLowerCase() + '">' + c.detector + '</span>' +
           (c.overlap_applicable ? '<span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + c.overlap_pct + '% overlap</span>' : '<span class="badge" data-tip="card.overlap" style="background:var(--bg-subtle);">' + escapeHtml(detectorEvidenceLabel(c.detector)) + '</span>') +
-      '    ' + locBadge +
+      '    ' + confBadge + locBadge +
       '  </div>' +
       '  ' + repoBadge +
       '</div>' +
@@ -1642,6 +1696,7 @@ const TIP = {
   'col.reads_writes': 'Memory reads versus notes written.',
   'card.overlap': 'Measured evidence overlap for D1/D2; D3/D4 show their evidence class instead of a percentage.',
   'card.callers': 'Call sites using the canonical helper.',
+  'card.confidence': 'Static confidence tier; stale or unknown freshness caps it at low.',
   'card.usage': 'How many eg reuse runs in the retained journal surfaced this candidate, and when the last one ran.',
   'card.recalled': 'Exact-key mem_get recalls in the retained journal.',
   'card.verified': 'Last Verify (anchor) timestamp; the creation date never changes.',

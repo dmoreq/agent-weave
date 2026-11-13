@@ -202,7 +202,9 @@ fn fifo_journal_reader_does_not_hang() {
     let mut cmd = eg(&repo);
     cmd.args(["usage"]);
     let out = output_with_timeout(cmd, 5).expect("usage hung on a FIFO journal");
-    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(out.status.code(), Some(6), "{out:?}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("refusing unsafe journal"), "{stderr}");
 }
 
 #[cfg(unix)]

@@ -6,7 +6,26 @@ pub const FNV_PRIME: u64 = 0x100000001b3;
 
 pub fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = FNV_OFFSET;
-    for &b in bytes {
+    // Eight independent XOR/multiply steps per iteration: the dependency
+    // chain stays exact FNV-1a while the loop overhead shrinks on 1 MiB files.
+    let mut chunks = bytes.chunks_exact(8);
+    for chunk in &mut chunks {
+        macro_rules! step {
+            ($i:expr) => {{
+                hash ^= u64::from(chunk[$i]);
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }};
+        }
+        step!(0);
+        step!(1);
+        step!(2);
+        step!(3);
+        step!(4);
+        step!(5);
+        step!(6);
+        step!(7);
+    }
+    for &b in chunks.remainder() {
         hash ^= u64::from(b);
         hash = hash.wrapping_mul(FNV_PRIME);
     }

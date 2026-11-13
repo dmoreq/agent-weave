@@ -55,6 +55,14 @@ pub(super) fn run_mem_import(
             "mem import: no importable notes".to_string(),
         ));
     }
+    if normalized
+        .iter()
+        .any(|note| note.key.starts_with("reuse-allow/"))
+    {
+        return Err(EgError::Usage(
+            "mem import: reuse-allow notes require an explicit mem write with confirm".to_string(),
+        ));
+    }
 
     // Open/create the store only after every note passed validation.
     let mut conn = open_mem_conn(root_arg, *global, MemoryMode::Store)?;
@@ -161,14 +169,20 @@ fn resolve_import_path(
 ) -> Result<std::path::PathBuf> {
     let candidate = std::path::Path::new(path);
     if surface == Surface::Mcp {
-        if candidate.is_absolute() {
+        if candidate.is_absolute()
+            || path.contains('\\')
+            || candidate
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(EgError::Usage(format!(
                 "mem import: '{path}' must be repo-relative over MCP"
             )));
         }
-        if let Some(root) = root_arg {
-            return Ok(root.join(candidate));
-        }
+        let root = root_arg.ok_or_else(|| {
+            EgError::Usage("mem import: MCP import requires a repository root".to_string())
+        })?;
+        return Ok(root.join(candidate));
     }
     Ok(candidate.to_path_buf())
 }
@@ -177,6 +191,11 @@ fn resolve_import_path(
 /// directory is rejected; the size cap runs before the read.
 fn read_input(path: &str, root_arg: Option<&Path>, surface: Surface) -> Result<String> {
     if path == "-" {
+        if surface == Surface::Mcp {
+            return Err(EgError::Usage(
+                "mem import: '-' is not supported over MCP; pass a repo-relative file".to_string(),
+            ));
+        }
         let mut buf = String::new();
         // Bound the read itself: one byte past the cap is enough to reject,
         // so unbounded stdin cannot exhaust memory.
@@ -208,6 +227,27 @@ fn read_input(path: &str, root_arg: Option<&Path>, surface: Surface) -> Result<S
         return Err(EgError::Usage(format!(
             "mem import: '{path}' is a directory; import one file or '-'"
         )));
+    }
+    if !meta.is_file() {
+        return Err(EgError::Usage(format!(
+            "mem import: '{path}' is not a regular file"
+        )));
+    }
+    if surface == Surface::Mcp {
+        let Some(root) = root_arg else {
+            return Err(EgError::Usage(
+                "mem import: MCP import requires a repository root".to_string(),
+            ));
+        };
+        let canon_root =
+            std::fs::canonicalize(root).map_err(|e| EgError::Internal(format!("io error: {e}")))?;
+        let canon = std::fs::canonicalize(&resolved)
+            .map_err(|e| EgError::Internal(format!("io error: {e}")))?;
+        if !canon.starts_with(&canon_root) {
+            return Err(EgError::Usage(format!(
+                "mem import: '{path}' escapes the repository root"
+            )));
+        }
     }
     if meta.len() > crate::memory::MAX_IMPORT_FILE_BYTES as u64 {
         return Err(EgError::Usage(format!(

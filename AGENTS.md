@@ -43,7 +43,7 @@ Read the governing specifications before changing schemas, resolution semantics,
 
 - **Dual-Database Schema Evolution**:
   - **Code Index (`.engram/index.db`, `SCHEMA_VERSION = 10`)**: Evolve [`schema/index.sql`](schema/index.sql) and [`schema/indexes.sql`](schema/indexes.sql) additively. Never migrate `.engram/index.db` in place. Any schema mismatch (`PRAGMA user_version != SCHEMA_VERSION`) must exit `5`; `eg build` replaces the database atomically after `fsync`. Keep secondary indexes in [`schema/indexes.sql`](schema/indexes.sql) so fresh builds create them after bulk inserts.
-  - **Memory Store (`.engram/memory.db` & `~/.engram/memory.db`, `MEMORY_SCHEMA_VERSION = 1`)**: Defined in [`schema/memory.sql`](schema/memory.sql). Preserves primary agent-authored notes across index rebuilds with FTS5 search, revision chains, content-hash deduplication, and JSONL backup (`eg mem export`).
+  - **Memory Store (`.engram/memory.db` & `~/.engram/memory.db`, `MEMORY_SCHEMA_VERSION = 2`)**: Defined in [`schema/memory.sql`](schema/memory.sql). Preserves primary agent-authored notes across index rebuilds with dual FTS5 indexes (legacy ASCII + Unicode), revision chains, content-hash deduplication, and JSONL backup (`eg mem export`).
 - **CLI & MCP Parity**:
   - Route all shared query, analysis, and memory operations through [`src/service.rs`](src/service.rs) so CLI and MCP outputs remain byte-identical.
 - **SQL Safety & Deterministic Ordering**:

@@ -26,6 +26,9 @@ pub struct Candidate {
     /// Fused score, filled by [`fuse`].
     pub score: f64,
     pub is_global: bool,
+    /// True when the FTS index produced this candidate (the only direct
+    /// evidence that the query lexically matched the note).
+    pub from_fts: bool,
 }
 
 /// Min-max normalize with the design's all-equal convention: an all-equal

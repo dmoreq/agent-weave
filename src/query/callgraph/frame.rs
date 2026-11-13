@@ -183,7 +183,7 @@ pub(super) fn callee_empty_reason(conn: &Connection, ids: &[i64]) -> Result<Stri
     let shown = names
         .iter()
         .take(SHOWN)
-        .map(String::as_str)
+        .map(|name| sanitize(name))
         .collect::<Vec<_>>()
         .join(", ");
     let more = if names.len() > SHOWN {
@@ -192,7 +192,7 @@ pub(super) fn callee_empty_reason(conn: &Connection, ids: &[i64]) -> Result<Stri
         String::new()
     };
     let hint = match symbol_file(conn, ids) {
-        Some(path) => format!(" — run eg unresolved --names --path {path}"),
+        Some(path) => format!(" — run eg unresolved --names --path {}", sanitize(&path)),
         None => " — run eg unresolved --names".to_string(),
     };
     Ok(format!(

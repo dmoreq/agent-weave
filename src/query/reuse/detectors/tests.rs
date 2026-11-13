@@ -1,6 +1,7 @@
 //! Unit tests for the D1-D4 detectors and the inverted-index parity gate.
 
 use super::*;
+use std::cell::Cell;
 
 fn make_test_symbol(
     id: i64,
@@ -19,6 +20,7 @@ fn make_test_symbol(
         line_end: 20,
         resolved_callees: HashSet::new(),
         all_callees: callees.iter().map(|&s| s.to_string()).collect(),
+        unresolved_callees: HashSet::new(),
         callee_ids: HashSet::new(),
         deep_weights: HashMap::new(),
         inbound_callers: callers,
@@ -44,7 +46,10 @@ fn d2_rejects_signature_only_twins() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     assert!(
         find_best_d2(&symbols[&2], &corpus).is_none(),
@@ -76,7 +81,10 @@ fn d2_accepts_twins_that_share_name_tokens() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let candidate = find_best_d2(&symbols[&2], &corpus).expect("shared name tokens match");
     assert_eq!(candidate.canonical, "ui.render_memory_list");
@@ -112,7 +120,10 @@ fn d2_rejects_numbered_siblings() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     assert!(
         find_best_d2(&symbols[&2], &corpus).is_none(),
@@ -131,7 +142,10 @@ fn d3_matches_raw_client_across_rust_path_styles() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
 
     let candidate = check_d3(&target_rust, &corpus);
@@ -141,7 +155,8 @@ fn d3_matches_raw_client_across_rust_path_styles() {
     );
     let cand = candidate.unwrap();
     assert_eq!(cand.canonical, "client.fetch");
-    assert_eq!(cand.shared_items, vec!["raw_client=reqwest.get"]);
+    assert_eq!(cand.raw_client.as_deref(), Some("reqwest.get"));
+    assert!(cand.shared_items.is_empty());
 
     let target_diff = make_test_symbol(3, "app.post", 2, 0, &["requests.post"]);
     assert!(check_d3(&target_diff, &corpus).is_none());
@@ -156,7 +171,10 @@ fn d3_matches_exact_client_only() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     assert!(check_d3(&target_post, &corpus).is_none());
 
@@ -178,6 +196,19 @@ fn resolved_symbol(
     sym
 }
 
+fn probe_id(name: &str) -> i64 {
+    match name {
+        "a" => 1001,
+        "b" => 1002,
+        "c" => 1003,
+        "x" => 1004,
+        "y" => 1005,
+        "z" => 1006,
+        "mid" => 1007,
+        other => 2000 + other.len() as i64,
+    }
+}
+
 fn deep_symbol(
     id: i64,
     qualname: &str,
@@ -189,10 +220,11 @@ fn deep_symbol(
     let mut sym = make_test_symbol(id, qualname, file_id, callers, direct);
     sym.resolved_callees = sym.all_callees.clone();
     for name in direct {
-        sym.deep_weights.insert(name.to_string(), 1.0);
+        sym.callee_ids.insert(probe_id(name));
+        sym.deep_weights.insert(probe_id(name), 1.0);
     }
     for name in second_hop {
-        sym.deep_weights.entry(name.to_string()).or_insert(0.5);
+        sym.deep_weights.entry(probe_id(name)).or_insert(0.5);
     }
     sym
 }
@@ -220,7 +252,10 @@ fn deep_callee_precision_meets_the_gate() {
         let corpus = Corpus {
             symbols: &symbols,
             index: Some(&index),
+            df_all_excl: None,
             deep_callee: true,
+            guarded_out: Cell::new(0),
+            deep_budget: Cell::new(MAX_DEEP_PAIRS),
         };
         let matched = find_best_d1(&symbols[&1], &corpus).is_some();
         if positive && matched {
@@ -281,11 +316,25 @@ fn detector_scan_gate_on_5000_symbols() {
         );
     }
     assert_eq!(symbols.len(), 5_000);
+    let name_ids: HashMap<String, i64> = symbols
+        .values()
+        .map(|sym| (sym.name.clone(), sym.id))
+        .collect();
+    for symbol in symbols.values_mut() {
+        for name in &symbol.resolved_callees {
+            if let Some(id) = name_ids.get(name.as_str()) {
+                symbol.callee_ids.insert(*id);
+            }
+        }
+    }
     let index = CorpusIndex::build(&symbols);
     let corpus = Corpus {
         symbols: &symbols,
         index: Some(&index),
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let targets: Vec<&SymbolData> = symbols.values().collect();
     let start = Instant::now();
@@ -330,23 +379,56 @@ fn inverted_index_preserves_detector_results() {
     ] {
         symbols.insert(id, resolved_symbol(id, name, 0, callees, tokens));
     }
+    // D1 intersects project symbol IDs, so every named callee needs a real
+    // corpus entry and the callers need matching callee_ids.
+    let mut callee_ids = HashMap::new();
+    for (offset, name) in [
+        "helper_one",
+        "helper_two",
+        "helper_three",
+        "different",
+        "only",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = 100 + offset as i64;
+        symbols.insert(
+            id,
+            make_test_symbol(id, &format!("x.{name}"), 90 + offset as i64, 0, &[]),
+        );
+        callee_ids.insert(name, id);
+    }
+    for symbol in symbols.values_mut() {
+        for name in &symbol.resolved_callees {
+            if let Some(id) = callee_ids.get(name.as_str()) {
+                symbol.callee_ids.insert(*id);
+            }
+        }
+    }
     let index = CorpusIndex::build(&symbols);
     let flat = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let indexed = Corpus {
         symbols: &symbols,
         index: Some(&index),
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     for target in symbols.values() {
-        let flat_d1 = find_best_d1(target, &flat).map(|c| c.format_text());
-        let indexed_d1 = find_best_d1(target, &indexed).map(|c| c.format_text());
+        let flat_d1 = find_best_d1(target, &flat).map(|c| c.format_text(false));
+        let indexed_d1 = find_best_d1(target, &indexed).map(|c| c.format_text(false));
         assert_eq!(flat_d1, indexed_d1, "D1 parity for {}", target.qualname);
-        let flat_d2 = find_best_d2(target, &flat).map(|c| c.format_text());
-        let indexed_d2 = find_best_d2(target, &indexed).map(|c| c.format_text());
+        let flat_d2 = find_best_d2(target, &flat).map(|c| c.format_text(false));
+        let indexed_d2 = find_best_d2(target, &indexed).map(|c| c.format_text(false));
         assert_eq!(flat_d2, indexed_d2, "D2 parity for {}", target.qualname);
     }
 }
@@ -368,7 +450,10 @@ fn d4_emits_no_measured_overlap_and_keeps_its_rank() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let cand = check_d4(&symbols[&2], &corpus).expect("D4 wrapper");
     assert!(
@@ -397,7 +482,10 @@ fn d3_emits_no_measured_overlap() {
     let corpus = Corpus {
         symbols: &symbols,
         index: None,
+        df_all_excl: None,
         deep_callee: false,
+        guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     if let Some(cand) = check_d3(&symbols[&2], &corpus) {
         assert!(cand.overlap_pct.is_none(), "D3 carries no percentage");

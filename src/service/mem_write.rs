@@ -2,6 +2,7 @@
 //! and local/global store resolution.
 
 use super::*;
+use crate::journal::JournalArgs;
 
 /// Persist one note (validation, normalization, and the write outcome line).
 pub(super) fn run_mem_write(
@@ -20,10 +21,21 @@ pub(super) fn run_mem_write(
         supersedes,
         global,
         touch,
+        confirm,
     } = req
     else {
         unreachable!("run_mem_write called with a non-write request")
     };
+    if key.trim_start().starts_with("reuse-allow/") && *global {
+        return Err(EgError::Usage(
+            "mem write: reuse-allow notes must be local, not --global".to_string(),
+        ));
+    }
+    if key.trim_start().starts_with("reuse-allow/") && surface == Surface::Mcp && !confirm {
+        return Err(EgError::Usage(
+            "mem write: MCP allowlist writes require confirm=true".to_string(),
+        ));
+    }
     if let Some(target) = supersedes {
         if target.trim() == key.trim() {
             return Err(EgError::Usage(
@@ -130,6 +142,8 @@ pub(super) struct MemQueryArgs<'a> {
     pub(super) filter: crate::db::MemFilter,
     pub(super) index_conn: Option<&'a rusqlite::Connection>,
     pub(super) reference: Option<&'a str>,
+    pub(super) explain: bool,
+    pub(super) legacy: bool,
 }
 
 /// Journal fields for `mem write` (key/kind/scope/ttl/supersedes/body_len —
@@ -144,6 +158,7 @@ pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
         supersedes,
         global,
         touch,
+        confirm,
         ..
     } = req
     else {
@@ -158,6 +173,7 @@ pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
         ("body_len", body.len().to_string()),
         ("global", global.to_string()),
         ("touch", touch.to_string()),
+        ("confirm", confirm.to_string()),
     ]
 }
 
@@ -165,13 +181,18 @@ pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
 pub(super) fn mem_query_args(req: &CommandRequest) -> JournalArgs {
     let CommandRequest::MemQuery {
         terms,
+        all: _,
         kind,
         scope,
         limit,
         include_superseded,
         global,
         reference,
-        ..
+        since,
+        until,
+        local,
+        explain,
+        legacy,
     } = req
     else {
         unreachable!("mem_query_args called with a non-query request")
@@ -190,6 +211,11 @@ pub(super) fn mem_query_args(req: &CommandRequest) -> JournalArgs {
         ("limit", limit.to_string()),
         ("include_superseded", include_superseded.to_string()),
         ("global", global.to_string()),
+        ("since", since.map_or_else(String::new, |n| n.to_string())),
+        ("until", until.map_or_else(String::new, |n| n.to_string())),
+        ("local", local.to_string()),
+        ("explain", explain.to_string()),
+        ("legacy", legacy.to_string()),
     ]
 }
 

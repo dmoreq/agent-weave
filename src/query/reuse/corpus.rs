@@ -17,10 +17,14 @@ pub(super) struct SymbolData {
     pub(super) line_end: i64,
     pub(super) resolved_callees: HashSet<String>,
     pub(super) all_callees: HashSet<String>,
+    /// Names whose call site has no resolved destination. A call resolved to a
+    /// class or test symbol is not unresolved, so D1L must not suggest a
+    /// same-named function as its canonical.
+    pub(super) unresolved_callees: HashSet<String>,
     pub(super) callee_ids: HashSet<i64>,
-    /// Weighted 1-hop (1.0) and 2-hop (0.5) callee footprint, populated only
+    /// Weighted 1-hop (1.0) and 2-hop (0.5) project callee IDs, populated only
     /// when `reuse --deep-callee` asks for the transitive signal.
-    pub(super) deep_weights: HashMap<String, f64>,
+    pub(super) deep_weights: HashMap<i64, f64>,
     pub(super) inbound_callers: i64,
     pub(super) tokens: HashSet<String>,
     pub(super) type_tokens: HashSet<String>,
@@ -55,6 +59,7 @@ pub(super) fn load_symbols(conn: &Connection) -> Result<HashMap<i64, SymbolData>
             line_end: r.get(6)?,
             resolved_callees: HashSet::new(),
             all_callees: HashSet::new(),
+            unresolved_callees: HashSet::new(),
             callee_ids: HashSet::new(),
             deep_weights: HashMap::new(),
             inbound_callers: 0,
@@ -79,22 +84,58 @@ pub(super) fn load_callees(
     map_unresolved_callees(conn, symbols)
 }
 
+/// `df_all_excl(c)`: distinct callers per resolved destination, including test
+/// callers. One prefetch feeds the D1 distinctive-callee guard.
+pub(super) fn load_df_all(conn: &Connection) -> Result<HashMap<i64, i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT dst_id, COUNT(DISTINCT src_id) FROM edges
+         WHERE kind = 'calls' AND dst_id IS NOT NULL GROUP BY dst_id",
+    )?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let mut out = HashMap::new();
+    for row in rows {
+        let (id, count) = row?;
+        out.insert(id, count);
+    }
+    Ok(out)
+}
+
 /// Build the weighted two-hop footprint after the stoplist filter: direct
 /// resolved callees weigh 1.0, callees of those callees weigh 0.5. A callee
 /// reachable both ways keeps the direct 1.0 weight.
 pub(super) fn load_deep_weights(symbols: &mut HashMap<i64, SymbolData>) {
-    let computed: HashMap<i64, HashMap<String, f64>> = symbols
+    let computed: HashMap<i64, HashMap<i64, f64>> = symbols
         .iter()
         .map(|(&id, sym)| {
-            let mut weights: HashMap<String, f64> = sym
-                .resolved_callees
+            let direct: Vec<i64> = sym
+                .callee_ids
                 .iter()
-                .map(|callee| (callee.clone(), 1.0))
+                .copied()
+                .filter(|callee_id| {
+                    // A self-call must not enter the symbol's own closure; a
+                    // call cycle would otherwise list the pair as evidence of
+                    // its own duplication.
+                    *callee_id != id
+                        && symbols.get(callee_id).is_some_and(|callee| {
+                            !super::guards::cross_language(sym, callee)
+                                && sym.resolved_callees.contains(&callee.name)
+                        })
+                })
                 .collect();
-            for callee_id in &sym.callee_ids {
-                if let Some(callee) = symbols.get(callee_id) {
-                    for second in &callee.resolved_callees {
-                        weights.entry(second.clone()).or_insert(0.5);
+            let mut weights: HashMap<i64, f64> =
+                direct.iter().map(|callee_id| (*callee_id, 1.0)).collect();
+            for callee_id in &direct {
+                let Some(callee) = symbols.get(callee_id) else {
+                    continue;
+                };
+                for second in &callee.callee_ids {
+                    if *second != id
+                        && symbols.get(second).is_some_and(|second_sym| {
+                            !super::guards::cross_language(sym, second_sym)
+                                && callee.resolved_callees.contains(&second_sym.name)
+                        })
+                    {
+                        weights.entry(*second).or_insert(0.5);
                     }
                 }
             }
@@ -128,20 +169,38 @@ fn load_resolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDat
         ))
     })?;
 
+    let mut caller_sets: HashMap<i64, HashSet<i64>> = HashMap::new();
     for row in rows {
         let (src_id, dst_id, dst_name) = row?;
         if let Some(did) = dst_id {
-            if let Some(dst) = symbols.get_mut(&did) {
-                dst.inbound_callers += 1;
+            // Distinct production callers only: exclude self-edges and any
+            // source outside the corpus (tests). The final count is set after
+            // the edge scan so duplicate call sites cannot inflate it.
+            if did != src_id && symbols.contains_key(&src_id) {
+                caller_sets.entry(did).or_default().insert(src_id);
             }
         }
+        let resolved = dst_id.filter(|id| symbols.contains_key(id));
         if let Some(sym) = symbols.get_mut(&src_id) {
             let callee = callee_name(&dst_name);
             sym.all_callees.insert(callee.clone());
-            if let Some(did) = dst_id {
-                sym.callee_ids.insert(did);
-                sym.resolved_callees.insert(callee);
+            match resolved {
+                Some(did) => {
+                    sym.callee_ids.insert(did);
+                    sym.resolved_callees.insert(callee);
+                }
+                // A resolved destination outside the production corpus (class,
+                // test, or other symbol kind) is still a real call site.
+                None if dst_id.is_none() => {
+                    sym.unresolved_callees.insert(callee);
+                }
+                None => {}
             }
+        }
+    }
+    for (did, callers) in caller_sets {
+        if let Some(dst) = symbols.get_mut(&did) {
+            dst.inbound_callers = callers.len() as i64;
         }
     }
     Ok(())
@@ -185,7 +244,8 @@ fn map_unresolved_callees(conn: &Connection, symbols: &mut HashMap<i64, SymbolDa
             .map(|&(_, _, id)| id);
 
         if let Some(sym) = innermost.and_then(|id| symbols.get_mut(&id)) {
-            sym.all_callees.insert(callee);
+            sym.all_callees.insert(callee.clone());
+            sym.unresolved_callees.insert(callee);
         }
     }
     Ok(())
@@ -223,7 +283,7 @@ pub(super) fn select_targets<'a>(
                 }
             }
             if let Some(paths) = path_filter {
-                if !paths.iter().any(|p| s.file_path.starts_with(p)) {
+                if !super::target::path_matches(&s.file_path, paths) {
                     return false;
                 }
             }

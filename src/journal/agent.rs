@@ -16,6 +16,19 @@ thread_local! {
     static CURRENT_AGENT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
+/// Sanitized environment tag: first set key wins, trimmed and capped at 64.
+pub(crate) fn env_tag(keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| std::env::var(key).ok())
+        .map(|v| v.trim().chars().take(64).collect())
+        .unwrap_or_default()
+}
+
+/// Session attribution for memory rows and journal lines.
+pub fn session_tag() -> String {
+    env_tag(&["ENGRAM_SESSION"])
+}
+
 /// Set active agent context for subsequent journal invocations in this process
 /// (e.g. from the MCP handshake `clientInfo.name`).
 pub fn set_agent_context(name: &str) {

@@ -38,12 +38,21 @@ const CONSOLIDATION_STOPWORDS: &[&str] = &[
 /// Token set used by the consolidation guard: body, refs, and tags through the
 /// single memory tokenizer, so the same words that rank a query also drive the
 /// duplicate signal.
-fn consolidation_tokens(body: &str, refs: &str, tags: &str) -> HashSet<String> {
-    let mut set: HashSet<String> = crate::memory::mem_tokens(body)
+fn consolidation_tokens(body: &str, refs: &str, tags: &str, legacy: bool) -> HashSet<String> {
+    let raw = if legacy {
+        crate::memory::mem_tokens_legacy(body)
+    } else {
+        crate::memory::mem_tokens(body)
+    };
+    let mut set: HashSet<String> = raw
         .into_iter()
         .filter(|token| !CONSOLIDATION_STOPWORDS.contains(&token.as_str()))
         .collect();
-    set.extend(crate::memory::mem_ref_tag_tokens(refs, tags));
+    set.extend(if legacy {
+        crate::memory::mem_ref_tag_tokens_legacy(refs, tags)
+    } else {
+        crate::memory::mem_ref_tag_tokens(refs, tags)
+    });
     set
 }
 
@@ -52,9 +61,10 @@ fn consolidation_tokens(body: &str, refs: &str, tags: &str) -> HashSet<String> {
 pub fn consolidation_similarity(
     note: &crate::memory::NormalizedNote,
     row: &crate::db::MemRow,
+    legacy: bool,
 ) -> u64 {
-    let left = consolidation_tokens(&note.body, &note.refs, &note.tags);
-    let right = consolidation_tokens(&row.body, &row.refs, &row.tags);
+    let left = consolidation_tokens(&note.body, &note.refs, &note.tags, legacy);
+    let right = consolidation_tokens(&row.body, &row.refs, &row.tags, legacy);
     if left.is_empty() || right.is_empty() {
         return 0;
     }
@@ -75,13 +85,25 @@ pub fn find_consolidation_match(
     conn: &rusqlite::Connection,
     note: &crate::memory::NormalizedNote,
 ) -> Option<ConsolidationMatch> {
-    let mut terms = crate::memory::mem_tokens(&note.body);
-    terms.extend(crate::memory::mem_tokens(&note.tags));
+    let ok_v2 = crate::db::memory_fts_v2_usable(conn).ok().unwrap_or(false);
+    let legacy = !ok_v2;
+    let mut terms = if legacy {
+        crate::memory::mem_tokens_legacy(&note.body)
+    } else {
+        crate::memory::mem_tokens(&note.body)
+    };
+    terms.extend(if legacy {
+        crate::memory::mem_tokens_legacy(&note.tags)
+    } else {
+        crate::memory::mem_tokens(&note.tags)
+    });
     if terms.is_empty() {
         return None;
     }
     let query = terms.into_iter().take(32).collect::<Vec<_>>().join(" OR ");
-    let ids: Vec<i64> = crate::db::memory_fts_candidates(conn, &query, 32)
+    let now = crate::db::unix_now();
+    let window = crate::memory::TimeWindow::default();
+    let ids: Vec<i64> = crate::db::memory_fts_candidates(conn, &query, &window, now, ok_v2, 32)
         .ok()?
         .into_iter()
         .map(|(id, _)| id)
@@ -92,15 +114,16 @@ pub fn find_consolidation_match(
     let filter = crate::db::MemFilter {
         kind: None,
         scope: None,
-        now: crate::db::unix_now(),
+        now,
         include_superseded: false,
+        window,
     };
     crate::db::memory_rows_by_ids(conn, &ids)
         .ok()?
         .into_iter()
         .filter(|row| row.key != note.key && crate::db::memory_row_is_current(row, &filter))
         .filter_map(|row| {
-            let similarity_pct = consolidation_similarity(note, &row);
+            let similarity_pct = consolidation_similarity(note, &row, legacy);
             (similarity_pct >= CONSOLIDATION_THRESHOLD_PCT).then_some(ConsolidationMatch {
                 key: row.key,
                 rev: row.rev,
@@ -166,6 +189,7 @@ pub fn find_guarding_notes(root: &Path, paths: &[&str], symbols: &[&str]) -> Vec
         scope: None,
         now,
         include_superseded: false,
+        window: crate::memory::TimeWindow::default(),
     };
 
     let mut results = Vec::new();
@@ -259,6 +283,7 @@ mod tests {
             refs: refs.into(),
             source: "cli".into(),
             created_at: 1,
+            anchored_at: 0,
             expires_at: 0,
             superseded_by: None,
         }
@@ -322,7 +347,7 @@ mod tests {
             "src/query.rs",
             "resolver",
         );
-        assert_eq!(consolidation_similarity(&note, &row), 100);
+        assert_eq!(consolidation_similarity(&note, &row, false), 100);
     }
 
     #[test]
@@ -338,7 +363,9 @@ mod tests {
             "src/query/callgraph.rs",
             "resolver",
         );
-        assert!(consolidation_similarity(&candidate, &paraphrase) >= CONSOLIDATION_THRESHOLD_PCT);
+        assert!(
+            consolidation_similarity(&candidate, &paraphrase, false) >= CONSOLIDATION_THRESHOLD_PCT
+        );
 
         let unrelated = row(
             "other",
@@ -346,7 +373,7 @@ mod tests {
             "src/dashboard.rs",
             "telemetry",
         );
-        assert!(consolidation_similarity(&candidate, &unrelated) < 20);
+        assert!(consolidation_similarity(&candidate, &unrelated, false) < 20);
     }
 
     #[test]
@@ -363,7 +390,7 @@ mod tests {
             let variant = body.replace(base[i % base.len()], "lambda");
             let candidate = note(&format!("{body} the note"), "", "");
             let stored = row("old", &format!("{variant} a note"), "", "");
-            if consolidation_similarity(&candidate, &stored) >= CONSOLIDATION_THRESHOLD_PCT {
+            if consolidation_similarity(&candidate, &stored, false) >= CONSOLIDATION_THRESHOLD_PCT {
                 detected += 1;
             }
 
@@ -372,7 +399,9 @@ mod tests {
             ]
             .join(" ");
             let unrelated = row("other", &unrelated_body, "", "");
-            if consolidation_similarity(&candidate, &unrelated) >= CONSOLIDATION_THRESHOLD_PCT {
+            if consolidation_similarity(&candidate, &unrelated, false)
+                >= CONSOLIDATION_THRESHOLD_PCT
+            {
                 false_alarms += 1;
             }
         }

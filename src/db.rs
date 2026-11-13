@@ -259,6 +259,9 @@ impl Drop for BuildLock {
 /// both map to the contract message via `EgError::from(rusqlite::Error)`.
 /// Deep integrity remains `eg doctor` (`PRAGMA integrity_check`).
 pub fn open_for_query(root: &Path) -> Result<Connection> {
+    // A cloned repository can ship an attacker-authored index. Refuse tracked
+    // state before reading any row, not only before writing `.engram/`.
+    reject_tracked_eg_dir(root)?;
     reject_symlink(&eg_dir(root), ".engram directory")?;
     let path = db_path(root);
     reject_symlink(&path, "index.db")?;
@@ -425,12 +428,15 @@ pub(crate) mod test_support {
 pub(crate) use test_support::temp_root;
 
 mod inserts;
+mod memory_fts;
 #[cfg(test)]
 mod memory_gc_tests;
 mod memory_query;
 mod memory_store;
 #[cfg(test)]
 mod memory_tests;
+#[cfg(test)]
+mod memory_v2_tests;
 mod memory_write;
 mod meta;
 mod paths;
@@ -441,6 +447,7 @@ mod sql;
 mod tests;
 
 pub(crate) use inserts::*;
+pub(crate) use memory_fts::*;
 pub(crate) use memory_query::*;
 pub(crate) use memory_store::*;
 pub(crate) use memory_write::*;

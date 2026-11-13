@@ -206,7 +206,12 @@ enum LineOutcome {
 
 pub fn collect(mode: &Mode, now: i64, days: u32, baseline_days: u32) -> Result<AuditData> {
     let log_path = match mode {
-        Mode::Local(root) => crate::journal::usage_log_path(root),
+        Mode::Local(root) => {
+            crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+            crate::db::reject_unsafe_journal(root)?;
+            crate::db::reject_tracked_eg_dir(root)?;
+            crate::journal::usage_log_path(root)
+        }
         Mode::Global => crate::db::global_usage_log_path()?,
     };
     let local_root = match mode {

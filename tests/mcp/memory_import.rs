@@ -11,6 +11,68 @@ use super::common::{
 };
 
 #[test]
+fn mem_import_rejects_traversal_and_allowlist_keys() {
+    let repo = mem_fixture("import-guard");
+    let outside = repo.parent().unwrap().join("outside-import.jsonl");
+    fs::write(
+        &outside,
+        r#"{"key":"outside","kind":"fact","body":"outside"}"#,
+    )
+    .unwrap();
+    fs::write(
+        repo.join("allow.jsonl"),
+        r#"{"key":"reuse-allow/a->b","kind":"decision","body":"intentional"}"#,
+    )
+    .unwrap();
+
+    let mut srv = spawn_with(&repo, true);
+    notification(&mut srv, "notifications/initialized");
+    let traversal = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "../outside-import.jsonl"}}),
+    );
+    assert_eq!(traversal["result"]["isError"], true, "{traversal}");
+    let allowlist = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "allow.jsonl"}}),
+    );
+    assert_eq!(allowlist["result"]["isError"], true, "{allowlist}");
+    let stdin_path = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "-"}}),
+    );
+    assert_eq!(stdin_path["result"]["isError"], true, "{stdin_path}");
+    let _ = fs::remove_file(outside);
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[cfg(unix)]
+#[test]
+fn mem_import_rejects_non_regular_files() {
+    use std::process::Command;
+    let repo = mem_fixture("import-fifo");
+    let fifo = repo.join("notes.fifo");
+    let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+    assert!(status.success());
+    let mut srv = spawn_with(&repo, true);
+    notification(&mut srv, "notifications/initialized");
+    let resp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "notes.fifo"}}),
+    );
+    assert_eq!(resp["result"]["isError"], true, "{resp}");
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn mem_import_and_markdown_export_parity() {
     let repo = mem_fixture("import");
     let (code, _stdout, stderr) = cli_mem(

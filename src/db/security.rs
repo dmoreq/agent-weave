@@ -48,6 +48,25 @@ pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reject a symlinked or non-regular journal file. `File::open` follows a
+/// symlink; local usage/dashboard/monitor reads must not render another
+/// repository's journal through one.
+pub(crate) fn reject_unsafe_journal(root: &Path) -> Result<()> {
+    let dir = eg_dir(root);
+    for name in ["usage.log", "usage.log.1"] {
+        let path = dir.join(name);
+        if let Ok(meta) = fs::symlink_metadata(&path) {
+            if meta.file_type().is_symlink() || !meta.is_file() {
+                return Err(EgError::Internal(format!(
+                    "refusing unsafe journal file: {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Create or validate the machine-wide confinement directory and keep it
 /// owner-only. The repo-local `.engram/` is left at the project's own mode:
 /// several developers can share one working tree.
@@ -56,58 +75,65 @@ pub(crate) fn ensure_global_dir(path: &Path) -> Result<()> {
     harden_dir_mode(path)
 }
 
-/// Lazily built map: confinement directory -> rejection detail (`None` means
-/// the directory holds no git-tracked files).
-static TRACKED_DIR_VERDICTS: std::sync::OnceLock<
-    std::sync::Mutex<HashMap<PathBuf, Option<String>>>,
-> = std::sync::OnceLock::new();
-
 /// Provenance gate for repo-local state. A repository that commits `.engram/`
 /// hands every querying agent attacker-authored memories and index rows, so a
 /// tracked confinement directory is rejected (exit 2) instead of trusted.
-/// Verdicts are cached per root: the MCP server re-enters this gate on every
-/// tool call, and a repository's tracking state cannot change mid-process.
+///
+/// No process-lifetime cache: `git add`, checkout, or a branch switch can
+/// change provenance while a long-lived MCP/dashboard process is running.
+/// The probe is one `git ls-files` spawn per open; correctness wins over that
+/// cost, and a failed probe still means "not tracked" (a broken git must not
+/// brick local queries).
 pub(crate) fn reject_tracked_eg_dir(root: &Path) -> Result<()> {
     let dir = eg_dir(root);
-    // The `git ls-files` probe costs a process spawn: only pay it when the
-    // confinement directory exists and could actually carry planted state.
     if !dir.exists() {
         return Ok(());
     }
-    let cache = TRACKED_DIR_VERDICTS.get_or_init(Default::default);
-    if let Ok(guard) = cache.lock() {
-        if let Some(verdict) = guard.get(&dir) {
-            return match verdict {
-                Some(detail) => Err(EgError::Security(detail.clone())),
-                None => Ok(()),
-            };
-        }
-    }
-    let verdict = git_tracked_engram(root);
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(dir, verdict.clone());
-    }
-    match verdict {
+    match git_tracked_engram(root) {
         Some(detail) => Err(EgError::Security(detail)),
         None => Ok(()),
     }
 }
 
-/// `git ls-files` over the confinement directory. No git, no repository, or a
-/// failing git means "not tracked": without git there is no committed state to
-/// distrust, and a broken git must never brick local queries.
+/// `git ls-files` over the confinement directory. The `:(icase)` pathspec is
+/// required on case-insensitive filesystems: a tracked `.ENGRAM/index.db`
+/// resolves to the same directory as `.engram/`, but a case-sensitive
+/// pathspec returns no rows and would let the planted index through.
+/// No git, no repository, or a failing git means "not tracked".
 fn git_tracked_engram(root: &Path) -> Option<String> {
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
-        .args(["ls-files", "-z", "--", ".engram"])
+        .args(["ls-files", "-z", "--", ":(icase).engram"])
         .output()
         .ok()?;
     if !out.status.success() || out.stdout.is_empty() {
         return None;
     }
-    Some(
-        ".engram/ contains git-tracked files — untrack and remove to prevent malicious memory injection"
-            .to_string(),
-    )
+    // `:(icase)` also matches an unrelated `.ENGRAM/` on a case-sensitive
+    // filesystem. Confirm a case variant resolves to the same directory as
+    // `.engram/` before rejecting it.
+    let canonical_eg = fs::canonicalize(eg_dir(root)).ok();
+    for entry in out
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|p| !p.is_empty())
+    {
+        let first = entry.split(|byte| *byte == b'/').next().unwrap_or(entry);
+        if first == b".engram" {
+            return Some(tracked_detail());
+        }
+        if first.eq_ignore_ascii_case(b".engram") {
+            let variant = root.join(String::from_utf8_lossy(first).as_ref());
+            if canonical_eg.is_some() && fs::canonicalize(&variant).ok() == canonical_eg {
+                return Some(tracked_detail());
+            }
+        }
+    }
+    None
+}
+
+fn tracked_detail() -> String {
+    ".engram/ contains git-tracked files — untrack and remove to prevent malicious memory injection"
+        .to_string()
 }

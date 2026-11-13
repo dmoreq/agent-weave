@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -34,17 +34,25 @@ pub fn stream_monitor(
     errors_only: bool,
     local: bool,
 ) -> Result<()> {
-    let log_path = resolve_monitor_log_path(root, local);
+    let (log_path, gate_root) = resolve_monitor_log_path(root, local)?;
+    let effective_root = gate_root.as_deref().or(root);
 
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return stream_linear(&log_path, repo_filter, errors_only);
+        return stream_linear(&log_path, repo_filter, errors_only, effective_root, local);
     }
 
     let Some(guard) = RawModeGuard::enter() else {
-        return stream_linear(&log_path, repo_filter, errors_only);
+        return stream_linear(&log_path, repo_filter, errors_only, effective_root, local);
     };
 
-    run_interactive(root, log_path, repo_filter, errors_only, guard)
+    run_interactive(
+        effective_root,
+        log_path,
+        repo_filter,
+        errors_only,
+        local,
+        guard,
+    )
 }
 
 struct RawModeGuard {
@@ -95,6 +103,7 @@ fn run_interactive(
     log_path: PathBuf,
     repo_filter: Option<&str>,
     errors_only: bool,
+    local: bool,
     _guard: RawModeGuard,
 ) -> Result<()> {
     let repo_filter_owned = repo_filter.map(str::to_string);
@@ -143,8 +152,13 @@ fn run_interactive(
     let (mut cols, mut rows) = get_terminal_size();
     let mut stdout = io::stdout();
     let _ = render_screen(&mut stdout, &state, cols, rows);
+    let mut last_gate = Instant::now();
 
     loop {
+        if last_gate.elapsed() >= Duration::from_secs(5) {
+            monitor_gate(root, local)?;
+            last_gate = Instant::now();
+        }
         let mut need_render = false;
 
         while let Ok(evt) = rx.try_recv() {
@@ -252,14 +266,25 @@ fn get_terminal_size() -> (usize, usize) {
     (80, 24)
 }
 
-fn stream_linear(log_path: &Path, repo_filter: Option<&str>, errors_only: bool) -> Result<()> {
+fn stream_linear(
+    log_path: &Path,
+    repo_filter: Option<&str>,
+    errors_only: bool,
+    root: Option<&Path>,
+    local: bool,
+) -> Result<()> {
     println!(
         "eg: query monitor (linear streaming) from {}",
         log_path.display()
     );
     let tail_start = file_len(log_path).saturating_sub(4096);
     let mut tail = data::Tail::starting_at(log_path, tail_start);
+    let mut last_gate = Instant::now();
     loop {
+        if last_gate.elapsed() >= Duration::from_secs(5) {
+            monitor_gate(root, local)?;
+            last_gate = Instant::now();
+        }
         poll_linear_events(&mut tail, log_path, repo_filter, errors_only);
         thread::sleep(Duration::from_millis(250));
     }
@@ -307,17 +332,81 @@ fn is_event_matched(val: &Value, repo_filter: Option<&str>, errors_only: bool) -
     true
 }
 
-fn resolve_monitor_log_path(root: Option<&Path>, local: bool) -> PathBuf {
+fn monitor_gate(root: Option<&Path>, local: bool) -> Result<()> {
+    if !local {
+        return Ok(());
+    }
+    if let Some(root) = root {
+        crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+        crate::db::reject_unsafe_journal(root)?;
+        crate::db::reject_tracked_eg_dir(root)?;
+    }
+    Ok(())
+}
+
+fn resolve_monitor_log_path(
+    root: Option<&Path>,
+    local: bool,
+) -> Result<(PathBuf, Option<PathBuf>)> {
     if local {
         if let Some(r) = root {
-            return crate::journal::usage_log_path(r);
+            monitor_gate(root, true)?;
+            return Ok((crate::journal::usage_log_path(r), Some(r.to_path_buf())));
         }
         if let Ok(cwd) = std::env::current_dir() {
             let local_p = crate::journal::usage_log_path(&cwd);
             if local_p.is_file() {
-                return local_p;
+                monitor_gate(Some(&cwd), true)?;
+                return Ok((local_p, Some(cwd)));
             }
         }
     }
-    db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log"))
+    Ok((
+        db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log")),
+        None,
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_gate_rejects_tracked_and_symlinked_journals() {
+        let dir = crate::db::test_support::temp_root("monitor-gate");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        crate::db::test_support::write_file(repo.join(".engram/usage.log"), b"{}\n").unwrap();
+        assert!(monitor_gate(Some(&repo), false).is_ok());
+        assert!(monitor_gate(Some(&repo), true).is_ok());
+        let init = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-q"])
+            .status();
+        if matches!(init, Ok(status) if status.success()) {
+            let added = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["add", "-f", ".engram/usage.log"])
+                .status()
+                .unwrap();
+            assert!(added.success());
+            assert!(monitor_gate(Some(&repo), true).is_err());
+        }
+        crate::db::test_support::remove_tree(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn monitor_gate_rejects_symlinked_journal_file() {
+        let dir = crate::db::test_support::temp_root("monitor-gate-link");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        crate::db::test_support::write_file(dir.join("outside.log"), b"{}\n").unwrap();
+        std::os::unix::fs::symlink(dir.join("outside.log"), repo.join(".engram/usage.log"))
+            .unwrap();
+        assert!(monitor_gate(Some(&repo), true).is_err());
+        crate::db::test_support::remove_tree(&dir);
+    }
 }

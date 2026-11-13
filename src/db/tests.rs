@@ -16,6 +16,63 @@ fn fresh_db_has_schema_v2() {
 }
 
 #[test]
+fn provenance_gate_rechecks_tracking_state() {
+    let dir = temp_root("db-tracked-recheck");
+    make_dir_all(dir.join(".engram")).unwrap();
+    write_file(dir.join(".engram/index.db"), b"x").unwrap();
+    let init = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["init", "-q"])
+        .status();
+    if !matches!(init, Ok(status) if status.success()) {
+        remove_tree(&dir);
+        return;
+    }
+    reject_tracked_eg_dir(&dir).expect("untracked state is readable");
+    let add = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["add", "-f", ".engram/index.db"])
+        .status()
+        .unwrap();
+    assert!(add.success());
+    assert!(
+        matches!(reject_tracked_eg_dir(&dir), Err(EgError::Security(_))),
+        "same-process recheck must observe the new tracked state"
+    );
+    remove_tree(&dir);
+}
+
+#[test]
+fn mutation_at_derives_repo_root_for_tracked_gate() {
+    let dir = temp_root("db-tracked-mutation");
+    make_dir_all(dir.join(".engram")).unwrap();
+    write_file(dir.join(".engram/memory.db"), b"x").unwrap();
+    let init = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["init", "-q"])
+        .status();
+    if !matches!(init, Ok(status) if status.success()) {
+        remove_tree(&dir);
+        return;
+    }
+    let add = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&dir)
+        .args(["add", "-f", ".engram/memory.db"])
+        .status()
+        .unwrap();
+    assert!(add.success());
+    assert!(matches!(
+        open_memory_mutation_at(&dir.join(".engram/memory.db")),
+        Err(EgError::Security(_))
+    ));
+    remove_tree(&dir);
+}
+
+#[test]
 fn missing_index_is_exit1_not_panic() {
     let dir = temp_root("db-missing");
     let err = open_for_query(&dir).unwrap_err();

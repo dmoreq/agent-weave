@@ -1,0 +1,235 @@
+{
+  "fixture": "tests/fixtures/memory/oracle-v2.json",
+  "fixture_sha256": "61b12b766df44fce2e49f9c7b9483470af845403af73206656a228c2437b1c7c",
+  "limit": 5,
+  "threshold": 1.0,
+  "seed": 20261105,
+  "queries": 20,
+  "hits": 20,
+  "recall": 1.0,
+  "wilson95": [
+    0.8389,
+    1.0
+  ],
+  "negative_control": {
+    "recall": 0.05,
+    "wilson95": [
+      0.0089,
+      0.2361
+    ],
+    "below_threshold": true
+  },
+  "per_query": [
+    {
+      "terms": "confidence tiers resolver",
+      "expect": [
+        "resolver-confidence-tiers"
+      ],
+      "hit": true,
+      "got": [
+        "resolver-confidence-tiers"
+      ]
+    },
+    {
+      "terms": "schema skew migrate",
+      "expect": [
+        "schema-skew-exit5"
+      ],
+      "hit": true,
+      "got": [
+        "schema-skew-exit5",
+        "distractor-fts-unicode61"
+      ]
+    },
+    {
+      "terms": "carry forward fast path",
+      "expect": [
+        "incremental-fast-path"
+      ],
+      "hit": true,
+      "got": [
+        "incremental-fast-path"
+      ]
+    },
+    {
+      "terms": "callee empty reason",
+      "expect": [
+        "callee-empty-reason"
+      ],
+      "hit": true,
+      "got": [
+        "callee-empty-reason"
+      ]
+    },
+    {
+      "terms": "fsyncs renames concurrent",
+      "expect": [
+        "atomic-replacement"
+      ],
+      "hit": true,
+      "got": [
+        "atomic-replacement"
+      ]
+    },
+    {
+      "terms": "writes allowlist doctor journal",
+      "expect": [
+        "write-confinement"
+      ],
+      "hit": true,
+      "got": [
+        "write-confinement",
+        "distractor-journal-rotation",
+        "distractor-stale-report",
+        "doctor-invalidate-keeps-memory",
+        "journal-privacy"
+      ]
+    },
+    {
+      "terms": "frames megabyte cap",
+      "expect": [
+        "mcp-stdio-frame"
+      ],
+      "hit": true,
+      "got": [
+        "mcp-stdio-frame"
+      ]
+    },
+    {
+      "terms": "fnv1a64 normalization bytes",
+      "expect": [
+        "fnv-content-hash"
+      ],
+      "hit": true,
+      "got": [
+        "fnv-content-hash"
+      ]
+    },
+    {
+      "terms": "usage journal scalars bodies",
+      "expect": [
+        "journal-privacy"
+      ],
+      "hit": true,
+      "got": [
+        "journal-privacy",
+        "distractor-journal-rotation"
+      ]
+    },
+    {
+      "terms": "derived rebuild authoritative",
+      "expect": [
+        "fts-purity-invariant"
+      ],
+      "hit": true,
+      "got": [
+        "fts-purity-invariant"
+      ]
+    },
+    {
+      "terms": "busy timeout serialize writers",
+      "expect": [
+        "busy-timeout-writers"
+      ],
+      "hit": true,
+      "got": [
+        "busy-timeout-writers"
+      ]
+    },
+    {
+      "terms": "session expire ttl default",
+      "expect": [
+        "session-ttl-lane"
+      ],
+      "hit": true,
+      "got": [
+        "session-ttl-lane"
+      ]
+    },
+    {
+      "terms": "supersedes target rollback transaction",
+      "expect": [
+        "supersedes-cross-key"
+      ],
+      "hit": true,
+      "got": [
+        "supersedes-cross-key"
+      ]
+    },
+    {
+      "terms": "retention superseded thirty days clock",
+      "expect": [
+        "gc-retention-clock"
+      ],
+      "hit": true,
+      "got": [
+        "gc-retention-clock"
+      ]
+    },
+    {
+      "terms": "tokenizer camelcase snake boundaries",
+      "expect": [
+        "token-shared-normalizer"
+      ],
+      "hit": true,
+      "got": [
+        "token-shared-normalizer"
+      ]
+    },
+    {
+      "terms": "fusion weights recency lexical",
+      "expect": [
+        "minmax-fusion-weights"
+      ],
+      "hit": true,
+      "got": [
+        "minmax-fusion-weights"
+      ]
+    },
+    {
+      "terms": "export jsonl stdout restore",
+      "expect": [
+        "export-jsonl-restore"
+      ],
+      "hit": true,
+      "got": [
+        "export-jsonl-restore"
+      ]
+    },
+    {
+      "terms": "invalidate keeps primary memory",
+      "expect": [
+        "doctor-invalidate-keeps-memory"
+      ],
+      "hit": true,
+      "got": [
+        "doctor-invalidate-keeps-memory",
+        "distractor-fts-unicode61",
+        "distractor-resolver-notes",
+        "token-shared-normalizer",
+        "minmax-fusion-weights"
+      ]
+    },
+    {
+      "terms": "caveat candidates proof trust",
+      "expect": [
+        "caveat-trust-contract"
+      ],
+      "hit": true,
+      "got": [
+        "caveat-trust-contract"
+      ]
+    },
+    {
+      "terms": "manifest required structure opens",
+      "expect": [
+        "user-version-manifest"
+      ],
+      "hit": true,
+      "got": [
+        "user-version-manifest"
+      ]
+    }
+  ],
+  "gate": "PASS"
+}

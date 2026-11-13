@@ -73,11 +73,7 @@ fn symbols_file(
     }
     out.extend(data_lines);
     let cap = finish_capped(&mut out, shown, n_symbols, stale, "");
-    Ok(LineQuery {
-        lines: out,
-        stderr: cap,
-        shown,
-    })
+    Ok(LineQuery::new(out, cap, shown))
 }
 
 fn file_symbol_rows(conn: &Connection, rel: &str, outline: bool) -> Result<Vec<SymbolRow>> {
@@ -104,10 +100,16 @@ fn file_symbol_rows(conn: &Connection, rel: &str, outline: bool) -> Result<Vec<S
 
 /// One `path:line kind qualname` row; `--outline` appends the signature.
 fn symbol_line(path: &str, row: &SymbolRow) -> String {
-    let mut text = format!("{path}:{} {} {}", row.line, row.kind, row.qualname);
+    let mut text = format!(
+        "{}:{} {} {}",
+        sanitize(path),
+        row.line,
+        sanitize(&row.kind),
+        sanitize(&row.qualname)
+    );
     if !row.signature.is_empty() {
         text.push(' ');
-        text.push_str(&row.signature);
+        text.push_str(&sanitize(&row.signature));
     }
     text
 }
@@ -123,18 +125,14 @@ fn dir_line_query(
     let mut last_path = "";
     for (path, row) in rows {
         if path != last_path {
-            out.push(path.clone());
+            out.push(sanitize(path));
             last_path = path;
         }
         out.push(symbol_line(path, row));
     }
     let shown = rows.len();
     let cap = finish_capped(&mut out, shown, total, stale, "");
-    LineQuery {
-        lines: out,
-        stderr: cap,
-        shown,
-    }
+    LineQuery::new(out, cap, shown)
 }
 
 /// Directory mode for `eg symbols <dir>` (Amendment 19): indexed prefix only,
@@ -175,7 +173,8 @@ fn symbols_directory(
         out.push(header);
     }
     out.push(format!(
-        "eg: dir {display} — {n_files} files, {total} symbols"
+        "eg: dir {} — {n_files} files, {total} symbols",
+        sanitize(display)
     ));
     Ok(dir_line_query(out, &rows, total as usize, stale))
 }

@@ -1,0 +1,121 @@
+{
+  "fixture": "tests/fixtures/memory/oracle-v3-vietnamese.json",
+  "fixture_sha256": "6dad4c0e3283a25480f23b4ba352cfc03476c14bb29993eb19730fadaf419fd0",
+  "limit": 5,
+  "threshold": 1.0,
+  "seed": 20261112,
+  "queries": 10,
+  "hits": 5,
+  "recall": 0.5,
+  "wilson95": [
+    0.2366,
+    0.7634
+  ],
+  "negative_control": {
+    "recall": 0.1,
+    "wilson95": [
+      0.0179,
+      0.4042
+    ],
+    "below_threshold": true
+  },
+  "per_query": [
+    {
+      "terms": "bo nho",
+      "expect": [
+        "vn-memory"
+      ],
+      "hit": false,
+      "got": []
+    },
+    {
+      "terms": "b\u1ed9 nh\u1edb",
+      "expect": [
+        "vn-memory"
+      ],
+      "hit": true,
+      "got": [
+        "vn-memory"
+      ]
+    },
+    {
+      "terms": "quyet dinh kien truc",
+      "expect": [
+        "vn-arch"
+      ],
+      "hit": false,
+      "got": []
+    },
+    {
+      "terms": "quy\u1ebft \u0111\u1ecbnh ki\u1ebfn tr\u00fac",
+      "expect": [
+        "vn-arch"
+      ],
+      "hit": true,
+      "got": [
+        "vn-arch",
+        "en-audit",
+        "en-resolver",
+        "en-tokenizer",
+        "vi-secret"
+      ]
+    },
+    {
+      "terms": "duong pho",
+      "expect": [
+        "vn-street"
+      ],
+      "hit": false,
+      "got": []
+    },
+    {
+      "terms": "\u0111\u01b0\u1eddng ph\u1ed1",
+      "expect": [
+        "vn-street"
+      ],
+      "hit": true,
+      "got": [
+        "vn-street"
+      ]
+    },
+    {
+      "terms": "resolver tiers",
+      "expect": [
+        "en-resolver"
+      ],
+      "hit": true,
+      "got": [
+        "en-resolver"
+      ]
+    },
+    {
+      "terms": "unicode tokenizer",
+      "expect": [
+        "en-tokenizer"
+      ],
+      "hit": true,
+      "got": [
+        "en-tokenizer"
+      ]
+    },
+    {
+      "terms": "ban do he thong",
+      "expect": [
+        "vn-map"
+      ],
+      "hit": false,
+      "got": [
+        "vn-arch"
+      ]
+    },
+    {
+      "terms": "kiem thu hoi quy",
+      "expect": [
+        "vi-test"
+      ],
+      "hit": false,
+      "got": []
+    }
+  ],
+  "gate": "FAIL"
+}

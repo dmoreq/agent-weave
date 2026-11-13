@@ -88,12 +88,24 @@ If duplicate helpers or bypasses are suspected, run `eg reuse`:
 eg reuse
 # Or scope to specific paths:
 eg reuse src/walk.rs src/parse.rs
+# Scope to the symbol containing one line:
+eg reuse src/walk.rs:42
 # Extend to second-hop wrappers:
 eg reuse --deep-callee
+# Propose a signature before writing it:
+eg reuse --propose "def parse_token(value)" --callees normalize
+# Opt-in coverage detectors:
+eg reuse --coverage class,unresolved,tests
+# Show detector and reason codes:
+eg reuse --explain
 ```
 
-Powered by an in-memory inverted posting index (< 3ms scan on 5,000 symbols), `eg reuse` executes four calibrated detectors across files and within the same file:
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper. Add `--judge` to send the 45-75% band to a local `eg-judge` model, which answers with a proposition head or a bi-encoder cosine; point `EG_JUDGE_BIN` at the binary and `EG_JUDGE_MODEL` at a checkpoint directory. Without both, the flag degrades to the static output and prints one note to stderr.
+Every candidate prints `confidence=low|provisional|medium|high`. A target or canonical file changed since the build downgrades the candidate and adds a freshness warning; an unindexed new file in an empty scope prints `freshness unknown (new-file)`. Use `--limit` (1–100) and the summary counters to see how many candidates were omitted or filtered by `--min-confidence`.
+
+For an intentional exception, write a local memory note keyed `reuse-allow/<target>-><canonical>` and add `--refs` for the source files. High-confidence pairs cannot be suppressed; `--show-suppressed` keeps the candidate visible and reports the count. `--judge` is optional and degrades to static output when `eg-judge` or its model is unavailable.
+
+`eg reuse` executes four structural detectors across files and within the same file:
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper. Closures wider than 512 weighted callees are skipped as hubs, and deep mode evaluates at most 30,000 candidate pairs per invocation, keeping the opt-in scan bounded.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
 - **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
 - **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.
@@ -120,6 +132,30 @@ Grounded in the citation-lock principles of [Agent Zero Memory](https://arxiv.or
 Before writing, `eg mem write` verifies note novelty via Jaccard token similarity against existing notes. At 80% or more similarity, it appends an advisory hint naming the existing key and suggests `--supersedes` to prevent memory bloat while preserving execution flow.
 
 Operationalizing [Zero-Mem](https://arxiv.org/abs/2607.29377), `eg mem query` consumes 0 LLM tokens. When `.engram/index.db` exists, it follows resolved `calls` edges outward from the query's symbols (depth up to 3, decay `0.5^depth`). Notes anchored to downstream callees surface automatically without requiring exact lexical overlap. If the index is missing, the query safely falls back to plain FTS5 ranking.
+
+#### 2c. Time-Bounded Recall, Explanations, and Scope
+Bound a handoff or regression window with half-open UTC bounds. Dates accept `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SSZ`; `@<unix-seconds>` is available for scripts:
+
+```bash
+eg mem query --all --since 2026-11-11 --until 2026-11-12
+eg mem export --since @1794441600 > handoff.jsonl
+```
+
+Add `--explain` to a ranked query to see why each note matched. Labels are causal and bounded: `lexical match`, `ref src/memory/rank.rs`, `graph depth 2`, and `age 3d`; scores and note bodies are never printed:
+
+```bash
+eg mem query resolver --explain
+```
+
+Use `--local` when only repository notes matter; it never falls back to the global store. Unicode retrieval matches `bo nho` to `Bộ nhớ` through the derived Unicode index, while `--legacy` forces the old ASCII index for diagnosis:
+
+```bash
+eg mem query deploy --local
+eg mem query "bo nho"
+eg mem query "bo nho" --legacy
+```
+
+`eg mem reindex` rebuilds the derived Unicode index without touching notes. `eg mem export --scan` reports suspected secrets on stderr and still exits 0; stdout stays valid JSONL for restore.
 
 #### 3. Record Multi-Agent Task Handoffs
 When wrapping up a session or passing tasks between agents, write a scoped task note:
@@ -237,5 +273,7 @@ export ENGRAM_NO_JOURNAL=1
 ```
 
 Memory stores gain an additive `anchored_at` column (memory schema v2) on the next write; `eg mem touch` refreshes that anchor and preserves the note's creation date. Telemetry logs are strictly local and automatically rotate at 5 MiB. Repository rows are a live inventory: an entry without a live repository identity — a deleted repository, a legacy line, a call that resolved no repository — is skipped by every read and purged from the log on the next `eg dashboard` or `eg doctor` run, so it disappears from `eg usage --global`, `eg monitor`, and the dashboard, totals included. There is no unattributed bucket.
+
+The dashboard and `eg monitor` report one row per repository: calls recorded in a linked git worktree fold into the main repository's row (resolved from the worktree's `.git` pointer file), with a per-worktree breakdown behind an expandable row in the repository table, and `from <main-repo>` provenance in the Recent Queries feed. The global dashboard additionally treats repository roots under the OS temp directory (`/tmp`, `/private/tmp`, `/var/tmp`, `$TMPDIR`) as scratch identities — probe fixtures and throwaway checkouts: they never reach the repository tables, and `eg dashboard` start drops their lines from the global journal.
 
 `eg audit` applies fixed windows, baselines, and thresholds to the retained journal, index, and memory refs. It is read-only: it never prunes, rotates, or writes, and it is excluded from its own telemetry. A run reports health (`status`) separately from coverage (`data_status`), so missing data is never presented as health. See [health](health.md) for the check registry, exit codes, redaction rules, and the daily automation contract.
