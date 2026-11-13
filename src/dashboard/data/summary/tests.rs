@@ -129,3 +129,72 @@ fn payload_carries_provenance_and_no_dead_fields() {
         );
     }
 }
+
+#[test]
+fn worktree_entries_fold_into_their_main_repository() {
+    let main = crate::db::test_support::temp_root("summary-wt-main");
+    crate::db::test_support::make_dir_all(main.join(".git/worktrees/wt")).unwrap();
+    let wt = crate::db::test_support::temp_root("summary-wt-link");
+    let pointer = format!("gitdir: {}/.git/worktrees/wt\n", main.display());
+    crate::db::test_support::write_file(wt.join(".git"), pointer.as_bytes()).unwrap();
+    // The fold keys on the canonical main root: temp roots spell /var/folders
+    // while resolved answers spell /private/var/folders on macOS.
+    let main_canon = std::fs::canonicalize(&main).unwrap_or_else(|_| main.clone());
+    let main_str = main_canon.to_string_lossy().into_owned();
+    let wt_str = wt.to_string_lossy().into_owned();
+    let main_name = main.file_name().unwrap().to_string_lossy().into_owned();
+
+    let entries = vec![
+        json!({ "tool": "build", "exit_code": 0, "repo": main_str, "repo_name": "main-repo" }),
+        json!({ "tool": "callers", "exit_code": 0, "repo": wt_str, "repo_name": "wt", "worktree": true }),
+        json!({ "tool": "callers", "exit_code": 3, "repo": wt_str, "repo_name": "wt", "worktree": true }),
+    ];
+    let summary = compute_summary(&entries);
+
+    // One row for the main repository; the worktree never gets its own row.
+    let aggs = summary["repo_aggs"].as_object().unwrap();
+    assert_eq!(aggs.len(), 1, "{summary}");
+    assert_eq!(summary["repo_aggs"][&main_str]["display"], "main-repo");
+    assert_eq!(summary["repo_aggs"][&main_str]["calls"], 3);
+    assert_eq!(summary["repo_aggs"][&main_str]["errors"], 1);
+    assert_eq!(
+        summary["repo_aggs"][&main_str]["worktrees"]["wt"]["calls"],
+        2
+    );
+    assert_eq!(
+        summary["repo_aggs"][&main_str]["worktrees"]["wt"]["errors"],
+        1
+    );
+
+    // Feed rows keep the worktree name plus the main-repository stamp.
+    let rows = summary["graph_recent_queries"].as_array().unwrap();
+    let stamped = rows
+        .iter()
+        .find(|r| r["repo_name"] == "wt")
+        .expect("worktree row in the graph window");
+    assert_eq!(stamped["repo_main_name"], main_name, "{stamped}");
+
+    crate::db::test_support::remove_tree(&main);
+    crate::db::test_support::remove_tree(&wt);
+}
+
+#[test]
+fn unresolvable_worktree_entries_keep_their_own_row() {
+    let wt = crate::db::test_support::temp_root("summary-wt-orphan");
+    // A pointer file with no worktree admin directory behind it does not fold.
+    crate::db::test_support::write_file(
+        wt.join(".git"),
+        b"gitdir: /nonexistent-eg-wt/.git/worktrees/wt\n",
+    )
+    .unwrap();
+    let wt_str = wt.to_string_lossy().into_owned();
+    let entries = vec![
+        json!({ "tool": "callers", "exit_code": 0, "repo": wt_str, "repo_name": "orphan", "worktree": true }),
+    ];
+    let summary = compute_summary(&entries);
+    let aggs = summary["repo_aggs"].as_object().unwrap();
+    assert_eq!(aggs.len(), 1, "{summary}");
+    assert_eq!(summary["repo_aggs"][&wt_str]["display"], "orphan");
+    assert_eq!(summary["repo_aggs"][&wt_str]["worktree"], true);
+    crate::db::test_support::remove_tree(&wt);
+}

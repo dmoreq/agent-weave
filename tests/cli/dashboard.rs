@@ -266,6 +266,124 @@ fn dashboard_summary_drops_deleted_repo_rows() {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
+#[test]
+fn dashboard_global_hides_scratch_repo_rows() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let dir = temp_repo("dashboard-global-scratch");
+    let log = dir.join("usage.log");
+    let scratch_path = std::env::temp_dir().join("eg-global-probe");
+    std::fs::create_dir_all(&scratch_path).unwrap();
+    let scratch = scratch_path.to_string_lossy().into_owned();
+    // The durable row is the checkout itself; the scratch row lives under the
+    // OS temp tree and must not reach the global repository table.
+    let stable = env!("CARGO_MANIFEST_DIR");
+    std::fs::write(
+        &log,
+        format!(
+            "{{\"tool\":\"build\",\"repo\":\"{scratch}\",\"repo_name\":\"probe\"}}\n{{\"tool\":\"build\",\"repo\":\"{stable}\",\"repo_name\":\"durable\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let log_clone = log.clone();
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = handle_client(stream, &log_clone, None, true);
+    });
+
+    let mut client = TcpStream::connect(addr).unwrap();
+    client
+        .write_all(b"GET /api/summary HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).unwrap();
+    assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+    let body_start = resp.find("\r\n\r\n").unwrap() + 4;
+    let json_val: serde_json::Value = serde_json::from_str(&resp[body_start..]).unwrap();
+    assert_eq!(json_val["total_calls"], 1, "{json_val}");
+    assert_eq!(json_val["repo_aggs"][stable]["display"], "durable");
+    assert!(json_val["repo_aggs"][&scratch].is_null(), "{json_val}");
+    assert!(!resp.contains("\"probe\""), "{resp}");
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(&scratch_path);
+}
+
+#[test]
+fn dashboard_summary_folds_worktree_into_main_repo() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    // Synthetic linked worktree: the main repo holds the worktree admin
+    // directory, the worktree's `.git` file points at it. Local scope (no
+    // scratch-root filter) keeps both fixture roots visible.
+    let main_root = std::env::temp_dir().join(format!("eg-wt-fold-main-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&main_root);
+    std::fs::create_dir_all(main_root.join(".git/worktrees/fold-test")).unwrap();
+    let wt_root = std::env::temp_dir().join(format!("eg-wt-fold-wt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&wt_root);
+    std::fs::create_dir_all(&wt_root).unwrap();
+    let pointer = format!("gitdir: {}/.git/worktrees/fold-test\n", main_root.display());
+    std::fs::write(wt_root.join(".git"), pointer.as_bytes()).unwrap();
+
+    let dir = temp_repo("dashboard-wt-fold");
+    let log = dir.join("usage.log");
+    // The fold keys on the canonical main root.
+    let main_canon = std::fs::canonicalize(&main_root).unwrap_or_else(|_| main_root.clone());
+    let main = main_canon.to_string_lossy().into_owned();
+    let main_name = main_root
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let wt = wt_root.to_string_lossy().into_owned();
+    std::fs::write(
+        &log,
+        format!(
+            "{{\"tool\":\"build\",\"repo\":\"{main}\",\"repo_name\":\"{main_name}\"}}\n{{\"tool\":\"callers\",\"exit_code\":0,\"repo\":\"{wt}\",\"repo_name\":\"fold-test\",\"worktree\":true}}\n"
+        ),
+    )
+    .unwrap();
+
+    let log_clone = log.clone();
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = handle_client(stream, &log_clone, None, false);
+    });
+
+    let mut client = TcpStream::connect(addr).unwrap();
+    client
+        .write_all(b"GET /api/summary HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).unwrap();
+    assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+    let body_start = resp.find("\r\n\r\n").unwrap() + 4;
+    let json_val: serde_json::Value = serde_json::from_str(&resp[body_start..]).unwrap();
+
+    // One row for the main repository; the worktree contributes its calls and
+    // a per-worktree breakdown, never a second row.
+    let aggs = json_val["repo_aggs"].as_object().unwrap();
+    assert_eq!(aggs.len(), 1, "{json_val}");
+    assert_eq!(json_val["repo_aggs"][&main]["display"], main_name);
+    assert_eq!(json_val["repo_aggs"][&main]["calls"], 2, "{json_val}");
+    assert_eq!(
+        json_val["repo_aggs"][&main]["worktrees"]["fold-test"]["calls"], 1,
+        "{json_val}"
+    );
+    // The feed row keeps the worktree name plus the main-repository stamp.
+    let rows = json_val["graph_recent_queries"].as_array().unwrap();
+    let wt_row = rows
+        .iter()
+        .find(|r| r["repo_name"] == "fold-test")
+        .expect("worktree row in feed");
+    assert_eq!(wt_row["repo_main_name"], main_name, "{wt_row}");
+    handle.join().unwrap();
+    let _ = std::fs::remove_dir_all(&main_root);
+    let _ = std::fs::remove_dir_all(&wt_root);
+}
+
 mod monitor;
 mod security;
 mod sse;

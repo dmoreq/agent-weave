@@ -369,6 +369,8 @@ eg dashboard [--port 7890] [--host 127.0.0.1] [--open] [--local]
 
 Entries without a live repository identity — deleted repositories, legacy lines, calls that resolved no repository — disappear from the repository tables, the active-repo count, the Recent Queries feed, and the live SSE stream, and are purged from the log at startup, matching `eg usage --global`.
 
+Calls recorded in a linked git worktree fold into the main repository's row instead of adding a second row: the main root is resolved from the worktree's `.git` pointer file, the repository table shows a per-worktree breakdown behind an expandable row, and Recent Queries feed rows keep the worktree name with a `from <main-repo>` note. In global mode the dashboard also treats repository roots under the OS temp directory (`/tmp`, `/private/tmp`, `/var/tmp`, `$TMPDIR`) as scratch identities — probe fixtures and throwaway checkouts never reach the tables, and dashboard start drops their lines from the global journal.
+
 ### Live Query Monitor (`eg monitor`)
 Stream real-time query events directly in your terminal with colored ANSI output, agent attribution tags, and zero dependencies. Defaults to global telemetry across all repositories with an initial backlog of recent events.
 

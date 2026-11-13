@@ -9,7 +9,9 @@
 //! answer instead of guessing. The identity is the canonical absolute path; the
 //! name is only a label.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use crate::error::{EgError, Result};
 use crate::walk::{discover_root, find_git_root};
@@ -97,6 +99,73 @@ impl RepoRef {
     }
 }
 
+/// Main repository root for a linked git worktree, read from its `.git`
+/// pointer file (`gitdir: <main>/.git/worktrees/<name>`). `None` for ordinary
+/// repositories (`.git` is a directory), submodules (the pointer lands under
+/// `.git/modules/`), and dangling or malformed pointers. The dashboard folds a
+/// worktree's telemetry into its main repository with this answer, so the
+/// answer is read from the pointer file without spawning git.
+pub fn worktree_main_root(root: &Path) -> Option<PathBuf> {
+    let pointer = root.join(".git");
+    let meta = std::fs::symlink_metadata(&pointer).ok()?;
+    if !meta.is_file() {
+        // An ordinary repository carries `.git` as a directory; anything else
+        // here is not a worktree pointer either.
+        return None;
+    }
+    let content = std::fs::read_to_string(&pointer).ok()?;
+    let gitdir = PathBuf::from(content.strip_prefix("gitdir:")?.trim());
+    let gitdir = if gitdir.is_absolute() {
+        gitdir
+    } else {
+        root.join(gitdir)
+    };
+    // Layout: <main>/.git/worktrees/<name>. A `modules` segment means a
+    // submodule pointer, which belongs to no worktree.
+    let name_dir = gitdir.parent()?;
+    if name_dir.file_name()? != "worktrees" {
+        return None;
+    }
+    let main_git = name_dir.parent()?;
+    if main_git.file_name()? != ".git" {
+        return None;
+    }
+    let main = main_git.parent()?.to_path_buf();
+    // Relative pointers leave `..` segments in the derived root; the journal
+    // records canonical paths, so the answer must be canonical too.
+    let main = std::fs::canonicalize(&main).unwrap_or(main);
+    if main == root || !main.join(".git").is_dir() || !gitdir.is_dir() {
+        return None;
+    }
+    Some(main)
+}
+
+/// Upper bound on remembered worktree verdicts; mirrors the liveness cache.
+const WORKTREE_CACHE_CAP: usize = 512;
+
+/// Cached `worktree_main_root`. The dashboard evaluates one journal entry per
+/// line on every poll and the pointer file never changes within a session, so
+/// one verdict per distinct root per process is enough; the map clears when it
+/// hits the cap instead of growing without limit.
+pub fn cached_worktree_main_root(root: &Path) -> Option<PathBuf> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<PathBuf>>>> = OnceLock::new();
+    let cell = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = root.to_path_buf();
+    let mut guard = match cell.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if !guard.contains_key(&key) && guard.len() >= WORKTREE_CACHE_CAP {
+        guard.clear();
+    }
+    if let Some(hit) = guard.get(&key) {
+        return hit.clone();
+    }
+    let verdict = worktree_main_root(root);
+    guard.insert(key, verdict.clone());
+    verdict
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +218,70 @@ mod tests {
         assert!(resolved.is_worktree());
 
         remove_tree(&root);
+    }
+
+    fn worktree_fixture(name: &str) -> (PathBuf, PathBuf) {
+        // Synthetic linked-worktree layout without spawning git: a main repo
+        // with a `.git` directory and a worktree whose pointer names the
+        // main-side admin directory.
+        let main = temp_root(name);
+        make_dir_all(main.join(".git/worktrees/wt")).unwrap();
+        let wt = temp_root(&format!("{name}-wt"));
+        let pointer = format!("gitdir: {}/.git/worktrees/wt\n", main.display());
+        write_file(wt.join(".git"), pointer.as_bytes()).unwrap();
+        (main, wt)
+    }
+
+    #[test]
+    fn linked_worktree_resolves_to_its_main_repository() {
+        let (main, wt) = worktree_fixture("wt-resolve");
+        // The answer is canonical: temp roots spell /var/folders while the
+        // journal records /private/var/folders on macOS.
+        let expected = std::fs::canonicalize(&main).unwrap_or_else(|_| main.clone());
+        assert_eq!(worktree_main_root(&wt), Some(expected.clone()));
+        assert_eq!(cached_worktree_main_root(&wt), Some(expected));
+        remove_tree(&main);
+        remove_tree(&wt);
+    }
+
+    #[test]
+    fn relative_pointer_resolves_against_the_worktree() {
+        let (main, wt) = worktree_fixture("wt-relative");
+        // git may store the pointer relative to the worktree root.
+        let rel = format!(
+            "gitdir: ../{}/.git/worktrees/wt\n",
+            main.file_name().unwrap().to_string_lossy()
+        );
+        write_file(wt.join(".git"), rel.as_bytes()).unwrap();
+        let expected = std::fs::canonicalize(&main).unwrap_or_else(|_| main.clone());
+        assert_eq!(worktree_main_root(&wt), Some(expected));
+        remove_tree(&main);
+        remove_tree(&wt);
+    }
+
+    #[test]
+    fn submodule_pointer_is_not_a_worktree() {
+        let (main, wt) = worktree_fixture("wt-submodule");
+        // Submodules point into `.git/modules/<name>`, not `.git/worktrees/`.
+        let modules = main.join(".git/modules/sub");
+        make_dir_all(&modules).unwrap();
+        let pointer = format!("gitdir: {}\n", modules.display());
+        write_file(wt.join(".git"), pointer.as_bytes()).unwrap();
+        assert_eq!(worktree_main_root(&wt), None);
+        remove_tree(&main);
+        remove_tree(&wt);
+    }
+
+    #[test]
+    fn ordinary_repository_and_dangling_pointer_are_not_worktrees() {
+        let (main, wt) = worktree_fixture("wt-ordinary");
+        // The main side has `.git` as a directory: not a worktree.
+        assert_eq!(worktree_main_root(&main), None);
+        // A pointer to a removed admin directory is dead.
+        remove_tree(main.join(".git/worktrees/wt"));
+        assert_eq!(worktree_main_root(&wt), None);
+        remove_tree(&main);
+        remove_tree(&wt);
     }
 
     #[test]

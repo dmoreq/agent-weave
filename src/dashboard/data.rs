@@ -8,7 +8,7 @@ mod summary;
 pub use memories::{collect_memories, resolve_store, store_ids};
 pub use reuse::collect_reuse_candidates;
 pub use summary::compute_summary;
-pub(crate) use summary::{classify, ToolClass};
+pub(crate) use summary::{annotate_worktree_main, classify, ToolClass};
 
 use std::collections::HashMap;
 use std::fs::File;

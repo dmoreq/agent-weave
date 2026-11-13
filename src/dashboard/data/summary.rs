@@ -2,6 +2,7 @@
 //! token-savings accounting folded per tool and repository.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
 use serde_json::{json, Value};
 
@@ -67,6 +68,12 @@ struct EntryView<'a> {
     /// Aggregation key: the journaled absolute path when present, else the
     /// name. A path keeps two repositories with the same directory name apart.
     repo_key: &'a str,
+    /// Row label: the main repository's basename when this entry belongs to a
+    /// linked worktree, else the journaled `repo_name`.
+    repo_display: String,
+    /// Main repository root when the entry was recorded in a linked worktree
+    /// whose `.git` pointer still resolves; the row folds into it.
+    repo_main: Option<String>,
     is_worktree: bool,
     agent_name: &'a str,
     session_name: &'a str,
@@ -89,6 +96,17 @@ impl<'a> EntryView<'a> {
             .get("repo_name")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty());
+        let is_worktree = e.get("worktree").and_then(Value::as_bool).unwrap_or(false);
+        let repo_main = if is_worktree {
+            crate::repo::cached_worktree_main_root(Path::new(repo_key))
+                .map(|p| p.to_string_lossy().into_owned())
+        } else {
+            None
+        };
+        let repo_display = match &repo_main {
+            Some(main) => main_display(main),
+            None => repo_name.unwrap_or(UNATTRIBUTED).to_string(),
+        };
         Some(EntryView {
             tool,
             exit_code: e.get("exit_code").and_then(Value::as_i64).unwrap_or(0),
@@ -102,7 +120,9 @@ impl<'a> EntryView<'a> {
             ts: e.get("ts").and_then(Value::as_f64).unwrap_or(0.0),
             repo_name: repo_name.unwrap_or(UNATTRIBUTED),
             repo_key,
-            is_worktree: e.get("worktree").and_then(Value::as_bool).unwrap_or(false),
+            repo_display,
+            repo_main,
+            is_worktree,
             agent_name: e
                 .get("agent")
                 .and_then(Value::as_str)
@@ -206,8 +226,14 @@ impl SummaryState {
         t.calls += 1;
         t.shown += v.shown;
         t.results += v.result_count;
-        let r = self.repo_mut(v.repo_key, v.repo_name);
-        record_entry_into(r, v.facts, v.ts, v.is_worktree);
+        let r = self.repo_mut(folded_key(v), &v.repo_display);
+        record_entry_into(r, v.facts, v.ts, v.is_worktree && v.repo_main.is_none());
+        if v.repo_main.is_some() {
+            r.worktrees
+                .entry(v.repo_name.to_string())
+                .or_default()
+                .record(v.ts);
+        }
         let a = self.agent_mut(v.agent_name);
         record_entry_into(a, v.facts, v.ts, false);
     }
@@ -225,20 +251,29 @@ impl SummaryState {
     fn record_error(&mut self, v: &EntryView<'_>) {
         self.errors += 1;
         self.tool_mut(v.tool).errors += 1;
-        self.repo_mut(v.repo_key, v.repo_name).errors += 1;
+        self.repo_mut(folded_key(v), &v.repo_display).errors += 1;
         self.agent_mut(v.agent_name).errors += 1;
         if v.facts.is_graph {
             self.graph_errors += 1;
-            self.repo_mut(v.repo_key, v.repo_name).graph_errors += 1;
+            self.repo_mut(folded_key(v), &v.repo_display).graph_errors += 1;
             self.agent_mut(v.agent_name).graph_errors += 1;
         }
         if v.facts.is_reuse {
-            self.repo_mut(v.repo_key, v.repo_name).reuse_errors += 1;
+            self.repo_mut(folded_key(v), &v.repo_display).reuse_errors += 1;
             self.agent_mut(v.agent_name).reuse_errors += 1;
         }
         if v.facts.is_mem {
-            self.repo_mut(v.repo_key, v.repo_name).memory_errors += 1;
+            self.repo_mut(folded_key(v), &v.repo_display).memory_errors += 1;
             self.agent_mut(v.agent_name).memory_errors += 1;
+        }
+        if v.repo_main.is_some() {
+            if let Some(wt) = self
+                .repo_mut(folded_key(v), &v.repo_display)
+                .worktrees
+                .get_mut(v.repo_name)
+            {
+                wt.errors += 1;
+            }
         }
     }
 
@@ -256,19 +291,21 @@ impl SummaryState {
             0
         };
         if reuse_hit > 0 {
-            self.repo_mut(v.repo_key, v.repo_name).reuse_hits += reuse_hit;
+            self.repo_mut(folded_key(v), &v.repo_display).reuse_hits += reuse_hit;
             self.agent_mut(v.agent_name).reuse_hits += reuse_hit;
         }
         self.saved_tokens += saved;
-        self.repo_mut(v.repo_key, v.repo_name).tokens_saved += saved;
+        self.repo_mut(folded_key(v), &v.repo_display).tokens_saved += saved;
         self.agent_mut(v.agent_name).tokens_saved += saved;
         if v.facts.is_graph {
             self.graph_saved_tokens += saved;
-            self.repo_mut(v.repo_key, v.repo_name).graph_tokens_saved += saved;
+            self.repo_mut(folded_key(v), &v.repo_display)
+                .graph_tokens_saved += saved;
             self.agent_mut(v.agent_name).graph_tokens_saved += saved;
         }
         if v.facts.is_reuse {
-            self.repo_mut(v.repo_key, v.repo_name).reuse_tokens_saved += saved;
+            self.repo_mut(folded_key(v), &v.repo_display)
+                .reuse_tokens_saved += saved;
             self.agent_mut(v.agent_name).reuse_tokens_saved += saved;
         }
     }
@@ -301,80 +338,47 @@ fn compute_percentiles(latencies: &mut [f64]) -> (f64, f64, f64) {
     (p50, p95, avg)
 }
 
-fn format_tool_aggs(tool_aggs: HashMap<String, ToolAgg>) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
-    for (k, mut v) in tool_aggs {
-        v.latencies
-            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let vn = v.latencies.len();
-        let p50_t = if vn > 0 {
-            v.latencies[(0.50 * vn as f64).ceil() as usize - 1]
-        } else {
-            0.0
-        };
-        let p95_t = if vn > 0 {
-            v.latencies[(0.95 * vn as f64).ceil() as usize - 1]
-        } else {
-            0.0
-        };
-        // Success-only inputs: the fold prices a call exactly as the global
-        // KPI does, so `sum(tool saved_tokens) == saved_tokens` always holds.
-        let saved_tokens =
-            crate::journal::estimated_tokens_saved(&k, v.ok_shown, v.ok_results, v.ok_calls);
-        out.insert(
-            k,
-            json!({
-                "calls": v.calls,
-                "errors": v.errors,
-                "shown": v.shown,
-                "p50": p50_t,
-                "p95": p95_t,
-                "saved_tokens": saved_tokens,
-            }),
-        );
-    }
-    out
-}
-
-fn rel_pct(errors: usize, calls: usize) -> f64 {
-    if calls > 0 {
-        100.0 * (calls - errors) as f64 / calls as f64
-    } else {
-        100.0
+/// Aggregation key for one entry: a linked worktree folds into its main
+/// repository, every other entry keeps its own repository key.
+fn folded_key<'a>(v: &'a EntryView<'_>) -> &'a str {
+    match &v.repo_main {
+        Some(main) => main.as_str(),
+        None => v.repo_key,
     }
 }
 
-fn format_aggs(aggs: HashMap<String, RepoAgg>, with_worktree: bool) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
-    for (k, v) in aggs {
-        let mut entry = json!({
-            "display": v.display,
-            "calls": v.calls,
-            "errors": v.errors,
-            "graph_calls": v.graph_calls,
-            "graph_errors": v.graph_errors,
-            "last_ts": v.last_ts,
-            "reliability_pct": rel_pct(v.errors, v.calls),
-            "graph_reliability_pct": rel_pct(v.graph_errors, v.graph_calls),
-            "saved_tokens": v.tokens_saved,
-            "graph_saved_tokens": v.graph_tokens_saved,
-            "reuse_calls": v.reuse_calls,
-            "reuse_errors": v.reuse_errors,
-            "reuse_reliability_pct": rel_pct(v.reuse_errors, v.reuse_calls),
-            "reuse_hits": v.reuse_hits,
-            "reuse_saved_tokens": v.reuse_tokens_saved,
-            "memory_calls": v.memory_calls,
-            "memory_errors": v.memory_errors,
-            "memory_reliability_pct": rel_pct(v.memory_errors, v.memory_calls),
-            "memory_reads": v.memory_reads,
-            "memory_writes": v.memory_writes,
-        });
-        if with_worktree {
-            entry["worktree"] = json!(v.worktree);
-        }
-        out.insert(k, entry);
+/// Row label for a folded main repository: the main root's basename, which is
+/// the `repo_name` the journal writes for that root.
+fn main_display(main: &str) -> String {
+    Path::new(main)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| main.to_string())
+}
+
+/// Stamp one journal entry with `repo_main` and `repo_main_name` when it was
+/// recorded in a linked worktree whose `.git` pointer still resolves. Feeds
+/// show the worktree name plus the repository it belongs to, and the summary
+/// window reuses the same stamp so both stay consistent.
+pub(crate) fn annotate_worktree_main(entry: &mut Value) {
+    let Some(repo) = entry.get("repo").and_then(Value::as_str) else {
+        return;
+    };
+    if !entry
+        .get("worktree")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return;
     }
-    out
+    let Some(main) = crate::repo::cached_worktree_main_root(Path::new(repo)) else {
+        return;
+    };
+    if let Some(name) = main.file_name() {
+        let name = name.to_string_lossy().into_owned();
+        entry["repo_main"] = json!(main.to_string_lossy());
+        entry["repo_main_name"] = json!(name);
+    }
 }
 
 #[derive(Default)]
@@ -410,6 +414,27 @@ struct RepoAgg {
     memory_reads: usize,
     memory_writes: usize,
     last_ts: f64,
+    /// Per-worktree breakdown under this repository: the dashboard renders
+    /// these as expandable sub-rows, so only the counts a sub-row shows are
+    /// kept. Empty unless linked-worktree entries folded into this row.
+    worktrees: BTreeMap<String, WtAgg>,
+}
+
+/// One linked worktree's contribution to its main repository's row.
+#[derive(Default)]
+struct WtAgg {
+    calls: usize,
+    errors: usize,
+    last_ts: f64,
+}
+
+impl WtAgg {
+    fn record(&mut self, ts: f64) {
+        self.calls += 1;
+        if ts > self.last_ts {
+            self.last_ts = ts;
+        }
+    }
 }
 
 /// Dimension counters shared by the repo and agent rollups, so the two

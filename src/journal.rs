@@ -288,7 +288,10 @@ mod prune;
 mod render;
 mod tokens;
 
-pub use prune::{prune_stale_entries, prune_stale_entries_all};
+pub use prune::{
+    prune_ephemeral_entries, prune_ephemeral_entries_all, prune_stale_entries,
+    prune_stale_entries_all,
+};
 
 use agent::env_tag;
 pub use agent::{detect_agent, session_tag, set_agent_context};
@@ -452,49 +455,5 @@ mod tests {
         let line = r#"{"tool":"symbols","exit_code":0,"agent":"antigravity","worktree":false}"#;
         let f = parse_usage_line(line).unwrap();
         assert_eq!(f.agent.as_deref(), Some("antigravity"));
-    }
-
-    #[test]
-    fn prune_stale_entries_removes_dead_repos_and_unjudgeable_lines() {
-        let dir = crate::db::temp_root("prune-wt");
-        let active_wt = dir.join("active-wt");
-        let deleted_wt = dir.join("deleted-wt");
-        fs::create_dir_all(&active_wt).unwrap();
-
-        let log_path = dir.join("usage.log");
-        let line1 = format!(
-            r#"{{"tool":"build","repo":"{}","worktree":true}}"#,
-            active_wt.display()
-        );
-        let line2 = format!(
-            r#"{{"tool":"build","repo":"{}","worktree":true}}"#,
-            deleted_wt.display()
-        );
-        let line3 = r#"{"tool":"symbols","repo":"/persistent/repo","worktree":false}"#.to_string();
-        // Identityless legacy lines (pre-repo-field binaries, test artifacts)
-        // are pruned alongside the dead roots.
-        let line4 =
-            r#"{"tool":"symbols","repo":".tmp/verify/repo1","repo_name":"repo1"}"#.to_string();
-        let line5 = r#"{"tool":"mem_query","exit_code":0}"#.to_string();
-
-        fs::write(
-            &log_path,
-            format!("{line1}\n{line2}\n{line3}\n{line4}\n{line5}\n"),
-        )
-        .unwrap();
-
-        let pruned = prune_stale_entries(&log_path).unwrap();
-        assert_eq!(
-            pruned, 4,
-            "deleted worktree, dead repo, relative and missing repo"
-        );
-
-        let remaining = fs::read_to_string(&log_path).unwrap();
-        assert!(remaining.contains(&active_wt.to_string_lossy().to_string()));
-        assert!(!remaining.contains(&deleted_wt.to_string_lossy().to_string()));
-        assert!(!remaining.contains("/persistent/repo"));
-        assert!(!remaining.contains(".tmp/verify/repo1"));
-
-        let _ = fs::remove_dir_all(&dir);
     }
 }

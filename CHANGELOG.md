@@ -16,6 +16,20 @@ changes bump the minor while 0.x is unstable.
 
 ## [Unreleased]
 
+### Added
+- Dashboard telemetry folds linked git worktrees into their main repository:
+  one row per repository with a per-worktree breakdown behind an expandable
+  row, and `from <main-repo>` provenance on Recent Queries feed rows and live
+  SSE frames. The main root resolves from the worktree's `.git` pointer file,
+  so no schema change and no git spawn are involved.
+
+### Changed
+- The global dashboard treats repository roots under the OS temp directory
+  (`/tmp`, `/private/tmp`, `/var/tmp`, `$TMPDIR`) as scratch identities:
+  probe fixtures and throwaway checkouts never reach the repository tables,
+  and `eg dashboard` start drops their lines from the global journal. Local
+  dashboards and `eg usage` keep their full history.
+
 ### Changed
 - `eg reuse` now supports four confidence tiers: `low`, `provisional`,
   `medium`, and `high`; `--min-confidence` filters candidates and the summary
