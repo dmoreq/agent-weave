@@ -41,7 +41,34 @@ fn mem_import_rejects_traversal_and_allowlist_keys() {
         json!({"name": "mem_import", "arguments": {"path": "allow.jsonl"}}),
     );
     assert_eq!(allowlist["result"]["isError"], true, "{allowlist}");
+    let stdin_path = rpc(
+        &mut srv,
+        3,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "-"}}),
+    );
+    assert_eq!(stdin_path["result"]["isError"], true, "{stdin_path}");
     let _ = fs::remove_file(outside);
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[cfg(unix)]
+#[test]
+fn mem_import_rejects_non_regular_files() {
+    use std::process::Command;
+    let repo = mem_fixture("import-fifo");
+    let fifo = repo.join("notes.fifo");
+    let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+    assert!(status.success());
+    let mut srv = spawn_with(&repo, true);
+    notification(&mut srv, "notifications/initialized");
+    let resp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "mem_import", "arguments": {"path": "notes.fifo"}}),
+    );
+    assert_eq!(resp["result"]["isError"], true, "{resp}");
     let _ = fs::remove_dir_all(&repo);
 }
 

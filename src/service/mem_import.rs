@@ -191,6 +191,11 @@ fn resolve_import_path(
 /// directory is rejected; the size cap runs before the read.
 fn read_input(path: &str, root_arg: Option<&Path>, surface: Surface) -> Result<String> {
     if path == "-" {
+        if surface == Surface::Mcp {
+            return Err(EgError::Usage(
+                "mem import: '-' is not supported over MCP; pass a repo-relative file".to_string(),
+            ));
+        }
         let mut buf = String::new();
         // Bound the read itself: one byte past the cap is enough to reject,
         // so unbounded stdin cannot exhaust memory.
@@ -221,6 +226,11 @@ fn read_input(path: &str, root_arg: Option<&Path>, surface: Surface) -> Result<S
     if meta.is_dir() {
         return Err(EgError::Usage(format!(
             "mem import: '{path}' is a directory; import one file or '-'"
+        )));
+    }
+    if !meta.is_file() {
+        return Err(EgError::Usage(format!(
+            "mem import: '{path}' is not a regular file"
         )));
     }
     if surface == Surface::Mcp {

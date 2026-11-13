@@ -55,6 +55,10 @@ pub(super) fn analyze(conn: &Connection, kinds: &[CoverageKind]) -> Result<Vec<R
             .cmp(&a.confidence.rank())
             .then_with(|| a.symbol.cmp(&b.symbol))
             .then_with(|| a.canonical.cmp(&b.canonical))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.canonical_file.cmp(&b.canonical_file))
+            .then_with(|| a.canonical_line.cmp(&b.canonical_line))
     });
     Ok(pool)
 }
@@ -161,10 +165,11 @@ fn language_family(file: &str) -> String {
 }
 
 fn unresolved_candidates(symbols: &HashMap<i64, SymbolData>) -> Result<Vec<ReuseCandidate>> {
-    let mut by_name: HashMap<&str, &SymbolData> = HashMap::new();
+    let mut by_name: HashMap<(&str, String), &SymbolData> = HashMap::new();
     for symbol in symbols.values() {
+        let key = (symbol.name.as_str(), language_family(&symbol.file_path));
         by_name
-            .entry(symbol.name.as_str())
+            .entry(key)
             .and_modify(|current| {
                 if is_more_canonical(symbol, current) {
                     *current = symbol;
@@ -174,11 +179,12 @@ fn unresolved_candidates(symbols: &HashMap<i64, SymbolData>) -> Result<Vec<Reuse
     }
     let mut pool = Vec::new();
     for target in symbols.values() {
+        let family = language_family(&target.file_path);
         for callee in target.all_callees.difference(&target.resolved_callees) {
             if is_generic_coverage_name(callee) {
                 continue;
             }
-            let Some(canonical) = by_name.get(callee.as_str()).copied() else {
+            let Some(canonical) = by_name.get(&(callee.as_str(), family.clone())).copied() else {
                 continue;
             };
             if canonical.id == target.id
@@ -240,6 +246,9 @@ fn test_candidates(
         }
         let mut best: Option<(&SymbolData, usize)> = None;
         for candidate in production.values() {
+            if language_family(&file) != language_family(&candidate.file_path) {
+                continue;
+            }
             let shared = name_tokens.intersection(&candidate.name_tokens).count();
             if shared < 3 {
                 continue;

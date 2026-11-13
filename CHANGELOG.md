@@ -296,7 +296,7 @@ changes bump the minor while 0.x is unstable.
 
 - **Official Open-Source Release**: `engram` (`eg`) reaches v1.0.0 with unified single native binary architecture.
 - **USP 1: Sub-2ms Deterministic Graph Navigation**: Tree-sitter AST indexing for Python, TypeScript, JavaScript, and Rust with SQLite FTS5 search and content-addressed incremental builds.
-- **USP 2: Real-Time Anti-Reinvention Engine**: Pre-write interface discovery with caller weighting and post-edit duplicate detection across 4 calibrated detectors.
+- **USP 2: Real-Time Anti-Reinvention Engine**: Pre-write interface discovery with caller weighting and post-edit duplicate detection across 4 structural detectors.
 - **USP 3: Zero-Token Layered Memory**: Code-anchored persistent project and global memory with SQLite BM25 + recency/ref fusion.
 - **Native Web Dashboard & TUI Monitor**: In-process HTTP SSE dashboard and terminal streaming monitor with zero Python dependencies.
 - **Model Context Protocol (MCP)**: Conforming stdio server for Claude, Cursor, Antigravity, Grok, Zcode, and OpenCode.

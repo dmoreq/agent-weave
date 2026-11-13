@@ -9,6 +9,17 @@ pub(super) fn finalize(
     mut report: ReuseReport,
     opts: &ReuseOpts,
 ) -> Result<crate::query::LineQuery> {
+    report.pool.sort_by(|a, b| {
+        b.confidence
+            .rank()
+            .cmp(&a.confidence.rank())
+            .then_with(|| b.sort_rank().cmp(&a.sort_rank()))
+            .then_with(|| b.canonical_callers.cmp(&a.canonical_callers))
+            .then_with(|| a.symbol.cmp(&b.symbol))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.canonical.cmp(&b.canonical))
+    });
     let freshness_headers = report.freshness.headers();
     crate::journal::set_freshness(crate::journal::ReuseFreshness {
         state: report.freshness.state.as_str(),

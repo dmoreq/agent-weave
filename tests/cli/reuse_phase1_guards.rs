@@ -4,6 +4,34 @@
 use super::common::*;
 
 #[test]
+fn empty_below_threshold_run_journals_counts() {
+    let repo = temp_repo("reuse-below-journal");
+    write(
+        &repo,
+        "a.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "def parse_token(token: str):\n    return token.strip()\n",
+    );
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--min-confidence", "high"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let log = std::fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
+    let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
+    assert_eq!(last["mode"], "scan");
+    assert!(
+        last["reuse"]["below_threshold"].as_u64().unwrap_or(0) >= 1,
+        "{last}"
+    );
+}
+
+#[test]
 fn scan_output_cap_30k() {
     let repo = temp_repo("reuse-output-cap");
     let mut a = String::new();

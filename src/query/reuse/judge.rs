@@ -6,6 +6,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -54,23 +55,31 @@ pub(super) fn apply(
     let before = pool.len();
     let mut judged = 0usize;
     let mut failed = false;
-    pool.retain(|candidate| {
+    let mut reject = vec![false; pool.len()];
+    for (index, candidate) in pool.iter().enumerate() {
         if judged >= MAX_JUDGED || !is_judgeable(candidate, mode) {
-            return true;
+            continue;
         }
         judged += 1;
         match arbitrate(ctx, &setup, candidate, proposal_signature) {
-            Some(verdict) => verdict.decision != VerdictDecision::Distinct,
-            None => {
-                failed = true;
-                true
+            Some(verdict) => {
+                if verdict.decision == VerdictDecision::Distinct {
+                    reject[index] = true;
+                }
             }
+            None => failed = true,
         }
-    });
+    }
     crate::journal::set_judged(judged > 0);
     if failed {
         return Some("eg: judge unavailable: arbitration failed; static result kept".to_string());
     }
+    let mut index = 0usize;
+    pool.retain(|_| {
+        let keep = !reject[index];
+        index += 1;
+        keep
+    });
     (judged > 0).then(|| {
         format!(
             "eg: judge: reviewed {judged}, rejected {}",
@@ -239,13 +248,22 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> 
     // Tear down the process group before draining so the read is bounded.
     kill_group(&child);
     let _ = writer.join();
-    let mut raw = String::new();
-    child
-        .stdout
-        .take()?
-        .take((MAX_OUTPUT + 1) as u64)
-        .read_to_string(&mut raw)
-        .ok()?;
+    let stdout = child.stdout.take()?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut raw = String::new();
+        let result = stdout
+            .take((MAX_OUTPUT + 1) as u64)
+            .read_to_string(&mut raw)
+            .ok()
+            .map(|_| raw);
+        let _ = tx.send(result);
+    });
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let raw = match rx.recv_timeout(remaining.max(Duration::from_millis(1))) {
+        Ok(Some(raw)) => raw,
+        _ => return None,
+    };
     if raw.len() > MAX_OUTPUT {
         return None;
     }

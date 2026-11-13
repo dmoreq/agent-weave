@@ -136,6 +136,18 @@ fn scan_gate(name: &str, files: usize, filler: usize, budget: Duration) {
     write_corpus(&root, files, filler);
     let eg = binary();
     build(&eg, &root);
+    let probe = Command::new(&eg)
+        .arg("--root")
+        .arg(&root)
+        .arg("--no-journal")
+        .args(["reuse", "--limit", "1"])
+        .output()
+        .unwrap();
+    let probe_stdout = String::from_utf8_lossy(&probe.stdout);
+    assert!(
+        probe.status.success() && !probe_stdout.contains(" — 0 duplication candidate(s) found"),
+        "benchmark corpus produced no candidates: {probe_stdout}"
+    );
 
     let (baseline_median, baseline_p95) = measure(&eg, &root, &[]);
     let (deep_median, deep_p95) = measure(&eg, &root, &["--deep-callee"]);

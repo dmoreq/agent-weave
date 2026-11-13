@@ -24,22 +24,6 @@ pub fn usage_log_path(root: &Path) -> PathBuf {
     crate::db::eg_dir(root).join("usage.log")
 }
 
-/// Session/arm attribution: R1/R2 A/B tags, sanitized. The first key that is
-/// set wins, so the pre-rename spelling still feeds attribution.
-fn env_tag(keys: &[&str]) -> String {
-    keys.iter()
-        .find_map(|key| std::env::var(key).ok())
-        .map(|v| v.trim().chars().take(64).collect())
-        .unwrap_or_default()
-}
-
-/// Session attribution for memory rows (`memories.session`): the same
-/// sanitized `ENGRAM_SESSION` tag the journal line carries. Public because the
-/// memory write path stamps it at write time.
-pub fn session_tag() -> String {
-    env_tag(&["ENGRAM_SESSION"])
-}
-
 /// Journal opt-out contract: env `ENGRAM_NO_JOURNAL=1` (checked in `begin`) or
 /// the global `--no-journal` flag (checked in `main` — it skips `begin`).
 pub(super) struct Pending {
@@ -218,6 +202,7 @@ pub(super) fn rewrite_pruned_atomic(path: &Path, text: &str) -> std::io::Result<
         return Err(err);
     }
     drop(file);
+    let _ = crate::db::harden_file_mode(&temp);
     if let Err(err) = fs::rename(&temp, path) {
         let _ = fs::remove_file(&temp);
         return Err(err);
@@ -305,7 +290,8 @@ mod tokens;
 
 pub use prune::{prune_stale_entries, prune_stale_entries_all};
 
-pub use agent::{detect_agent, set_agent_context};
+use agent::env_tag;
+pub use agent::{detect_agent, session_tag, set_agent_context};
 pub(crate) use outcome::*;
 pub(crate) use render::*;
 pub(crate) use tokens::*;
@@ -402,6 +388,24 @@ mod tests {
         assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]).len(), 64);
         std::env::remove_var("ENGRAM_TEST_TAG");
         assert_eq!(env_tag(&["ENGRAM_TEST_TAG"]), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_preserves_owner_only_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::db::temp_root("journal-prune-mode");
+        let log = dir.join("usage.log");
+        fs::write(
+            &log,
+            "{\"tool\":\"build\",\"repo\":\"/missing/repo\",\"worktree\":true}\n",
+        )
+        .unwrap();
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(prune_stale_entries(&log).unwrap(), 1);
+        let mode = fs::metadata(&log).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

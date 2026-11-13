@@ -271,13 +271,13 @@ pub(super) const MEM_EXPORT: ToolSpec = ToolSpec {
 
 pub(super) const MEM_IMPORT: ToolSpec = ToolSpec {
         name: "mem_import",
-        description: "Restore project-memory notes from a JSONL or fenced-Markdown file (path, or '-' for stdin); conflicting keys are skipped unless force overwrites them. MCP writes are confined to the project store",
+        description: "Restore project-memory notes from a JSONL or fenced-Markdown file; CLI also accepts '-' for stdin. Conflicting keys are skipped unless force overwrites them. MCP writes are confined to the project store",
         params: &[
             ParamSpec {
                 name: "path",
                 kind: ParamKind::Str,
                 required: true,
-                description: "Input file path, or '-' to read stdin (repo-relative over MCP)",
+                description: "Repo-relative input file over MCP; CLI also accepts '-' for stdin",
             },
             ParamSpec {
                 name: "format",

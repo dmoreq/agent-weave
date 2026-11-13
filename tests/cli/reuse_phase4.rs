@@ -99,6 +99,22 @@ fn coverage_unresolved_is_deterministic() {
 }
 
 #[test]
+fn coverage_unresolved_selects_same_language_canonical() {
+    let repo = temp_repo("reuse-coverage-language");
+    write(&repo, "a.py", "def rogue():\n    return normalize(1)\n");
+    write(&repo, "c.py", "def normalize(value):\n    return value\n");
+    write(&repo, "b.rs", "fn normalize(value: i32) -> i32 { value }\n");
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--coverage", "unresolved", "--explain"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("existing 'c.normalize'"), "{stdout}");
+    assert!(!stdout.contains("existing 'b.normalize'"), "{stdout}");
+}
+
+#[test]
 fn coverage_tests_reports_test_production_overlap() {
     let repo = temp_repo("reuse-coverage-tests");
     write(

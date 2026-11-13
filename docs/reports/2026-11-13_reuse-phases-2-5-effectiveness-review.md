@@ -50,12 +50,23 @@
 cargo fmt --all -- --check                         PASS
 cargo clippy --all-targets -- -D warnings          PASS
 cargo test --locked                                 PASS
-  186 lib, 271 CLI, 37 fixtures, 33 MCP
+  187 lib, 274 CLI, 37 fixtures, 34 MCP
 allowlist_check / write_path_check / hygiene_check  PASS
-reuse_bench: 5k p95 29.86 ms, 10k p95 57.34 ms, hash +6.85 ms
+reuse_bench: 5k p95 26.48 ms, 10k p95 53.60 ms, hash +6.11 ms
 test_reuse_oracle.py                                4 tests PASS
 oracle protocol fixture                             precision 1.0, McNemar power 1.0
 ```
+
+## Second closure review
+
+The six lenses were run again against the remediation commit. A second pass found four residual P1s: ordering after freshness, proposal/coverage tie determinism, dashboard freshness overstatement, and stale MCP/import docs. Those were fixed with:
+
+- a final `finalize` sort after freshness and complete `(file, line, qualname)` tie-breakers;
+- same-language canonical selection for D1L and DT;
+- proposal language inference and resolved-callee-only matching;
+- dashboard stale confidence downgrade;
+- MCP docs, `mem_import` schema, and import `-`/FIFO guards;
+- non-vacuous judge, bench, FIFO, and empty-journal tests.
 
 ## Residual risks
 

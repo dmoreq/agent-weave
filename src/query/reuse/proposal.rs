@@ -17,6 +17,7 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
         .ok_or_else(|| EgError::Usage("propose needs an identifier".to_string()))?;
     let (all_tokens, _type_tokens, name_tokens) = tokenize_name_sig(&name, signature);
     let proposed = callee_set(&opts.proposed_callees);
+    let language = proposal_language(signature);
 
     let mut symbols = load_symbols(conn)?;
     load_callees(conn, &mut symbols)?;
@@ -36,8 +37,14 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
         if candidate.qualname == name {
             continue;
         }
+        if language
+            .as_deref()
+            .is_some_and(|family| family != language_family(&candidate.file_path))
+        {
+            continue;
+        }
         let shared_callees: Vec<String> = proposed
-            .intersection(&candidate.all_callees)
+            .intersection(&candidate.resolved_callees)
             .cloned()
             .collect();
         let candidate_tokens = if candidate.name_tokens.is_empty() {
@@ -64,10 +71,10 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
         let mut reasons = Vec::new();
         let (detector, pct, confidence, items) = if !proposed.is_empty() {
             let coverage = shared_callees.len() as f64 / proposed.len() as f64;
-            let containment = if candidate.all_callees.is_empty() {
+            let containment = if candidate.resolved_callees.is_empty() {
                 0.0
             } else {
-                shared_callees.len() as f64 / candidate.all_callees.len() as f64
+                shared_callees.len() as f64 / candidate.resolved_callees.len() as f64
             };
             if shared_callees.is_empty() || coverage.max(containment) < 0.50 {
                 continue;
@@ -135,8 +142,36 @@ pub(super) fn analyze(conn: &Connection, opts: &ReuseOpts) -> Result<Vec<ReuseCa
             .then_with(|| b.overlap_pct.cmp(&a.overlap_pct))
             .then_with(|| b.canonical_callers.cmp(&a.canonical_callers))
             .then_with(|| a.canonical.cmp(&b.canonical))
+            .then_with(|| a.canonical_file.cmp(&b.canonical_file))
+            .then_with(|| a.canonical_line.cmp(&b.canonical_line))
     });
     Ok(pool)
+}
+
+fn proposal_language(signature: &str) -> Option<String> {
+    let trimmed = signature.trim_start();
+    if trimmed.starts_with("def ")
+        || trimmed.starts_with("async def ")
+        || trimmed.starts_with("class ")
+    {
+        Some("python".to_string())
+    } else if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
+        Some("rust".to_string())
+    } else if trimmed.starts_with("function ") {
+        Some("tsjs".to_string())
+    } else {
+        None
+    }
+}
+
+fn language_family(file: &str) -> String {
+    let ext = file.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    match ext {
+        "py" | "pyi" => "python".to_string(),
+        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => "tsjs".to_string(),
+        "rs" => "rust".to_string(),
+        other => other.to_ascii_lowercase(),
+    }
 }
 
 fn proposal_name(signature: &str) -> Option<String> {
@@ -144,6 +179,7 @@ fn proposal_name(signature: &str) -> Option<String> {
     let reduced = [
         "async def ",
         "def ",
+        "pub fn ",
         "fn ",
         "function ",
         "class ",

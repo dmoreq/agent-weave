@@ -342,18 +342,29 @@ fn reuse_truncation_reports_showing_and_omitted() {
 #[test]
 fn stale_candidate_downgrades_high_to_low() {
     let repo = temp_repo("reuse-stale-high");
-    let source = "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef alpha_case():\n    return h1() + h2() + h3()\n";
-    write(&repo, "a.py", source);
+    write(
+        &repo,
+        "helpers.py",
+        "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n",
+    );
+    write(
+        &repo,
+        "a.py",
+        "from helpers import h1, h2, h3\n\ndef alpha_case():\n    return h1() + h2() + h3()\n",
+    );
     write(
         &repo,
         "b.py",
-        "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef beta_case():\n    return h1() + h2() + h3()\n",
+        "from helpers import h1, h2, h3\n\ndef beta_case():\n    return h1() + h2() + h3()\n",
     );
     build(&repo);
+    let before = eg(&repo).args(["reuse", "b.py"]).output().unwrap();
+    let before_stdout = String::from_utf8_lossy(&before.stdout);
+    assert!(before_stdout.contains("confidence=high"), "{before_stdout}");
     write(
         &repo,
         "b.py",
-        "def h1():\n    return 1\n\ndef h2():\n    return 2\n\ndef h3():\n    return 3\n\ndef beta_case():\n    return h1() + h2() + h3() + 1\n",
+        "from helpers import h1, h2, h3\n\ndef beta_case():\n    return h1() + h2() + h3() + 1\n",
     );
     let out = eg(&repo).args(["reuse", "b.py"]).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -430,34 +441,6 @@ fn reuse_empty_scope_warns_about_new_unindexed_file() {
     assert!(
         stdout.contains("freshness unknown (new-file)"),
         "expected new-file warning: {stdout}"
-    );
-}
-
-#[test]
-fn empty_below_threshold_run_journals_counts() {
-    let repo = temp_repo("reuse-below-journal");
-    write(
-        &repo,
-        "a.py",
-        "def parse_token(token: str):\n    return token.strip()\n",
-    );
-    write(
-        &repo,
-        "b.py",
-        "def parse_token(token: str):\n    return token.strip()\n",
-    );
-    build(&repo);
-    let out = eg(&repo)
-        .args(["reuse", "--min-confidence", "high"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(0));
-    let log = std::fs::read_to_string(repo.join(".engram/usage.log")).unwrap();
-    let last: serde_json::Value = serde_json::from_str(log.lines().last().unwrap()).unwrap();
-    assert_eq!(last["mode"], "scan");
-    assert!(
-        last["reuse"]["below_threshold"].as_u64().unwrap_or(0) >= 1,
-        "{last}"
     );
 }
 

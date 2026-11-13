@@ -29,8 +29,8 @@ impl ReuseMode {
     }
 }
 
-/// Phase 1 confidence. `Medium`/`High` are reserved for Phase 2 and are never
-/// produced by the scan.
+/// Ordinal confidence tier. Higher tiers require stricter structural evidence;
+/// they are not calibrated probabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReuseConfidence {
     Low,
@@ -49,8 +49,7 @@ impl ReuseConfidence {
         }
     }
 
-    /// Parse the public confidence surface. `medium`/`high` are produced only
-    /// when Phase 2 calibration signals meet their thresholds.
+    /// Parse the public confidence surface.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "low" => Some(Self::Low),

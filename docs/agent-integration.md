@@ -111,10 +111,10 @@ By default, `eg mcp` exposes 13 high-ROI tools focused on navigation, anti-reinv
 | `imports` | `file`, `limit?` | Outbound resolved imports |
 | `symbols` | `file`, `outline?`, `limit?` | File/directory definitions and signatures |
 | `search` | `terms`, `limit?` | Discover symbols with interface cards & `[callers=N]` |
-| `reuse` | `paths?`, `limit?`, `deep_callee?` | Anti-reinvention duplicate detector; `deep_callee` adds second-hop callee footprints |
+| `reuse` | `paths?`, `limit?`, `deep_callee?`, `min_confidence?`, `propose?`, `callees?`, `explain?`, `show_suppressed?`, `coverage?`, `judge?` | Anti-reinvention scan, pre-write proposal, allowlist visibility, opt-in coverage, and optional judge |
 | `mem_query` | `terms?`, `all?`, `kind?`, `scope?`, `limit?`, `include_superseded?`, `global?`, `ref?`, `since?`, `until?`, `local?`, `explain?`, `legacy?` | Zero-token layered memory search; uses the code index for call-graph expansion when available; Unicode-aware with a legacy fallback |
 | `usage` | `quality?` | Session telemetry, latency percentiles, and token savings |
-| `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `touch?`, `global?` | Persist architectural decisions and gotchas |
+| `mem_write` | `key`, `body`, `kind`, `tags?`, `refs?`, `scope?`, `ttl?`, `supersedes?`, `touch?`, `global?`, `confirm?` | Persist architectural decisions and gotchas; `confirm=true` is required for `reuse-allow/` over MCP |
 
 ### Extended Surface (`--all-tools`)
 Passing `--all-tools` exposes 7 additional memory maintenance tools (20 total): `mem_touch`, `mem_get`, `mem_delete`, `mem_gc`, `mem_export` (JSONL or Markdown, optional `since`/`until`), `mem_import` (reject-on-conflict restore; confined to the project store), and `mem_reindex` (rebuild the derived Unicode index). `mem_export` over MCP does not expose `--scan`; agents that need a scanned backup run the CLI, which reports suspected secrets on stderr without blocking the export.
@@ -201,14 +201,16 @@ endpoint on loopback only. Payload shape is versioned in-band:
   label), and `graph_recent_queries` (last 50 graph calls).
 - `GET /api/reuse` — `candidates[]` (each: `id`, `repo`, `repo_path`,
   `detector`, `symbol`, `canonical`, `overlap_pct` or `null` with
-  `overlap_applicable: false` for D3/D4, `shared_evidence`, `loc_saving`,
+  `overlap_applicable: false` for D3/D4, `confidence`, `reasons`,
+  `shared_evidence`, `loc_saving`,
   snippets, `reuse_count`/`last_reused_ts` with
   `usage_window: "retained_journal"` — how many journaled `eg reuse` runs
   surfaced this pair and when the last ran), `summary`
   (`schema_version`, `total_candidates`, `sample_strategy:
   "top_overlap_per_repo"`, `preventable_loc` with `preventable_loc_estimated:
   true`, `detector_counts` with `detector_counts_estimated: true`,
-  `prewrite_count`, `cache_hit`, `cache_age_ms`), `prewrite_searches[]`.
+  `confidence_counts`, `reason_counts`, `prewrite_count`, `cache_hit`,
+  `cache_age_ms`), `prewrite_searches[]`.
 - `GET /api/memories` — `{schema_version, notes[], degraded, errors[]}`. A
   store that cannot be read yields an `errors` entry and `degraded: true`
   instead of an empty list. Each note carries `store`, `store_id` (canonical

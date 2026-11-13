@@ -25,6 +25,17 @@ fn judge_reviews_proposal_candidates() {
     std::fs::set_permissions(&bin, perms).unwrap();
     std::fs::create_dir_all(repo.join("model")).unwrap();
     std::fs::write(repo.join("model/lazy.json"), "{\"head_layers\":1}\n").unwrap();
+    let baseline = eg(&repo)
+        .args([
+            "reuse",
+            "--propose",
+            "def parse_token(value)",
+            "--callees",
+            "normalize,helper",
+        ])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&baseline.stdout).contains("1 duplication candidate(s) found"));
 
     let out = eg(&repo)
         .env("EG_JUDGE_BIN", &bin)
@@ -78,6 +89,8 @@ fn judge_receives_source_on_stdin_and_filters_distinct() {
     std::fs::create_dir_all(repo.join("model")).unwrap();
     std::fs::write(repo.join("model/lazy.json"), "{\"head_layers\":1}\n").unwrap();
 
+    let baseline = eg(&repo).args(["reuse"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&baseline.stdout).contains("1 duplication candidate(s) found"));
     let out = eg(&repo)
         .env("EG_JUDGE_BIN", &bin)
         .env("EG_JUDGE_MODEL", repo.join("model"))
@@ -119,6 +132,8 @@ fn judge_malformed_output_keeps_static_result_with_note() {
     std::fs::create_dir_all(repo.join("model")).unwrap();
     std::fs::write(repo.join("model/lazy.json"), "{\"head_layers\":1}\n").unwrap();
 
+    let baseline = eg(&repo).args(["reuse"]).output().unwrap();
+    assert!(String::from_utf8_lossy(&baseline.stdout).contains("1 duplication candidate(s) found"));
     let out = eg(&repo)
         .env("EG_JUDGE_BIN", &bin)
         .env("EG_JUDGE_MODEL", repo.join("model"))
@@ -128,7 +143,7 @@ fn judge_malformed_output_keeps_static_result_with_note() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("duplication candidate(s) found"),
+        stdout.contains("1 duplication candidate(s) found"),
         "{stdout}"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -158,7 +173,7 @@ fn judge_missing_binary_degrades_with_one_note() {
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("duplication candidate(s) found"),
+        stdout.contains("1 duplication candidate(s) found"),
         "{stdout}"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);

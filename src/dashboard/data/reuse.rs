@@ -261,6 +261,18 @@ fn format_candidate_json(
     let shared_evidence = format_shared_evidence(c);
     let (cand_loc, can_loc, cand_snippet, can_snippet) =
         resolve_candidate_snippets(r_root, conn, c);
+    let ctx = crate::query::QueryCtx { conn, root: r_root };
+    let stale = crate::query::file_changed(&ctx, &c.file)
+        || crate::query::file_changed(&ctx, &c.canonical_file);
+    let confidence = if stale {
+        crate::query::reuse::ReuseConfidence::Low
+    } else {
+        c.confidence
+    };
+    let mut reasons: Vec<&str> = c.reasons.iter().map(|r| r.as_str()).collect();
+    if stale {
+        reasons.push("stale-index");
+    }
 
     let loc_saving = cand_loc.loc;
     let symbol = crate::query::reuse::sanitize(&c.symbol);
@@ -283,8 +295,8 @@ fn format_candidate_json(
         // a measured percentage. The UI renders a label from `detector`.
         "overlap_pct": c.overlap_pct,
         "overlap_applicable": c.overlap_pct.is_some(),
-        "confidence": c.confidence.as_str(),
-        "reasons": c.reasons.iter().map(|r| r.as_str()).collect::<Vec<_>>(),
+        "confidence": confidence.as_str(),
+        "reasons": reasons,
         "shared_evidence": shared_evidence,
         "candidate_info": json!({
             "file": cand_loc.file,

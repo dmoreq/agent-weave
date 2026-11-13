@@ -28,7 +28,6 @@ impl Corpus<'_> {
     }
 }
 
-/// Raw external clients targeted by D3 abstraction bypass.
 pub(crate) const RAW_CLIENTS: &[&str] = &[
     "Connection::open",
     "Connection.open",
@@ -423,11 +422,13 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
             corpus.guard();
             continue;
         }
-        let Some(shared_raw) = target
+        let mut shared_raw: Vec<&String> = target
             .all_callees
             .iter()
-            .find(|tc| is_raw_client(tc) && s.all_callees.iter().any(|sc| raw_client_eq(tc, sc)))
-        else {
+            .filter(|tc| is_raw_client(tc) && s.all_callees.iter().any(|sc| raw_client_eq(tc, sc)))
+            .collect();
+        shared_raw.sort();
+        let Some(shared_raw) = shared_raw.first() else {
             continue;
         };
         let is_better = best_wrapper.is_none_or(|(bw, _)| {
