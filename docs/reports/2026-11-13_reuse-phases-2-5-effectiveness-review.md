@@ -68,12 +68,42 @@ The six lenses were run again against the remediation commit. A second pass foun
 - MCP docs, `mem_import` schema, and import `-`/FIFO guards;
 - non-vacuous judge, bench, FIFO, and empty-journal tests.
 
-## Residual risks
+## Final six-lens verification
+
+After the second closure pass, the six lenses were run as independent reviews against the final implementation and every open finding was fixed with a regression test. Final HEAD: commit series ending at `ec6072d`.
+
+| Lens | Final verdict | Basis |
+|---|---|---|
+| Correctness/spec | PASS | D1 counts project symbol IDs (flat and indexed paths); D3 is language-scoped with a canonical-first stop; deep D1 is a dedicated scan with guard order, hub cap (512 weighted callees) and a 30,000-pair per-invocation budget; call cycles are excluded from deep closures and shared evidence |
+| Security/trust | PASS | Provenance gate (case-insensitive pathspec, no verdict cache) runs before every CLI/MCP read, build (including lock acquisition), audit/usage/monitor read, and dashboard request/SSE/monitor stream; journal files reject symlinks/FIFOs; dashboard memory reads/touch are gated; rejected invocations leave tracked `.engram` state untouched |
+| Performance/reliability | PASS | All gates with ≥2x margin: 5k p95 ≈44 ms, 10k ≈98 ms, hub 5k ≈75 ms, D3 raw (mixed-language) ≈108 ms, deep shared (512-key closure) ≈245 ms, 16 MiB hash ≈+6 ms; D5 class pairs capped at 10,000 |
+| Test quality | PASS | Mutation-verified regression tests for every finding (constructor footprints, D1L resolved calls, D5 qualnames, dot targets, tracked/case-variant/symlink state, D3/D1 ID collisions, deep bal 74/75 boundary, cycle evidence, revocation streams, degraded payloads); CI pins all six bench names |
+| API/observability | PASS | CLI/MCP byte parity incl. reuse modes and error paths; sanitized index-derived fields on every pointer/error surface; stable exit codes; journal counters/freshness/mode; dashboard 503 + degraded payloads; budget exhaustion surfaces as `guarded_out`, never a silent zero |
+| Effectiveness/calibration | PASS | Oracle protocol (confirmation + holdout, McNemar power/MDD, negative-tier validation) passes; detector semantics match the design; confidence stays ordinal with documented caps; no circular High evidence remains on self-scan |
+
+## Final evidence
+
+```
+cargo fmt --all -- --check / clippy -D warnings          PASS
+cargo test --locked                                       PASS
+  194 lib, 298 CLI, 37 fixtures, 35 MCP
+allowlist / write-path / hygiene checks                   PASS
+reuse_bench --ignored (6 gates)                           PASS
+  5k p95 ≈44 ms (200), 10k ≈98 ms (500), hub ≈75 ms (300),
+  d3 raw ≈108 ms (300), deep shared ≈245 ms (500),
+  16 MiB hash ≈+6 ms (25); deep median delta +2.3%/+4.4% (10%)
+oracle tests + protocol fixture                           PASS (precision/recall 1.0 fixture-only)
+```
+
+## Residual risks (updated)
 
 - Confidence tiers are ordinal heuristics, not field-calibrated probabilities. `high` is intentionally conservative (D1/D2 only; D3 capped).
 - The tracked 160-label oracle file is a protocol fixture. Field calibration requires a frozen repository sample and predictions from real corpora.
-- Coverage remains opt-in and low-precision by design; D1L/DT are advisory, not proof.
+- `--deep-callee` is bounded by design: closures wider than 512 weighted callees are skipped and deep scanning stops after 30,000 candidate pairs per invocation; exhaustion is visible in `guarded_out`, not as a silent zero.
+- D3 indexes raw-client wrappers with `inbound_callers >= 2` per language family; the canonical-first scan stops early, so evidence ordering follows the deterministic canonical rank.
+- Coverage remains opt-in and low-precision by design; D5 pairs are capped at 10,000; D1L/DT are advisory, not proof.
 - Dashboard renders confidence but does not run coverage detectors; CLI coverage remains the authoritative surface.
 - Allowlist suppression is an explicit local act with `--show-suppressed` visibility; it is not a security boundary against a malicious same-user agent.
 - A judge binary is trusted input; model integrity and installation provenance remain operator responsibilities.
+- MCP `usage` defaults `quality=true` while the CLI defaults to `false`; byte parity holds for identical explicit arguments. Aligning the defaults is a follow-up, not a contract break.
 - The final confidence tier claims should be revisited after a real oracle run; until then `high` is a review aid, not a probability.

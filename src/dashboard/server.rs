@@ -343,7 +343,7 @@ pub fn handle_client(
     // Local mode is revalidated per request: a session can become tracked
     // after startup, and the captured log path must not keep serving it.
     if let Err(err) = local_gate(root, global) {
-        let body = format!("eg: {err}\n");
+        let body = format!("{err}\n");
         send_response(
             &mut stream,
             503,
