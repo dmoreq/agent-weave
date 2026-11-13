@@ -1,15 +1,14 @@
-//! Usage-log parsing, aggregation, and rendering: per-tool and per-repo
-//! folds, summary rendering, telemetry totals, and bounded log loading.
+//! Usage-log parsing, aggregation, rendering, telemetry, and bounded reads.
 
 use super::*;
 use crate::repo::UNATTRIBUTED;
 
 mod read;
+mod reuse;
 pub(crate) use read::*;
+use reuse::ReuseUsage;
 
-/// Parsed usage line. Queries and signatures can contain quotes, backslashes,
-/// and control characters, so this must go through serde_json rather than
-/// slicing the raw text between quote characters.
+/// Parsed usage line; serde_json handles quotes, backslashes, and controls.
 pub(crate) struct UsageFields {
     pub(crate) tool: String,
     pub(crate) exit_code: i64,
@@ -24,6 +23,9 @@ pub(crate) struct UsageFields {
     pub(crate) repo_name: Option<String>,
     pub(crate) worktree: bool,
     pub(crate) agent: Option<String>,
+    pub(crate) mode: Option<String>,
+    pub(crate) truncated: bool,
+    pub(crate) reuse: Option<ReuseUsage>,
 }
 
 pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
@@ -51,6 +53,15 @@ pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
             .get("agent")
             .and_then(|x| x.as_str())
             .map(|s| s.to_string()),
+        mode: v
+            .get("mode")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        truncated: v
+            .get("truncated")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false),
+        reuse: v.get("reuse").and_then(reuse::parse),
     })
 }
 
@@ -84,11 +95,12 @@ struct ToolAgg {
     latencies: Vec<u64>,
     total_shown: usize,
     total_results: usize,
+    reuse_usage: ReuseUsage,
+    reuse_truncated: usize,
+    reuse_modes: usize,
 }
 
-/// Summarize `usage.log` (+ `.1`): per-tool calls, errors, p50/p95, rates.
-/// `quality` adds the empty-result split and the cap count without changing
-/// the journal schema or the default text.
+/// Summarize `usage.log` (+ `.1`); `quality` adds the empty split and cap count.
 pub fn summary(root: &Path, quality: bool) -> crate::error::Result<Vec<String>> {
     let lines = load_usage_lines(root)?;
     let aggs = aggregate_usage(&lines);
@@ -172,6 +184,7 @@ fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
     if let Some(us) = fields.latency_us {
         agg.latencies.push(us.max(0) as u64);
     }
+    reuse::fold(fields.reuse, fields.truncated, fields.mode.is_some(), agg);
 }
 
 /// Fold every parsed line into one `ToolAgg` per tool. Only calls against a
@@ -447,7 +460,7 @@ fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
     let p50 = percentile(&lat, 0.5);
     let p95 = percentile(&lat, 0.95);
     if quality {
-        format!(
+        let mut row = format!(
             "  {tool}: {} calls, errors={} empty_ok={} ({}) empty_error={} stale={} ambiguous={} capped={} p50={p50} p95={p95}",
             agg.calls,
             agg.errors,
@@ -457,7 +470,23 @@ fn tool_row(tool: &str, agg: &ToolAgg, quality: bool) -> String {
             agg.stale,
             agg.ambiguous,
             agg.capped,
-        )
+        );
+        if agg.reuse_modes > 0 {
+            row.push_str(&format!(
+                " reuse_modes={} truncated={} provisional={} low={} medium={} high={} suppressed={} guarded={} below={} omitted={}",
+                agg.reuse_modes,
+                agg.reuse_truncated,
+                agg.reuse_usage.provisional,
+                agg.reuse_usage.low,
+                agg.reuse_usage.medium,
+                agg.reuse_usage.high,
+                agg.reuse_usage.suppressed,
+                agg.reuse_usage.guarded_out,
+                agg.reuse_usage.below_threshold,
+                agg.reuse_usage.omitted,
+            ));
+        }
+        row
     } else {
         format!(
             "  {tool}: {} calls, errors={} empty={} stale={} ambiguous={} p50={p50} p95={p95}",

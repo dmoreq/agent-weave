@@ -7,6 +7,7 @@
 - Final audit: `.tmp/prevent-reinvention/audit.md` (`needs-one-more-revision`)
 - Gate 2 report: `docs/reports/2026-11-12_goldfish-review_reuse-prevention.md`
 - Scope: Phase 1a and Phase 1b only. Phases 2–5 are a gated roadmap in §Roadmap.
+- Follow-up: Phases 2–5 implementation contract is `2026-11-13_reuse-phases-2-5.md` (owner directive 2026-11-13).
 - Constraints: local-first, zero network, no schema change, no new dependency, MSRV 1.90, module ≤500 LOC, CLI/MCP byte parity, no hooks/daemons.
 
 ## Overview

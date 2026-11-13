@@ -201,6 +201,9 @@ fn format_shared_evidence(c: &ReuseCandidate) -> String {
         DetectorId::D2 => "shared tokens",
         DetectorId::D3 => "client bypass",
         DetectorId::D4 => "details",
+        DetectorId::D5 => "class methods",
+        DetectorId::D1L => "unresolved callees",
+        DetectorId::DT => "shared test tokens",
     };
     if c.detector == DetectorId::D3 {
         return c
@@ -331,6 +334,23 @@ fn collect_prewrite_searches(entries: &[Value]) -> Vec<Value> {
     out
 }
 
+fn candidate_reason_counts(candidates_json: &[Value]) -> Value {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for candidate in candidates_json {
+        if let Some(reasons) = candidate.get("reasons").and_then(Value::as_array) {
+            for reason in reasons.iter().filter_map(Value::as_str) {
+                *counts.entry(reason.to_string()).or_default() += 1;
+            }
+        }
+    }
+    Value::Object(
+        counts
+            .into_iter()
+            .map(|(key, count)| (key, json!(count)))
+            .collect(),
+    )
+}
+
 fn summarize_reuse_metrics(
     candidates_json: &[Value],
     total_corpus_candidates: usize,
@@ -380,6 +400,14 @@ fn summarize_reuse_metrics(
             "D4": candidates_json.iter().filter(|c| c.get("detector") == Some(&json!("D4"))).count(),
         },
         "detector_counts_estimated": true,
+        "confidence_counts": {
+            "low": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("low"))).count(),
+            "provisional": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("provisional"))).count(),
+            "medium": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("medium"))).count(),
+            "high": candidates_json.iter().filter(|c| c.get("confidence") == Some(&json!("high"))).count(),
+        },
+        "reason_counts": candidate_reason_counts(candidates_json),
+        "confidence_counts_estimated": true,
     })
 }
 

@@ -2,15 +2,19 @@
 //! Referencing RepoReuse (arXiv:2609.35357) and codebase-minimalism.
 //! Deterministic structural duplicate detectors.
 
+mod allowlist;
 mod candidate;
 mod confidence;
 mod corpus;
+mod coverage;
 mod detectors;
 mod finalize;
 mod freshness;
 mod guards;
 mod index;
+mod judge;
 mod opts;
+mod proposal;
 mod status;
 mod target;
 mod tokens;
@@ -38,10 +42,12 @@ pub use types::{
 
 /// Analysis output before confidence filtering and display truncation.
 pub(super) struct ReuseReport {
+    pub(super) mode: ReuseMode,
     pub(super) pool: Vec<ReuseCandidate>,
     pub(super) counts: ReuseCounts,
     pub(super) freshness: freshness::FreshnessReport,
     pub(super) path_matches: usize,
+    pub(super) stderr: String,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +123,18 @@ impl ReuseCandidate {
                 "symbol '{}' is a pass-through wrapper around existing '{}' {}",
                 symbol, canonical, tail
             ),
+            DetectorId::D5 => format!(
+                "class '{}' overlaps existing '{}' {}",
+                symbol, canonical, tail
+            ),
+            DetectorId::D1L => format!(
+                "symbol '{}' has an unresolved callee matching existing '{}' {}",
+                symbol, canonical, tail
+            ),
+            DetectorId::DT => format!(
+                "test helper '{}' overlaps production '{}' {}",
+                symbol, canonical, tail
+            ),
         }
     }
 
@@ -141,6 +159,9 @@ impl ReuseCandidate {
                 DetectorId::D2 => "shared tokens",
                 DetectorId::D3 => "client bypass",
                 DetectorId::D4 => "details",
+                DetectorId::D5 => "class methods",
+                DetectorId::D1L => "unresolved callees",
+                DetectorId::DT => "shared test tokens",
             };
             let items: Vec<String> = self
                 .shared_items
@@ -159,6 +180,9 @@ impl ReuseCandidate {
         self.overlap_pct.unwrap_or(match self.detector {
             DetectorId::D3 => 90,
             DetectorId::D4 => 100,
+            DetectorId::D5 => 80,
+            DetectorId::D1L => 70,
+            DetectorId::DT => 60,
             DetectorId::D1 | DetectorId::D2 => 0,
         })
     }
@@ -177,35 +201,108 @@ pub fn detect_hints(conn: &Connection, new_names: &HashSet<String>) -> Result<Ve
     Ok(hints)
 }
 
+pub struct ReuseRunArgs {
+    pub paths: Vec<String>,
+    pub limit: usize,
+    pub deep_callee: bool,
+    pub min_confidence: ReuseConfidence,
+    pub explain: bool,
+    pub show_suppressed: bool,
+    pub coverage: Vec<String>,
+    pub judge: bool,
+}
+
+pub struct ProposalRunArgs {
+    pub signature: String,
+    pub callees: Vec<String>,
+    pub limit: usize,
+    pub deep_callee: bool,
+    pub min_confidence: ReuseConfidence,
+    pub explain: bool,
+    pub show_suppressed: bool,
+    pub judge: bool,
+}
+
 /// Run `eg reuse` across the whole repository or specified paths.
-pub fn run_reuse(
-    ctx: &QueryCtx<'_>,
-    paths: &[String],
-    limit: usize,
-    deep_callee: bool,
-    min_confidence: ReuseConfidence,
-    explain: bool,
-) -> Result<crate::query::LineQuery> {
-    let opts = ReuseOpts::new(paths.to_vec(), limit, deep_callee, min_confidence, explain)?;
+pub fn run_reuse(ctx: &QueryCtx<'_>, args: ReuseRunArgs) -> Result<crate::query::LineQuery> {
+    let opts = ReuseOpts::new(
+        args.paths,
+        args.limit,
+        args.deep_callee,
+        args.min_confidence,
+        args.explain,
+    )?
+    .with_show_suppressed(args.show_suppressed)
+    .with_coverage(&args.coverage)?
+    .with_judge(args.judge);
     let scope = target::resolve_scope(ctx, &opts.paths)?;
     let report = analyze_corpus_with(ctx, &opts, &scope)?;
     finalize::finalize(ctx, report, &opts)
 }
 
-/// Phase 1 analysis entry point: load the corpus, run guards/detectors, and
-/// attach per-pair freshness. Display truncation belongs to `finalize`.
+/// Phase 2 proposal entry point. Paths are rejected by the caller; the repo
+/// scope supplies the freshness checker for canonical files.
+pub fn run_reuse_proposal(
+    ctx: &QueryCtx<'_>,
+    args: ProposalRunArgs,
+) -> Result<crate::query::LineQuery> {
+    let opts = ReuseOpts::new_proposal(
+        args.signature,
+        args.callees,
+        args.limit,
+        args.deep_callee,
+        args.min_confidence,
+        args.explain,
+    )?
+    .with_show_suppressed(args.show_suppressed)
+    .with_judge(args.judge);
+    let scope = target::resolve_scope(ctx, &[])?;
+    let report = analyze_corpus_with(ctx, &opts, &scope)?;
+    finalize::finalize(ctx, report, &opts)
+}
+
+/// Analysis entry point: load the corpus, run guards/detectors or the
+/// proposal matcher, and attach per-pair freshness. Display truncation
+/// belongs to `finalize`.
 pub(super) fn analyze_corpus_with(
     ctx: &QueryCtx<'_>,
     opts: &ReuseOpts,
     scope: &status::ResolvedScope,
 ) -> Result<ReuseReport> {
-    let (mut pool, total, guarded_out) = analyze_corpus(
-        ctx.conn,
-        scope.path_filter(),
-        scope.target_names(),
-        crate::query::MAX_LIMIT,
-        opts.deep_callee,
-    )?;
+    let (mut pool, _total, guarded_out) = if opts.mode == ReuseMode::Propose {
+        (proposal::analyze(ctx.conn, opts)?, 0, 0)
+    } else if opts.mode == ReuseMode::Coverage {
+        (coverage::analyze(ctx.conn, &opts.coverage)?, 0, 0)
+    } else {
+        analyze_corpus(
+            ctx.conn,
+            scope.path_filter(),
+            scope.target_names(),
+            crate::query::MAX_LIMIT,
+            opts.deep_callee,
+        )?
+    };
+    let allowed = allowlist::load(ctx);
+    let mut suppressed = 0usize;
+    if !allowed.is_empty() {
+        if opts.show_suppressed {
+            suppressed = pool
+                .iter()
+                .filter(|c| allowlist::is_allowed(&allowed, c))
+                .count();
+        } else {
+            pool.retain(|candidate| {
+                if allowlist::is_allowed(&allowed, candidate) {
+                    suppressed += 1;
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+    }
+    let judge_note = judge::apply(ctx, &mut pool, opts.judge);
+    let total = pool.len();
     let freshness = if opts.freshness_mode == FreshnessMode::Full {
         freshness::evaluate(ctx, scope, &mut pool)?
     } else {
@@ -214,13 +311,16 @@ pub(super) fn analyze_corpus_with(
     let counts = ReuseCounts {
         guarded_out,
         total,
+        suppressed,
         ..ReuseCounts::default()
     };
     Ok(ReuseReport {
+        mode: opts.mode,
         pool,
         counts,
         freshness,
         path_matches: scope.path_matches,
+        stderr: judge_note.map(|n| format!("{n}\n")).unwrap_or_default(),
     })
 }
 

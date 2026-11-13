@@ -100,8 +100,12 @@ pub(super) fn run_usage(root_arg: Option<&Path>, quality: bool, global: bool) ->
 /// Index-only query arms: graph traversal, analysis, and inventory.
 fn run_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
     if let CommandRequest::Reuse {
+        paths,
         limit,
         min_confidence,
+        propose,
+        callees,
+        coverage,
         ..
     } = req
     {
@@ -112,8 +116,29 @@ fn run_query(req: &CommandRequest, root_arg: Option<&Path>) -> Result<ArmOut> {
             && crate::query::reuse::ReuseConfidence::parse(min_confidence).is_none()
         {
             return Err(EgError::Usage(
-                "min-confidence must be low|provisional".to_string(),
+                "min-confidence must be low|provisional|medium|high".to_string(),
             ));
+        }
+        match propose {
+            Some(signature) => {
+                if !paths.is_empty() {
+                    return Err(EgError::Usage(
+                        "--propose cannot be combined with paths".to_string(),
+                    ));
+                }
+                if signature.trim().is_empty() {
+                    return Err(EgError::Usage("propose must be non-empty".to_string()));
+                }
+                if !coverage.is_empty() {
+                    return Err(EgError::Usage(
+                        "--coverage cannot be combined with --propose".to_string(),
+                    ));
+                }
+            }
+            None if !callees.is_empty() => {
+                return Err(EgError::Usage("--callees requires --propose".to_string()));
+            }
+            None => {}
         }
     }
     match req.family() {
@@ -244,16 +269,48 @@ fn run_line_query(req: &CommandRequest, ctx: &crate::query::QueryCtx<'_>) -> Res
             limit,
             deep_callee,
             min_confidence,
+            propose,
+            callees,
             explain,
+            show_suppressed,
+            coverage,
+            judge,
         } => {
             let min_confidence = if min_confidence.is_empty() {
                 crate::query::reuse::ReuseConfidence::Low
             } else {
                 crate::query::reuse::ReuseConfidence::parse(min_confidence).ok_or_else(|| {
-                    EgError::Usage("min-confidence must be low|provisional".to_string())
+                    EgError::Usage("min-confidence must be low|provisional|medium|high".to_string())
                 })?
             };
-            crate::query::run_reuse(ctx, paths, *limit, *deep_callee, min_confidence, *explain)?
+            match propose {
+                Some(signature) => crate::query::reuse::run_reuse_proposal(
+                    ctx,
+                    crate::query::reuse::ProposalRunArgs {
+                        signature: signature.clone(),
+                        callees: callees.clone(),
+                        limit: *limit,
+                        deep_callee: *deep_callee,
+                        min_confidence,
+                        explain: *explain,
+                        show_suppressed: *show_suppressed,
+                        judge: *judge,
+                    },
+                )?,
+                None => crate::query::run_reuse(
+                    ctx,
+                    crate::query::reuse::ReuseRunArgs {
+                        paths: paths.clone(),
+                        limit: *limit,
+                        deep_callee: *deep_callee,
+                        min_confidence,
+                        explain: *explain,
+                        show_suppressed: *show_suppressed,
+                        coverage: coverage.clone(),
+                        judge: *judge,
+                    },
+                )?,
+            }
         }
         CommandRequest::Search { terms, limit } => crate::query::search(ctx, terms, *limit)?,
         _ => unreachable!("run_line_query called with a non-line request"),

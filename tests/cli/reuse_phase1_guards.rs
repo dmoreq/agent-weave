@@ -42,7 +42,7 @@ fn scan_bal_boundaries() {
         (29usize, 100usize, None),
         (30, 100, Some("low")),
         (49, 100, Some("low")),
-        (50, 100, Some("provisional")),
+        (50, 100, Some("medium")),
     ] {
         let repo = temp_repo(&format!("reuse-bal-{target_n}"));
         let mut helpers = String::new();

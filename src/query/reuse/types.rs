@@ -15,12 +15,16 @@ pub enum FreshnessMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReuseMode {
     Scan,
+    Propose,
+    Coverage,
 }
 
 impl ReuseMode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Scan => "scan",
+            Self::Propose => "propose",
+            Self::Coverage => "coverage",
         }
     }
 }
@@ -45,12 +49,14 @@ impl ReuseConfidence {
         }
     }
 
-    /// Parse the Phase 1 surface values. `medium`/`high` are reserved for
-    /// Phase 2 and are not accepted here.
+    /// Parse the public confidence surface. `medium`/`high` are produced only
+    /// when Phase 2 calibration signals meet their thresholds.
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "low" => Some(Self::Low),
             "provisional" => Some(Self::Provisional),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
             _ => None,
         }
     }
@@ -111,6 +117,11 @@ pub enum ReasonCode {
     BelowThreshold,
     CrossLanguage,
     NoCanonical,
+    ProposalPartial,
+    ProposalTokenOnly,
+    CoverageClass,
+    CoverageUnresolved,
+    CoverageTests,
 }
 
 impl ReasonCode {
@@ -126,6 +137,11 @@ impl ReasonCode {
             Self::BelowThreshold => "below-threshold",
             Self::CrossLanguage => "cross-language",
             Self::NoCanonical => "no-canonical",
+            Self::ProposalPartial => "proposal-partial",
+            Self::ProposalTokenOnly => "proposal-token-only",
+            Self::CoverageClass => "coverage-class",
+            Self::CoverageUnresolved => "coverage-unresolved",
+            Self::CoverageTests => "coverage-tests",
         }
     }
 }
@@ -136,6 +152,9 @@ impl ReasonCode {
 pub struct ReuseCounts {
     pub shown_provisional: usize,
     pub shown_low: usize,
+    pub shown_medium: usize,
+    pub shown_high: usize,
+    pub suppressed: usize,
     pub guarded_out: usize,
     pub below_threshold: usize,
     pub omitted: usize,

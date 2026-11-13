@@ -84,7 +84,7 @@ pub use callgraph::{callees, callers, context, imports, path, GraphQueryOpts};
 /// request is built, not at query time.
 pub(crate) use impact::parse_edge_kinds;
 pub use impact::{impact, ImpactOpts};
-pub use reuse::run_reuse;
+pub use reuse::{run_reuse, run_reuse_proposal};
 
 /// One resolved name candidate: (path, line, qualname). Defined in `error`
 /// beside the `Ambiguous` payload it fills; re-exported here so the query

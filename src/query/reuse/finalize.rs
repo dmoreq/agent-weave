@@ -30,16 +30,22 @@ pub(super) fn finalize(
         );
         let mut lines = vec!["eg: reuse — 0 duplication candidate(s) found".to_string()];
         lines.extend(freshness_headers);
-        if below_threshold > 0 || report.counts.guarded_out > 0 {
-            lines.push(format!(
-                "eg: reuse: 0 provisional, 0 low, {} guarded out, {below_threshold} below threshold",
+        if below_threshold > 0 || report.counts.guarded_out > 0 || report.counts.suppressed > 0 {
+            let mut summary = format!(
+                "eg: reuse: 0 provisional, 0 low, 0 medium, 0 high, {} guarded out, {below_threshold} below threshold",
                 report.counts.guarded_out
-            ));
+            );
+            if report.counts.suppressed > 0 {
+                summary.push_str(&format!("; {} suppressed", report.counts.suppressed));
+            }
+            lines.push(summary);
         }
         if !opts.paths.is_empty() {
             lines.push(format!("eg: reuse: path_matches={}", report.path_matches));
         }
-        return Ok(crate::query::LineQuery::new(lines, String::new(), 0));
+        let mut query = crate::query::LineQuery::new(lines, report.stderr, 0);
+        query.mode = report.mode;
+        return Ok(query);
     }
 
     let mut blocks: Vec<(&ReuseCandidate, String)> = report
@@ -61,15 +67,23 @@ pub(super) fn finalize(
         emitted.push((candidate, block));
     }
     let shown = emitted.len();
-    let provisional = emitted
-        .iter()
-        .filter(|(c, _)| c.confidence == ReuseConfidence::Provisional)
-        .count();
-    let low = shown - provisional;
+    let count_level = |level: ReuseConfidence| {
+        emitted
+            .iter()
+            .filter(|(c, _)| c.confidence == level)
+            .count()
+    };
+    let provisional = count_level(ReuseConfidence::Provisional);
+    let low = count_level(ReuseConfidence::Low);
+    let medium = count_level(ReuseConfidence::Medium);
+    let high = count_level(ReuseConfidence::High);
     let omitted = limit_omitted + capped;
     report.counts = ReuseCounts {
         shown_provisional: provisional,
         shown_low: low,
+        shown_medium: medium,
+        shown_high: high,
+        suppressed: report.counts.suppressed,
         guarded_out: report.counts.guarded_out,
         below_threshold,
         omitted,
@@ -78,9 +92,13 @@ pub(super) fn finalize(
         total: report.counts.total,
         truncated: omitted > 0,
     };
+    crate::journal::set_mode(report.mode);
     crate::journal::set_reuse_counts(crate::journal::ReuseJournalCounts {
         provisional: report.counts.shown_provisional,
         low: report.counts.shown_low,
+        medium: report.counts.shown_medium,
+        high: report.counts.shown_high,
+        suppressed: report.counts.suppressed,
         guarded_out: report.counts.guarded_out,
         below_threshold: report.counts.below_threshold,
         omitted: report.counts.omitted,
@@ -88,9 +106,11 @@ pub(super) fn finalize(
         truncated: report.counts.truncated,
     });
     let mut summary = format!(
-        "eg: reuse: {} provisional, {} low, {} guarded out, {} below threshold",
+        "eg: reuse: {} provisional, {} low, {} medium, {} high, {} guarded out, {} below threshold",
         report.counts.shown_provisional,
         report.counts.shown_low,
+        report.counts.shown_medium,
+        report.counts.shown_high,
         report.counts.guarded_out,
         report.counts.below_threshold
     );
@@ -99,6 +119,9 @@ pub(super) fn finalize(
     }
     if report.counts.capped > 0 {
         summary.push_str(&format!("; {} capped", report.counts.capped));
+    }
+    if report.counts.suppressed > 0 {
+        summary.push_str(&format!("; {} suppressed", report.counts.suppressed));
     }
     if report.counts.omitted > 0 {
         summary.push_str(&format!(
@@ -136,7 +159,8 @@ pub(super) fn finalize(
         false,
         0,
     );
-    let mut query = crate::query::LineQuery::new(out, String::new(), report.counts.shown);
+    let mut query = crate::query::LineQuery::new(out, report.stderr, report.counts.shown);
+    query.mode = report.mode;
     query.truncated = report.counts.truncated;
     Ok(query)
 }

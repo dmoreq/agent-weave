@@ -38,8 +38,10 @@ fn reuse_journals_surfaced_candidate_ids() {
     let reuse = &val["reuse"];
     let provisional = reuse["provisional"].as_u64().unwrap_or(0);
     let low = reuse["low"].as_u64().unwrap_or(0);
+    let medium = reuse["medium"].as_u64().unwrap_or(0);
+    let high = reuse["high"].as_u64().unwrap_or(0);
     assert!(
-        provisional + low >= 1,
+        provisional + low + medium + high >= 1,
         "typed confidence counts missing: {last}"
     );
     for key in ["guarded_out", "below_threshold", "omitted", "capped"] {

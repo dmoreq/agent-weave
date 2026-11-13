@@ -138,12 +138,31 @@ pub enum Cmd {
         /// Extend the callee footprint to second-hop callees (weight 0.5)
         #[arg(long)]
         deep_callee: bool,
-        /// Minimum confidence to show: low or provisional
-        #[arg(long, default_value = "low", value_parser = ["low", "provisional"])]
+        /// Minimum confidence to show: low, provisional, medium, or high
+        #[arg(
+            long,
+            default_value = "low",
+            value_parser = ["low", "provisional", "medium", "high"]
+        )]
         min_confidence: String,
+        /// Propose a signature before writing it; paths are not allowed
+        #[arg(long)]
+        propose: Option<String>,
+        /// Proposed callee names, comma-separated, used with --propose
+        #[arg(long, value_delimiter = ',')]
+        callees: Vec<String>,
         /// Append detector and reason codes to each candidate
         #[arg(long)]
         explain: bool,
+        /// Include allowlisted candidates and report the suppressed count
+        #[arg(long)]
+        show_suppressed: bool,
+        /// Opt-in coverage detectors: class, unresolved, tests
+        #[arg(long, value_delimiter = ',')]
+        coverage: Vec<String>,
+        /// Ask a local eg-judge binary to arbitrate gray-zone candidates
+        #[arg(long)]
+        judge: bool,
     },
     /// Symbol-level search: bm25-ranked FTS5 over identifier tokens with interface cards
     Search {

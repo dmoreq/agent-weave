@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 mod reuse;
-pub use reuse::{set_candidate_ids, set_reuse_counts, ReuseJournalCounts};
+pub use reuse::{set_candidate_ids, set_judged, set_mode, set_reuse_counts, ReuseJournalCounts};
 
 /// Rotate `usage.log` to `usage.log.1` past this size (one prior generation).
 pub(crate) const ROTATE_BYTES: u64 = 5 * 1024 * 1024;
@@ -134,6 +134,9 @@ pub fn finalize(root: Option<&Path>, exit_code: i32, latency_us: u64) {
             serde_json::json!({
                 "provisional": c.provisional,
                 "low": c.low,
+                "medium": c.medium,
+                "high": c.high,
+                "suppressed": c.suppressed,
                 "guarded_out": c.guarded_out,
                 "below_threshold": c.below_threshold,
                 "omitted": c.omitted,

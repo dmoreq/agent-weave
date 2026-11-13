@@ -90,6 +90,9 @@ Grounded in [RepoReuse](https://arxiv.org/abs/2609.35357) (*Ma et al., 2026*) an
 | D2 | Interface & signature overlap | $\ge 60\%$ Jaccard overlap on parameter names, types, and return tokens |
 | D3 | Raw client / abstraction bypass | Callers invoke uncurated driver/raw primitives instead of established wrappers |
 | D4 | Guarded pass-through wrapper | Single-caller forwarder adding trivial checks over a canonical function |
+| D5 | Class-shape coverage | Opt-in same-name class and method overlap across files |
+| D1L | Unresolved-call coverage | Opt-in unresolved bare-name call matching an indexed production symbol |
+| DT | Test-helper coverage | Opt-in test/production name-token overlap |
 
 For corpora larger than 1,000 symbols, `analyze_corpus` builds an in-memory **Inverted Posting Index** (`by_callee`, `by_token_pair`, `by_raw_client`), reducing pairwise detection from $O(N \times M)$ to a sparse posting lookup while preserving 100% byte parity with the linear scan.
 

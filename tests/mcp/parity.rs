@@ -269,6 +269,60 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 }
 
 #[test]
+fn mcp_reuse_phase4_coverage_parity() {
+    let repo = fixture("mcp-reuse-phase4");
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let cli = eg_cmd(&repo)
+        .args(["reuse", "--coverage", "class"])
+        .output()
+        .unwrap();
+    assert_eq!(cli.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let mcp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"coverage": ["class"]}}),
+    );
+    assert_eq!(mcp["result"]["isError"], false, "{mcp}");
+    assert_eq!(
+        strip_footer(&result_text(&mcp)),
+        String::from_utf8_lossy(&cli.stdout).into_owned()
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
+fn mcp_reuse_phase2_proposal_parity() {
+    let repo = fixture("mcp-reuse-phase2");
+    let build = eg_cmd(&repo).arg("build").output().unwrap();
+    assert_eq!(build.status.code(), Some(0));
+
+    let cli = eg_cmd(&repo)
+        .args(["reuse", "--propose", "def normalize(text)"])
+        .output()
+        .unwrap();
+    assert_eq!(cli.status.code(), Some(0));
+
+    let mut srv = spawn(&repo);
+    let mcp = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({"name": "reuse", "arguments": {"propose": "def normalize(text)"}}),
+    );
+    assert_eq!(mcp["result"]["isError"], false, "{mcp}");
+    assert_eq!(
+        strip_footer(&result_text(&mcp)),
+        String::from_utf8_lossy(&cli.stdout).into_owned()
+    );
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn mcp_reuse_phase1_parity() {
     let repo = fixture("mcp-reuse-phase1");
     let build = eg_cmd(&repo).arg("build").output().unwrap();

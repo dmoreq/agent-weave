@@ -176,7 +176,9 @@ eg symbols <FILE_OR_DIR> [--outline] [--limit <N>]
 Real-time anti-reinvention engine. Detects cross-file and intra-file duplicate functions, callee footprint overlap, client bypasses, and wrapper inflation.
 
 ```bash
-eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--min-confidence <low|provisional>] [--explain]
+eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--min-confidence <low|provisional|medium|high>] [--explain]
+eg reuse --propose "<signature>" [--callees <a,b>] [--explain]
+eg reuse --coverage <class|unresolved|tests> [--explain]
 ```
 
 | Option / Argument | Default | Description |
@@ -184,16 +186,30 @@ eg reuse [PATHS]... [--limit <N>] [--deep-callee] [--min-confidence <low|provisi
 | `[PATHS]...` | Empty (repo) | File, directory, `file:line`, or unique symbol name to inspect. Multiple paths form a union. |
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
 | `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). |
-| `--min-confidence <low\|provisional>` | `low` | Minimum confidence shown; `medium`/`high` are reserved for Phase 2 and rejected. |
+| `--min-confidence <tier>` | `low` | Minimum confidence shown: `low`, `provisional`, `medium`, or `high`. |
+| `--propose <signature>` | — | Pre-finalize proposal matched against indexed symbols; paths are rejected. |
+| `--callees <a,b>` | — | Proposed callee names used with `--propose`. |
+| `--coverage <kinds>` | — | Opt-in coverage detectors: `class`, `unresolved`, `tests`. |
+| `--show-suppressed` | `false` | Include allowlisted candidates and report the suppressed count. |
+| `--judge` | `false` | Ask a local `eg-judge` binary to arbitrate gray-zone candidates. |
 | `--explain` | `false` | Append `detector=...; reasons=[...]` to each candidate line. |
 
-Path targets are validated before the scan: absolute paths, `..`, backslashes, and symlinks exit `2`; missing or unindexed targets exit `1`. A `file:line` target selects the innermost production function or method containing that line. Directory targets match at a path-component boundary. When a target or canonical file changed since the build, the candidate is downgraded to `low` and the output carries a reuse-specific freshness header.
+Path targets are validated before the scan: absolute paths, `..`, backslashes, and symlinks exit `2`; missing or unindexed targets exit `1`. A `file:line` target selects the innermost production function or method containing that line. Directory targets match at a path-component boundary. When a target or canonical file changed since the build, the candidate is downgraded and the output carries a reuse-specific freshness header.
+
+Proposal mode never creates a file. It matches the proposed name tokens and callees against resolved index data and returns only existing canonical symbols.
+
+Allowlist notes use the key `reuse-allow/<target>-><canonical>` in the local memory store. High-confidence pairs are never suppressed. A note with `--refs` is ignored after any referenced file changes. `--show-suppressed` keeps the candidate visible and adds `N suppressed` to the summary.
+
+Judge mode is best-effort. A missing binary, model, timeout, malformed output, or unknown verdict leaves the static result unchanged and prints one `eg: judge unavailable:` stderr note. Set `EG_JUDGE_BIN` and `EG_JUDGE_MODEL` to pin the executable and checkpoint directory; the child runs with a cleared environment and a 15 s deadline.
 
 #### Detectors
 - **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard). With `--deep-callee`, the footprint includes second-hop callees, catching wrappers that forward through an intermediate helper.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Flags functions with heavily overlapping signatures and parameter types.
 - **D3: Raw Client Bypass**: Warns when callers invoke raw primitives rather than existing canonical wrappers.
 - **D4: 1-Caller Wrappers**: Surfaces redundant single-use forwarding functions.
+- **D5: Class Shape Overlap**: Opt-in `--coverage class`; same class name and method overlap across files.
+- **D1L: Unresolved Call Coverage**: Opt-in `--coverage unresolved`; an unresolved bare-name call matches an indexed production symbol.
+- **DT: Test Helper Overlap**: Opt-in `--coverage tests`; a test helper shares name tokens with a production symbol.
 
 ---
 

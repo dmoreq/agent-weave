@@ -235,7 +235,12 @@ mod tests {
                 limit: 10,
                 deep_callee: false,
                 min_confidence: "low".into(),
+                propose: None,
+                callees: Vec::new(),
                 explain: false,
+                show_suppressed: false,
+                coverage: Vec::new(),
+                judge: false,
             },
             CommandRequest::Search {
                 terms: "x".into(),

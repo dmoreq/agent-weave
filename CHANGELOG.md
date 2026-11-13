@@ -17,10 +17,23 @@ changes bump the minor while 0.x is unstable.
 ## [Unreleased]
 
 ### Changed
-- `eg reuse` is now a Phase 1 truthfulness pass: confidence is `low|provisional`
-  (no calibrated/medium/high), `--min-confidence` filters low candidates,
-  `--limit` is 1..100, output adds a count summary and a 30 KiB cap, and stale
+- `eg reuse` now supports four confidence tiers: `low`, `provisional`,
+  `medium`, and `high`; `--min-confidence` filters candidates and the summary
+  reports each tier. `--limit` is 1..100, output adds a 30 KiB cap, and stale
   files downgrade confidence with a reuse-specific header.
+- Phase 2 proposal mode: `--propose "<signature>"` with optional `--callees`
+  matches indexed canonical symbols without creating a file. Proposal runs are
+  journaled as `mode=propose` and can be judged.
+- Phase 3 allowlist: a current memory note keyed
+  `reuse-allow/<target>-><canonical>` suppresses an intentional pair; stale
+  refs invalidate the note, High candidates are never suppressed, and
+  `--show-suppressed` exposes the count.
+- Phase 4 coverage: `--coverage class,unresolved,tests` adds D5 class-shape,
+  D1L unresolved-call, and DT test/production detectors, off by default.
+- Phase 5 judge: `--judge` restores optional local `eg-judge` arbitration with
+  a 15 s deadline, process-group termination, environment clearing, a 64 KiB
+  stdout cap, path containment, and a closed verdict whitelist. Any failure
+  leaves static output unchanged and emits one stderr note.
 - Path typos and absolute paths are rejected explicitly; file, directory,
   `file:line`, and unique symbol scopes resolve before the scan. Directory
   matches stop at a path-component boundary, and ambiguous bare names list
@@ -32,8 +45,8 @@ changes bump the minor while 0.x is unstable.
   self/test excluded), shared by `eg search` and `eg reuse`.
 - `mem touch` and `mem write --touch` use `max(anchored_at, created_at)` for
   ref staleness; `[stale-ref] [modified-ref]` clears after verification.
-- Removed `--judge` and the MCP `judge` parameter from the shipped surface. The
-  semantic judge returns in Phase 5 with a hardened protocol.
+- The Phase 1 surface temporarily removed `--judge`; Phase 5 restores it with
+  the hardened protocol above.
 - Reuse journal lines carry `mode`, `truncated`, and typed `reuse` counts;
   dashboard candidates carry `confidence` and `reasons`. `guarded_out` now
   counts explicit guard rejections instead of a hardcoded zero.

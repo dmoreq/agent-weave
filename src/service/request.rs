@@ -57,7 +57,12 @@ pub enum CommandRequest {
         limit: usize,
         deep_callee: bool,
         min_confidence: String,
+        propose: Option<String>,
+        callees: Vec<String>,
         explain: bool,
+        show_suppressed: bool,
+        coverage: Vec<String>,
+        judge: bool,
     },
     Search {
         terms: String,

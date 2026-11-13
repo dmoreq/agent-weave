@@ -92,11 +92,17 @@ eg reuse src/walk.rs src/parse.rs
 eg reuse src/walk.rs:42
 # Extend to second-hop wrappers:
 eg reuse --deep-callee
+# Propose a signature before writing it:
+eg reuse --propose "def parse_token(value)" --callees normalize
+# Opt-in coverage detectors:
+eg reuse --coverage class,unresolved,tests
 # Show detector and reason codes:
 eg reuse --explain
 ```
 
-Every candidate prints `confidence=provisional` or `confidence=low`. A target or canonical file changed since the build downgrades the candidate and adds a freshness warning; an unindexed new file in an empty scope prints `freshness unknown (new-file)`. Use `--limit` (1–100) and the summary counters to see how many candidates were omitted or filtered by `--min-confidence`.
+Every candidate prints `confidence=low|provisional|medium|high`. A target or canonical file changed since the build downgrades the candidate and adds a freshness warning; an unindexed new file in an empty scope prints `freshness unknown (new-file)`. Use `--limit` (1–100) and the summary counters to see how many candidates were omitted or filtered by `--min-confidence`.
+
+For an intentional exception, write a local memory note keyed `reuse-allow/<target>-><canonical>` and add `--refs` for the source files. High-confidence pairs cannot be suppressed; `--show-suppressed` keeps the candidate visible and reports the count. `--judge` is optional and degrades to static output when `eg-judge` or its model is unavailable.
 
 `eg reuse` executes four structural detectors across files and within the same file:
 - **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper.

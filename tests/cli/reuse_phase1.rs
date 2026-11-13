@@ -85,15 +85,17 @@ fn reuse_composition_guard_rejects_callee_pair() {
 }
 
 #[test]
-fn reuse_min_confidence_rejects_medium() {
+fn reuse_min_confidence_accepts_numeric_tiers() {
     let repo = temp_repo("reuse-min-confidence");
     write(&repo, "a.py", "def unique_one():\n    return 1\n");
     build(&repo);
-    let out = eg(&repo)
-        .args(["reuse", "--min-confidence", "medium"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2));
+    for level in ["provisional", "medium", "high"] {
+        let out = eg(&repo)
+            .args(["reuse", "--min-confidence", level])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{level}");
+    }
 }
 
 #[test]

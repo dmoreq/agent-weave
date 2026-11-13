@@ -92,6 +92,12 @@ pub enum DetectorId {
     D3,
     /// Redundant Pass-Through Wrapper.
     D4,
+    /// Duplicate class shape (Phase 4 coverage).
+    D5,
+    /// Unresolved bare-name call with an indexed canonical (Phase 4 coverage).
+    D1L,
+    /// Test-helper overlap (Phase 4 coverage).
+    DT,
 }
 
 impl DetectorId {
@@ -102,17 +108,17 @@ impl DetectorId {
             DetectorId::D2 => "D2",
             DetectorId::D3 => "D3",
             DetectorId::D4 => "D4",
+            DetectorId::D5 => "D5",
+            DetectorId::D1L => "D1L",
+            DetectorId::DT => "DT",
         }
     }
 }
 
 pub(super) const DETECTORS: &[Detector] = &[find_best_d1, find_best_d2, check_d3, check_d4];
 
-/// Shared D1/D2 scan frame: walk the corpus, drop the target's own id/file
-/// and non-canonical candidates, let `signal` produce the `(pct, shared)`
-/// overlap, and keep the best by overlap percentage. An equal percentage
-/// breaks the tie by the canonical key (file_path, line_start, qualname
-/// ascending) so the winner does not depend on HashMap iteration order.
+/// Shared D1/D2 scan frame: drop self/overlap/non-canonical candidates and
+/// keep the best signal with a deterministic canonical tie-break.
 fn best_by_overlap(
     detector: DetectorId,
     target: &SymbolData,
@@ -239,12 +245,13 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
                 if zero_name {
                     reasons.push(ReasonCode::ZeroName);
                 }
-                let confidence = if reasons.is_empty()
-                    && distinctive_ratio(target, candidate, corpus, &shared) <= 0.75
-                {
-                    ReuseConfidence::Provisional
-                } else {
+                let weak = distinctive_ratio(target, candidate, corpus, &shared);
+                let confidence = if !reasons.is_empty() || weak > 0.75 {
                     ReuseConfidence::Low
+                } else if ratio >= 0.95 && weak <= 0.25 {
+                    ReuseConfidence::High
+                } else {
+                    ReuseConfidence::Medium
                 };
                 return Some((pct, shared, confidence, reasons));
             }
@@ -289,12 +296,13 @@ fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             if bal < 0.50 {
                 reasons.push(ReasonCode::SizeImbalance);
             }
-            let confidence = if reasons.is_empty()
-                && distinctive_ratio(target, candidate, corpus, &shared) <= 0.75
-            {
-                ReuseConfidence::Provisional
-            } else {
+            let weak = distinctive_ratio(target, candidate, corpus, &shared);
+            let confidence = if !reasons.is_empty() || weak > 0.75 {
                 ReuseConfidence::Low
+            } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {
+                ReuseConfidence::High
+            } else {
+                ReuseConfidence::Medium
             };
             Some((pct, shared, confidence, reasons))
         },
@@ -379,10 +387,12 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
             if strict_subset {
                 reasons.push(ReasonCode::SameNameSubset);
             }
-            let confidence = if reasons.is_empty() && shared.len() >= 3 {
-                ReuseConfidence::Provisional
-            } else {
+            let confidence = if !reasons.is_empty() || shared.len() < 3 {
                 ReuseConfidence::Low
+            } else if shared.len() >= 4 && jaccard >= 0.80 && type_jaccard >= 0.50 {
+                ReuseConfidence::High
+            } else {
+                ReuseConfidence::Medium
             };
             Some((
                 (jaccard * 100.0).round() as u64,
@@ -440,7 +450,11 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         &[],
         MatchMeta {
             raw_client: Some(raw_client.to_string()),
-            confidence: ReuseConfidence::Provisional,
+            confidence: if canonical.inbound_callers >= 5 {
+                ReuseConfidence::High
+            } else {
+                ReuseConfidence::Medium
+            },
             reasons: Vec::new(),
         },
     ))
@@ -476,7 +490,7 @@ fn check_d4(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
         std::slice::from_ref(&callee.name),
         MatchMeta {
             raw_client: None,
-            confidence: ReuseConfidence::Provisional,
+            confidence: ReuseConfidence::Medium,
             reasons: Vec::new(),
         },
     ))

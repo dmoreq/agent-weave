@@ -244,7 +244,12 @@ fn from_tool_args_analysis(a: &ArgReader<'_>, tool: &str) -> Result<CommandReque
             limit: a.n_spec(tool, "limit", crate::query::DEFAULT_REUSE_LIMIT)?,
             deep_callee: a.b("deep_callee"),
             min_confidence: a.s("min_confidence").unwrap_or_default(),
+            propose: a.s("propose"),
+            callees: a.str_array("callees")?,
             explain: a.b("explain"),
+            show_suppressed: a.b("show_suppressed"),
+            coverage: a.str_array("coverage")?,
+            judge: a.b("judge"),
         },
         "search" => CommandRequest::Search {
             terms: a.req("terms")?,

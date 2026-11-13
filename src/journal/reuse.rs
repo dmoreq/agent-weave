@@ -8,6 +8,9 @@ use serde_json::Value;
 pub struct ReuseJournalCounts {
     pub provisional: usize,
     pub low: usize,
+    pub medium: usize,
+    pub high: usize,
+    pub suppressed: usize,
     pub guarded_out: usize,
     pub below_threshold: usize,
     pub omitted: usize,
@@ -27,11 +30,28 @@ pub fn set_candidate_ids(list: &str) {
     });
 }
 
-/// Record the typed reuse counts and mark the line as a scan.
+/// Record which reuse surface produced the line.
+pub fn set_mode(mode: crate::query::reuse::ReuseMode) {
+    super::PENDING.with(|pending| {
+        if let Some(entry) = pending.borrow_mut().as_mut() {
+            entry.mode = mode.as_str();
+        }
+    });
+}
+
+/// Record the typed reuse counts. The caller sets the mode separately so scan
+/// and proposal lines cannot silently overwrite each other.
+pub fn set_judged(value: bool) {
+    super::PENDING.with(|pending| {
+        if let Some(entry) = pending.borrow_mut().as_mut() {
+            entry.judged = value;
+        }
+    });
+}
+
 pub fn set_reuse_counts(counts: ReuseJournalCounts) {
     super::PENDING.with(|pending| {
         if let Some(entry) = pending.borrow_mut().as_mut() {
-            entry.mode = "scan";
             entry.truncated = counts.truncated;
             entry.reuse_counts = Some(counts);
         }
