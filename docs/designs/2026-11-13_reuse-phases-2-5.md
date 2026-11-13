@@ -14,7 +14,9 @@
 - Oracle ledger arithmetic remains 160 labels: 50 tune, 60 confirmation
   positives (30 eligible + 15 D4 + 15 D3), 30 confirmation negatives, 20
   holdout. `tests/scripts/reuse_oracle.py` validates labels and can compute
-  precision, recall, TP/FP/FN/TN, and Wilson precision upper bound.
+  precision, recall, TP/FP/FN/TN, Wilson precision upper bound, and
+  McNemar discordant counts, chi-square, p-value, power, and MDD against a
+  baseline prediction file.
 
 ## Phase 3 — Allowlist
 
@@ -36,8 +38,11 @@
 ## Phase 5 — Judge
 
 - `--judge` and MCP `judge` are restored as opt-in.
-- Child runs only for gray-zone candidates (45–75% overlap), at most five.
-- Deadline 15 s, stdout cap 64 KiB, cleared environment, process-group
+- Child runs for gray-zone scan candidates (45–75% overlap) and proposal
+  candidates, at most five.
+- Source travels on stdin as `{"code_a","code_b"}` (or
+  `{"text_a","text_b"}`), never argv.
+- Deadline 15 s, stdin/stdout caps 64 KiB, cleared environment, process-group
   termination, repository-contained source spans, and verdict whitelist
   (`duplicate|distinct`, probability 0..1).
 - Any failure leaves static output unchanged and emits one

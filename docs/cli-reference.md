@@ -200,7 +200,7 @@ Proposal mode never creates a file. It matches the proposed name tokens and call
 
 Allowlist notes use the key `reuse-allow/<target>-><canonical>` in the local memory store. High-confidence pairs are never suppressed. A note with `--refs` is ignored after any referenced file changes. `--show-suppressed` keeps the candidate visible and adds `N suppressed` to the summary.
 
-Judge mode is best-effort. It reviews gray-zone scan candidates and proposal candidates. A missing binary, model, timeout, malformed output, or unknown verdict leaves the static result unchanged and prints one `eg: judge unavailable:` stderr note. Set `EG_JUDGE_BIN` and `EG_JUDGE_MODEL` to pin the executable and checkpoint directory; the child runs with a cleared environment and a 15 s deadline.
+Judge mode is best-effort. It reviews gray-zone scan candidates and proposal candidates. A missing binary, model, timeout, malformed output, or unknown verdict leaves the static result unchanged and prints one `eg: judge unavailable:` stderr note. Set `EG_JUDGE_BIN` and `EG_JUDGE_MODEL` to pin the executable and checkpoint directory; the child runs with a cleared environment and a 15 s deadline. The v2 protocol passes source through stdin as `{"code_a","code_b"}` (or `{"text_a","text_b"}` for the similarity subcommand), never through argv.
 
 #### Detectors
 - **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Identifies functions sharing $\ge 80\%$ of their called functions (symmetric containment with size guard). With `--deep-callee`, the footprint includes second-hop callees, catching wrappers that forward through an intermediate helper.

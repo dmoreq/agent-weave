@@ -189,16 +189,25 @@ impl ReuseCandidate {
 }
 
 /// Detect up to 3 non-failing advisory lines for modified symbols during incremental build.
-pub fn detect_hints(conn: &Connection, new_names: &HashSet<String>) -> Result<Vec<String>> {
+pub fn detect_hints(ctx: &QueryCtx<'_>, new_names: &HashSet<String>) -> Result<Vec<String>> {
     if new_names.is_empty() {
         return Ok(Vec::new());
     }
-    let (candidates, _, _) = analyze_corpus(conn, None, Some(new_names), 3, false)?;
-    let mut hints = Vec::new();
-    for c in candidates.iter().take(3) {
-        hints.push(format!("eg: reuse-hint: {}", c.hint_line()));
-    }
-    Ok(hints)
+    let opts = ReuseOpts::for_hints();
+    let scope = status::ResolvedScope {
+        kind: status::ScopeKind::Symbols(Vec::new()),
+        paths: Vec::new(),
+        symbols: new_names.clone(),
+        files: Vec::new(),
+        path_matches: 0,
+    };
+    let report = analyze_corpus_with(ctx, &opts, &scope)?;
+    Ok(report
+        .pool
+        .iter()
+        .take(opts.limit)
+        .map(|c| format!("eg: reuse-hint: {}", c.hint_line()))
+        .collect())
 }
 
 pub struct ReuseRunArgs {

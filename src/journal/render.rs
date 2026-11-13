@@ -13,7 +13,8 @@ pub(crate) struct UsageFields {
     pub(crate) tool: String,
     pub(crate) exit_code: i64,
     pub(crate) result_count: i64,
-    pub(crate) shown: i64,
+    /// `None` distinguishes a legacy line with no `shown` key from a real 0.
+    pub(crate) shown: Option<i64>,
     pub(crate) total: i64,
     pub(crate) stale: bool,
     pub(crate) ambiguous: i64,
@@ -34,7 +35,7 @@ pub(crate) fn parse_usage_line(line: &str) -> Option<UsageFields> {
         tool: v.get("tool")?.as_str()?.to_string(),
         exit_code: v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0),
         result_count: v.get("result_count").and_then(|x| x.as_i64()).unwrap_or(0),
-        shown: v.get("shown").and_then(|x| x.as_i64()).unwrap_or(0),
+        shown: v.get("shown").and_then(|x| x.as_i64()),
         total: v.get("total").and_then(|x| x.as_i64()).unwrap_or(0),
         stale: v.get("stale").and_then(|x| x.as_bool()).unwrap_or(false),
         ambiguous: v.get("ambiguous").and_then(|x| x.as_i64()).unwrap_or(0),
@@ -154,9 +155,7 @@ fn load_global_usage_lines() -> crate::error::Result<String> {
     load_usage_lines_from_path(&path)
 }
 
-/// Fold one parsed journal line into its per-tool aggregate. The single copy
-/// of the counter rules shared by the per-repo and global summaries, so their
-/// error/empty/capped/stale semantics cannot drift apart.
+/// Fold one parsed line into its per-tool aggregate; one counter rule set.
 fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
     agg.calls += 1;
     // One exit-code classification for the CLI and the dashboard: empty and
@@ -172,14 +171,15 @@ fn fold_tool(fields: &UsageFields, agg: &mut ToolAgg) {
             agg.empty_error += 1;
         }
     }
-    if fields.total > fields.shown {
+    let shown = fields.shown.unwrap_or(fields.result_count).max(0) as usize;
+    if fields.total > shown as i64 {
         agg.capped += 1;
     }
     if fields.stale {
         agg.stale += 1;
     }
     agg.ambiguous += fields.ambiguous.max(0) as usize;
-    agg.total_shown += fields.shown.max(0) as usize;
+    agg.total_shown += shown;
     agg.total_results += fields.result_count.max(0) as usize;
     if let Some(us) = fields.latency_us {
         agg.latencies.push(us.max(0) as u64);

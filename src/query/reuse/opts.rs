@@ -74,6 +74,23 @@ impl ReuseOpts {
         })
     }
 
+    pub(super) fn for_hints() -> Self {
+        Self {
+            mode: ReuseMode::Scan,
+            paths: Vec::new(),
+            proposal_signature: None,
+            proposed_callees: Vec::new(),
+            limit: 3,
+            deep_callee: false,
+            min_confidence: ReuseConfidence::Low,
+            explain: false,
+            show_suppressed: false,
+            coverage: Vec::new(),
+            judge: false,
+            freshness_mode: FreshnessMode::Skip,
+        }
+    }
+
     pub(super) fn with_show_suppressed(mut self, show: bool) -> Self {
         self.show_suppressed = show;
         self

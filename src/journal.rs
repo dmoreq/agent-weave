@@ -356,6 +356,9 @@ mod tests {
         .unwrap();
         assert_eq!(legacy.tool, "callers");
         assert_eq!(legacy.latency_us, None);
+        assert_eq!(legacy.shown, None);
+        let zero = parse_usage_line(r#"{"tool":"callers","shown":0,"exit_code":0}"#).unwrap();
+        assert_eq!(zero.shown, Some(0));
     }
 
     #[test]

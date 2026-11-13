@@ -33,8 +33,11 @@ changes bump the minor while 0.x is unstable.
   D1L unresolved-call, and DT test/production detectors, off by default.
 - Phase 5 judge: `--judge` restores optional local `eg-judge` arbitration with
   a 15 s deadline, process-group termination, environment clearing, a 64 KiB
-  stdout cap, path containment, and a closed verdict whitelist. Any failure
-  leaves static output unchanged and emits one stderr note.
+  stdin/stdout caps, path containment, and a closed verdict whitelist. Source
+  is passed through stdin, never argv. Any failure leaves static output
+  unchanged and emits one stderr note.
+- `tests/scripts/reuse_oracle.py` adds McNemar discordant counts, p-value,
+  power, and MDD against a baseline prediction file.
 - Path typos and absolute paths are rejected explicitly; file, directory,
   `file:line`, and unique symbol scopes resolve before the scan. Directory
   matches stop at a path-component boundary, and ambiguous bare names list

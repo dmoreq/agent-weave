@@ -3,7 +3,7 @@
 //! timeouts, malformed output, and unknown verdicts never alter the static
 //! result; they add one stderr note.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -17,6 +17,7 @@ pub(super) const GRAY_HIGH: u64 = 75;
 const MAX_JUDGED: usize = 5;
 const TIMEOUT: Duration = Duration::from_millis(15_000);
 const POLL: Duration = Duration::from_millis(10);
+const MAX_INPUT: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
@@ -161,21 +162,22 @@ fn source(ctx: &QueryCtx<'_>, file: &str, name: &str) -> Option<String> {
 }
 
 fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> {
-    let (flag_a, flag_b) = if setup.subcommand == "similarity" {
-        ("--text-a", "--text-b")
+    let payload = if setup.subcommand == "similarity" {
+        serde_json::json!({"text_a": left, "text_b": right})
     } else {
-        ("--code-a", "--code-b")
+        serde_json::json!({"code_a": left, "code_b": right})
     };
+    let payload = serde_json::to_vec(&payload).ok()?;
+    if payload.len() > MAX_INPUT {
+        return None;
+    }
     let mut command = Command::new(&setup.binary);
     command
         .arg(setup.subcommand)
-        .arg(flag_a)
-        .arg(left)
-        .arg(flag_b)
-        .arg(right)
+        .arg("--stdin")
         .arg("--model")
         .arg(&setup.model)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .env_clear();
@@ -188,6 +190,18 @@ fn run_child(setup: &Setup, left: &str, right: &str) -> Option<VerdictDecision> 
         command.process_group(0);
     }
     let mut child = command.spawn().ok()?;
+    let Some(mut stdin) = child.stdin.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
+    if stdin.write_all(&payload).is_err() {
+        kill_group(&child);
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    drop(stdin);
     let deadline = Instant::now() + TIMEOUT;
     loop {
         match child.try_wait() {

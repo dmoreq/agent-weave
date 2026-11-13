@@ -85,7 +85,11 @@ fn incremental_reuse_hints(
     let Ok(conn) = crate::db::open_for_query(&prep.root) else {
         return String::new();
     };
-    let Ok(hints) = crate::query::reuse::detect_hints(&conn, &new_names) else {
+    let ctx = crate::query::QueryCtx {
+        conn: &conn,
+        root: &prep.root,
+    };
+    let Ok(hints) = crate::query::reuse::detect_hints(&ctx, &new_names) else {
         return String::new();
     };
     if hints.is_empty() {

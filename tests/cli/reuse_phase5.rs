@@ -2,6 +2,51 @@
 
 use super::common::*;
 
+#[cfg(unix)]
+#[test]
+fn judge_receives_source_on_stdin_and_filters_distinct() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = temp_repo("reuse-judge-stdin");
+    write(
+        &repo,
+        "a.py",
+        "def normalize(value):\n    return value\n\ndef parse_token_value_data_extra(value):\n    return normalize(value)\n",
+    );
+    write(
+        &repo,
+        "b.py",
+        "def normalize(value):\n    return value\n\ndef parse_token_value(value):\n    return normalize(value)\n",
+    );
+    build(&repo);
+    let bin = repo.join("judge.sh");
+    std::fs::write(
+        &bin,
+        "#!/bin/sh\nbody=$(cat)\ncase \"$body\" in *'\"code_a\"'*) printf '%s\\n' '{\"decision\":\"distinct\",\"probability\":0.4}' ;; *) printf '%s\\n' '{\"decision\":\"duplicate\",\"probability\":0.9}' ;; esac\n",
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&bin, perms).unwrap();
+    std::fs::create_dir_all(repo.join("model")).unwrap();
+    std::fs::write(repo.join("model/lazy.json"), "{\"head_layers\":1}\n").unwrap();
+
+    let out = eg(&repo)
+        .env("EG_JUDGE_BIN", &bin)
+        .env("EG_JUDGE_MODEL", repo.join("model"))
+        .args(["reuse", "--judge"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("0 duplication candidate(s) found"),
+        "{stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("judge unavailable"), "{stderr}");
+}
+
 #[test]
 fn judge_missing_binary_degrades_with_one_note() {
     let repo = temp_repo("reuse-judge-missing");

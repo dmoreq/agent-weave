@@ -13,6 +13,8 @@ CSV columns: pair_id,split,label,tier
 
 Optional `--predictions FILE` reads `pair_id,confidence` and reports
 confirmation precision, recall, confusion counts, and the Wilson upper bound.
+`--baseline FILE` adds McNemar discordant counts, chi-square, p-value, power,
+and minimum detectable difference at `--alpha`/`--power`.
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ import math
 import sys
 from collections import Counter
 from pathlib import Path
+from statistics import NormalDist
+from typing import Optional
 
 
 def validate(path: Path) -> dict:
@@ -86,7 +90,72 @@ def wilson_upper(successes: int, total: int, z: float = 1.96) -> float:
     return min(1.0, (centre + margin) / denom)
 
 
-def evaluate(labels_path: Path, predictions_path: Path, threshold: float) -> dict:
+def mcnemar(
+    confirmation: list[dict],
+    predictions: dict[str, float],
+    baseline: dict[str, float],
+    threshold: float,
+    alpha: float,
+    target_power: float,
+) -> dict:
+    b = c = missing = 0
+    normal = NormalDist()
+    for row in confirmation:
+        current = predictions.get(row["pair_id"])
+        reference = baseline.get(row["pair_id"])
+        if current is None or reference is None:
+            missing += 1
+            continue
+        actual = row["label"] == "duplicate"
+        model_correct = (current >= threshold) == actual
+        base_correct = (reference >= threshold) == actual
+        if model_correct and not base_correct:
+            b += 1
+        elif base_correct and not model_correct:
+            c += 1
+    discordant = b + c
+    if discordant == 0:
+        return {
+            "b": b,
+            "c": c,
+            "discordant": 0,
+            "missing": missing,
+            "chi2": 0.0,
+            "p_value": 1.0,
+            "power": 0.0,
+            "mdd": 1.0,
+            "alpha": alpha,
+            "target_power": target_power,
+        }
+    chi2 = (abs(b - c) - 1) ** 2 / discordant
+    p_value = 2 * (1 - normal.cdf(math.sqrt(chi2)))
+    delta = abs(b - c) / discordant
+    z_alpha = normal.inv_cdf(1 - alpha / 2)
+    z_power = normal.inv_cdf(target_power)
+    power = normal.cdf(math.sqrt(discordant) * delta - z_alpha)
+    mdd = min(1.0, (z_alpha + z_power) / math.sqrt(discordant))
+    return {
+        "b": b,
+        "c": c,
+        "discordant": discordant,
+        "missing": missing,
+        "chi2": round(chi2, 4),
+        "p_value": round(p_value, 6),
+        "power": round(power, 4),
+        "mdd": round(mdd, 4),
+        "alpha": alpha,
+        "target_power": target_power,
+    }
+
+
+def evaluate(
+    labels_path: Path,
+    predictions_path: Path,
+    threshold: float,
+    baseline_path: Optional[Path] = None,
+    alpha: float = 0.05,
+    target_power: float = 0.8,
+) -> dict:
     labels = list(csv.DictReader(labels_path.open(newline="", encoding="utf-8")))
     predictions = {
         row["pair_id"]: float(row["confidence"])
@@ -112,7 +181,7 @@ def evaluate(labels_path: Path, predictions_path: Path, threshold: float) -> dic
             tn += 1
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
-    return {
+    result = {
         "labels": str(labels_path),
         "predictions": str(predictions_path),
         "threshold": threshold,
@@ -126,13 +195,25 @@ def evaluate(labels_path: Path, predictions_path: Path, threshold: float) -> dic
         "recall": round(recall, 4),
         "precision_wilson_upper": round(wilson_upper(tp, tp + fp), 4),
     }
+    if baseline_path is not None:
+        baseline = {
+            row["pair_id"]: float(row["confidence"])
+            for row in csv.DictReader(baseline_path.open(newline="", encoding="utf-8"))
+        }
+        result["mcnemar"] = mcnemar(
+            confirmation, predictions, baseline, threshold, alpha, target_power
+        )
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labels", required=True, type=Path)
     parser.add_argument("--predictions", type=Path)
+    parser.add_argument("--baseline", type=Path)
     parser.add_argument("--threshold", default=0.5, type=float)
+    parser.add_argument("--alpha", default=0.05, type=float)
+    parser.add_argument("--power", dest="target_power", default=0.8, type=float)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     try:
@@ -140,7 +221,20 @@ def main() -> int:
         if args.predictions is not None:
             if not 0.0 <= args.threshold <= 1.0:
                 raise ValueError("threshold must be 0..1")
-            result = evaluate(args.labels, args.predictions, args.threshold)
+            if not 0.0 < args.alpha < 1.0:
+                raise ValueError("alpha must be in (0, 1)")
+            if not 0.0 < args.target_power < 1.0:
+                raise ValueError("power must be in (0, 1)")
+            if args.baseline is not None and args.predictions is None:
+                raise ValueError("--baseline requires --predictions")
+            result = evaluate(
+                args.labels,
+                args.predictions,
+                args.threshold,
+                args.baseline,
+                args.alpha,
+                args.target_power,
+            )
     except (OSError, ValueError) as exc:
         print(f"reuse_oracle: {exc}", file=sys.stderr)
         return 1
