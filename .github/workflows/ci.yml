@@ -27,6 +27,9 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo test --locked --test reuse_bench -- --list | grep -q 'bench_scan_5k_p95'
+      - run: cargo test --locked --test reuse_bench -- --list | grep -q 'bench_scan_hub_5k_p95'
+      - run: cargo test --locked --test reuse_bench -- --list | grep -q 'bench_d3_raw_5k_p95'
+      - run: cargo test --locked --test reuse_bench -- --list | grep -q 'bench_deep_shared_10k_p95'
       - run: EG_BENCH_BIN=target/release/eg cargo test --locked --test reuse_bench -- --ignored --nocapture
       - run: python3 -I tests/scripts/test_recall_scorers.py
       - run: python3 -I tests/scripts/test_reuse_oracle.py

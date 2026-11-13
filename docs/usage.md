@@ -105,7 +105,7 @@ Every candidate prints `confidence=low|provisional|medium|high`. A target or can
 For an intentional exception, write a local memory note keyed `reuse-allow/<target>-><canonical>` and add `--refs` for the source files. High-confidence pairs cannot be suppressed; `--show-suppressed` keeps the candidate visible and reports the count. `--judge` is optional and degrades to static output when `eg-judge` or its model is unavailable.
 
 `eg reuse` executes four structural detectors across files and within the same file:
-- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper.
+- **D1: Callee Footprint Overlap ($C_{dup} \ge 80\%$)**: Flags functions that invoke virtually identical sets of subroutines (symmetric containment with size ratio guard). Add `--deep-callee` to extend the footprint to second-hop callees (weight `0.5`, threshold 0.85), catching wrappers that forward through an intermediate helper. Closures wider than 512 weighted callees are skipped as hubs, keeping the opt-in scan bounded.
 - **D2: Interface Token Overlap ($\ge 60\%$)**: Surfaces functions with overlapping parameter names, types, and return signatures.
 - **D3: Raw Client Bypass**: Detects callers invoking raw primitives directly when a high-level wrapper exists.
 - **D4: 1-Caller Wrappers**: Highlights trivial single-caller forwarders that inflate codebase complexity.

@@ -28,8 +28,6 @@ pub(super) enum PostingKind {
     /// predicate while avoiding a scan of every symbol that carries one
     /// frequent token such as `filler`.
     TokenPair,
-    /// Raw external client names (D3's one-client gate).
-    RawClient,
 }
 
 /// One posting list per signal key: `key -> symbol ids`.
@@ -37,6 +35,11 @@ pub(super) enum PostingKind {
 pub(super) struct CorpusIndex {
     by_callee: HashMap<i64, Vec<i64>>,
     by_deep_callee: HashMap<i64, Vec<i64>>,
+    /// Representative deep key per posting-group, plus key -> group lookup.
+    /// Many two-hop leaves share an identical caller set; grouping collapses
+    /// their union cost while preserving the exact shared-key counts.
+    deep_group_rep: Vec<i64>,
+    deep_key_group: HashMap<i64, usize>,
     by_token_pair: HashMap<(String, String), Vec<i64>>,
     by_raw_client: HashMap<String, Vec<i64>>,
 }
@@ -90,7 +93,51 @@ impl CorpusIndex {
                 }
             }
         }
+        // Group deep keys whose posting lists are identical. A target with
+        // 2,000 shared leaves then walks one 400-symbol list, not 2,000.
+        let mut deep_keys: Vec<i64> = index.by_deep_callee.keys().copied().collect();
+        deep_keys.sort_unstable();
+        let mut buckets: HashMap<u64, Vec<usize>> = HashMap::new();
+        for key in deep_keys {
+            let hash = hash_ids(&index.by_deep_callee[&key]);
+            let existing = buckets.get(&hash).and_then(|groups| {
+                groups.iter().copied().find(|&group| {
+                    index.by_deep_callee[&index.deep_group_rep[group]] == index.by_deep_callee[&key]
+                })
+            });
+            let group = match existing {
+                Some(group) => group,
+                None => {
+                    let group = index.deep_group_rep.len();
+                    index.deep_group_rep.push(key);
+                    buckets.entry(hash).or_default().push(group);
+                    group
+                }
+            };
+            index.deep_key_group.insert(key, group);
+        }
+        // D3 picks the most canonical wrapper. Sort each raw-client posting
+        // best-first so a target can stop at the first eligible candidate
+        // instead of scanning every wrapper sharing the client.
+        for postings in index.by_raw_client.values_mut() {
+            postings.sort_by(|a, b| {
+                let left = &symbols[a];
+                let right = &symbols[b];
+                right
+                    .inbound_callers
+                    .cmp(&left.inbound_callers)
+                    .then_with(|| left.file_path.cmp(&right.file_path))
+                    .then_with(|| left.line_start.cmp(&right.line_start))
+                    .then_with(|| left.qualname.cmp(&right.qualname))
+            });
+            postings.dedup();
+        }
         index
+    }
+
+    /// Raw-client posting list, best canonical first.
+    pub(super) fn raw_candidates(&self, client: &str) -> Option<&[i64]> {
+        self.by_raw_client.get(client).map(Vec::as_slice)
     }
 
     /// Symbol ids sharing at least `min_shared` keys with `target` for the
@@ -110,8 +157,21 @@ impl CorpusIndex {
                 }
             }
             PostingKind::DeepCallee => {
+                let mut groups: HashMap<usize, usize> = HashMap::new();
                 for key in target.deep_weights.keys() {
-                    add_postings(self.by_deep_callee.get(key), &mut counts);
+                    if let Some(group) = self.deep_key_group.get(key) {
+                        *groups.entry(*group).or_default() += 1;
+                    }
+                }
+                for (group, multiplicity) in groups {
+                    let Some(rep) = self.deep_group_rep.get(group) else {
+                        continue;
+                    };
+                    if let Some(ids) = self.by_deep_callee.get(rep) {
+                        for id in ids {
+                            *counts.entry(*id).or_default() += multiplicity;
+                        }
+                    }
                 }
             }
             PostingKind::TokenPair => {
@@ -124,16 +184,6 @@ impl CorpusIndex {
                             &mut counts,
                         );
                     }
-                }
-            }
-            PostingKind::RawClient => {
-                for key in target
-                    .all_callees
-                    .iter()
-                    .filter(|c| is_raw_client(c))
-                    .map(|c| normalize_client(c))
-                {
-                    add_postings(self.by_raw_client.get(&key), &mut counts);
                 }
             }
         }
@@ -149,6 +199,12 @@ impl CorpusIndex {
 /// and `reqwest.get` are the same client.
 pub(super) fn normalize_client(client: &str) -> String {
     client.replace("::", ".")
+}
+
+fn hash_ids(ids: &[i64]) -> u64 {
+    ids.iter().fold(0xcbf2_9ce4_8422_2325, |hash, id| {
+        (hash ^ (*id as u64)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 fn add_postings(postings: Option<&Vec<i64>>, counts: &mut HashMap<i64, usize>) {
@@ -241,7 +297,10 @@ mod tests {
             symbols.insert(id, symbol);
         }
         let index = CorpusIndex::build(&symbols);
-        let mut ids = index.candidates(&symbols[&1], PostingKind::RawClient, 1);
+        let mut ids = index
+            .raw_candidates("reqwest.get")
+            .unwrap_or_default()
+            .to_vec();
         ids.retain(|id| *id != 1);
         assert_eq!(ids, vec![2]);
     }

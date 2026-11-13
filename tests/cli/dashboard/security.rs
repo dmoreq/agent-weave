@@ -56,6 +56,46 @@ fn local_dashboard_rejects_symlinked_journal_file() {
 }
 
 #[test]
+fn local_dashboard_event_stream_revokes_after_tracking() {
+    let repo = temp_repo("dashboard-stream-revoke");
+    write(
+        &repo,
+        ".engram/usage.log",
+        "{\"tool\":\"build\",\"exit_code\":0,\"result_count\":1,\"shown\":1,\"repo\":\"/x\",\"ts\":1}\n",
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let repo_path = repo.to_path_buf();
+    let log = repo.join(".engram/usage.log");
+    let handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _ = handle_client(stream, &log, Some(&repo_path), false);
+    });
+    let mut client = TcpStream::connect(addr).unwrap();
+    client
+        .write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut header = Vec::new();
+    let mut byte = [0u8; 1];
+    while !header.ends_with(b"\r\n\r\n") {
+        client.read_exact(&mut byte).unwrap();
+        header.push(byte[0]);
+    }
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-f", ".engram/usage.log"]);
+    client
+        .set_read_timeout(Some(std::time::Duration::from_secs(9)))
+        .unwrap();
+    let started = Instant::now();
+    let mut rest = Vec::new();
+    client
+        .read_to_end(&mut rest)
+        .expect("stream must close after provenance changes");
+    assert!(started.elapsed() < std::time::Duration::from_secs(9));
+    handle.join().unwrap();
+}
+
+#[test]
 fn dashboard_rejects_foreign_host_and_sends_security_headers() {
     // DNS rebinding: a public Host that resolves to loopback must be refused.
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

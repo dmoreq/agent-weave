@@ -185,7 +185,7 @@ eg reuse --coverage <class|unresolved|tests> [--explain]
 |---|---|---|
 | `[PATHS]...` | Empty (repo) | File, directory, `file:line`, or unique symbol name to inspect. Multiple paths form a union. |
 | `--limit <N>` | `10` | Maximum candidate pairs displayed (1 to 100). |
-| `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). |
+| `--deep-callee` | `false` | Extend D1's callee footprint to second-hop callees (weight `0.5`). Closures wider than 512 weighted callees are skipped as hubs. |
 | `--min-confidence <tier>` | `low` | Minimum confidence shown: `low`, `provisional`, `medium`, or `high`. |
 | `--propose <signature>` | — | Pre-finalize proposal matched against indexed symbols; paths are rejected. |
 | `--callees <a,b>` | — | Proposed callee names used with `--propose`. |

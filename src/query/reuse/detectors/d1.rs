@@ -4,6 +4,11 @@
 use super::*;
 use crate::query::reuse::confidence::distinctive_weakness;
 
+/// A two-hop closure this broad describes a hub, not a wrapper. Skipping it
+/// keeps `--deep-callee` linear on generated hub corpora instead of comparing
+/// every worker against every other worker's thousands of leaf callees.
+const MAX_DEEP_FOOTPRINT: usize = 512;
+
 /// `C_in(s)`: resolved project callees in the source's language family whose
 /// names survived the static/dynamic stoplist.
 fn d1_project_ids(corpus: &Corpus<'_>, symbol: &SymbolData) -> std::collections::HashSet<i64> {
@@ -22,7 +27,8 @@ fn d1_project_ids(corpus: &Corpus<'_>, symbol: &SymbolData) -> std::collections:
 pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
     let target_ids = d1_project_ids(corpus, target);
     if corpus.deep_callee {
-        if target.deep_weights.len() < 3 {
+        if target.deep_weights.len() < 3 || target.deep_weights.len() > MAX_DEEP_FOOTPRINT {
+            corpus.guard();
             return None;
         }
     } else if target_ids.len() < 3 {
@@ -58,7 +64,9 @@ pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<R
                 .next()
                 .is_none();
             if corpus.deep_callee {
-                if candidate.deep_weights.len() < 3 {
+                if candidate.deep_weights.len() < 3
+                    || candidate.deep_weights.len() > MAX_DEEP_FOOTPRINT
+                {
                     return None;
                 }
                 let ratio = weighted_containment(target, candidate);

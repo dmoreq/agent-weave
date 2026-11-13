@@ -3,7 +3,7 @@
 use super::candidate::{make_candidate, MatchMeta};
 use super::corpus::SymbolData;
 use super::guards::*;
-use super::index::{CorpusIndex, PostingKind};
+use super::index::{normalize_client, CorpusIndex, PostingKind};
 use super::*;
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -274,39 +274,93 @@ fn find_best_d2(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandida
     )
 }
 
+/// D3 candidate guards; returns the shared raw-client spelling.
+fn d3_accept<'a>(
+    target: &'a SymbolData,
+    candidate: &SymbolData,
+    corpus: &Corpus<'_>,
+) -> Option<&'a str> {
+    let same_file_overlap = candidate.file_id == target.file_id
+        && !(candidate.line_end < target.line_start || candidate.line_start > target.line_end);
+    if candidate.id == target.id || same_file_overlap {
+        corpus.guard();
+        return None;
+    }
+    if cross_language(target, candidate) {
+        corpus.guard();
+        return None;
+    }
+    let mut shared_raw: Vec<&String> = target
+        .all_callees
+        .iter()
+        .filter(|tc| {
+            is_raw_client(tc) && candidate.all_callees.iter().any(|sc| raw_client_eq(tc, sc))
+        })
+        .collect();
+    shared_raw.sort();
+    shared_raw.first().map(|name| name.as_str())
+}
+
+fn consider_d3<'a>(
+    target: &'a SymbolData,
+    candidate: &'a SymbolData,
+    corpus: &Corpus<'_>,
+    best: &mut Option<(&'a SymbolData, &'a str)>,
+) -> bool {
+    let Some(raw) = d3_accept(target, candidate, corpus) else {
+        return false;
+    };
+    let is_better = best.is_none_or(|(current, _)| {
+        candidate.inbound_callers > current.inbound_callers
+            || (candidate.inbound_callers == current.inbound_callers
+                && is_more_canonical(candidate, current))
+    });
+    if is_better {
+        *best = Some((candidate, raw));
+    }
+    true
+}
+
 /// Detector D3: Raw Client / Abstraction Bypass.
 fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
     let mut best_wrapper: Option<(&SymbolData, &str)> = None;
-    for s in candidate_symbols(corpus, target, PostingKind::RawClient, 1) {
-        let same_file_overlap = s.file_id == target.file_id
-            && !(s.line_end < target.line_start || s.line_start > target.line_end);
-        if s.id == target.id || same_file_overlap {
-            corpus.guard();
-            continue;
+    match corpus.index {
+        Some(index) => {
+            // Each posting is best-canonical first. The first eligible
+            // candidate wins that raw client; stop once the ranking is worse
+            // than the target, because every later entry is also worse.
+            let mut clients: std::collections::BTreeSet<String> = target
+                .all_callees
+                .iter()
+                .filter(|callee| is_raw_client(callee))
+                .map(|callee| normalize_client(callee))
+                .collect();
+            for client in std::mem::take(&mut clients) {
+                let Some(postings) = index.raw_candidates(&client) else {
+                    continue;
+                };
+                for id in postings {
+                    let Some(candidate) = corpus.symbols.get(id) else {
+                        continue;
+                    };
+                    if !is_more_canonical(candidate, target) {
+                        corpus.guard();
+                        break;
+                    }
+                    if consider_d3(target, candidate, corpus, &mut best_wrapper) {
+                        break;
+                    }
+                }
+            }
         }
-        if cross_language(target, s) {
-            corpus.guard();
-            continue;
-        }
-        if !is_more_canonical(s, target) {
-            corpus.guard();
-            continue;
-        }
-        let mut shared_raw: Vec<&String> = target
-            .all_callees
-            .iter()
-            .filter(|tc| is_raw_client(tc) && s.all_callees.iter().any(|sc| raw_client_eq(tc, sc)))
-            .collect();
-        shared_raw.sort();
-        let Some(shared_raw) = shared_raw.first() else {
-            continue;
-        };
-        let is_better = best_wrapper.is_none_or(|(bw, _)| {
-            s.inbound_callers > bw.inbound_callers
-                || (s.inbound_callers == bw.inbound_callers && is_more_canonical(s, bw))
-        });
-        if is_better {
-            best_wrapper = Some((s, shared_raw.as_str()));
+        None => {
+            for candidate in corpus.symbols.values() {
+                if candidate.id == target.id || !is_more_canonical(candidate, target) {
+                    corpus.guard();
+                    continue;
+                }
+                let _ = consider_d3(target, candidate, corpus, &mut best_wrapper);
+            }
         }
     }
     let (canonical, raw_client) = best_wrapper?;

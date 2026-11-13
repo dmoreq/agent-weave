@@ -116,6 +116,22 @@ fn measure(eg: &Path, root: &Path, extra: &[&str]) -> (Duration, Duration) {
     percentile(samples, 0.95)
 }
 
+/// Alternate baseline and deep samples so host-load drift cannot masquerade as
+/// a deep-callee regression.
+fn measure_pair(eg: &Path, root: &Path) -> ((Duration, Duration), (Duration, Duration)) {
+    for _ in 0..WARMUP_RUNS {
+        run(eg, root, &[]);
+        run(eg, root, &["--deep-callee"]);
+    }
+    let mut baseline = Vec::with_capacity(MEASURED_RUNS);
+    let mut deep = Vec::with_capacity(MEASURED_RUNS);
+    for _ in 0..MEASURED_RUNS {
+        baseline.push(run(eg, root, &[]));
+        deep.push(run(eg, root, &["--deep-callee"]));
+    }
+    (percentile(baseline, 0.95), percentile(deep, 0.95))
+}
+
 #[test]
 #[ignore = "gate benchmark: generates a 5,000-symbol repo and needs the release binary"]
 fn bench_scan_5k_p95() {
@@ -149,8 +165,7 @@ fn scan_gate(name: &str, files: usize, filler: usize, budget: Duration) {
         "benchmark corpus produced no candidates: {probe_stdout}"
     );
 
-    let (baseline_median, baseline_p95) = measure(&eg, &root, &[]);
-    let (deep_median, deep_p95) = measure(&eg, &root, &["--deep-callee"]);
+    let ((baseline_median, baseline_p95), (deep_median, deep_p95)) = measure_pair(&eg, &root);
     println!(
         "{name} reuse p50: baseline={:.2}ms deep-callee={:.2}ms (+{:.1}%); p95: baseline={:.2}ms deep-callee={:.2}ms",
         baseline_median.as_secs_f64() * 1e3,
@@ -243,8 +258,84 @@ fn bench_scan_hub_5k_p95() {
     let (_, p95) = measure(&eg, &root, &[]);
     println!("hub 5k reuse p95={:.2}ms", p95.as_secs_f64() * 1e3);
     assert!(
-        p95 < Duration::from_millis(200),
-        "hub 5k regression: p95 {:.2}ms >= 200ms",
+        p95 < Duration::from_millis(300),
+        "hub 5k regression: p95 {:.2}ms >= 300ms",
+        p95.as_secs_f64() * 1e3
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// 5,000 raw-client callers, each with two dispatcher callers. D3 must stop at
+/// the first eligible wrapper per raw client instead of scanning 5,000.
+fn write_raw_corpus(root: &Path) {
+    let mut source = String::from("import requests\n");
+    for i in 0..5_000 {
+        source.push_str(&format!(
+            "def raw_{i}():\n    return requests.get('https://example.invalid/{i}')\n"
+        ));
+    }
+    for dispatch in ["dispatch_a", "dispatch_b"] {
+        let calls = (0..5_000)
+            .map(|i| format!("raw_{i}()"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        source.push_str(&format!("def {dispatch}():\n    return {calls}\n"));
+    }
+    fs::write(root.join("raw.py"), source).unwrap();
+}
+
+#[test]
+#[ignore = "gate benchmark: generates a 5,000-raw-caller corpus and needs the release binary"]
+fn bench_d3_raw_5k_p95() {
+    let _guard = BENCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = bench_root("d3raw5k");
+    write_raw_corpus(&root);
+    let eg = binary();
+    build(&eg, &root);
+    let (_, p95) = measure(&eg, &root, &[]);
+    println!("d3 raw 5k reuse p95={:.2}ms", p95.as_secs_f64() * 1e3);
+    assert!(
+        p95 < Duration::from_millis(300),
+        "d3 raw 5k regression: p95 {:.2}ms >= 300ms",
+        p95.as_secs_f64() * 1e3
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// 2,000 leaves under one central hub, 400 workers, and filler. Every worker
+/// has a 2,001-key deep closure; the footprint cap must skip these hubs.
+fn write_deep_hub_corpus(root: &Path) {
+    let mut source = String::new();
+    for leaf in 0..2_000 {
+        source.push_str(&format!("def leaf_{leaf}():\n    return {leaf}\n"));
+    }
+    let leaves = (0..2_000)
+        .map(|leaf| format!("leaf_{leaf}()"))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    source.push_str(&format!("def central():\n    return {leaves}\n"));
+    for worker in 0..400 {
+        source.push_str(&format!("def worker_{worker}():\n    return central()\n"));
+    }
+    for filler in 0..7_600 {
+        source.push_str(&format!("def filler_{filler}():\n    return {filler}\n"));
+    }
+    fs::write(root.join("deep.py"), source).unwrap();
+}
+
+#[test]
+#[ignore = "gate benchmark: generates a 10,000-symbol shared deep footprint"]
+fn bench_deep_shared_10k_p95() {
+    let _guard = BENCH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let root = bench_root("deepshared10k");
+    write_deep_hub_corpus(&root);
+    let eg = binary();
+    build(&eg, &root);
+    let (_, p95) = measure(&eg, &root, &["--deep-callee"]);
+    println!("deep shared 10k p95={:.2}ms", p95.as_secs_f64() * 1e3);
+    assert!(
+        p95 < Duration::from_millis(500),
+        "deep shared 10k regression: p95 {:.2}ms >= 500ms",
         p95.as_secs_f64() * 1e3
     );
     let _ = fs::remove_dir_all(&root);

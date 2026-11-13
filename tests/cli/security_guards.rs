@@ -112,6 +112,40 @@ fn symlinked_journal_file_is_rejected() {
 }
 
 #[test]
+fn monitor_revokes_local_journal_after_tracking() {
+    let repo = temp_repo("monitor-revoke");
+    write(
+        &repo,
+        ".engram/usage.log",
+        "{\"tool\":\"build\",\"exit_code\":0,\"result_count\":1,\"shown\":1,\"repo\":\"/x\",\"ts\":1}\n",
+    );
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_eg"))
+        .arg("--root")
+        .arg(&repo)
+        .args(["monitor", "--local"])
+        .env("ENGRAM_GLOBAL_DIR", repo.join(".test_global"))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1_000));
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-f", ".engram/usage.log"]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(9);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("monitor did not revoke a tracked journal");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert_eq!(status.code(), Some(2), "monitor security exit");
+}
+
+#[test]
 fn index_derived_control_bytes_are_escaped_in_output() {
     let repo = temp_repo("control-bytes");
     let evil = "evil\u{1b}[31mred\u{7}.py";
