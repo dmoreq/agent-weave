@@ -129,9 +129,13 @@ fn monitor_revokes_local_journal_after_tracking() {
         .spawn()
         .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1_000));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "monitor exited before provenance changed"
+    );
     git(&repo, &["init", "-q"]);
     git(&repo, &["add", "-f", ".engram/usage.log"]);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(9);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(7);
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
             break status;
@@ -152,7 +156,7 @@ fn index_derived_control_bytes_are_escaped_in_output() {
     write(
         &repo,
         evil,
-        "def unique_control_marker():\n    return 1\n\ndef unique_control_other():\n    return 2\n",
+        "def unique_control_marker():\n    return unique_control_middle()\n\ndef unique_control_middle():\n    return unique_control_other()\n\ndef unique_control_other():\n    return 2\n",
     );
     build(&repo);
     for args in [
@@ -167,7 +171,13 @@ fn index_derived_control_bytes_are_escaped_in_output() {
         assert!(stdout.contains("\\x1b[31m"), "{args:?}: {stdout}");
     }
     let out = eg(&repo)
-        .args(["path", "unique_control_marker", "unique_control_other"])
+        .args([
+            "path",
+            "unique_control_marker",
+            "unique_control_other",
+            "--depth",
+            "1",
+        ])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -178,4 +188,13 @@ fn index_derived_control_bytes_are_escaped_in_output() {
     );
     assert!(!stderr.contains('\u{7}'), "raw BEL in path error: {stderr}");
     assert!(stderr.contains("\\x1b[31m"), "{stderr}");
+    let same = eg(&repo)
+        .args(["path", "unique_control_marker", "unique_control_marker"])
+        .output()
+        .unwrap();
+    assert_eq!(same.status.code(), Some(1));
+    let same_stderr = String::from_utf8_lossy(&same.stderr);
+    assert!(!same_stderr.contains('\u{1b}'), "{same_stderr}");
+    assert!(!same_stderr.contains('\u{7}'), "{same_stderr}");
+    assert!(same_stderr.contains("\\x1b[31m"), "{same_stderr}");
 }

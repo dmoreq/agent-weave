@@ -366,6 +366,7 @@ pub(crate) fn analyze_corpus(
         df_all_excl: Some(&df_all_excl),
         deep_callee,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(detectors::MAX_DEEP_PAIRS),
     };
     let mut candidates = Vec::new();
     let mut seen_pairs = HashSet::new();

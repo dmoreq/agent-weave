@@ -24,25 +24,132 @@ fn d1_project_ids(corpus: &Corpus<'_>, symbol: &SymbolData) -> std::collections:
         .collect()
 }
 
+/// Weighted deep scan. Computes the expensive shared-evidence set only for a
+/// candidate that can still beat the current best, and stops after the
+/// per-invocation pair budget.
+fn find_best_d1_deep(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
+    type DeepBest<'a> = (
+        u64,
+        &'a SymbolData,
+        Vec<String>,
+        ReuseConfidence,
+        Vec<ReasonCode>,
+    );
+    let mut best: Option<DeepBest<'_>> = None;
+    for candidate in candidate_symbols(corpus, target, PostingKind::DeepCallee, 2) {
+        if corpus.deep_budget.get() == 0 {
+            corpus.guard();
+            break;
+        }
+        corpus.deep_budget.set(corpus.deep_budget.get() - 1);
+        let same_file_overlap = candidate.file_id == target.file_id
+            && !(candidate.line_end < target.line_start || candidate.line_start > target.line_end);
+        if candidate.id == target.id || same_file_overlap {
+            corpus.guard();
+            continue;
+        }
+        if cross_language(target, candidate) || !is_more_canonical(candidate, target) {
+            corpus.guard();
+            continue;
+        }
+        if target.callee_ids.contains(&candidate.id) || candidate.callee_ids.contains(&target.id) {
+            corpus.guard();
+            continue;
+        }
+        if candidate.deep_weights.len() < 3 || candidate.deep_weights.len() > MAX_DEEP_FOOTPRINT {
+            continue;
+        }
+        let ratio = weighted_containment(target, candidate);
+        if ratio < 0.85 {
+            continue;
+        }
+        let bal = weighted_balance(target, candidate);
+        if bal < 0.30 {
+            corpus.guard();
+            continue;
+        }
+        let pct = (ratio * 100.0).round() as u64;
+        let can_win = best.as_ref().is_none_or(|(best_pct, best_sym, ..)| {
+            pct > *best_pct || (pct == *best_pct && is_more_canonical(candidate, best_sym))
+        });
+        if !can_win {
+            continue;
+        }
+        let shared_ids: Vec<i64> = target
+            .deep_weights
+            .keys()
+            .filter(|id| candidate.deep_weights.contains_key(*id))
+            .copied()
+            .collect();
+        let mut shared: Vec<String> = shared_ids
+            .iter()
+            .filter_map(|id| corpus.symbols.get(id))
+            .map(|sym| sym.name.clone())
+            .collect();
+        shared.sort();
+        shared.dedup();
+        let mut reasons = Vec::new();
+        let unresolved_composition = target.unresolved_callees.contains(&candidate.name)
+            || candidate.unresolved_callees.contains(&target.name);
+        if unresolved_composition {
+            reasons.push(ReasonCode::CallerCallee);
+        }
+        if target
+            .name_tokens
+            .intersection(&candidate.name_tokens)
+            .next()
+            .is_none()
+        {
+            reasons.push(ReasonCode::ZeroName);
+        }
+        if bal < 0.50 {
+            reasons.push(ReasonCode::SizeImbalance);
+        }
+        let weak = distinctive_weakness(corpus, &shared_ids);
+        let confidence = if !reasons.is_empty() || weak > 0.75 {
+            ReuseConfidence::Low
+        } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {
+            ReuseConfidence::High
+        } else if ratio >= 0.90 {
+            ReuseConfidence::Medium
+        } else {
+            ReuseConfidence::Provisional
+        };
+        best = Some((pct, candidate, shared, confidence, reasons));
+    }
+    best.map(|(pct, candidate, shared, confidence, reasons)| {
+        make_candidate(
+            DetectorId::D1,
+            target,
+            candidate,
+            Some(pct),
+            &shared,
+            MatchMeta {
+                raw_client: None,
+                confidence,
+                reasons,
+            },
+        )
+    })
+}
+
 pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
-    let target_ids = d1_project_ids(corpus, target);
     if corpus.deep_callee {
         if target.deep_weights.len() < 3 || target.deep_weights.len() > MAX_DEEP_FOOTPRINT {
             corpus.guard();
             return None;
         }
-    } else if target_ids.len() < 3 {
+        return find_best_d1_deep(target, corpus);
+    }
+    let target_ids = d1_project_ids(corpus, target);
+    if target_ids.len() < 3 {
         return None;
     }
     best_by_overlap(
         DetectorId::D1,
         target,
         corpus,
-        if corpus.deep_callee {
-            PostingKind::DeepCallee
-        } else {
-            PostingKind::Callee
-        },
+        PostingKind::Callee,
         2,
         |candidate| {
             let c_ids = d1_project_ids(corpus, candidate);
@@ -63,57 +170,6 @@ pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<R
                 .intersection(&candidate.name_tokens)
                 .next()
                 .is_none();
-            if corpus.deep_callee {
-                if candidate.deep_weights.len() < 3
-                    || candidate.deep_weights.len() > MAX_DEEP_FOOTPRINT
-                {
-                    return None;
-                }
-                let ratio = weighted_containment(target, candidate);
-                if ratio < 0.85 {
-                    return None;
-                }
-                let bal = weighted_balance(target, candidate);
-                if bal < 0.30 {
-                    corpus.guard();
-                    return None;
-                }
-                let shared_ids: Vec<i64> = target
-                    .deep_weights
-                    .keys()
-                    .filter(|id| candidate.deep_weights.contains_key(*id))
-                    .copied()
-                    .collect();
-                let mut shared: Vec<String> = shared_ids
-                    .iter()
-                    .filter_map(|id| corpus.symbols.get(id))
-                    .map(|sym| sym.name.clone())
-                    .collect();
-                shared.sort();
-                shared.dedup();
-                let pct = (ratio * 100.0).round() as u64;
-                let mut reasons = Vec::new();
-                if unresolved_composition {
-                    reasons.push(ReasonCode::CallerCallee);
-                }
-                if zero_name {
-                    reasons.push(ReasonCode::ZeroName);
-                }
-                if bal < 0.50 {
-                    reasons.push(ReasonCode::SizeImbalance);
-                }
-                let weak = distinctive_weakness(corpus, &shared_ids);
-                let confidence = if !reasons.is_empty() || weak > 0.75 {
-                    ReuseConfidence::Low
-                } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {
-                    ReuseConfidence::High
-                } else if ratio >= 0.90 {
-                    ReuseConfidence::Medium
-                } else {
-                    ReuseConfidence::Provisional
-                };
-                return Some((pct, shared, confidence, reasons));
-            }
             if c_ids.len() < 3 {
                 return None;
             }

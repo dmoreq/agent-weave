@@ -49,6 +49,7 @@ fn d2_rejects_signature_only_twins() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     assert!(
         find_best_d2(&symbols[&2], &corpus).is_none(),
@@ -83,6 +84,7 @@ fn d2_accepts_twins_that_share_name_tokens() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let candidate = find_best_d2(&symbols[&2], &corpus).expect("shared name tokens match");
     assert_eq!(candidate.canonical, "ui.render_memory_list");
@@ -121,6 +123,7 @@ fn d2_rejects_numbered_siblings() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     assert!(
         find_best_d2(&symbols[&2], &corpus).is_none(),
@@ -142,6 +145,7 @@ fn d3_matches_raw_client_across_rust_path_styles() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
 
     let candidate = check_d3(&target_rust, &corpus);
@@ -170,6 +174,7 @@ fn d3_matches_exact_client_only() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     assert!(check_d3(&target_post, &corpus).is_none());
 
@@ -250,6 +255,7 @@ fn deep_callee_precision_meets_the_gate() {
             df_all_excl: None,
             deep_callee: true,
             guarded_out: Cell::new(0),
+            deep_budget: Cell::new(MAX_DEEP_PAIRS),
         };
         let matched = find_best_d1(&symbols[&1], &corpus).is_some();
         if positive && matched {
@@ -328,6 +334,7 @@ fn detector_scan_gate_on_5000_symbols() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let targets: Vec<&SymbolData> = symbols.values().collect();
     let start = Instant::now();
@@ -406,6 +413,7 @@ fn inverted_index_preserves_detector_results() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let indexed = Corpus {
         symbols: &symbols,
@@ -413,6 +421,7 @@ fn inverted_index_preserves_detector_results() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     for target in symbols.values() {
         let flat_d1 = find_best_d1(target, &flat).map(|c| c.format_text(false));
@@ -444,6 +453,7 @@ fn d4_emits_no_measured_overlap_and_keeps_its_rank() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     let cand = check_d4(&symbols[&2], &corpus).expect("D4 wrapper");
     assert!(
@@ -475,6 +485,7 @@ fn d3_emits_no_measured_overlap() {
         df_all_excl: None,
         deep_callee: false,
         guarded_out: Cell::new(0),
+        deep_budget: Cell::new(MAX_DEEP_PAIRS),
     };
     if let Some(cand) = check_d3(&symbols[&2], &corpus) {
         assert!(cand.overlap_pct.is_none(), "D3 carries no percentage");

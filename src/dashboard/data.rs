@@ -62,8 +62,7 @@ fn discover_repos(
     }
 }
 
-/// Drop repos whose `.engram/` is git-tracked and return the security errors
-/// for the panel payload. A tracked repo must not scan as a clean zero-result.
+/// Drop repos whose `.engram/` is tracked/symlinked; return security errors.
 fn retain_untracked(repos: &mut HashMap<String, PathBuf>) -> (Vec<Value>, usize) {
     let mut errors = Vec::new();
     let mut blocked = 0usize;
@@ -75,9 +74,7 @@ fn retain_untracked(repos: &mut HashMap<String, PathBuf>) -> (Vec<Value>, usize)
             Err(err) => {
                 blocked += 1;
                 errors.push(serde_json::json!({
-                    "repo": name,
-                    "stage": "security",
-                    "message": err.to_string(),
+                    "repo": name, "stage": "security", "message": err.to_string(),
                 }));
                 false
             }
@@ -412,6 +409,7 @@ mod lifecycle_tests {
 mod cache_tests {
     use super::*;
     use crate::db::test_support::{append_file, remove_tree, temp_root, write_file};
+    use serde_json::json;
 
     #[test]
     fn journal_parse_is_cached_until_the_stamp_changes() {
@@ -463,6 +461,39 @@ mod cache_tests {
         assert!(repos.is_empty());
         assert_eq!(blocked, 1);
         assert_eq!(errors[0]["stage"], "security");
+        remove_tree(&dir);
+    }
+
+    #[test]
+    fn tracked_repo_reuse_payload_is_degraded() {
+        let dir = temp_root("dashboard-reuse-degraded");
+        let repo = dir.join("repo");
+        crate::db::test_support::make_dir_all(repo.join(".engram")).unwrap();
+        write_file(repo.join(".engram/index.db"), b"x").unwrap();
+        let init = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "-q"])
+            .status();
+        if !matches!(init, Ok(status) if status.success()) {
+            remove_tree(&dir);
+            return;
+        }
+        let added = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "-f", ".engram/index.db"])
+            .status()
+            .unwrap();
+        assert!(added.success());
+        let entries = vec![json!({
+            "repo": repo.to_string_lossy(),
+            "repo_name": "repo",
+            "tool": "reuse",
+        })];
+        let (_, summary, _) = collect_reuse_candidates(Some(&repo), &entries).unwrap();
+        assert_eq!(summary["degraded"], true, "{summary}");
+        assert_eq!(summary["errors"][0]["stage"], "security", "{summary}");
         remove_tree(&dir);
     }
 }

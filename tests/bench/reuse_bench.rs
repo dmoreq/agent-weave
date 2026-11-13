@@ -265,23 +265,38 @@ fn bench_scan_hub_5k_p95() {
     let _ = fs::remove_dir_all(&root);
 }
 
-/// 5,000 raw-client callers, each with two dispatcher callers. D3 must stop at
-/// the first eligible wrapper per raw client instead of scanning 5,000.
+/// 2,500 Python and 2,500 TypeScript raw-client callers, each with dispatcher
+/// callers. TS wrappers sort first on caller count, so a target must only scan
+/// its own language postings rather than rejecting every TS candidate.
 fn write_raw_corpus(root: &Path) {
-    let mut source = String::from("import requests\n");
-    for i in 0..5_000 {
-        source.push_str(&format!(
-            "def raw_{i}():\n    return requests.get('https://example.invalid/{i}')\n"
+    let mut py = String::from("import requests\n");
+    for i in 0..2_500 {
+        py.push_str(&format!(
+            "def raw_py_{i}():\n    return requests.get('https://example.invalid/{i}')\n"
         ));
     }
-    for dispatch in ["dispatch_a", "dispatch_b"] {
-        let calls = (0..5_000)
-            .map(|i| format!("raw_{i}()"))
+    for dispatch in ["dispatch_py_a", "dispatch_py_b"] {
+        let calls = (0..2_500)
+            .map(|i| format!("raw_py_{i}()"))
             .collect::<Vec<_>>()
             .join(" + ");
-        source.push_str(&format!("def {dispatch}():\n    return {calls}\n"));
+        py.push_str(&format!("def {dispatch}():\n    return {calls}\n"));
     }
-    fs::write(root.join("raw.py"), source).unwrap();
+    let mut ts = String::new();
+    for i in 0..2_500 {
+        ts.push_str(&format!(
+            "function raw_ts_{i}() {{ return fetch('https://example.invalid/{i}'); }}\n"
+        ));
+    }
+    for dispatch in ["dispatch_ts_a", "dispatch_ts_b", "dispatch_ts_c"] {
+        let calls = (0..2_500)
+            .map(|i| format!("raw_ts_{i}()"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        ts.push_str(&format!("function {dispatch}() {{ return {calls}; }}\n"));
+    }
+    fs::write(root.join("raw.py"), py).unwrap();
+    fs::write(root.join("raw.ts"), ts).unwrap();
 }
 
 #[test]
@@ -302,14 +317,15 @@ fn bench_d3_raw_5k_p95() {
     let _ = fs::remove_dir_all(&root);
 }
 
-/// 2,000 leaves under one central hub, 400 workers, and filler. Every worker
-/// has a 2,001-key deep closure; the footprint cap must skip these hubs.
+/// 511 leaves under one central hub, 400 workers, and filler. Every worker has
+/// a 512-key deep closure, just under the hub cap; the per-invocation pair
+/// budget must bound the otherwise quadratic worker×leaf comparison.
 fn write_deep_hub_corpus(root: &Path) {
     let mut source = String::new();
-    for leaf in 0..2_000 {
+    for leaf in 0..511 {
         source.push_str(&format!("def leaf_{leaf}():\n    return {leaf}\n"));
     }
-    let leaves = (0..2_000)
+    let leaves = (0..511)
         .map(|leaf| format!("leaf_{leaf}()"))
         .collect::<Vec<_>>()
         .join(" + ");
@@ -317,7 +333,7 @@ fn write_deep_hub_corpus(root: &Path) {
     for worker in 0..400 {
         source.push_str(&format!("def worker_{worker}():\n    return central()\n"));
     }
-    for filler in 0..7_600 {
+    for filler in 0..9_088 {
         source.push_str(&format!("def filler_{filler}():\n    return {filler}\n"));
     }
     fs::write(root.join("deep.py"), source).unwrap();
@@ -331,6 +347,18 @@ fn bench_deep_shared_10k_p95() {
     write_deep_hub_corpus(&root);
     let eg = binary();
     build(&eg, &root);
+    let probe = Command::new(&eg)
+        .arg("--root")
+        .arg(&root)
+        .arg("--no-journal")
+        .args(["reuse", "--deep-callee", "--limit", "1"])
+        .output()
+        .unwrap();
+    let probe_stdout = String::from_utf8_lossy(&probe.stdout);
+    assert!(
+        probe.status.success() && !probe_stdout.contains(" — 0 duplication candidate(s) found"),
+        "deep benchmark corpus produced no candidates: {probe_stdout}"
+    );
     let (_, p95) = measure(&eg, &root, &["--deep-callee"]);
     println!("deep shared 10k p95={:.2}ms", p95.as_secs_f64() * 1e3);
     assert!(

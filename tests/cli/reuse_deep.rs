@@ -4,7 +4,7 @@ use super::common::*;
 
 #[test]
 fn reuse_deep_high_requires_weighted_balance() {
-    for (target_n, expected) in [(50usize, "medium"), (75, "high")] {
+    for (target_n, expected) in [(50usize, "medium"), (74, "medium"), (75, "high")] {
         let repo = temp_repo(&format!("reuse-deep-bal-{target_n}"));
         let mut helpers = String::new();
         for i in 0..100 {

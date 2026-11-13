@@ -81,17 +81,32 @@ fn local_dashboard_event_stream_revokes_after_tracking() {
         client.read_exact(&mut byte).unwrap();
         header.push(byte[0]);
     }
+    // The stream must still be live before provenance changes.
+    client
+        .set_read_timeout(Some(std::time::Duration::from_millis(300)))
+        .unwrap();
+    let mut probe = [0u8; 1];
+    match client.read(&mut probe) {
+        Ok(0) => panic!("SSE stream closed before provenance change"),
+        Ok(_) => {}
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) => {}
+        Err(err) => panic!("SSE liveness probe failed: {err}"),
+    }
     git(&repo, &["init", "-q"]);
     git(&repo, &["add", "-f", ".engram/usage.log"]);
     client
-        .set_read_timeout(Some(std::time::Duration::from_secs(9)))
+        .set_read_timeout(Some(std::time::Duration::from_secs(7)))
         .unwrap();
     let started = Instant::now();
     let mut rest = Vec::new();
     client
         .read_to_end(&mut rest)
         .expect("stream must close after provenance changes");
-    assert!(started.elapsed() < std::time::Duration::from_secs(9));
+    assert!(started.elapsed() < std::time::Duration::from_secs(7));
     handle.join().unwrap();
 }
 

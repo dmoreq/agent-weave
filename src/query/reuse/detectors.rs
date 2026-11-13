@@ -22,7 +22,14 @@ pub(super) struct Corpus<'a> {
     /// Explicit guard rejections seen while matching pairs. The scan reports
     /// this as `guarded_out`; it is not part of the candidate pool.
     pub(super) guarded_out: Cell<usize>,
+    /// Remaining deep-pair evaluations for this invocation. A shared hub can
+    /// otherwise make `--deep-callee` quadratic in workers × keys.
+    pub(super) deep_budget: Cell<usize>,
 }
+
+/// Hard per-invocation bound for `--deep-callee` candidate-pair evaluations.
+/// Normal wrapper corpora stay far below this; broad shared hubs stop early.
+pub(super) const MAX_DEEP_PAIRS: usize = 30_000;
 
 impl Corpus<'_> {
     fn guard(&self) {
@@ -324,6 +331,7 @@ fn consider_d3<'a>(
 /// Detector D3: Raw Client / Abstraction Bypass.
 fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> {
     let mut best_wrapper: Option<(&SymbolData, &str)> = None;
+    let family = language_family(&target.file_path);
     match corpus.index {
         Some(index) => {
             // Each posting is best-canonical first. The first eligible
@@ -336,7 +344,7 @@ fn check_d3(target: &SymbolData, corpus: &Corpus<'_>) -> Option<ReuseCandidate> 
                 .map(|callee| normalize_client(callee))
                 .collect();
             for client in std::mem::take(&mut clients) {
-                let Some(postings) = index.raw_candidates(&client) else {
+                let Some(postings) = index.raw_candidates(&client, &family) else {
                     continue;
                 };
                 for id in postings {

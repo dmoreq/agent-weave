@@ -41,7 +41,7 @@ pub(super) struct CorpusIndex {
     deep_group_rep: Vec<i64>,
     deep_key_group: HashMap<i64, usize>,
     by_token_pair: HashMap<(String, String), Vec<i64>>,
-    by_raw_client: HashMap<String, Vec<i64>>,
+    by_raw_client: HashMap<(String, String), Vec<i64>>,
 }
 
 impl CorpusIndex {
@@ -86,7 +86,10 @@ impl CorpusIndex {
                     if is_raw_client(callee) {
                         index
                             .by_raw_client
-                            .entry(normalize_client(callee))
+                            .entry((
+                                normalize_client(callee),
+                                super::guards::language_family(&sym.file_path),
+                            ))
                             .or_default()
                             .push(sym.id);
                     }
@@ -136,8 +139,10 @@ impl CorpusIndex {
     }
 
     /// Raw-client posting list, best canonical first.
-    pub(super) fn raw_candidates(&self, client: &str) -> Option<&[i64]> {
-        self.by_raw_client.get(client).map(Vec::as_slice)
+    pub(super) fn raw_candidates(&self, client: &str, family: &str) -> Option<&[i64]> {
+        self.by_raw_client
+            .get(&(client.to_string(), family.to_string()))
+            .map(Vec::as_slice)
     }
 
     /// Symbol ids sharing at least `min_shared` keys with `target` for the
@@ -298,7 +303,7 @@ mod tests {
         }
         let index = CorpusIndex::build(&symbols);
         let mut ids = index
-            .raw_candidates("reqwest.get")
+            .raw_candidates("reqwest.get", "rust")
             .unwrap_or_default()
             .to_vec();
         ids.retain(|id| *id != 1);
