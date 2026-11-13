@@ -235,6 +235,7 @@ eg mem write <KEY> --body <TEXT> --kind <KIND> [OPTIONS]
 | `--ttl <SECS>` | `604800` (7 days)| Expiration lifetime in seconds (only valid with `--scope session`). |
 | `--supersedes <KEY>`| None | Mark the specified key as superseded by this note in one atomic transaction. |
 | `--touch` | `false` | Refresh `created_at` (last asserted) on the active revision when the content hash matches; no new revision. |
+| `--confirm` | `false` | Required for `reuse-allow/...` writes over MCP; keeps allowlist creation an explicit act. |
 | `--global` | `false` | Persist to global store (`~/.engram/memory.db`) instead of repository (`.engram/memory.db`). |
 
 When the new note is at least 80% Jaccard-similar to an existing current note under another key, `mem write` appends an advisory `eg: mem hint:` line suggesting `--supersedes`. The write still succeeds; the hint is never a hard failure.

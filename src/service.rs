@@ -271,6 +271,7 @@ mod tests {
                 supersedes: None,
                 global: false,
                 touch: false,
+                confirm: false,
             },
             CommandRequest::MemQuery {
                 terms: vec!["x".into()],

@@ -98,6 +98,7 @@ pub enum CommandRequest {
         supersedes: Option<String>,
         global: bool,
         touch: bool,
+        confirm: bool,
     },
     MemQuery {
         terms: Vec<String>,

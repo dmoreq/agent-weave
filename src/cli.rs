@@ -311,6 +311,9 @@ pub enum MemAction {
         /// Refresh timestamp when content_hash matches an existing current note
         #[arg(long)]
         touch: bool,
+        /// Confirm an allowlist write over MCP (`reuse-allow/...`)
+        #[arg(long)]
+        confirm: bool,
     },
     /// Rank current notes for the terms (bm25 + ref-token overlap + recency)
     Query {

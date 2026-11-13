@@ -50,6 +50,7 @@ impl CommandRequest {
             supersedes,
             global,
             touch,
+            confirm,
         } = action
         else {
             unreachable!("mem_write_request called with a non-write action")
@@ -65,6 +66,7 @@ impl CommandRequest {
             supersedes,
             global,
             touch,
+            confirm,
         })
     }
 

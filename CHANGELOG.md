@@ -27,7 +27,8 @@ changes bump the minor while 0.x is unstable.
 - Phase 3 allowlist: a current memory note keyed
   `reuse-allow/<target>-><canonical>` suppresses an intentional pair; stale
   refs invalidate the note, High candidates are never suppressed, and
-  `--show-suppressed` exposes the count.
+  `--show-suppressed` exposes the count. MCP allowlist writes require
+  `confirm=true`.
 - Phase 4 coverage: `--coverage class,unresolved,tests` adds D5 class-shape,
   D1L unresolved-call, and DT test/production detectors, off by default.
 - Phase 5 judge: `--judge` restores optional local `eg-judge` arbitration with

@@ -21,10 +21,16 @@ pub(super) fn run_mem_write(
         supersedes,
         global,
         touch,
+        confirm,
     } = req
     else {
         unreachable!("run_mem_write called with a non-write request")
     };
+    if key.trim_start().starts_with("reuse-allow/") && surface == Surface::Mcp && !confirm {
+        return Err(EgError::Usage(
+            "mem write: MCP allowlist writes require confirm=true".to_string(),
+        ));
+    }
     if let Some(target) = supersedes {
         if target.trim() == key.trim() {
             return Err(EgError::Usage(
@@ -147,6 +153,7 @@ pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
         supersedes,
         global,
         touch,
+        confirm,
         ..
     } = req
     else {
@@ -161,6 +168,7 @@ pub(super) fn mem_write_args(req: &CommandRequest) -> JournalArgs {
         ("body_len", body.len().to_string()),
         ("global", global.to_string()),
         ("touch", touch.to_string()),
+        ("confirm", confirm.to_string()),
     ]
 }
 

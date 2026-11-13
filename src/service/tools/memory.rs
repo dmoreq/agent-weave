@@ -70,6 +70,12 @@ pub(super) const MEM_WRITE: ToolSpec = ToolSpec {
                 required: false,
                 description: "Refresh created_at (last asserted) when content_hash matches an existing current note",
             },
+            ParamSpec {
+                name: "confirm",
+                kind: ParamKind::Bool,
+                required: false,
+                description: "Required for reuse-allow/ notes over MCP",
+            },
         ],
         core: true,
     };

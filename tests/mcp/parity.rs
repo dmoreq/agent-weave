@@ -269,6 +269,42 @@ fn g10_ambiguous_carries_candidates_and_iserror() {
 }
 
 #[test]
+fn mcp_allowlist_write_requires_confirm() {
+    let repo = fixture("mcp-reuse-allowlist-confirm");
+    let mut srv = spawn(&repo);
+    let rejected = rpc(
+        &mut srv,
+        1,
+        "tools/call",
+        json!({
+            "name": "mem_write",
+            "arguments": {
+                "key": "reuse-allow/a->b",
+                "body": "intentional",
+                "kind": "decision"
+            }
+        }),
+    );
+    assert_eq!(rejected["result"]["isError"], true, "{rejected}");
+    let accepted = rpc(
+        &mut srv,
+        2,
+        "tools/call",
+        json!({
+            "name": "mem_write",
+            "arguments": {
+                "key": "reuse-allow/a->b",
+                "body": "intentional",
+                "kind": "decision",
+                "confirm": true
+            }
+        }),
+    );
+    assert_eq!(accepted["result"]["isError"], false, "{accepted}");
+    let _ = fs::remove_dir_all(&repo);
+}
+
+#[test]
 fn mcp_reuse_phase4_coverage_parity() {
     let repo = fixture("mcp-reuse-phase4");
     let build = eg_cmd(&repo).arg("build").output().unwrap();

@@ -271,6 +271,7 @@ fn from_tool_args_memory(a: &ArgReader<'_>, tool: &str) -> Result<CommandRequest
             supersedes: a.s("supersedes"),
             global: a.b("global"),
             touch: a.b("touch"),
+            confirm: a.b("confirm"),
         },
         "mem_touch" => CommandRequest::MemTouch {
             key: a.req("key")?,
