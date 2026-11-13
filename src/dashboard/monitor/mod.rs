@@ -34,17 +34,25 @@ pub fn stream_monitor(
     errors_only: bool,
     local: bool,
 ) -> Result<()> {
-    let log_path = resolve_monitor_log_path(root, local)?;
+    let (log_path, gate_root) = resolve_monitor_log_path(root, local)?;
+    let effective_root = gate_root.as_deref().or(root);
 
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return stream_linear(&log_path, repo_filter, errors_only, root, local);
+        return stream_linear(&log_path, repo_filter, errors_only, effective_root, local);
     }
 
     let Some(guard) = RawModeGuard::enter() else {
-        return stream_linear(&log_path, repo_filter, errors_only, root, local);
+        return stream_linear(&log_path, repo_filter, errors_only, effective_root, local);
     };
 
-    run_interactive(root, log_path, repo_filter, errors_only, local, guard)
+    run_interactive(
+        effective_root,
+        log_path,
+        repo_filter,
+        errors_only,
+        local,
+        guard,
+    )
 }
 
 struct RawModeGuard {
@@ -330,24 +338,31 @@ fn monitor_gate(root: Option<&Path>, local: bool) -> Result<()> {
     }
     if let Some(root) = root {
         crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+        crate::db::reject_unsafe_journal(root)?;
         crate::db::reject_tracked_eg_dir(root)?;
     }
     Ok(())
 }
 
-fn resolve_monitor_log_path(root: Option<&Path>, local: bool) -> Result<PathBuf> {
+fn resolve_monitor_log_path(
+    root: Option<&Path>,
+    local: bool,
+) -> Result<(PathBuf, Option<PathBuf>)> {
     if local {
         if let Some(r) = root {
-            crate::db::reject_tracked_eg_dir(r)?;
-            return Ok(crate::journal::usage_log_path(r));
+            monitor_gate(root, true)?;
+            return Ok((crate::journal::usage_log_path(r), Some(r.to_path_buf())));
         }
         if let Ok(cwd) = std::env::current_dir() {
             let local_p = crate::journal::usage_log_path(&cwd);
             if local_p.is_file() {
-                crate::db::reject_tracked_eg_dir(&cwd)?;
-                return Ok(local_p);
+                monitor_gate(Some(&cwd), true)?;
+                return Ok((local_p, Some(cwd)));
             }
         }
     }
-    Ok(db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log")))
+    Ok((
+        db::global_usage_log_path().unwrap_or_else(|_| PathBuf::from("usage.log")),
+        None,
+    ))
 }

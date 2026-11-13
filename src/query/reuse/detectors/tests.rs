@@ -191,6 +191,19 @@ fn resolved_symbol(
     sym
 }
 
+fn probe_id(name: &str) -> i64 {
+    match name {
+        "a" => 1001,
+        "b" => 1002,
+        "c" => 1003,
+        "x" => 1004,
+        "y" => 1005,
+        "z" => 1006,
+        "mid" => 1007,
+        other => 2000 + other.len() as i64,
+    }
+}
+
 fn deep_symbol(
     id: i64,
     qualname: &str,
@@ -202,10 +215,11 @@ fn deep_symbol(
     let mut sym = make_test_symbol(id, qualname, file_id, callers, direct);
     sym.resolved_callees = sym.all_callees.clone();
     for name in direct {
-        sym.deep_weights.insert(name.to_string(), 1.0);
+        sym.callee_ids.insert(probe_id(name));
+        sym.deep_weights.insert(probe_id(name), 1.0);
     }
     for name in second_hop {
-        sym.deep_weights.entry(name.to_string()).or_insert(0.5);
+        sym.deep_weights.entry(probe_id(name)).or_insert(0.5);
     }
     sym
 }
@@ -296,6 +310,17 @@ fn detector_scan_gate_on_5000_symbols() {
         );
     }
     assert_eq!(symbols.len(), 5_000);
+    let name_ids: HashMap<String, i64> = symbols
+        .values()
+        .map(|sym| (sym.name.clone(), sym.id))
+        .collect();
+    for symbol in symbols.values_mut() {
+        for name in &symbol.resolved_callees {
+            if let Some(id) = name_ids.get(name.as_str()) {
+                symbol.callee_ids.insert(*id);
+            }
+        }
+    }
     let index = CorpusIndex::build(&symbols);
     let corpus = Corpus {
         symbols: &symbols,
@@ -346,6 +371,33 @@ fn inverted_index_preserves_detector_results() {
         (4, "d.single", &["helper_one", "only"][..], &["single"][..]),
     ] {
         symbols.insert(id, resolved_symbol(id, name, 0, callees, tokens));
+    }
+    // D1 intersects project symbol IDs, so every named callee needs a real
+    // corpus entry and the callers need matching callee_ids.
+    let mut callee_ids = HashMap::new();
+    for (offset, name) in [
+        "helper_one",
+        "helper_two",
+        "helper_three",
+        "different",
+        "only",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = 100 + offset as i64;
+        symbols.insert(
+            id,
+            make_test_symbol(id, &format!("x.{name}"), 90 + offset as i64, 0, &[]),
+        );
+        callee_ids.insert(name, id);
+    }
+    for symbol in symbols.values_mut() {
+        for name in &symbol.resolved_callees {
+            if let Some(id) = callee_ids.get(name.as_str()) {
+                symbol.callee_ids.insert(*id);
+            }
+        }
     }
     let index = CorpusIndex::build(&symbols);
     let flat = Corpus {

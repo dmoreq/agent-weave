@@ -265,6 +265,81 @@ fn duplicate_qualname_scan_is_deterministic_after_freshness_change() {
 }
 
 #[test]
+fn indexed_d1_matches_shared_ids_with_duplicate_names() {
+    let repo = temp_repo("reuse-index-duplicate-names");
+    write(
+        &repo,
+        "models.py",
+        "class Alpha:\n    def __init__(self):\n        self.x = 1\n\nclass Beta:\n    def __init__(self):\n        self.x = 2\n\nclass Gamma:\n    def __init__(self):\n        self.x = 3\n",
+    );
+    for (path, name) in [("a.py", "make_a"), ("b.py", "make_b")] {
+        write(
+            &repo,
+            path,
+            &format!(
+                "from models import Alpha, Beta, Gamma\n\ndef {name}():\n    Alpha()\n    Beta()\n    Gamma()\n"
+            ),
+        );
+    }
+    let mut noise = String::new();
+    for i in 0..1_100 {
+        noise.push_str(&format!("def noise_{i}():\n    return {i}\n"));
+    }
+    write(&repo, "noise.py", &noise);
+    build(&repo);
+    let out = eg(&repo).args(["reuse", "--explain"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("detector=D1") && stdout.contains("__init__"),
+        "indexed D1 must match distinct IDs even when their names collide: {stdout}"
+    );
+}
+
+#[test]
+fn deep_callee_applies_weighted_balance_guard() {
+    let repo = temp_repo("reuse-deep-balance");
+    let mut helpers = String::new();
+    for i in 0..100 {
+        helpers.push_str(&format!("def h{i}():\n    return {i}\n"));
+    }
+    let imports = (0..100)
+        .map(|i| format!("h{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let target_calls = (0..3)
+        .map(|i| format!("h{i}()"))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let candidate_calls = (0..100)
+        .map(|i| format!("h{i}()"))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    write(&repo, "helpers.py", &helpers);
+    write(
+        &repo,
+        "a.py",
+        &format!("from helpers import {imports}\n\ndef target_a():\n    return {target_calls}\n"),
+    );
+    write(
+        &repo,
+        "b.py",
+        &format!(
+            "from helpers import {imports}\n\ndef candidate_b():\n    return {candidate_calls}\n"
+        ),
+    );
+    build(&repo);
+    let out = eg(&repo)
+        .args(["reuse", "--deep-callee", "--explain"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("target_a") && !stdout.contains("candidate_b"),
+        "weighted bal 0.03 must reject: {stdout}"
+    );
+}
+
+#[test]
 fn scan_output_cap_30k() {
     let repo = temp_repo("reuse-output-cap");
     let mut helpers = String::new();

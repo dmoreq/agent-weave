@@ -2,16 +2,7 @@
 //! so same-named helpers in different modules stay distinct.
 
 use super::*;
-use crate::query::reuse::confidence::distinctive_ratio;
-
-/// D1: callee-footprint containment over resolved project callees.
-fn d1_footprint(symbol: &SymbolData) -> &std::collections::HashSet<String> {
-    if symbol.resolved_callees.is_empty() {
-        &symbol.all_callees
-    } else {
-        &symbol.resolved_callees
-    }
-}
+use crate::query::reuse::confidence::distinctive_weakness;
 
 /// `C_in(s)`: resolved project callees in the source's language family whose
 /// names survived the static/dynamic stoplist.
@@ -48,7 +39,6 @@ pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<R
         },
         2,
         |candidate| {
-            let c_callees = d1_footprint(candidate);
             let c_ids = d1_project_ids(corpus, candidate);
             // GUARD-COMP: a resolved call edge in either direction is a
             // caller/callee composition, not duplication.
@@ -75,10 +65,24 @@ pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<R
                 if ratio < 0.85 {
                     return None;
                 }
-                let shared: Vec<String> = d1_footprint(target)
-                    .intersection(c_callees)
-                    .cloned()
+                let bal = weighted_balance(target, candidate);
+                if bal < 0.30 {
+                    corpus.guard();
+                    return None;
+                }
+                let shared_ids: Vec<i64> = target
+                    .deep_weights
+                    .keys()
+                    .filter(|id| candidate.deep_weights.contains_key(*id))
+                    .copied()
                     .collect();
+                let mut shared: Vec<String> = shared_ids
+                    .iter()
+                    .filter_map(|id| corpus.symbols.get(id))
+                    .map(|sym| sym.name.clone())
+                    .collect();
+                shared.sort();
+                shared.dedup();
                 let pct = (ratio * 100.0).round() as u64;
                 let mut reasons = Vec::new();
                 if unresolved_composition {
@@ -87,10 +91,13 @@ pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<R
                 if zero_name {
                     reasons.push(ReasonCode::ZeroName);
                 }
-                let weak = distinctive_ratio(target, candidate, corpus, &shared);
+                if bal < 0.50 {
+                    reasons.push(ReasonCode::SizeImbalance);
+                }
+                let weak = distinctive_weakness(corpus, &shared_ids);
                 let confidence = if !reasons.is_empty() || weak > 0.75 {
                     ReuseConfidence::Low
-                } else if ratio >= 0.95 && weak <= 0.25 {
+                } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {
                     ReuseConfidence::High
                 } else if ratio >= 0.90 {
                     ReuseConfidence::Medium
@@ -138,16 +145,7 @@ pub(crate) fn find_best_d1(target: &SymbolData, corpus: &Corpus<'_>) -> Option<R
             if bal < 0.50 {
                 reasons.push(ReasonCode::SizeImbalance);
             }
-            let distinctive = shared_ids
-                .iter()
-                .filter(|id| {
-                    corpus
-                        .df_all_excl
-                        .is_none_or(|df| df.get(id).copied().unwrap_or(0) <= 2)
-                })
-                .count();
-            let weak =
-                (shared_ids.len().saturating_sub(distinctive)) as f64 / shared_ids.len() as f64;
+            let weak = distinctive_weakness(corpus, &shared_ids);
             let confidence = if !reasons.is_empty() || weak > 0.75 {
                 ReuseConfidence::Low
             } else if ratio >= 0.95 && bal >= 0.75 && weak <= 0.25 {

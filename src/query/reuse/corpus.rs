@@ -22,9 +22,9 @@ pub(super) struct SymbolData {
     /// same-named function as its canonical.
     pub(super) unresolved_callees: HashSet<String>,
     pub(super) callee_ids: HashSet<i64>,
-    /// Weighted 1-hop (1.0) and 2-hop (0.5) callee footprint, populated only
+    /// Weighted 1-hop (1.0) and 2-hop (0.5) project callee IDs, populated only
     /// when `reuse --deep-callee` asks for the transitive signal.
-    pub(super) deep_weights: HashMap<String, f64>,
+    pub(super) deep_weights: HashMap<i64, f64>,
     pub(super) inbound_callers: i64,
     pub(super) tokens: HashSet<String>,
     pub(super) type_tokens: HashSet<String>,
@@ -104,18 +104,32 @@ pub(super) fn load_df_all(conn: &Connection) -> Result<HashMap<i64, i64>> {
 /// resolved callees weigh 1.0, callees of those callees weigh 0.5. A callee
 /// reachable both ways keeps the direct 1.0 weight.
 pub(super) fn load_deep_weights(symbols: &mut HashMap<i64, SymbolData>) {
-    let computed: HashMap<i64, HashMap<String, f64>> = symbols
+    let computed: HashMap<i64, HashMap<i64, f64>> = symbols
         .iter()
         .map(|(&id, sym)| {
-            let mut weights: HashMap<String, f64> = sym
-                .resolved_callees
+            let direct: Vec<i64> = sym
+                .callee_ids
                 .iter()
-                .map(|callee| (callee.clone(), 1.0))
+                .copied()
+                .filter(|callee_id| {
+                    symbols.get(callee_id).is_some_and(|callee| {
+                        !super::guards::cross_language(sym, callee)
+                            && sym.resolved_callees.contains(&callee.name)
+                    })
+                })
                 .collect();
-            for callee_id in &sym.callee_ids {
-                if let Some(callee) = symbols.get(callee_id) {
-                    for second in &callee.resolved_callees {
-                        weights.entry(second.clone()).or_insert(0.5);
+            let mut weights: HashMap<i64, f64> =
+                direct.iter().map(|callee_id| (*callee_id, 1.0)).collect();
+            for callee_id in &direct {
+                let Some(callee) = symbols.get(callee_id) else {
+                    continue;
+                };
+                for second in &callee.callee_ids {
+                    if symbols.get(second).is_some_and(|second_sym| {
+                        !super::guards::cross_language(sym, second_sym)
+                            && callee.resolved_callees.contains(&second_sym.name)
+                    }) {
+                        weights.entry(*second).or_insert(0.5);
                     }
                 }
             }

@@ -26,5 +26,6 @@ mod reuse_phase3;
 mod reuse_phase4;
 mod reuse_phase5;
 mod robustness;
+mod security_guards;
 mod stats;
 mod symbols;

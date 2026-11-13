@@ -48,6 +48,25 @@ pub(crate) fn reject_symlink(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
+/// Reject a symlinked or non-regular journal file. `File::open` follows a
+/// symlink; local usage/dashboard/monitor reads must not render another
+/// repository's journal through one.
+pub(crate) fn reject_unsafe_journal(root: &Path) -> Result<()> {
+    let dir = eg_dir(root);
+    for name in ["usage.log", "usage.log.1"] {
+        let path = dir.join(name);
+        if let Ok(meta) = fs::symlink_metadata(&path) {
+            if meta.file_type().is_symlink() || !meta.is_file() {
+                return Err(EgError::Internal(format!(
+                    "refusing unsafe journal file: {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Create or validate the machine-wide confinement directory and keep it
 /// owner-only. The repo-local `.engram/` is left at the project's own mode:
 /// several developers can share one working tree.

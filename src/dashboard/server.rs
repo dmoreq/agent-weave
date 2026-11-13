@@ -70,6 +70,7 @@ pub fn serve_dashboard(
         // Local mode reads and displays this repo's journal; refuse a tracked
         // or symlinked confinement directory before opening any panel.
         crate::db::reject_symlink(&crate::db::eg_dir(r), ".engram directory")?;
+        crate::db::reject_unsafe_journal(r)?;
         crate::db::reject_tracked_eg_dir(r)?;
         crate::journal::usage_log_path(r)
     } else {
@@ -309,6 +310,7 @@ fn local_gate(root: Option<&Path>, global: bool) -> Result<()> {
     }
     if let Some(root) = root {
         crate::db::reject_symlink(&crate::db::eg_dir(root), ".engram directory")?;
+        crate::db::reject_unsafe_journal(root)?;
         crate::db::reject_tracked_eg_dir(root)?;
     }
     Ok(())

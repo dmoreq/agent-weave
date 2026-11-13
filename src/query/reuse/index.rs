@@ -19,9 +19,9 @@ pub(super) const INVERTED_INDEX_MIN_SYMBOLS: usize = 1_000;
 /// Which posting list a detector needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PostingKind {
-    /// Resolved callee names (D1's two-resolved-callee gate).
+    /// Resolved production callee IDs (D1's two-callee gate).
     Callee,
-    /// Weighted 1-hop/2-hop callee footprint (D1 `--deep-callee`).
+    /// Weighted 1-hop/2-hop callee IDs (D1 `--deep-callee`).
     DeepCallee,
     /// Interface signature/name token pairs (D2's two-token gate). Indexing
     /// pairs instead of single tokens keeps the exact `>= 2 shared tokens`
@@ -35,8 +35,8 @@ pub(super) enum PostingKind {
 /// One posting list per signal key: `key -> symbol ids`.
 #[derive(Debug, Default)]
 pub(super) struct CorpusIndex {
-    by_callee: HashMap<String, Vec<i64>>,
-    by_deep_callee: HashMap<String, Vec<i64>>,
+    by_callee: HashMap<i64, Vec<i64>>,
+    by_deep_callee: HashMap<i64, Vec<i64>>,
     by_token_pair: HashMap<(String, String), Vec<i64>>,
     by_raw_client: HashMap<String, Vec<i64>>,
 }
@@ -46,17 +46,13 @@ impl CorpusIndex {
     pub(super) fn build(symbols: &HashMap<i64, SymbolData>) -> Self {
         let mut index = CorpusIndex::default();
         for sym in symbols.values() {
-            for callee in &sym.resolved_callees {
-                index
-                    .by_callee
-                    .entry(callee.clone())
-                    .or_default()
-                    .push(sym.id);
+            for callee in &sym.callee_ids {
+                index.by_callee.entry(*callee).or_default().push(sym.id);
             }
             for callee in sym.deep_weights.keys() {
                 index
                     .by_deep_callee
-                    .entry(callee.clone())
+                    .entry(*callee)
                     .or_default()
                     .push(sym.id);
             }
@@ -96,7 +92,7 @@ impl CorpusIndex {
         let mut counts: HashMap<i64, usize> = HashMap::new();
         match kind {
             PostingKind::Callee => {
-                for key in &target.resolved_callees {
+                for key in &target.callee_ids {
                     add_postings(self.by_callee.get(key), &mut counts);
                 }
             }
@@ -155,6 +151,11 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    fn callee_key(name: &str) -> i64 {
+        name.bytes()
+            .fold(0i64, |acc, byte| acc * 31 + i64::from(byte))
+    }
+
     fn symbol_with(id: i64, callees: &[&str], tokens: &[&str]) -> SymbolData {
         SymbolData {
             id,
@@ -167,7 +168,7 @@ mod tests {
             resolved_callees: callees.iter().map(|s| s.to_string()).collect(),
             all_callees: callees.iter().map(|s| s.to_string()).collect(),
             unresolved_callees: HashSet::new(),
-            callee_ids: HashSet::new(),
+            callee_ids: callees.iter().map(|name| callee_key(name)).collect(),
             deep_weights: HashMap::new(),
             inbound_callers: 0,
             tokens: tokens.iter().map(|s| s.to_string()).collect(),

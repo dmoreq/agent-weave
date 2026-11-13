@@ -50,14 +50,24 @@ pub(super) fn weighted_containment(target: &SymbolData, candidate: &SymbolData) 
     let target_shared: f64 = target
         .deep_weights
         .iter()
-        .filter(|(name, _)| candidate.deep_weights.contains_key(*name))
+        .filter(|(id, _)| candidate.deep_weights.contains_key(*id))
         .map(|(_, weight)| weight)
         .sum();
     let candidate_shared: f64 = candidate
         .deep_weights
         .iter()
-        .filter(|(name, _)| target.deep_weights.contains_key(*name))
+        .filter(|(id, _)| target.deep_weights.contains_key(*id))
         .map(|(_, weight)| weight)
         .sum();
     (target_shared / target_total).max(candidate_shared / candidate_total)
+}
+
+/// Weighted size balance: `min(total_t, total_c) / max(total_t, total_c)`.
+pub(super) fn weighted_balance(target: &SymbolData, candidate: &SymbolData) -> f64 {
+    let target_total: f64 = target.deep_weights.values().sum();
+    let candidate_total: f64 = candidate.deep_weights.values().sum();
+    if target_total <= 0.0 || candidate_total <= 0.0 {
+        return 0.0;
+    }
+    target_total.min(candidate_total) / target_total.max(candidate_total)
 }
